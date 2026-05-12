@@ -1,0 +1,20 @@
+-- User-configured local music folders that act as a media source alongside Plex.
+
+CREATE TABLE LocalFolderRow (
+    id TEXT NOT NULL PRIMARY KEY,
+    rootUri TEXT NOT NULL,
+    label TEXT NOT NULL,
+    enabled INTEGER NOT NULL
+);
+
+selectAll:
+SELECT * FROM LocalFolderRow ORDER BY label COLLATE NOCASE;
+
+insertOrReplace:
+INSERT OR REPLACE INTO LocalFolderRow(id, rootUri, label, enabled) VALUES (?, ?, ?, ?);
+
+delete:
+DELETE FROM LocalFolderRow WHERE id = ?;
+
+setEnabled:
+UPDATE LocalFolderRow SET enabled = ? WHERE id = ?;

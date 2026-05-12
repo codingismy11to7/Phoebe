@@ -1,0 +1,23 @@
+-- Download queue / state. Binary audio bytes remain on disk; this table tracks metadata only.
+
+CREATE TABLE DownloadRow (
+    trackId TEXT NOT NULL PRIMARY KEY,
+    title TEXT NOT NULL,
+    artist TEXT NOT NULL,
+    dlState TEXT NOT NULL,
+    progress REAL NOT NULL,
+    localUri TEXT
+);
+
+selectAll:
+SELECT * FROM DownloadRow;
+
+upsert:
+INSERT OR REPLACE INTO DownloadRow(trackId, title, artist, dlState, progress, localUri)
+VALUES (?, ?, ?, ?, ?, ?);
+
+delete:
+DELETE FROM DownloadRow WHERE trackId = ?;
+
+clearAll:
+DELETE FROM DownloadRow;

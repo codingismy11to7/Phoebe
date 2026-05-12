@@ -1,0 +1,26 @@
+-- Single-row table: holds the user's library UI preferences.
+
+CREATE TABLE LibraryPrefsRow (
+    id INTEGER NOT NULL PRIMARY KEY CHECK (id = 1) DEFAULT 1,
+    sortBy TEXT NOT NULL,
+    ascending INTEGER NOT NULL,
+    colYear INTEGER NOT NULL,
+    colGenre INTEGER NOT NULL,
+    colFilepath INTEGER NOT NULL,
+    colAudioCodec INTEGER NOT NULL,
+    colBitrate INTEGER NOT NULL,
+    colDuration INTEGER NOT NULL,
+    colSampleRate INTEGER NOT NULL,
+    colFileType INTEGER NOT NULL,
+    colDateAdded INTEGER NOT NULL
+);
+
+selectCurrent:
+SELECT * FROM LibraryPrefsRow WHERE id = 1;
+
+upsert:
+INSERT OR REPLACE INTO LibraryPrefsRow(
+    id, sortBy, ascending,
+    colYear, colGenre, colFilepath, colAudioCodec, colBitrate,
+    colDuration, colSampleRate, colFileType, colDateAdded
+) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);

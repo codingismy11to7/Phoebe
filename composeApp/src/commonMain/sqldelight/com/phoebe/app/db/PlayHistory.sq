@@ -1,0 +1,37 @@
+-- Per-play history. Each call to recordPlay inserts a fresh row, so a track can
+-- appear many times. UI surfaces use the MAX(played_at_ms) per scope (track,
+-- album, artist) for "last played".
+
+CREATE TABLE PlayHistoryRow (
+    track_id TEXT NOT NULL,
+    artist TEXT NOT NULL,
+    album TEXT NOT NULL,
+    played_at_ms INTEGER NOT NULL
+);
+
+CREATE INDEX play_history_artist_idx ON PlayHistoryRow(artist);
+CREATE INDEX play_history_album_idx ON PlayHistoryRow(album);
+CREATE INDEX play_history_track_idx ON PlayHistoryRow(track_id);
+CREATE INDEX play_history_played_at_idx ON PlayHistoryRow(played_at_ms);
+
+recordPlay:
+INSERT INTO PlayHistoryRow(track_id, artist, album, played_at_ms)
+VALUES (?, ?, ?, ?);
+
+selectLastPlayedByArtist:
+SELECT artist, MAX(played_at_ms) AS lastPlayed
+FROM PlayHistoryRow
+GROUP BY artist;
+
+selectLastPlayedByAlbum:
+SELECT album, MAX(played_at_ms) AS lastPlayed
+FROM PlayHistoryRow
+GROUP BY album;
+
+selectLastPlayedByTrack:
+SELECT track_id, MAX(played_at_ms) AS lastPlayed
+FROM PlayHistoryRow
+GROUP BY track_id;
+
+clearAll:
+DELETE FROM PlayHistoryRow;

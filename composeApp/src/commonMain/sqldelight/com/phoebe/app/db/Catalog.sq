@@ -1,0 +1,116 @@
+-- Cached catalog (artists/albums/playlists/tracks) plus per-track parent ordering.
+-- Each entity table mirrors the corresponding kotlin data class in com.phoebe.app.domain.
+
+CREATE TABLE ArtistRow (
+    id TEXT NOT NULL PRIMARY KEY,
+    title TEXT NOT NULL,
+    thumbUrl TEXT,
+    albumCount INTEGER NOT NULL DEFAULT 0,
+    songCount INTEGER NOT NULL DEFAULT 0,
+    sortKey INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE AlbumRow (
+    id TEXT NOT NULL PRIMARY KEY,
+    title TEXT NOT NULL,
+    artist TEXT NOT NULL,
+    year INTEGER,
+    thumbUrl TEXT,
+    sortKey INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE PlaylistRow (
+    id TEXT NOT NULL PRIMARY KEY,
+    title TEXT NOT NULL,
+    trackCount INTEGER NOT NULL,
+    plKey TEXT,
+    thumbUrl TEXT,
+    sortKey INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE TrackRow (
+    id TEXT NOT NULL PRIMARY KEY,
+    title TEXT NOT NULL,
+    artist TEXT NOT NULL,
+    album TEXT NOT NULL,
+    durationMs INTEGER NOT NULL,
+    streamUrl TEXT NOT NULL,
+    downloadUrl TEXT NOT NULL,
+    thumbUrl TEXT,
+    localUri TEXT,
+    year INTEGER,
+    genre TEXT,
+    filepath TEXT,
+    audioCodec TEXT,
+    bitrateKbps INTEGER
+);
+
+CREATE TABLE TrackParentRow (
+    parentId TEXT NOT NULL,
+    trackId TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    PRIMARY KEY (parentId, trackId)
+);
+
+CREATE INDEX TrackParentRow_parent_position ON TrackParentRow(parentId, position);
+
+selectArtists:
+SELECT * FROM ArtistRow ORDER BY sortKey, title COLLATE NOCASE;
+
+selectAlbums:
+SELECT * FROM AlbumRow ORDER BY sortKey, title COLLATE NOCASE;
+
+selectPlaylists:
+SELECT * FROM PlaylistRow ORDER BY sortKey, title COLLATE NOCASE;
+
+selectAllTracks:
+SELECT * FROM TrackRow;
+
+selectTrackParents:
+SELECT parentId, trackId, position FROM TrackParentRow ORDER BY parentId, position;
+
+selectTracksForParent:
+SELECT t.*
+FROM TrackRow t
+INNER JOIN TrackParentRow tp ON tp.trackId = t.id
+WHERE tp.parentId = ?
+ORDER BY tp.position;
+
+upsertArtist:
+INSERT OR REPLACE INTO ArtistRow(id, title, thumbUrl, albumCount, songCount, sortKey)
+VALUES (?, ?, ?, ?, ?, ?);
+
+upsertAlbum:
+INSERT OR REPLACE INTO AlbumRow(id, title, artist, year, thumbUrl, sortKey)
+VALUES (?, ?, ?, ?, ?, ?);
+
+upsertPlaylist:
+INSERT OR REPLACE INTO PlaylistRow(id, title, trackCount, plKey, thumbUrl, sortKey)
+VALUES (?, ?, ?, ?, ?, ?);
+
+upsertTrack:
+INSERT OR REPLACE INTO TrackRow(
+    id, title, artist, album, durationMs, streamUrl, downloadUrl,
+    thumbUrl, localUri, year, genre, filepath, audioCodec, bitrateKbps
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+upsertTrackParent:
+INSERT OR REPLACE INTO TrackParentRow(parentId, trackId, position) VALUES (?, ?, ?);
+
+deleteTrackParents:
+DELETE FROM TrackParentRow WHERE parentId = ?;
+
+clearArtists:
+DELETE FROM ArtistRow;
+
+clearAlbums:
+DELETE FROM AlbumRow;
+
+clearPlaylists:
+DELETE FROM PlaylistRow;
+
+clearTracks:
+DELETE FROM TrackRow;
+
+clearTrackParents:
+DELETE FROM TrackParentRow;

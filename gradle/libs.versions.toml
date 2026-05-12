@@ -1,0 +1,68 @@
+[versions]
+agp = "8.9.3"
+compose = "1.10.0"
+kotlin = "2.2.21"
+coroutines = "1.10.2"
+ktor = "3.3.2"
+serialization = "1.9.0"
+activityCompose = "1.11.0"
+media3 = "1.8.0"
+documentfile = "1.0.1"
+junit = "4.13.2"
+javafx = "21.0.11"
+jaudiotagger = "3.0.1"
+jnativehook = "2.2.2"
+soundlibs-mp3spi = "1.9.5.4"
+soundlibs-vorbisspi = "1.0.3.3"
+jflac-codec = "1.5.2"
+sqldelight = "2.2.1"
+androidx-test-core = "1.6.1"
+androidx-test-runner = "1.6.2"
+androidx-test-rules = "1.6.1"
+androidx-test-ext-junit = "1.2.1"
+androidx-compose-bom = "2024.12.01"
+
+[libraries]
+androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
+androidx-documentfile = { module = "androidx.documentfile:documentfile", version.ref = "documentfile" }
+androidx-media3-exoplayer = { module = "androidx.media3:media3-exoplayer", version.ref = "media3" }
+androidx-media3-session = { module = "androidx.media3:media3-session", version.ref = "media3" }
+coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
+coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
+coroutines-swing = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-swing", version.ref = "coroutines" }
+androidx-test-core = { module = "androidx.test:core", version.ref = "androidx-test-core" }
+androidx-test-runner = { module = "androidx.test:runner", version.ref = "androidx-test-runner" }
+androidx-test-rules = { module = "androidx.test:rules", version.ref = "androidx-test-rules" }
+androidx-test-ext-junit = { module = "androidx.test.ext:junit", version.ref = "androidx-test-ext-junit" }
+androidx-compose-bom = { module = "androidx.compose:compose-bom", version.ref = "androidx-compose-bom" }
+ktor-client-content-negotiation = { module = "io.ktor:ktor-client-content-negotiation", version.ref = "ktor" }
+ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
+ktor-client-darwin = { module = "io.ktor:ktor-client-darwin", version.ref = "ktor" }
+ktor-client-mock = { module = "io.ktor:ktor-client-mock", version.ref = "ktor" }
+ktor-client-okhttp = { module = "io.ktor:ktor-client-okhttp", version.ref = "ktor" }
+ktor-client-cio = { module = "io.ktor:ktor-client-cio", version.ref = "ktor" }
+ktor-client-js = { module = "io.ktor:ktor-client-js", version.ref = "ktor" }
+ktor-serialization-json = { module = "io.ktor:ktor-serialization-kotlinx-json", version.ref = "ktor" }
+serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
+junit = { module = "junit:junit", version.ref = "junit" }
+jaudiotagger = { module = "net.jthink:jaudiotagger", version.ref = "jaudiotagger" }
+jnativehook = { module = "com.github.kwhat:jnativehook", version.ref = "jnativehook" }
+soundlibs-mp3spi = { module = "com.googlecode.soundlibs:mp3spi", version.ref = "soundlibs-mp3spi" }
+soundlibs-vorbisspi = { module = "com.googlecode.soundlibs:vorbisspi", version.ref = "soundlibs-vorbisspi" }
+jflac-codec = { module = "org.jflac:jflac-codec", version.ref = "jflac-codec" }
+sqldelight-runtime = { module = "app.cash.sqldelight:runtime", version.ref = "sqldelight" }
+sqldelight-async-extensions = { module = "app.cash.sqldelight:async-extensions", version.ref = "sqldelight" }
+sqldelight-coroutines-extensions = { module = "app.cash.sqldelight:coroutines-extensions", version.ref = "sqldelight" }
+sqldelight-primitive-adapters = { module = "app.cash.sqldelight:primitive-adapters", version.ref = "sqldelight" }
+sqldelight-android-driver = { module = "app.cash.sqldelight:android-driver", version.ref = "sqldelight" }
+sqldelight-sqlite-driver = { module = "app.cash.sqldelight:sqlite-driver", version.ref = "sqldelight" }
+sqldelight-native-driver = { module = "app.cash.sqldelight:native-driver", version.ref = "sqldelight" }
+sqldelight-web-worker-driver = { module = "app.cash.sqldelight:web-worker-driver", version.ref = "sqldelight" }
+
+[plugins]
+androidApplication = { id = "com.android.application", version.ref = "agp" }
+composeCompiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+composeMultiplatform = { id = "org.jetbrains.compose", version.ref = "compose" }
+kotlinMultiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
+kotlinSerialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+sqldelight = { id = "app.cash.sqldelight", version.ref = "sqldelight" }
