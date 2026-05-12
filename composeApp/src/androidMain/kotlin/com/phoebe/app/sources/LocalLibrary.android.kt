@@ -13,12 +13,22 @@ import androidx.documentfile.provider.DocumentFile
 import com.phoebe.app.AndroidContextHolder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.net.URLDecoder
+import java.io.File
 
 private val audioExt = setOf("mp3", "m4a", "flac", "wav", "aac", "ogg", "opus")
 
 actual object LocalLibraryIO {
     actual suspend fun listAudioUris(rootUri: String): List<String> = withContext(Dispatchers.IO) {
+        val fileRoot = rootUri.toFileOrNull()
+        if (fileRoot != null) {
+            if (!fileRoot.exists() || !fileRoot.isDirectory) return@withContext emptyList()
+            return@withContext fileRoot.walkTopDown()
+                .filter { it.isFile }
+                .filter { it.extension.lowercase() in audioExt }
+                .map { it.toURI().toString() }
+                .toList()
+        }
+
         val ctx = AndroidContextHolder.application
         val treeUri = Uri.parse(rootUri)
         val root = DocumentFile.fromTreeUri(ctx, treeUri) ?: return@withContext emptyList()
@@ -36,6 +46,8 @@ actual object LocalLibraryIO {
     }
 
     actual suspend fun fileExists(uri: String): Boolean = withContext(Dispatchers.IO) {
+        uri.toFileOrNull()?.let { return@withContext it.isFile }
+
         val ctx = AndroidContextHolder.application
         DocumentFile.fromSingleUri(ctx, Uri.parse(uri))?.exists() == true
     }
@@ -45,7 +57,12 @@ actual object LocalLibraryIO {
         val parsed = Uri.parse(uri)
         val retriever = MediaMetadataRetriever()
         try {
-            retriever.setDataSource(ctx, parsed)
+            val file = uri.toFileOrNull()
+            if (file != null) {
+                retriever.setDataSource(file.absolutePath)
+            } else {
+                retriever.setDataSource(ctx, parsed)
+            }
             fun meta(key: Int) = retriever.extractMetadata(key)?.trim()?.takeIf { it.isNotEmpty() }
             val title = meta(MediaMetadataRetriever.METADATA_KEY_TITLE)
             val artist = meta(MediaMetadataRetriever.METADATA_KEY_ARTIST)
@@ -78,6 +95,12 @@ actual object LocalLibraryIO {
         } finally {
             runCatching { retriever.release() }
         }
+    }
+
+    private fun String.toFileOrNull(): File? {
+        val parsed = runCatching { Uri.parse(this) }.getOrNull() ?: return null
+        if (parsed.scheme != "file") return null
+        return File(parsed.path ?: return null)
     }
 }
 
