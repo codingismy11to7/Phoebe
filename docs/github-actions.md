@@ -25,7 +25,7 @@ phoebe.versionName=1.2.3
 phoebe.versionCode=1002003
 ```
 
-The release workflow requires the pushed tag to match `phoebe.versionName`, so `phoebe.versionName=1.2.3` must be released with tag `release/1.2.3`. It validates that the version is plain semver with a major version greater than `0`, uses `phoebe.versionCode` for Android, builds Android, Linux, Windows, and macOS packages, then creates a draft GitHub release with the generated assets. The major version requirement comes from Compose Desktop's macOS package version rules.
+The release workflow requires the pushed tag to match `phoebe.versionName`, so `phoebe.versionName=1.2.3` must be released with tag `release/1.2.3`. It validates that the version is plain semver, uses `phoebe.versionCode` for Android, builds Android, Linux, Windows, and macOS packages, then creates a draft GitHub release with the generated assets.
 
 ## Secrets
 

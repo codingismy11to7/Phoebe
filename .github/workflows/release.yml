@@ -68,11 +68,6 @@ jobs:
           fi
 
           IFS='.' read -r major minor patch <<< "${version}"
-          if (( major == 0 )); then
-            echo "::error::Desktop release packages require a semver major version greater than 0"
-            exit 1
-          fi
-
           if (( major > 2100 || minor > 999 || patch > 999 )); then
             echo "::error::Version is too large to derive a safe Android versionCode"
             exit 1
