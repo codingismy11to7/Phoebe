@@ -1,0 +1,37 @@
+app-id: com.phoebe.app
+runtime: org.freedesktop.Platform
+runtime-version: '25.08'
+sdk: org.freedesktop.Sdk
+command: Phoebe
+
+finish-args:
+  - --share=ipc
+  - --share=network
+  - --socket=fallback-x11
+  - --socket=wayland
+  - --socket=pulseaudio
+  - --device=dri
+  - --filesystem=xdg-music:ro
+  - --filesystem=xdg-download:ro
+
+modules:
+  - name: phoebe
+    buildsystem: simple
+    build-commands:
+      - install -d /app/bin /app/lib/phoebe
+      - cp -a phoebe/. /app/lib/phoebe/
+      - ln -s /app/lib/phoebe/bin/Phoebe /app/bin/Phoebe
+      - install -Dm644 com.phoebe.app.desktop /app/share/applications/com.phoebe.app.desktop
+      - install -Dm644 com.phoebe.app.metainfo.xml /app/share/metainfo/com.phoebe.app.metainfo.xml
+      - install -Dm644 com.phoebe.app.png /app/share/icons/hicolor/512x512/apps/com.phoebe.app.png
+    sources:
+      - type: dir
+        path: ../build/compose/binaries/main-release/app/Phoebe
+        dest: phoebe
+      - type: file
+        path: com.phoebe.app.desktop
+      - type: file
+        path: com.phoebe.app.metainfo.xml
+      - type: file
+        path: ../src/desktopMain/resources/icons/icon.png
+        dest-filename: com.phoebe.app.png

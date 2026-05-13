@@ -22,6 +22,8 @@ data class PlexDeviceDto(
     @SerialName("clientIdentifier") val clientIdentifier: String,
     val owned: Boolean = false,
     val provides: String = "",
+    @SerialName("accessToken") val accessToken: String? = null,
+    @SerialName("httpsRequired") val httpsRequired: Boolean = false,
     val connections: List<PlexConnectionDto> = emptyList(),
 )
 
@@ -42,6 +44,8 @@ data class PlexMediaContainer(
     val machineIdentifier: String? = null,
     val leafCountAdded: Int? = null,
     val leafCountRequested: Int? = null,
+    @SerialName("playQueueID") val playQueueId: Long? = null,
+    @SerialName("playQueueSelectedItemID") val playQueueSelectedItemId: Long? = null,
     @SerialName("Directory") val directories: List<PlexDirectoryDto> = emptyList(),
     @SerialName("Metadata") val metadata: List<PlexMetadataDto> = emptyList(),
 )
@@ -63,6 +67,7 @@ data class PlexGenreTagDto(
 @Serializable
 data class PlexMetadataDto(
     val ratingKey: String,
+    @SerialName("playQueueItemID") val playQueueItemId: Long? = null,
     val key: String? = null,
     val title: String,
     val type: String? = null,

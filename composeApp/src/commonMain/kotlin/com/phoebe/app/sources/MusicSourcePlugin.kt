@@ -3,6 +3,7 @@ package com.phoebe.app.sources
 import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.LocalFolderMediaSourceConfig
 import com.phoebe.app.domain.PlexSession
+import com.phoebe.app.domain.serverAuthToken
 import com.phoebe.app.data.PlexClient
 import io.ktor.client.HttpClient
 
@@ -28,8 +29,7 @@ object PlexMusicSourcePlugin : MusicSourcePlugin {
     override suspend fun buildCatalog(ctx: SourceBuildContext): CatalogSnapshot {
         val server = ctx.session?.selectedServer ?: return CatalogSnapshot()
         val library = ctx.session.selectedLibrary ?: return CatalogSnapshot()
-        val token = ctx.session.token
-        if (token.isBlank()) return CatalogSnapshot()
+        val token = ctx.session.serverAuthToken() ?: return CatalogSnapshot()
         return PlexCatalogBuilder(ctx.plexClient, ctx.httpClient).buildCatalog(server, library, token)
     }
 }

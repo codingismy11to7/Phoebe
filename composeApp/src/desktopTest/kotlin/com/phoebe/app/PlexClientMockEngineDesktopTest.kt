@@ -1,6 +1,7 @@
 package com.phoebe.app
 
 import com.phoebe.app.data.PlexClient
+import com.phoebe.app.data.PlexTimelineState
 import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.testing.testHttpClient
 import io.ktor.client.engine.mock.MockEngine
@@ -24,6 +25,7 @@ class PlexClientMockEngineDesktopTest {
                 "clientIdentifier": "server-id",
                 "owned": true,
                 "provides": "server",
+                "accessToken": "server-token-xyz",
                 "connections": [
                   { "uri": "https://example.plex.direct:32400", "local": false }
                 ]
@@ -45,6 +47,34 @@ class PlexClientMockEngineDesktopTest {
         val servers: List<PlexServer> = client.servers("fake-token")
         assertEquals(1, servers.size)
         assertEquals("server-id", servers.single().id)
+        assertEquals("server-token-xyz", servers.single().accessToken)
         assertTrue(servers.single().uri.startsWith("https://"))
+    }
+
+    @Test
+    fun reportTimelineSendsTokenInQueryAndUsesGet() = runBlocking {
+        var capturedMethod: String? = null
+        var capturedToken: String? = null
+        val engine = MockEngine { request ->
+            capturedMethod = request.method.value
+            capturedToken = request.url.parameters["X-Plex-Token"]
+            respond(
+                content = """{"MediaContainer":{"size":0}}""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, "application/json"),
+            )
+        }
+        val client = PlexClient(testHttpClient(engine))
+        client.reportTimeline(
+            server = PlexServer("id", "plex", "https://plex.example:32400", owned = true),
+            token = "secret-token",
+            sessionIdentifier = "session-1",
+            ratingKey = "123",
+            timeMs = 5_000L,
+            durationMs = 180_000L,
+            state = PlexTimelineState.Playing,
+        )
+        assertEquals("GET", capturedMethod)
+        assertEquals("secret-token", capturedToken)
     }
 }

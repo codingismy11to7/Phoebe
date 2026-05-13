@@ -32,6 +32,8 @@ class PlexClient(
         }
     },
 ) {
+    /** Last base URL that accepted API calls for this server — usually plain LAN HTTP. */
+    private val apiBaseCache = mutableMapOf<String, String>()
     suspend fun createPin(): PlexPin {
         val response: PlexPinResponse = httpClient.post("https://plex.tv/api/v2/pins") {
             plexHeaders()
@@ -68,15 +70,27 @@ class PlexClient(
         return devices
             .filter { "server" in it.provides }
             .mapNotNull { device ->
-                val connection = device.connections.firstOrNull { !it.local } ?: device.connections.firstOrNull()
-                connection?.let {
-                    PlexServer(
-                        id = device.clientIdentifier,
-                        name = device.name,
-                        uri = it.uri.trimEnd('/'),
-                        owned = device.owned,
-                    )
-                }
+                val connections = device.connections
+                if (connections.isEmpty()) return@mapNotNull null
+                val advertised = connections.map { it.uri.trimEnd('/') }.filter { it.isNotBlank() }.distinct()
+                val local = connections.filter { it.local }.map { it.uri.trimEnd('/') }.distinct()
+                val allUris = expandConnectionUris(advertised)
+                val bestUri = bestReachableBaseUri(
+                    advertisedUris = advertised,
+                    localUris = local,
+                    httpsRequired = device.httpsRequired,
+                ) ?: return@mapNotNull null
+                PlexServer(
+                    id = device.clientIdentifier,
+                    name = device.name,
+                    uri = bestUri,
+                    owned = device.owned,
+                    connectionUris = allUris,
+                    advertisedConnectionUris = advertised,
+                    localConnectionUris = local,
+                    accessToken = device.accessToken?.takeIf { it.isNotBlank() },
+                    httpsRequired = device.httpsRequired,
+                )
             }
     }
 
@@ -191,13 +205,15 @@ class PlexClient(
         } else {
             "server://$machineIdentifier/com.plexapp.plugins.library/library/sections/${library.key}"
         }
-        val response = httpClient.post(server.uri + "/playlists") {
-            header("X-Plex-Token", token)
-            header(HttpHeaders.Accept, "application/json")
-            parameter("type", "audio")
-            parameter("title", title)
-            parameter("smart", 0)
-            parameter("uri", uri)
+        val response = withReachableBase(server) { base ->
+            httpClient.post("$base/playlists") {
+                plexServerAuth(token)
+                header(HttpHeaders.Accept, "application/json")
+                parameter("type", "audio")
+                parameter("title", title)
+                parameter("smart", 0)
+                parameter("uri", uri)
+            }
         }
         val parsed = parsePlaylistResponse(response, "createPlaylist", title)
         val meta = parsed.mediaContainer.metadata.firstOrNull()
@@ -227,15 +243,135 @@ class PlexClient(
         ratingKeys: List<String>,
     ): Int? {
         if (ratingKeys.isEmpty()) return null
-        val response = httpClient.put(server.uri + "/playlists/$playlistRatingKey/items") {
-            header("X-Plex-Token", token)
-            header(HttpHeaders.Accept, "application/json")
-            parameter("uri", metadataUri(machineIdentifier, ratingKeys))
+        val response = withReachableBase(server) { base ->
+            httpClient.put("$base/playlists/$playlistRatingKey/items") {
+                plexServerAuth(token)
+                header(HttpHeaders.Accept, "application/json")
+                parameter("uri", metadataUri(machineIdentifier, ratingKeys))
+            }
         }
         val parsed = parsePlaylistResponse(response, "addTracksToPlaylist", "playlist/$playlistRatingKey")
         return parsed.mediaContainer.leafCountAdded
             ?: parsed.mediaContainer.metadata.firstOrNull()?.leafCount
             ?: parsed.mediaContainer.size
+    }
+
+    /**
+     * Report playback position to Plex so the server can mark items played and scrobble to
+     * linked services (e.g. ListenBrainz). Clients must hit this on state changes and
+     * periodically (~10s) while playing.
+     *
+     * Tries every known server connection (LAN before relay) because plex.direct
+     * relay URLs often serve library media but return 401 for the timeline command path.
+     */
+    suspend fun reportTimeline(
+        server: PlexServer,
+        token: String,
+        sessionIdentifier: String,
+        ratingKey: String,
+        timeMs: Long,
+        durationMs: Long,
+        state: PlexTimelineState,
+        continuing: Boolean? = null,
+        playQueueItemId: Long? = null,
+    ) {
+        val bases = server.reachableBaseUris(apiBaseCache[server.id])
+        var lastStatus = 0
+        var lastBody = ""
+        var lastBase = server.uri
+        for (base in bases) {
+            lastBase = base
+            val response = timelineHttpRequest(base, token, sessionIdentifier) {
+                parameter("ratingKey", ratingKey)
+                parameter("key", "/library/metadata/$ratingKey")
+                parameter("identifier", LibraryIdentifier)
+                parameter("time", timeMs.coerceAtLeast(0L))
+                parameter("duration", durationMs.coerceAtLeast(0L))
+                parameter("state", state.wireValue)
+                continuing?.let { parameter("continuing", if (it) 1 else 0) }
+                playQueueItemId?.let { parameter("playQueueItemID", it) }
+            }
+            if (response.status.isSuccess()) {
+                apiBaseCache[server.id] = base
+                if (base != server.uri) {
+                    println("[PlexClient] reportTimeline ok via $base (primary is ${server.uri})")
+                }
+                return
+            }
+            lastStatus = response.status.value
+            lastBody = response.bodyAsText()
+            if (response.status.value != 401) break
+        }
+        println(
+            "[PlexClient] reportTimeline failed ratingKey=$ratingKey state=${state.wireValue} " +
+                "url=$lastBase tried=${bases.size} → HTTP $lastStatus: ${lastBody.take(300)}",
+        )
+    }
+
+    /**
+     * Register an audio play queue with Plex — first-party clients do this before timeline
+     * updates and many servers expect a playQueueItemID on each ping.
+     */
+    suspend fun createAudioPlayQueue(
+        server: PlexServer,
+        token: String,
+        machineIdentifier: String,
+        ratingKeys: List<String>,
+        startRatingKey: String,
+    ): PlexPlayQueue? {
+        if (ratingKeys.isEmpty()) return null
+        val uri = metadataUri(machineIdentifier, ratingKeys)
+        val bases = server.reachableBaseUris(apiBaseCache[server.id])
+        for (base in bases) {
+            val response = httpClient.post("$base/playQueues") {
+                plexTimelineAuth(token)
+                parameter("type", "audio")
+                parameter("uri", uri)
+                parameter("key", startRatingKey)
+                parameter("continuous", 1)
+            }
+            val body = response.bodyAsText()
+            if (!response.status.isSuccess()) {
+                if (response.status.value == 401) continue
+                println("[PlexClient] createAudioPlayQueue failed → HTTP ${response.status.value}: ${body.take(300)}")
+                return null
+            }
+            apiBaseCache[server.id] = base
+            val parsed = runCatching {
+                PlexJson.decodeFromString(PlexMediaContainerResponse.serializer(), body)
+            }.getOrNull()
+            val container = parsed?.mediaContainer
+            val playQueueId = container?.playQueueId ?: return null
+            val itemIds = buildMap {
+                for (item in container.metadata) {
+                    val id = item.playQueueItemId ?: continue
+                    put(item.ratingKey, id)
+                }
+            }
+            return PlexPlayQueue(playQueueId = playQueueId, itemIdByRatingKey = itemIds)
+        }
+        return null
+    }
+
+    private suspend fun timelineHttpRequest(
+        base: String,
+        token: String,
+        sessionIdentifier: String,
+        block: io.ktor.client.request.HttpRequestBuilder.() -> Unit,
+    ): HttpResponse {
+        val getResponse = httpClient.get("$base/:/timeline") {
+            plexTimelineAuth(token)
+            header("X-Plex-Session-Identifier", sessionIdentifier)
+            block()
+        }
+        if (getResponse.status.isSuccess() || getResponse.status.value != 401) {
+            return getResponse
+        }
+        return httpClient.post("$base/:/timeline") {
+            plexTimelineAuth(token)
+            header("X-Plex-Session-Identifier", sessionIdentifier)
+            block()
+        }
     }
 
     suspend fun editTrackMetadata(
@@ -246,18 +382,20 @@ class PlexClient(
         original: Track,
         update: TrackMetadataUpdate,
     ) {
-        val response = httpClient.put(server.uri + "/library/sections/${library.key}/all") {
-            header("X-Plex-Token", token)
-            header(HttpHeaders.Accept, "application/json")
-            parameter("type", 10)
-            parameter("id", ratingKey)
-            if (update.title != original.title) {
-                parameter("title.value", update.title)
-                parameter("title.locked", 1)
-            }
-            if (update.artist != original.artist) {
-                parameter("originalTitle.value", update.artist)
-                parameter("originalTitle.locked", 1)
+        val response = withReachableBase(server) { base ->
+            httpClient.put("$base/library/sections/${library.key}/all") {
+                plexServerAuth(token)
+                header(HttpHeaders.Accept, "application/json")
+                parameter("type", 10)
+                parameter("id", ratingKey)
+                if (update.title != original.title) {
+                    parameter("title.value", update.title)
+                    parameter("title.locked", 1)
+                }
+                if (update.artist != original.artist) {
+                    parameter("originalTitle.value", update.artist)
+                    parameter("originalTitle.locked", 1)
+                }
             }
         }
         val body = response.bodyAsText()
@@ -297,11 +435,34 @@ class PlexClient(
         return "server://$machineIdentifier/com.plexapp.plugins.library/library/metadata/$joined"
     }
 
+    private suspend fun <T> withReachableBase(
+        server: PlexServer,
+        block: suspend (base: String) -> T,
+    ): T {
+        var lastError: Throwable? = null
+        for (base in server.reachableBaseUris(apiBaseCache[server.id])) {
+            val result = runCatching { block(base) }
+            if (result.isSuccess) {
+                apiBaseCache[server.id] = base
+                return result.getOrThrow()
+            }
+            lastError = result.exceptionOrNull()
+        }
+        throw lastError ?: IllegalStateException("Could not reach Plex server '${server.name}'")
+    }
+
     private suspend inline fun <reified T> plexGet(server: PlexServer, token: String, path: String): T =
-        httpClient.get(server.uri + path) {
-            header("X-Plex-Token", token)
-            header(HttpHeaders.Accept, "application/json")
-        }.body()
+        withReachableBase(server) { base ->
+            val response = httpClient.get("$base$path") {
+                plexServerAuth(token)
+                header(HttpHeaders.Accept, "application/json")
+            }
+            if (!response.status.isSuccess()) {
+                val body = response.bodyAsText()
+                error("Plex GET $path failed (${response.status.value}) via $base: ${body.take(200)}")
+            }
+            response.body()
+        }
 
     private fun PlexMetadataDto.toTrack(server: PlexServer, token: String): Track? {
         val mediaItem = media.firstOrNull() ?: return null
@@ -335,19 +496,45 @@ class PlexClient(
     }
 
     private fun PlexServer.assetUrl(path: String, token: String): String {
-        val builder = URLBuilder(uri)
+        val base = apiBaseCache[id] ?: uri
+        val builder = URLBuilder(base)
         builder.appendPathSegments(path.trimStart('/').split('/'))
         builder.parameters.append("X-Plex-Token", token)
         return builder.buildString()
     }
 
+    /** Base URL that succeeded for API calls, used for media/thumbnail URLs. */
+    fun mediaBaseUrl(server: PlexServer): String = apiBaseCache[server.id] ?: server.uri
+
     companion object {
+        const val LibraryIdentifier = "com.plexapp.plugins.library"
         const val ClientIdentifier = "phoebe-compose-multiplatform"
         val PlexJson = Json {
             ignoreUnknownKeys = true
             explicitNulls = false
         }
     }
+}
+
+enum class PlexTimelineState(val wireValue: String) {
+    Playing("playing"),
+    Paused("paused"),
+    Stopped("stopped"),
+    Buffering("buffering"),
+}
+
+/** Plex accepts the token in a header and/or query param; relays reliably forward the query form. */
+private fun io.ktor.client.request.HttpRequestBuilder.plexServerAuth(token: String) {
+    header("X-Plex-Token", token)
+    parameter("X-Plex-Token", token)
+    plexHeaders()
+}
+
+private fun io.ktor.client.request.HttpRequestBuilder.plexTimelineAuth(token: String) {
+    plexServerAuth(token)
+    header("X-Plex-Device", "Phoebe")
+    header("X-Plex-Device-Name", "Phoebe")
+    header("X-Plex-Provides", "player")
 }
 
 private fun io.ktor.client.request.HttpRequestBuilder.plexHeaders(token: String? = null) {

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.phoebe.app</id>
+  <name>Phoebe</name>
+  <summary>Music player and library manager</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>LicenseRef-proprietary</project_license>
+  <description>
+    <p>Phoebe is a desktop music player for browsing and playing a personal music library.</p>
+  </description>
+  <launchable type="desktop-id">com.phoebe.app.desktop</launchable>
+  <categories>
+    <category>Audio</category>
+    <category>Music</category>
+    <category>Player</category>
+  </categories>
+  <developer_name>Phoebe</developer_name>
+</component>

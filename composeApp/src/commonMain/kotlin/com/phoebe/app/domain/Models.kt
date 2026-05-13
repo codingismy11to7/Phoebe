@@ -29,7 +29,26 @@ data class PlexServer(
     val name: String,
     val uri: String,
     val owned: Boolean,
-)
+    /** Advertised URLs plus synthesized plain-IP fallbacks from plex.direct hostnames. */
+    val connectionUris: List<String> = emptyList(),
+    /** URLs Plex.tv listed explicitly (never synthesized). */
+    val advertisedConnectionUris: List<String> = emptyList(),
+    /** Subset of [advertisedConnectionUris] Plex marked `local=true`. */
+    val localConnectionUris: List<String> = emptyList(),
+    /** Per-server token from plex.tv `/resources`; required for many PMS API calls. */
+    val accessToken: String? = null,
+    val httpsRequired: Boolean = false,
+) {
+    fun authToken(fallbackUserToken: String): String =
+        accessToken?.takeIf { it.isNotBlank() } ?: fallbackUserToken
+}
+
+/** Plex Media Server auth token (per-server accessToken when Plex provides one). */
+fun PlexSession?.serverAuthToken(): String? {
+    val s = this ?: return null
+    val user = s.token.takeIf { it.isNotBlank() } ?: return null
+    return s.selectedServer?.authToken(user) ?: user
+}
 
 @Serializable
 data class MusicLibrary(

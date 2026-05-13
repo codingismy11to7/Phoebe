@@ -60,6 +60,7 @@ import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryUiPreferences
+import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.isLocalMediaPlayback
 import com.phoebe.app.domain.isPlexLibraryTrack
@@ -111,9 +112,7 @@ internal fun LibraryMobileView(
         }
     }
 
-    Column(modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-        MobileLibraryHeader()
-        Spacer(Modifier.height(14.dp))
+    Column(modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp)) {
         MobileLibraryTabs(filter, onFilter)
         Spacer(Modifier.height(14.dp))
         MobileLibraryToolbar(
@@ -156,30 +155,6 @@ internal fun LibraryMobileView(
                     onDownload = onDownload,
                 )
             }
-        }
-    }
-}
-
-@Composable
-private fun MobileLibraryHeader() {
-    Row(
-        Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            Modifier.size(36.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.04f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            PhoebeIconView(PhoebeIcon.Bell, tint = PhoebeUi.secondaryText, modifier = Modifier.size(17.dp))
-        }
-        Spacer(Modifier.weight(1f))
-        Text("Library", color = PhoebeUi.primaryText, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.weight(1f))
-        Box(
-            Modifier.size(36.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.04f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            PhoebeIconView(PhoebeIcon.Library, tint = PhoebeUi.secondaryText, modifier = Modifier.size(18.dp))
         }
     }
 }
@@ -1010,5 +985,144 @@ private fun MobileActionPill(label: String, onClick: () -> Unit, modifier: Modif
         contentAlignment = Alignment.Center,
     ) {
         Text(label, color = PhoebeUi.primaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+internal fun PlaylistsMobileView(
+    catalogRefreshing: Boolean,
+    onPlaylist: (Playlist) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val playlistActions = LocalPlaylistActions.current
+    val playlists = playlistActions.playlists
+
+    Column(modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        if (catalogRefreshing) {
+            LibraryLoadingStrip(Modifier.padding(bottom = 6.dp))
+        }
+        if (!playlistActions.playlistsEnabled) {
+            Column(
+                Modifier.fillMaxWidth().padding(top = 48.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                PhoebeIconView(PhoebeIcon.Queue, tint = PhoebeUi.mutedText, modifier = Modifier.size(36.dp))
+                Text(
+                    "Sign in to Plex to browse playlists",
+                    color = PhoebeUi.secondaryText,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                )
+                Text(
+                    "Playlists sync from your Plex music library.",
+                    color = PhoebeUi.mutedText,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                )
+            }
+        } else {
+            LazyColumn(
+                Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 18.dp),
+            ) {
+                item(contentType = "create") {
+                    MobilePlaylistRow(
+                        icon = PhoebeIcon.Plus,
+                        title = "Create Playlist",
+                        subtitle = null,
+                        accent = false,
+                        onClick = { playlistActions.onRequestCreatePlaylist(emptyList()) },
+                    )
+                }
+                if (playlists.isEmpty()) {
+                    item(contentType = "empty") {
+                        Text(
+                            "No playlists yet. Create one or add songs from your library.",
+                            color = PhoebeUi.mutedText,
+                            fontSize = 13.sp,
+                            lineHeight = 18.sp,
+                            modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
+                        )
+                    }
+                } else {
+                    items(playlists, key = { it.id }, contentType = { "playlist" }) { playlist ->
+                        val liked = playlist.title.contains("Liked", ignoreCase = true)
+                        MobilePlaylistRow(
+                            icon = if (liked) PhoebeIcon.Heart else null,
+                            title = playlist.title,
+                            subtitle = "${playlist.trackCount} songs",
+                            thumbUrl = playlist.thumbUrl,
+                            accent = liked,
+                            onClick = { onPlaylist(playlist) },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MobilePlaylistRow(
+    icon: PhoebeIcon?,
+    title: String,
+    subtitle: String?,
+    thumbUrl: String? = null,
+    accent: Boolean = false,
+    onClick: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 4.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            ArtworkImage(title, thumbUrl, Modifier.size(52.dp), radius = 8.dp)
+            if (accent || icon != null) {
+                Box(
+                    Modifier
+                        .size(52.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(
+                            if (accent) {
+                                androidx.compose.ui.graphics.Brush.linearGradient(
+                                    listOf(PhoebeUi.accentLight.copy(alpha = 0.82f), Color(0xCC6D45E8)),
+                                )
+                            } else {
+                                androidx.compose.ui.graphics.Brush.linearGradient(
+                                    listOf(Color.Transparent, Color.Transparent),
+                                )
+                            },
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (icon != null) {
+                        PhoebeIconView(icon, tint = PhoebeUi.primaryText, modifier = Modifier.size(22.dp), filled = accent)
+                    }
+                }
+            }
+        }
+        Column(Modifier.weight(1f)) {
+            Text(
+                title,
+                color = PhoebeUi.primaryText,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (subtitle != null) {
+                Text(subtitle, color = PhoebeUi.mutedText, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        PhoebeIconView(PhoebeIcon.Forward, tint = PhoebeUi.mutedText, modifier = Modifier.size(16.dp))
     }
 }

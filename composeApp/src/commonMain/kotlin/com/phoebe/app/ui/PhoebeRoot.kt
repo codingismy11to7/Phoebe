@@ -160,6 +160,7 @@ private enum class DesktopSection {
     Home,
     Search,
     Library,
+    Playlists,
     Settings,
 }
 
@@ -740,20 +741,27 @@ fun PhoebeRoot(
     // app rather than under it (CompositionLocalProvider isn't a layout, so emitting siblings
     // here results in painter order = source order, with the last one rendered last/highest).
     Box(modifier = Modifier.fillMaxSize()) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(
-                Brush.radialGradient(
-                    colors = listOf(PhoebeUi.shellRadialTint, PhoebeUi.canvasBackground),
-                    center = Offset(420f, 40f),
-                    radius = 960f,
-                ),
-            )
-            .windowInsetsPadding(WindowInsets.safeDrawing),
-    ) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
-            if (maxWidth < 900.dp) {
+            val compact = maxWidth < 900.dp
+            val wideDesktop = maxWidth >= 1120.dp
+            val shellModifier = if (compact) {
+                Modifier
+                    .fillMaxSize()
+                    .background(PhoebeUi.shellTop)
+            } else {
+                Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(PhoebeUi.shellRadialTint, PhoebeUi.canvasBackground),
+                            center = Offset(420f, 40f),
+                            radius = 960f,
+                        ),
+                    )
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
+            }
+            Box(modifier = shellModifier) {
+            if (compact) {
                 when (val scr = screen) {
                     is AppScreen.ServerPicker -> PlexServerPickerPanel(
                         servers = servers,
@@ -873,6 +881,7 @@ fun PhoebeRoot(
                                 scopedScreen is AppScreen.PlaylistDetail ||
                                 selectedPlaylistId != null ||
                                 browseSection == DesktopSection.Library ||
+                                browseSection == DesktopSection.Playlists ||
                                 browseSection == DesktopSection.Settings
                             if (!scoped && newQuery.isNotBlank()) {
                                 browseSection = DesktopSection.Search
@@ -881,7 +890,7 @@ fun PhoebeRoot(
                         onLibraryFilter = { libraryFilter = it },
                         onPlaylist = { playlist ->
                             selectedPlaylistId = playlist.id
-                            browseSection = DesktopSection.Library
+                            browseSection = DesktopSection.Playlists
                             state.open(AppScreen.PlaylistDetail(playlist))
                         },
                         onArtist = { state.open(AppScreen.ArtistDetail(it)) },
@@ -926,8 +935,8 @@ fun PhoebeRoot(
                     shuffle = player.shuffle,
                     repeat = player.repeat,
                     volume = player.volume,
-                    showQueue = maxWidth >= 1120.dp,
-                    compact = maxWidth < 1120.dp,
+                    showQueue = wideDesktop,
+                    compact = !wideDesktop,
                     busy = busy,
                     onNavigate = {
                         state.dismissDetailsToHome()
@@ -942,8 +951,9 @@ fun PhoebeRoot(
                             screen is AppScreen.AlbumDetail ||
                             screen is AppScreen.PlaylistDetail ||
                             selectedPlaylistId != null ||
-                            browseSection == DesktopSection.Library ||
-                            browseSection == DesktopSection.Settings
+                                browseSection == DesktopSection.Library ||
+                                browseSection == DesktopSection.Playlists ||
+                                browseSection == DesktopSection.Settings
                         if (!scoped && newQuery.isNotBlank()) {
                             browseSection = DesktopSection.Search
                         }
@@ -999,7 +1009,7 @@ fun PhoebeRoot(
                     .firstOrNull { it.id == editing.id } ?: editing
                 MetadataEditorOverlay(
                     track = latest,
-                    compact = maxWidth < 900.dp,
+                    compact = compact,
                     onDismiss = { metadataEditorTrack = null },
                     onSave = { update ->
                         state.updateTrackMetadata(update)
@@ -1351,7 +1361,7 @@ private fun Sidebar(
             .width(236.dp)
             .fillMaxHeight()
             .background(PhoebeUi.sidebar)
-            .padding(24.dp),
+            .padding(start = 14.dp, top = 54.dp, end = 24.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(26.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1610,10 +1620,22 @@ internal fun PhoebeIconView(
                 drawCircle(tint, radius = s * 0.25f, center = p(0.43f, 0.42f), style = stroke)
                 line(0.61f, 0.61f, 0.82f, 0.82f)
             }
-            PhoebeIcon.Library, PhoebeIcon.Queue -> {
+            PhoebeIcon.Library -> {
                 line(0.22f, 0.30f, 0.78f, 0.30f)
                 line(0.22f, 0.50f, 0.78f, 0.50f)
                 line(0.22f, 0.70f, 0.78f, 0.70f)
+            }
+            PhoebeIcon.Queue -> {
+                val play = Path().apply {
+                    moveTo(s * 0.18f, s * 0.26f)
+                    lineTo(s * 0.18f, s * 0.74f)
+                    lineTo(s * 0.44f, s * 0.50f)
+                    close()
+                }
+                drawPath(play, tint, style = androidx.compose.ui.graphics.drawscope.Fill)
+                line(0.54f, 0.30f, 0.82f, 0.30f)
+                line(0.54f, 0.50f, 0.82f, 0.50f)
+                line(0.54f, 0.70f, 0.82f, 0.70f)
             }
             PhoebeIcon.Plus -> {
                 line(0.50f, 0.20f, 0.50f, 0.80f)
@@ -1944,6 +1966,7 @@ private fun DesktopContent(
                         selectedPlaylist != null -> "Playlist"
                         section == DesktopSection.Search -> "Search"
                         section == DesktopSection.Library -> "Your Library"
+                        section == DesktopSection.Playlists -> "Playlists"
                         section == DesktopSection.Settings -> "Settings"
                         else -> "Home"
                     },
@@ -1952,7 +1975,8 @@ private fun DesktopContent(
                 Text(
                     selectedPlaylist?.title ?: when (section) {
                         DesktopSection.Search -> "Find your sound"
-                        DesktopSection.Library -> "Albums, artists, and playlists"
+                        DesktopSection.Library -> "Albums, artists, and songs"
+                        DesktopSection.Playlists -> "Your Plex playlists"
                         DesktopSection.Settings -> "Customize your listening experience"
                         DesktopSection.Home -> "Now playing"
                     },
@@ -4779,43 +4803,127 @@ private fun MobileBottomNavigation(
         DesktopSection.Home to (PhoebeIcon.Home to "Home"),
         DesktopSection.Search to (PhoebeIcon.Search to "Search"),
         DesktopSection.Library to (PhoebeIcon.Library to "Library"),
+        DesktopSection.Playlists to (PhoebeIcon.Queue to "Playlists"),
     )
+    val topShape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(topShape)
+            .background(PhoebeUi.navBar, topShape)
+            .border(BorderStroke(1.dp, PhoebeUi.border), topShape),
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(vertical = 10.dp, horizontal = 4.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            tabs.forEach { (target, iconLabel) ->
+                val (icon, label) = iconLabel
+                val active = section == target
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { onSection(target) }
+                        .padding(vertical = 6.dp, horizontal = 2.dp)
+                        .semantics { contentDescription = label },
+                ) {
+                    PhoebeIconView(icon, tint = if (active) PhoebeUi.accentLight else PhoebeUi.secondaryText, modifier = Modifier.size(19.dp))
+                    Text(
+                        label.uppercase(),
+                        color = if (active) PhoebeUi.primaryText else PhoebeUi.mutedText,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = 0.06.em,
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.navigationBarsPadding())
+    }
+}
+
+@Composable
+private fun MobileScreenToolbar(
+    title: String,
+    onBack: (() -> Unit)? = null,
+    menuExpanded: Boolean,
+    onMenuExpandedChange: (Boolean) -> Unit,
+    menuContent: @Composable () -> Unit,
+    showMenu: Boolean = true,
+) {
     Row(
         Modifier
             .fillMaxWidth()
-            .navigationBarsPadding()
-            .background(PhoebeUi.panel)
-            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
-            .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
-            .padding(vertical = 10.dp, horizontal = 4.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly,
+            .height(56.dp)
+            .padding(start = 8.dp, end = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        tabs.forEach { (target, iconLabel) ->
-            val (icon, label) = iconLabel
-            val active = section == target
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(10.dp))
-                    .clickable { onSection(target) }
-                    .padding(vertical = 6.dp, horizontal = 2.dp)
-                    .semantics { contentDescription = label },
+        if (onBack != null) {
+            Box(
+                Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onBack),
+                contentAlignment = Alignment.Center,
             ) {
-                PhoebeIconView(icon, tint = if (active) PhoebeUi.accentLight else PhoebeUi.secondaryText, modifier = Modifier.size(19.dp))
-                Text(
-                    label.uppercase(),
-                    color = if (active) PhoebeUi.primaryText else PhoebeUi.mutedText,
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    letterSpacing = 0.06.em,
-                    maxLines = 1,
+                PhoebeIconView(
+                    PhoebeIcon.Back,
+                    tint = PhoebeUi.primaryText,
+                    modifier = Modifier.size(22.dp),
                 )
             }
+        } else {
+            Spacer(Modifier.size(44.dp))
+        }
+        Text(
+            title,
+            color = PhoebeUi.primaryText,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.weight(1f),
+        )
+        if (showMenu) {
+            Box(
+                Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .clickable { onMenuExpandedChange(true) },
+                contentAlignment = Alignment.Center,
+            ) {
+                PhoebeIconView(
+                    PhoebeIcon.More,
+                    tint = PhoebeUi.primaryText,
+                    modifier = Modifier.size(22.dp),
+                )
+                DropdownMenu(
+                    expanded = menuExpanded,
+                    onDismissRequest = { onMenuExpandedChange(false) },
+                ) {
+                    menuContent()
+                }
+            }
+        } else {
+            Spacer(Modifier.size(44.dp))
         }
     }
+}
+
+private fun mobileSectionTitle(section: DesktopSection): String = when (section) {
+    DesktopSection.Home -> "Home"
+    DesktopSection.Search -> "Search"
+    DesktopSection.Library -> "Library"
+    DesktopSection.Playlists -> "Playlists"
+    DesktopSection.Settings -> "Settings"
 }
 
 @Composable
@@ -4852,101 +4960,77 @@ private fun MobileBrowseShell(
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     val pickLocalFolder = rememberPickLocalFolder(onPicked = onAddLocalFolder)
-    Column(
+    val toolbarTitle = when {
+        section == DesktopSection.Settings -> "Settings"
+        selectedPlaylistId != null -> {
+            catalog.playlists.firstOrNull { it.id == selectedPlaylistId }?.title ?: "Playlist"
+        }
+        else -> mobileSectionTitle(section)
+    }
+    Box(
         Modifier
             .fillMaxSize()
-            .background(Brush.verticalGradient(listOf(PhoebeUi.shellTop, PhoebeUi.shellBottom)))
-            .statusBarsPadding(),
+            .background(PhoebeUi.shellTop),
     ) {
-        Row(
+        Column(
             Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
+                .fillMaxSize()
+                .statusBarsPadding(),
         ) {
-            if (section == DesktopSection.Settings && selectedPlaylistId == null) {
-                PhoebeIconView(
-                    PhoebeIcon.Back,
-                    tint = PhoebeUi.primaryText,
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(CircleShape)
-                        .clickable { onNavigate(DesktopSection.Home) }
-                        .padding(12.dp),
-                )
-                Spacer(Modifier.weight(1f))
-                Text("Settings", color = PhoebeUi.primaryText, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.weight(1f))
-                Spacer(Modifier.size(44.dp))
-            } else if (section == DesktopSection.Search && selectedPlaylistId == null) {
-                Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
-                    PhoebeIconView(PhoebeIcon.Bell, tint = PhoebeUi.secondaryText, modifier = Modifier.size(18.dp))
-                }
-                Spacer(Modifier.weight(1f))
-                Text("Search", color = PhoebeUi.primaryText, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.weight(1f))
+        MobileScreenToolbar(
+            title = toolbarTitle,
+            onBack = if (section == DesktopSection.Settings && selectedPlaylistId == null) {
+                { onNavigate(DesktopSection.Home) }
             } else {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    BrandMark(size = 26.dp)
-                    Text("Phoebe", color = PhoebeUi.primaryText, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                }
-                Spacer(Modifier.weight(1f))
-            }
-            Box {
-                Text(
-                    "···",
-                    color = PhoebeUi.primaryText,
-                    fontSize = 24.sp,
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(CircleShape)
-                        .clickable { menuExpanded = true },
-                    textAlign = TextAlign.Center,
+                null
+            },
+            menuExpanded = menuExpanded,
+            onMenuExpandedChange = { menuExpanded = it },
+            showMenu = !(section == DesktopSection.Settings && selectedPlaylistId == null),
+            menuContent = {
+            val userName = session?.userName
+            if (userName != null) {
+                DropdownMenuItem(
+                    text = { Text(userName, color = PhoebeUi.mutedText, fontSize = 13.sp) },
+                    onClick = {},
+                    enabled = false,
                 )
-                DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
-                    session?.userName?.let { name ->
-                        DropdownMenuItem(
-                            text = { Text(name, color = PhoebeUi.mutedText, fontSize = 13.sp) },
-                            onClick = {},
-                            enabled = false,
-                        )
-                    }
-                    DropdownMenuItem(
-                        text = {
-                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                                PhoebeIconView(PhoebeIcon.Settings, tint = PhoebeUi.secondaryText, modifier = Modifier.size(18.dp))
-                                Text("Settings")
-                            }
-                        },
-                        onClick = {
-                            onNavigate(DesktopSection.Settings)
-                            menuExpanded = false
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Refresh library") },
-                        onClick = {
-                            onRefreshLibrary()
-                            menuExpanded = false
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Add music folder") },
-                        onClick = {
-                            pickLocalFolder()
-                            menuExpanded = false
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Sign out") },
-                        onClick = {
-                            onSignOut()
-                            menuExpanded = false
-                        },
-                    )
-                }
             }
-        }
+            DropdownMenuItem(
+                text = {
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        PhoebeIconView(PhoebeIcon.Settings, tint = PhoebeUi.secondaryText, modifier = Modifier.size(18.dp))
+                        Text("Settings")
+                    }
+                },
+                onClick = {
+                    onNavigate(DesktopSection.Settings)
+                    menuExpanded = false
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("Refresh library") },
+                onClick = {
+                    onRefreshLibrary()
+                    menuExpanded = false
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("Add music folder") },
+                onClick = {
+                    pickLocalFolder()
+                    menuExpanded = false
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("Sign out") },
+                onClick = {
+                    onSignOut()
+                    menuExpanded = false
+                },
+            )
+            },
+        )
 
         Column(Modifier.weight(1f).fillMaxWidth()) {
             when {
@@ -4988,6 +5072,11 @@ private fun MobileBrowseShell(
                     onPlayTracks = onPlayTracks,
                     onAddToUpNext = onAddToUpNext,
                     onDownload = onDownload,
+                    modifier = Modifier.fillMaxSize(),
+                )
+                section == DesktopSection.Playlists && selectedPlaylistId == null -> PlaylistsMobileView(
+                    catalogRefreshing = catalogRefreshing,
+                    onPlaylist = onPlaylist,
                     modifier = Modifier.fillMaxSize(),
                 )
                 else -> DesktopContent(
@@ -5061,6 +5150,7 @@ private fun MobileBrowseShell(
         }
 
         MobileBottomNavigation(section = section, onSection = onNavigate)
+        }
     }
 }
 

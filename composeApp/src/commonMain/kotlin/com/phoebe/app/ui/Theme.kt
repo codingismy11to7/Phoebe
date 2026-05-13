@@ -40,6 +40,11 @@ fun PhoebeTheme(
 ) {
     val palette = if (useLightAppearance) PhoebePaletteLight else PhoebePaletteDark
     val colors: ColorScheme = if (useLightAppearance) LightColors else DarkColors
+    ApplySystemBarAppearance(
+        statusBarColor = palette.shellTop,
+        navigationBarColor = palette.navBar,
+        useLightIcons = useLightAppearance,
+    )
     CompositionLocalProvider(LocalPhoebePalette provides palette) {
         MaterialTheme(
             colorScheme = colors,
