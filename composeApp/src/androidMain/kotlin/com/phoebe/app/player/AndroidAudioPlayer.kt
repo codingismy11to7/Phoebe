@@ -11,7 +11,10 @@ import com.phoebe.app.AndroidContextHolder
 import com.phoebe.app.domain.Track
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
@@ -38,6 +41,7 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var controller: MediaController? = null
+    private var positionSyncJob: Job? = null
     private val pendingActions = mutableListOf<() -> Unit>()
 
     private val controllerListener = object : Player.Listener {
@@ -139,6 +143,32 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
             durationMs = player.duration.coerceAtLeast(0L),
             isPlaying = player.isPlaying,
         )
+        if (player.isPlaying) {
+            startPositionSyncLoop()
+        } else {
+            stopPositionSyncLoop()
+        }
+    }
+
+    private fun startPositionSyncLoop() {
+        if (positionSyncJob?.isActive == true) return
+        positionSyncJob = scope.launch {
+            while (isActive) {
+                delay(250)
+                val player = controller ?: break
+                if (!player.isPlaying) break
+                applyPlatformPlayback(
+                    positionMs = player.currentPosition.coerceAtLeast(0L),
+                    durationMs = player.duration.coerceAtLeast(0L),
+                    isPlaying = true,
+                )
+            }
+        }
+    }
+
+    private fun stopPositionSyncLoop() {
+        positionSyncJob?.cancel()
+        positionSyncJob = null
     }
 
     private suspend fun <T> com.google.common.util.concurrent.ListenableFuture<T>.await(): T =

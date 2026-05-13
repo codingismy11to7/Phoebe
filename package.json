@@ -1,0 +1,14 @@
+{
+  "name": "phoebe-visual-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "web:install-browsers": "playwright install --with-deps chromium",
+    "web:screenshots": "playwright test",
+    "web:screenshots:update": "playwright test --update-snapshots"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.60.0",
+    "typescript": "5.9.3"
+  }
+}

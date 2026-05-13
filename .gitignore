@@ -19,3 +19,6 @@ build/
 .externalNativeBuild
 .cxx
 .kotlin
+node_modules/
+playwright-report/
+test-results/

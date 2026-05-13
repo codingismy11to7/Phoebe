@@ -8,6 +8,11 @@ config.resolve.fallback = {
     path: false,
 };
 
+config.devServer = {
+    ...(config.devServer || {}),
+    port: Number(process.env.PHOEBE_WEB_PORT || config.devServer?.port || 8080),
+};
+
 config.plugins.push(
     new CopyWebpackPlugin({
         patterns: [

@@ -34,8 +34,13 @@ internal fun browseTrackItem(track: Track): MediaItem =
         .setMediaMetadata(
             MediaMetadata.Builder()
                 .setTitle(track.title)
+                .setDisplayTitle(track.title)
                 .setArtist(track.artist)
+                .setAlbumArtist(track.artist)
+                .setSubtitle(track.artist)
                 .setAlbumTitle(track.album)
+                .setDescription(track.descriptionForCarDisplay())
+                .setDurationMs(track.durationMs.takeIf { it > 0L })
                 .setIsBrowsable(false)
                 .setIsPlayable(true)
                 .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
@@ -66,3 +71,9 @@ internal fun Playlist.toBrowseItem(): MediaItem =
     )
 
 internal fun playbackMediaItem(track: Track): MediaItem = browseTrackItem(track)
+
+private fun Track.descriptionForCarDisplay(): String =
+    listOf(artist, album)
+        .filter { it.isNotBlank() }
+        .distinct()
+        .joinToString(" - ")

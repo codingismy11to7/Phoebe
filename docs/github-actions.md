@@ -6,8 +6,28 @@ Pull requests targeting `main` run:
 
 - `./gradlew :composeApp:desktopTest`
 - `./gradlew :composeApp:wasmJsTest`
+- `./gradlew :composeApp:verifyRoborazziDebug`
+- `npm run web:screenshots`
 - `./gradlew :composeApp:compileDebugAndroidTestKotlinAndroid`
 - `./gradlew :composeApp:connectedDebugAndroidTest` on a GitHub-hosted Android emulator
+
+Screenshot failures upload Roborazzi and Playwright reports as workflow artifacts so the expected, actual, and diff images can be reviewed from the failed check.
+
+Update screenshot baselines locally with:
+
+```sh
+./gradlew :composeApp:recordRoborazziDebug
+./gradlew :composeApp:recordRoborazziDesktop
+npm run web:screenshots:update
+```
+
+Verify screenshot baselines locally with:
+
+```sh
+./gradlew :composeApp:verifyRoborazziDebug
+./gradlew :composeApp:desktopTest
+npm run web:screenshots
+```
 
 ## Releases
 
