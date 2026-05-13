@@ -57,9 +57,22 @@ actual class PlatformStorage actual constructor() {
 }
 
 actual fun openExternalUrl(url: String) {
-    if (Desktop.isDesktopSupported()) {
-        Desktop.getDesktop().browse(URI(url))
+    val desktop = runCatching { if (Desktop.isDesktopSupported()) Desktop.getDesktop() else null }.getOrNull()
+    if (desktop != null && desktop.isSupported(Desktop.Action.BROWSE)) {
+        desktop.browse(URI(url))
+        return
     }
+    openExternalUrlWithSystemHandler(url)
+}
+
+private fun openExternalUrlWithSystemHandler(url: String) {
+    val os = System.getProperty("os.name").orEmpty().lowercase()
+    val command = when {
+        "mac" in os -> arrayOf("open", url)
+        "win" in os -> arrayOf("rundll32", "url.dll,FileProtocolHandler", url)
+        else -> arrayOf("xdg-open", url)
+    }
+    ProcessBuilder(*command).start()
 }
 
 actual fun currentTimeMs(): Long = System.currentTimeMillis()

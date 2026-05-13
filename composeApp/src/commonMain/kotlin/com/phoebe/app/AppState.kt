@@ -111,7 +111,8 @@ class AppState(
         val controller = dependencies.systemVolume
         controller.start(scope)
         if (controller.isSupported) {
-            dependencies.audioPlayer.setVolume(1.0f)
+            dependencies.audioPlayer.setUnityOutputVolume()
+            dependencies.audioPlayer.updateReportedVolume(controller.volume.value)
             scope.launch {
                 controller.volume.collect { v ->
                     dependencies.audioPlayer.updateReportedVolume(v)

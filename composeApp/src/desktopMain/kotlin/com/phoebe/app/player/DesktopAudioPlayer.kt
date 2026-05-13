@@ -133,13 +133,17 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
     }
 
     private fun applyVolumesFromState() {
-        val v = state.value.volume.coerceIn(0f, 1f)
+        val v = effectiveOutputVolume()
         JavaFxRuntime.runLater { player?.volume = v.toDouble() }
         applySampledVolume(v)
     }
 
     private fun applySampledVolume(volume: Float) {
         val clip = sampledClip ?: return
+        applyVolumeToClip(clip, volume)
+    }
+
+    private fun applyVolumeToClip(clip: Clip, volume: Float) {
         val v = volume.coerceIn(0f, 1f)
         runCatching {
             val control = clip.getControl(FloatControl.Type.MASTER_GAIN) as FloatControl
@@ -344,6 +348,7 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
                 runCatching { prepared.close() }
                 throw e
             }
+            applyVolumeToClip(clip, effectiveOutputVolume())
             clip.start()
             clip
         }.getOrElse { e ->
@@ -419,7 +424,7 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
             runCatching {
                 val media = Media(uri)
                 player = MediaPlayer(media).also { mediaPlayer ->
-                    mediaPlayer.volume = state.value.volume.toDouble().coerceIn(0.0, 1.0)
+                    mediaPlayer.volume = effectiveOutputVolume().toDouble().coerceIn(0.0, 1.0)
                     mediaPlayer.setOnError {
                         println("Phoebe desktop playback error: ${mediaPlayer.error?.message}")
                     }

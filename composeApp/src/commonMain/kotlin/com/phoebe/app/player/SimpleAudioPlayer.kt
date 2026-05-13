@@ -16,6 +16,7 @@ abstract class SimpleAudioPlayer : AudioPlayer {
     override val state: StateFlow<PlayerState> = mutableState
     private val scope = CoroutineScope(Dispatchers.Default)
     private var progressJob: Job? = null
+    private var preferUnityOutputVolume = false
 
     override fun play(queue: List<Track>, startIndex: Int) {
         val index = startIndex.coerceIn(queue.indices)
@@ -27,8 +28,8 @@ abstract class SimpleAudioPlayer : AudioPlayer {
             positionMs = 0L,
             durationMs = track?.durationMs ?: 0L,
         )
+        setOutputVolume(effectiveOutputVolume())
         track?.let { playTrack(it) }
-        setOutputVolume(mutableState.value.volume)
         if (track != null) startProgressTicker()
     }
 
@@ -137,7 +138,14 @@ abstract class SimpleAudioPlayer : AudioPlayer {
     override fun setVolume(volume: Float) {
         val coerced = volume.coerceIn(0f, 1f)
         mutableState.value = mutableState.value.copy(volume = coerced)
-        setOutputVolume(coerced)
+        if (!preferUnityOutputVolume) {
+            setOutputVolume(coerced)
+        }
+    }
+
+    override fun setUnityOutputVolume() {
+        preferUnityOutputVolume = true
+        setOutputVolume(1.0f)
     }
 
     override fun updateReportedVolume(volume: Float) {
@@ -190,6 +198,9 @@ abstract class SimpleAudioPlayer : AudioPlayer {
     protected open fun resume() = Unit
     protected open fun seek(positionMs: Long) = Unit
     protected open fun setOutputVolume(volume: Float) = Unit
+
+    protected fun effectiveOutputVolume(): Float =
+        if (preferUnityOutputVolume) 1f else mutableState.value.volume.coerceIn(0f, 1f)
 
     private fun startProgressTicker() {
         if (!useProgressTicker) return

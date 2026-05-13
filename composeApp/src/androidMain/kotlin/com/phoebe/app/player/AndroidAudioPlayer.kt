@@ -73,6 +73,7 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
 
     override fun playTrack(track: Track) {
         withController {
+            volume = effectiveOutputVolume()
             setMediaItem(playbackMediaItem(track))
             prepare()
             play()

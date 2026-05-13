@@ -21,6 +21,11 @@ interface AudioPlayer {
     fun setVolume(volume: Float)
 
     /**
+     * Keep per-app output at unity while [updateReportedVolume] mirrors the OS level on the slider.
+     */
+    fun setUnityOutputVolume()
+
+    /**
      * Update the volume value the UI reads from [state] without touching the underlying
      * platform output volume. Used when system volume drives the slider so we don't
      * double-attenuate.

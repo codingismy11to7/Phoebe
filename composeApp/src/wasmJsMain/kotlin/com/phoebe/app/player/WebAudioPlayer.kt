@@ -12,6 +12,7 @@ private class WebAudioPlayer : SimpleAudioPlayer() {
     }
 
     override fun playUri(uri: String) {
+        audio.volume = effectiveOutputVolume().toDouble().coerceIn(0.0, 1.0)
         audio.src = uri
         audio.play()
     }
