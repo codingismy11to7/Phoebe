@@ -10,6 +10,12 @@
     *;
 }
 
+# jnativehook loads GlobalScreen$NativeHookThread.dispatchEvent via JNI; shrinking breaks release builds.
+-keep class com.github.kwhat.jnativehook.** { *; }
+-keepnames class com.github.kwhat.jnativehook.GlobalScreen$NativeHookThread {
+    protected static void dispatchEvent(com.github.kwhat.jnativehook.NativeInputEvent);
+}
+
 -keep class com.sun.glass.** {
     *;
 }
