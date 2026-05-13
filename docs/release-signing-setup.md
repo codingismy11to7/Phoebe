@@ -245,6 +245,13 @@ Assign the app registration this role scoped to the certificate profile:
 Artifact Signing Certificate Profile Signer
 ```
 
+If `azure/login` reports `No subscriptions found`, either:
+
+- keep `allow-no-subscriptions: true` in the workflow, which this repository does, or
+- also assign the app registration a basic role such as `Reader` on the subscription or resource group that contains the signing account.
+
+The signing action still requires the certificate-profile signer role above.
+
 Microsoft docs:
 
 https://learn.microsoft.com/en-us/azure/trusted-signing/tutorial-assign-roles
