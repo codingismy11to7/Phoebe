@@ -75,6 +75,7 @@ class AppState(
         }
         bindSystemVolume()
         recordPlaybackHistory()
+        dependencies.plexPlaybackReporter.start(scope)
     }
 
     /**
@@ -174,8 +175,8 @@ class AppState(
     }
 
     fun selectServer(server: PlexServer) = scope.launchBusy {
-        dependencies.sessionRepository.selectServer(server)
-        mutableLibraries.value = dependencies.sessionRepository.libraries(server)
+        val resolved = dependencies.sessionRepository.selectServer(server)
+        mutableLibraries.value = dependencies.sessionRepository.libraries(resolved)
         detailStack.clear()
         mutableScreen.value = AppScreen.LibraryPicker
     }

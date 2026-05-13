@@ -17,6 +17,7 @@ concurrency:
 
 permissions:
   contents: write
+  id-token: write
 
 env:
   JAVA_VERSION: 17
@@ -145,20 +146,33 @@ jobs:
           -Pphoebe.versionName=${{ needs.version.outputs.version }}
           -Pphoebe.versionCode=${{ needs.version.outputs.version_code }}
 
+      - name: Collect Android release artifacts
+        shell: bash
+        run: |
+          mkdir -p release-artifacts
+          apk="$(find composeApp/build/outputs/apk/release -name '*.apk' -print -quit)"
+          aab="$(find composeApp/build/outputs/bundle/release -name '*.aab' -print -quit)"
+          if [[ -z "${apk}" || -z "${aab}" ]]; then
+            echo "::error::Could not find Android APK and AAB release artifacts"
+            exit 1
+          fi
+          cp "${apk}" "release-artifacts/Phoebe-${VERSION}.apk"
+          cp "${aab}" "release-artifacts/Phoebe-${VERSION}.aab"
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+
       - name: Upload Android artifacts
         uses: actions/upload-artifact@v4
         with:
           name: android-release
           if-no-files-found: error
-          path: |
-            composeApp/build/outputs/apk/release/*.apk
-            composeApp/build/outputs/bundle/release/*.aab
+          path: release-artifacts/*
 
   linux:
     name: Linux release
     needs: version
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
@@ -167,7 +181,9 @@ jobs:
       - name: Install packaging tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y fakeroot
+          sudo apt-get install -y fakeroot flatpak flatpak-builder
+          sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          sudo flatpak install --noninteractive flathub org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08
 
       - name: Set up JDK
         uses: actions/setup-java@v4
@@ -182,22 +198,66 @@ jobs:
         run: >
           ./gradlew
           :composeApp:packageReleaseDeb
+          :composeApp:createReleaseDistributable
           -Pphoebe.versionName=${{ needs.version.outputs.version }}
+
+      - name: Build Linux Flatpak bundle
+        shell: bash
+        run: |
+          mkdir -p release-artifacts
+          (
+            cd composeApp/flatpak
+            flatpak-builder \
+              --force-clean \
+              --repo="${GITHUB_WORKSPACE}/flatpak-repo" \
+              "${GITHUB_WORKSPACE}/flatpak-build" \
+              com.phoebe.app.yml
+          )
+          flatpak build-bundle \
+            flatpak-repo \
+            "release-artifacts/Phoebe-${VERSION}.flatpak" \
+            com.phoebe.app \
+            --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+
+      - name: Collect Linux release artifacts
+        shell: bash
+        run: |
+          mkdir -p release-artifacts
+          deb="$(find composeApp/build -name '*.deb' -print -quit)"
+          if [[ -z "${deb}" ]]; then
+            echo "::error::Could not find Linux DEB release artifact"
+            exit 1
+          fi
+          flatpak_bundle="release-artifacts/Phoebe-${VERSION}.flatpak"
+          if [[ ! -f "${flatpak_bundle}" ]]; then
+            echo "::error::Could not find Linux Flatpak release artifact"
+            exit 1
+          fi
+          cp "${deb}" "release-artifacts/Phoebe-${VERSION}.deb"
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
         with:
           name: linux-release
           if-no-files-found: error
-          path: |
-            composeApp/build/compose/binaries/main-release/deb/*.deb
-            composeApp/build/release/main-release/deb/*.deb
+          path: release-artifacts/*
 
   windows:
     name: Windows release
     needs: version
     runs-on: windows-latest
     timeout-minutes: 45
+    env:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      AZURE_SIGNING_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+      AZURE_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_SIGNING_ACCOUNT_NAME }}
+      AZURE_SIGNING_CERTIFICATE_PROFILE_NAME: ${{ secrets.AZURE_SIGNING_CERTIFICATE_PROFILE_NAME }}
 
     steps:
       - name: Checkout
@@ -212,6 +272,21 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Validate Azure Artifact Signing settings
+        shell: pwsh
+        run: |
+          $missing = @()
+          if (-not $env:AZURE_CLIENT_ID) { $missing += "AZURE_CLIENT_ID" }
+          if (-not $env:AZURE_TENANT_ID) { $missing += "AZURE_TENANT_ID" }
+          if (-not $env:AZURE_SUBSCRIPTION_ID) { $missing += "AZURE_SUBSCRIPTION_ID" }
+          if (-not $env:AZURE_SIGNING_ENDPOINT) { $missing += "AZURE_SIGNING_ENDPOINT" }
+          if (-not $env:AZURE_SIGNING_ACCOUNT_NAME) { $missing += "AZURE_SIGNING_ACCOUNT_NAME" }
+          if (-not $env:AZURE_SIGNING_CERTIFICATE_PROFILE_NAME) { $missing += "AZURE_SIGNING_CERTIFICATE_PROFILE_NAME" }
+          if ($missing.Count -gt 0) {
+            Write-Error "Missing required Azure Artifact Signing settings: $($missing -join ', ')"
+            exit 1
+          }
+
       - name: Build Windows package
         shell: pwsh
         run: >
@@ -219,14 +294,44 @@ jobs:
           :composeApp:packageReleaseMsi
           "-Pphoebe.versionName=${{ needs.version.outputs.version }}"
 
+      - name: Collect Windows release artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "release-artifacts" | Out-Null
+          $msi = Get-ChildItem -Path "composeApp/build" -Recurse -Filter "*.msi" | Select-Object -First 1
+          if (-not $msi) {
+            throw "Could not find Windows MSI release artifact"
+          }
+          Copy-Item $msi.FullName "release-artifacts/Phoebe-${env:VERSION}.msi"
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+
+      - name: Azure login
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sign Windows installer
+        uses: azure/artifact-signing-action@v1
+        with:
+          endpoint: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT_NAME }}
+          certificate-profile-name: ${{ secrets.AZURE_SIGNING_CERTIFICATE_PROFILE_NAME }}
+          files-folder: ${{ github.workspace }}\release-artifacts
+          files-folder-filter: msi
+          files-folder-recurse: false
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
           name: windows-release
           if-no-files-found: error
-          path: |
-            composeApp/build/compose/binaries/main-release/msi/*.msi
-            composeApp/build/release/main-release/msi/*.msi
+          path: release-artifacts/*
 
   macos:
     name: macOS release
@@ -313,14 +418,25 @@ jobs:
             --wait
           xcrun stapler staple "${dmg}"
 
+      - name: Collect macOS release artifacts
+        shell: bash
+        run: |
+          mkdir -p release-artifacts
+          dmg="$(find composeApp/build -name '*.dmg' -print -quit)"
+          if [[ -z "${dmg}" ]]; then
+            echo "::error::Could not find macOS DMG release artifact"
+            exit 1
+          fi
+          cp "${dmg}" "release-artifacts/Phoebe-${VERSION}.dmg"
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:
           name: macos-release
           if-no-files-found: error
-          path: |
-            composeApp/build/compose/binaries/main-release/dmg/*.dmg
-            composeApp/build/release/main-release/dmg/*.dmg
+          path: release-artifacts/*
 
   github-release:
     name: Create GitHub release
@@ -352,5 +468,6 @@ jobs:
             release-artifacts/**/*.apk
             release-artifacts/**/*.aab
             release-artifacts/**/*.deb
+            release-artifacts/**/*.flatpak
             release-artifacts/**/*.msi
             release-artifacts/**/*.dmg

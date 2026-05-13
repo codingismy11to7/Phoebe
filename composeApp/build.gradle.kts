@@ -218,8 +218,12 @@ compose.desktop {
         val mediaKeysDylibPath =
             layout.buildDirectory.get().asFile.resolve("native/macos/libPhoebeMediaKeys.dylib").absolutePath
         jvmArgs += listOf("-Dphoebe.mediakeys.lib=$mediaKeysDylibPath")
+        buildTypes.release.proguard {
+            configurationFiles.from(project.file("desktop-release.pro"))
+        }
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
+            modules("java.instrument", "java.management", "java.net.http", "java.sql", "jdk.jfr", "jdk.unsupported")
             packageName = "Phoebe"
             packageVersion = phoebeDesktopPackageVersion.get()
             val iconsDir = project.layout.projectDirectory.dir("src/desktopMain/resources/icons")

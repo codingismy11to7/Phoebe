@@ -15,6 +15,7 @@ import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.TrackMetadataUpdate
 import com.phoebe.app.domain.isLocalMediaPlayback
 import com.phoebe.app.domain.isPlexLibraryTrack
+import com.phoebe.app.domain.serverAuthToken
 import com.phoebe.app.domain.supportsPlexPlaylists
 import com.phoebe.app.platform.PlatformStorage
 import com.phoebe.app.sources.CatalogMerge
@@ -170,7 +171,7 @@ class CatalogRepository(
     private suspend fun refetchPlaylistTracksFromPlex(session: PlexSession?, playlist: Playlist) {
         val rating = plexRatingKey(playlist.id) ?: return
         val server = session?.selectedServer ?: return
-        val token = session.token.takeIf { it.isNotBlank() } ?: return
+        val token = session.serverAuthToken() ?: return
         val tracks = plexClient.playlistTracks(server, playlist.copy(id = rating), token)
             .map { it.withPlexPrefix() }
         publish(
@@ -195,7 +196,7 @@ class CatalogRepository(
         val rating = plexRatingKey(album.id) ?: return mutableCatalog.value.tracksByParent[album.id].orEmpty()
         val server = session?.selectedServer ?: return emptyList()
         session.selectedLibrary ?: return emptyList()
-        val tracks = plexClient.children(server, rating, session.token).map { it.withPlexPrefix() }
+        val tracks = plexClient.children(server, rating, session.serverAuthToken()!!).map { it.withPlexPrefix() }
         publish(
             mutableCatalog.value.copy(
                 tracksByParent = mutableCatalog.value.tracksByParent + (album.id to tracks),
@@ -211,7 +212,7 @@ class CatalogRepository(
      */
     suspend fun ensureTracksForArtistAlbums(session: PlexSession?, artistTitle: String) {
         val server = session?.selectedServer ?: return
-        val token = session.token
+        val token = session.serverAuthToken() ?: return
         val albums = catalogAlbumsForArtist(mutableCatalog.value, artistTitle)
             .filter { plexRatingKey(it.id) != null }
         if (albums.isEmpty()) return
@@ -219,17 +220,21 @@ class CatalogRepository(
         coroutineScope {
             albums.map { album ->
                 async {
-                    val rating = plexRatingKey(album.id) ?: return@async
-                    val snap = mutableCatalog.value
-                    val existing = snap.tracksByParent[album.id]
-                    if (!existing.isNullOrEmpty()) return@async
-                    val tracks = plexClient.children(server, rating, token).map { it.withPlexPrefix() }
-                    catalogMergeMutex.withLock {
-                        val cur = mutableCatalog.value
-                        publish(
-                            cur.copy(tracksByParent = cur.tracksByParent + (album.id to tracks)),
-                            persist = false,
-                        )
+                    runCatching {
+                        val rating = plexRatingKey(album.id) ?: return@runCatching
+                        val snap = mutableCatalog.value
+                        val existing = snap.tracksByParent[album.id]
+                        if (!existing.isNullOrEmpty()) return@runCatching
+                        val tracks = plexClient.children(server, rating, token).map { it.withPlexPrefix() }
+                        catalogMergeMutex.withLock {
+                            val cur = mutableCatalog.value
+                            publish(
+                                cur.copy(tracksByParent = cur.tracksByParent + (album.id to tracks)),
+                                persist = false,
+                            )
+                        }
+                    }.onFailure { e ->
+                        println("[CatalogRepository] album track fetch failed for '${album.title}': ${e.message}")
                     }
                 }
             }.awaitAll()
@@ -263,7 +268,7 @@ class CatalogRepository(
         if (initialTracks.any { it.isLocalMediaPlayback() || !it.isPlexLibraryTrack() }) return null
         val server = s.selectedServer ?: return null
         val library = s.selectedLibrary ?: return null
-        val token = s.token.takeIf { it.isNotBlank() } ?: return null
+        val token = s.serverAuthToken() ?: return null
         return createPlexPlaylist(server, library, token, cleanTitle, initialTracks)
     }
 
@@ -333,7 +338,7 @@ class CatalogRepository(
         }
 
         val server = s.selectedServer
-        val token = s.token.takeIf { it.isNotBlank() }
+        val token = s.serverAuthToken()
         val playlistRating = plexRatingKey(playlist.id)
         val ratingKeys = toAdd.mapNotNull { plexRatingKey(it.id) }
         println("[CatalogRepository] plex branch: hasServer=${server != null}, hasToken=${token != null}, playlistRating=$playlistRating, ratingKeys=$ratingKeys")

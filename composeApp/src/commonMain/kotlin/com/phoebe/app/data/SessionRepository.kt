@@ -27,15 +27,29 @@ class SessionRepository(
         }
         if (row != null) {
             mutableSession.value = row.toSession()
-            return
+        } else {
+            val legacy = storage.readText(LegacySessionFile) ?: return
+            val parsed = runCatching {
+                json.decodeFromString<PlexSession>(legacy)
+            }.getOrNull() ?: return
+            withContext(Dispatchers.Default) { persist(parsed) }
+            mutableSession.value = parsed
+            storage.delete(LegacySessionFile)
         }
-        val legacy = storage.readText(LegacySessionFile) ?: return
-        val parsed = runCatching {
-            json.decodeFromString<PlexSession>(legacy)
-        }.getOrNull() ?: return
-        withContext(Dispatchers.Default) { persist(parsed) }
-        mutableSession.value = parsed
-        storage.delete(LegacySessionFile)
+        refreshSelectedServerConnections()
+    }
+
+    /** Refresh server URLs from plex.tv so we pick up LAN addresses for timeline API calls. */
+    suspend fun refreshSelectedServerConnections() {
+        val current = mutableSession.value ?: return
+        val selected = current.selectedServer ?: return
+        if (current.token.isBlank()) return
+        val fresh = runCatching { plexClient.servers(current.token) }.getOrNull()
+            ?.find { it.id == selected.id }
+            ?: return
+        if (fresh != selected) {
+            save(current.copy(selectedServer = fresh))
+        }
     }
 
     suspend fun createPin(): PlexPin = plexClient.createPin()
@@ -54,11 +68,14 @@ class SessionRepository(
 
     suspend fun libraries(server: PlexServer): List<MusicLibrary> {
         val token = mutableSession.value?.token ?: return emptyList()
-        return plexClient.musicLibraries(server, token)
+        val resolved = mutableSession.value?.selectedServer?.takeIf { it.id == server.id } ?: server
+        return plexClient.musicLibraries(resolved, resolved.authToken(token))
     }
 
-    suspend fun selectServer(server: PlexServer) {
+    suspend fun selectServer(server: PlexServer): PlexServer {
         mutableSession.value?.let { save(it.copy(selectedServer = server, selectedLibrary = null)) }
+        refreshSelectedServerConnections()
+        return mutableSession.value?.selectedServer ?: server
     }
 
     suspend fun selectLibrary(library: MusicLibrary) {

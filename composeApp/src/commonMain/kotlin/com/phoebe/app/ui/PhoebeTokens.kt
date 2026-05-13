@@ -11,6 +11,8 @@ data class PhoebeVisualPalette(
     val shellRadialTint: Color,
     val shellTop: Color,
     val shellBottom: Color,
+    /** Opaque bottom chrome (tab bar + system navigation inset). */
+    val navBar: Color,
     val sidebar: Color,
     val panel: Color,
     val glass: Color,
@@ -46,6 +48,7 @@ val PhoebePaletteDark = PhoebeVisualPalette(
     shellRadialTint = Color(0x332B174E),
     shellTop = Color(0xFF151A27),
     shellBottom = Color(0xFF0B0F17),
+    navBar = Color(0xFF0B0F17),
     sidebar = Color(0xFF0A0D14),
     panel = Color(0xCC121722),
     glass = Color(0xB8121722),
@@ -74,6 +77,7 @@ val PhoebePaletteLight = PhoebeVisualPalette(
     shellRadialTint = Color(0x0F8B3DFF),
     shellTop = Color(0xFFFFFFFF),
     shellBottom = Color(0xFFFAFAFC),
+    navBar = Color(0xFFFFFFFF),
     sidebar = Color(0xFFF7F8FA),
     panel = Color(0xFFFFFFFF),
     glass = Color(0xEBFFFFFF),
@@ -104,6 +108,7 @@ internal object PhoebeUi {
     val shellRadialTint: Color @Composable get() = LocalPhoebePalette.current.shellRadialTint
     val shellTop: Color @Composable get() = LocalPhoebePalette.current.shellTop
     val shellBottom: Color @Composable get() = LocalPhoebePalette.current.shellBottom
+    val navBar: Color @Composable get() = LocalPhoebePalette.current.navBar
     val sidebar: Color @Composable get() = LocalPhoebePalette.current.sidebar
     val panel: Color @Composable get() = LocalPhoebePalette.current.panel
     val glass: Color @Composable get() = LocalPhoebePalette.current.glass

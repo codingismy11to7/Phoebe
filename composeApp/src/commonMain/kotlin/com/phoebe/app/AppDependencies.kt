@@ -5,6 +5,7 @@ import com.phoebe.app.data.LibraryUiRepository
 import com.phoebe.app.data.MediaSourcesRepository
 import com.phoebe.app.data.PlayHistoryRepository
 import com.phoebe.app.data.PlexClient
+import com.phoebe.app.data.PlexPlaybackReporter
 import com.phoebe.app.data.SessionRepository
 import com.phoebe.app.data.db.createPhoebeDatabase
 import com.phoebe.app.db.PhoebeDatabase
@@ -22,6 +23,7 @@ class AppDependencies(
     val catalogRepository: CatalogRepository,
     val libraryUiRepository: LibraryUiRepository,
     val playHistoryRepository: PlayHistoryRepository,
+    val plexPlaybackReporter: PlexPlaybackReporter,
     val audioPlayer: AudioPlayer,
     val systemVolume: SystemVolumeController,
     /** File-backed on desktop; NSUserDefaults keys on iOS; etc. Used for lightweight UI prefs. */
@@ -35,9 +37,11 @@ class AppDependencies(
             val database = createPhoebeDatabase()
             val mediaSourcesRepository = MediaSourcesRepository(database, storage)
             val libraryUiRepository = LibraryUiRepository(database, storage)
+            val audioPlayer = createAudioPlayer()
+            val sessionRepository = SessionRepository(plexClient, database, storage)
             return AppDependencies(
                 database = database,
-                sessionRepository = SessionRepository(plexClient, database, storage),
+                sessionRepository = sessionRepository,
                 mediaSourcesRepository = mediaSourcesRepository,
                 catalogRepository = CatalogRepository(
                     plexClient = plexClient,
@@ -48,7 +52,12 @@ class AppDependencies(
                 ),
                 libraryUiRepository = libraryUiRepository,
                 playHistoryRepository = PlayHistoryRepository(database),
-                audioPlayer = createAudioPlayer(),
+                plexPlaybackReporter = PlexPlaybackReporter(
+                    plexClient = plexClient,
+                    audioPlayer = audioPlayer,
+                    session = sessionRepository.session,
+                ),
+                audioPlayer = audioPlayer,
                 systemVolume = createSystemVolumeController(),
                 platformStorage = storage,
             )

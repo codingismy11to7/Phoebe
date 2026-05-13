@@ -1,8 +1,12 @@
 flush out settings page
 
 android 
+-playlists
 -animations when expanding
 -better back button
+- better background / system service handling
+
+cast support
 
 sync takes awhile
 

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Phoebe
+Comment=Music player and library manager
+Exec=Phoebe
+Icon=com.phoebe.app
+Terminal=false
+Categories=Audio;AudioVideo;Music;Player;
+StartupWMClass=Phoebe
