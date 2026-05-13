@@ -6,12 +6,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import com.github.kwhat.jnativehook.GlobalScreen
+import com.github.kwhat.jnativehook.dispatcher.SwingDispatchService
 import com.github.kwhat.jnativehook.keyboard.NativeKeyEvent
 import com.github.kwhat.jnativehook.keyboard.NativeKeyListener
 import com.phoebe.app.domain.PlayerState
 import com.phoebe.app.media.MacMediaSession
 import com.phoebe.app.media.loadMacMediaDylib
-import java.awt.EventQueue
 import java.util.logging.Level
 import java.util.logging.LogManager
 import kotlinx.coroutines.flow.collectLatest
@@ -82,6 +82,8 @@ actual fun GlobalMediaKeysEffect(
                     LogManager.getLogManager()?.getLogger("com.github.kwhat.jnativehook")?.level = Level.WARNING
                 }
 
+                GlobalScreen.setEventDispatcher(SwingDispatchService())
+
                 val registeredHookHere = if (!GlobalScreen.isNativeHookRegistered()) {
                     GlobalScreen.registerNativeHook()
                     true
@@ -91,15 +93,13 @@ actual fun GlobalMediaKeysEffect(
 
                 val listener = object : NativeKeyListener {
                     override fun nativeKeyPressed(nativeKeyEvent: NativeKeyEvent) {
-                        EventQueue.invokeLater {
-                            runCatching {
-                                when (nativeKeyEvent.keyCode) {
-                                    NativeKeyEvent.VC_MEDIA_PLAY -> toggle.value.invoke()
-                                    NativeKeyEvent.VC_MEDIA_NEXT -> next.value.invoke()
-                                    NativeKeyEvent.VC_MEDIA_PREVIOUS -> previous.value.invoke()
-                                    NativeKeyEvent.VC_MEDIA_STOP -> pause.value.invoke()
-                                    else -> Unit
-                                }
+                        runCatching {
+                            when (nativeKeyEvent.keyCode) {
+                                NativeKeyEvent.VC_MEDIA_PLAY -> toggle.value.invoke()
+                                NativeKeyEvent.VC_MEDIA_NEXT -> next.value.invoke()
+                                NativeKeyEvent.VC_MEDIA_PREVIOUS -> previous.value.invoke()
+                                NativeKeyEvent.VC_MEDIA_STOP -> pause.value.invoke()
+                                else -> Unit
                             }
                         }
                     }
@@ -110,8 +110,10 @@ actual fun GlobalMediaKeysEffect(
                 }
 
                 GlobalScreen.addNativeKeyListener(listener)
+                DesktopGlobalMediaKeyHook.isActive = true
 
                 onDispose {
+                    DesktopGlobalMediaKeyHook.isActive = false
                     GlobalScreen.removeNativeKeyListener(listener)
                     if (registeredHookHere && GlobalScreen.isNativeHookRegistered()) {
                         runCatching {
@@ -122,7 +124,9 @@ actual fun GlobalMediaKeysEffect(
                     }
                 }
             } catch (t: Throwable) {
+                DesktopGlobalMediaKeyHook.isActive = false
                 println("[Phoebe] Global media keys unavailable: ${t.message}")
+                t.printStackTrace()
                 onDispose { }
             }
         }

@@ -215,9 +215,11 @@ android {
 compose.desktop {
     application {
         mainClass = "com.phoebe.app.MainKt"
-        val mediaKeysDylibPath =
-            layout.buildDirectory.get().asFile.resolve("native/macos/libPhoebeMediaKeys.dylib").absolutePath
-        jvmArgs += listOf("-Dphoebe.mediakeys.lib=$mediaKeysDylibPath")
+        if (System.getProperty("os.name").lowercase().contains("mac")) {
+            val mediaKeysDylibPath =
+                layout.buildDirectory.get().asFile.resolve("native/macos/libPhoebeMediaKeys.dylib").absolutePath
+            jvmArgs += listOf("-Dphoebe.mediakeys.lib=$mediaKeysDylibPath")
+        }
         buildTypes.release.proguard {
             configurationFiles.from(project.file("desktop-release.pro"))
         }
