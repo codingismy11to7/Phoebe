@@ -245,10 +245,12 @@ class AppState(
                             dependencies.catalogRepository.ensureTracksForArtistAlbums(session.value, screen.artist.title)
                         }
                     }
-                    is AppScreen.AlbumDetail -> scope.launchBusy {
+                    is AppScreen.AlbumDetail -> scope.launchBusy(loadingMessage = "Fetching data…") {
                         dependencies.catalogRepository.tracksForAlbum(session.value, screen.album)
                     }
-                    is AppScreen.PlaylistDetail -> scope.launchBusy {
+                    is AppScreen.PlaylistDetail -> scope.launchBusy(
+                        loadingMessage = "Fetching playlist data… This only happens the first time you open each playlist.",
+                    ) {
                         dependencies.catalogRepository.tracksForPlaylist(session.value, screen.playlist)
                     }
                     else -> Unit
@@ -482,8 +484,14 @@ class AppState(
         }
     }
 
-    private fun CoroutineScope.launchBusy(block: suspend () -> Unit) = launch {
+    private fun CoroutineScope.launchBusy(
+        loadingMessage: String? = null,
+        block: suspend () -> Unit,
+    ) = launch {
         mutableBusy.value = true
+        if (loadingMessage != null) {
+            mutableMessage.value = loadingMessage
+        }
         runCatching { block() }
             .onFailure { mutableMessage.value = it.message ?: "Something went sideways." }
         mutableBusy.value = false

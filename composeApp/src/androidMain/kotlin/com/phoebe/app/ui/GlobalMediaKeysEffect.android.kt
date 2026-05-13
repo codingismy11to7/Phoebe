@@ -1,7 +1,9 @@
 package com.phoebe.app.ui
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import com.phoebe.app.domain.PlayerState
+import com.phoebe.app.player.AndroidAudioPlayerHolder
 
 @Composable
 actual fun GlobalMediaKeysEffect(
@@ -12,4 +14,7 @@ actual fun GlobalMediaKeysEffect(
     onNext: () -> Unit,
     onPrevious: () -> Unit,
 ) {
+    LaunchedEffect(Unit) {
+        AndroidAudioPlayerHolder.ensureConnected()
+    }
 }

@@ -147,6 +147,41 @@ abstract class SimpleAudioPlayer : AudioPlayer {
         }
     }
 
+    /** Adopt queue state without touching platform output (Android Auto / MediaSession playlist). */
+    protected fun adoptQueueState(queue: List<Track>, startIndex: Int, isPlaying: Boolean) {
+        val index = startIndex.coerceIn(queue.indices)
+        val track = queue.getOrNull(index)
+        mutableState.value = mutableState.value.copy(
+            queue = queue,
+            currentIndex = if (track == null) -1 else index,
+            isPlaying = isPlaying && track != null,
+            positionMs = 0L,
+            durationMs = track?.durationMs ?: 0L,
+        )
+        if (isPlaying && track != null && useProgressTicker) {
+            startProgressTicker()
+        } else {
+            stopProgressTicker()
+        }
+    }
+
+    /** When false, [applyPlatformPlayback] drives position instead of the 1s ticker (Android). */
+    protected open val useProgressTicker: Boolean get() = true
+
+    protected fun applyPlatformPlayback(positionMs: Long, durationMs: Long, isPlaying: Boolean) {
+        val current = mutableState.value
+        mutableState.value = current.copy(
+            positionMs = positionMs,
+            durationMs = if (durationMs > 0L) durationMs else current.durationMs,
+            isPlaying = isPlaying,
+        )
+        if (isPlaying && useProgressTicker) {
+            startProgressTicker()
+        } else {
+            stopProgressTicker()
+        }
+    }
+
     protected abstract fun playUri(uri: String)
     protected open fun playTrack(track: Track) {
         playUri(track.localUri ?: track.streamUrl)
@@ -157,6 +192,7 @@ abstract class SimpleAudioPlayer : AudioPlayer {
     protected open fun setOutputVolume(volume: Float) = Unit
 
     private fun startProgressTicker() {
+        if (!useProgressTicker) return
         progressJob?.cancel()
         progressJob = scope.launch {
             while (true) {

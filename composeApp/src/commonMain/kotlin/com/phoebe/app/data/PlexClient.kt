@@ -293,19 +293,12 @@ class PlexClient(
             }
             if (response.status.isSuccess()) {
                 apiBaseCache[server.id] = base
-                if (base != server.uri) {
-                    println("[PlexClient] reportTimeline ok via $base (primary is ${server.uri})")
-                }
                 return
             }
             lastStatus = response.status.value
             lastBody = response.bodyAsText()
             if (response.status.value != 401) break
         }
-        println(
-            "[PlexClient] reportTimeline failed ratingKey=$ratingKey state=${state.wireValue} " +
-                "url=$lastBase tried=${bases.size} → HTTP $lastStatus: ${lastBody.take(300)}",
-        )
     }
 
     /**

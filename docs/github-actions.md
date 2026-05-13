@@ -40,7 +40,6 @@ Windows MSI signing uses Azure Artifact Signing with GitHub OIDC:
 
 - `AZURE_CLIENT_ID`
 - `AZURE_TENANT_ID`
-- `AZURE_SUBSCRIPTION_ID`
 - `AZURE_SIGNING_ENDPOINT`, for example `https://eus.codesigning.azure.net/`
 - `AZURE_SIGNING_ACCOUNT_NAME`
 - `AZURE_SIGNING_CERTIFICATE_PROFILE_NAME`

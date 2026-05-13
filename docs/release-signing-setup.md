@@ -148,7 +148,6 @@ Required GitHub secrets:
 
 - `AZURE_CLIENT_ID`
 - `AZURE_TENANT_ID`
-- `AZURE_SUBSCRIPTION_ID`
 - `AZURE_SIGNING_ENDPOINT`
 - `AZURE_SIGNING_ACCOUNT_NAME`
 - `AZURE_SIGNING_CERTIFICATE_PROFILE_NAME`
@@ -202,11 +201,7 @@ AZURE_CLIENT_ID
 AZURE_TENANT_ID
 ```
 
-Get your Azure subscription ID from the Subscriptions page and add it as:
-
-```text
-AZURE_SUBSCRIPTION_ID
-```
+The workflow does not require `AZURE_SUBSCRIPTION_ID`; Azure login is configured with `allow-no-subscriptions: true` because signing only needs the OIDC identity and certificate-profile signer role.
 
 ### 5. Add A GitHub Federated Credential
 
@@ -245,10 +240,9 @@ Assign the app registration this role scoped to the certificate profile:
 Artifact Signing Certificate Profile Signer
 ```
 
-If `azure/login` reports `No subscriptions found`, either:
+If `azure/login` reports `No subscriptions found`, keep `allow-no-subscriptions: true` in the workflow, which this repository does.
 
-- keep `allow-no-subscriptions: true` in the workflow, which this repository does, or
-- also assign the app registration a basic role such as `Reader` on the subscription or resource group that contains the signing account.
+If it reports that a subscription does not exist, remove any `AZURE_SUBSCRIPTION_ID` secret or make sure the workflow is not passing `subscription-id`. This repository does not pass it.
 
 The signing action still requires the certificate-profile signer role above.
 

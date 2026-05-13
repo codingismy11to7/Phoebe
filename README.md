@@ -6,6 +6,28 @@
 
 Phoebe is a Compose Multiplatform Plex-first music player for Android, iOS, desktop (JVM), and the browser (Kotlin/Wasm).
 
+## Features
+
+- **Plex streaming** — PIN sign-in, server and music-library selection, and browsing of artists, albums, playlists, and tracks from your Plex library.
+- **Lazy library loading** — Track lists load on demand for albums, artists, and playlists; opened detail views are preserved across catalog refreshes.
+- **Plex playlists** — Create playlists, add tracks from the library, and drag a song onto a sidebar playlist row to append it.
+- **Plex playback sync** — Reports playback to Plex’s timeline API so plays show up on the server and other Plex clients.
+- **Metadata editing** — Edit title, artist, album, year, and genre from the library or track surfaces; changes persist locally and sync to Plex when supported.
+- **Downloads** — Download Plex tracks as original files and browse them in a dedicated downloads area.
+- **Local music folders** — Add one or more local folder roots (desktop, Android, and iOS), enable or disable them individually, and merge them with your Plex catalog in one library.
+- **Unified catalog** — Plex (`plex:`-prefixed ids) and local tracks appear together in search, library views, and playback.
+- **Playback** — Play, pause, seek, next/previous, shuffle, repeat, and an Up Next queue you can add to, reorder, and play from.
+- **Now playing** — Full-screen player with artwork, progress, transport controls, queue, and a now-playing badge on the active track row.
+- **Search** — Search songs, artists, and albums across the merged catalog, with recent search history.
+- **Rich library table** — Configurable columns (title, artist, album, year, genre, path, codec, bitrate, duration, and related fields where available).
+- **Sorting and layout prefs** — Sort library and detail views; column visibility and sort preferences persist per platform.
+- **Play history** — Last-played timestamps for artists, albums, and tracks surfaced in the library UI.
+- **Appearance** — Album-art-inspired Material 3 UI with light and dark modes.
+- **Settings** — Manage Plex sign-in, local folders, library options, downloads, and appearance.
+- **System integration** — Volume control with OS system volume where supported; global media-key shortcuts on desktop (including a macOS native bridge).
+- **Multiplatform** — Android, iOS, desktop (JVM), and browser (Kotlin/Wasm) targets from a shared Compose UI and data layer.
+- **Offline-friendly persistence** — SQLDelight-backed catalog, session, media sources, library preferences, downloads state, and play history cached across restarts.
+
 ## What works now
 
 ### App shell and UI
@@ -14,7 +36,6 @@ Phoebe is a Compose Multiplatform Plex-first music player for Android, iOS, desk
 - Album-art-inspired Material 3 UI: sign-in, server and library selection, library tabs (albums, artists, playlists, downloads), detail screens, downloads, and now-playing surfaces.
 - Library table with configurable columns (title, artist, album, year, genre, path, codec, bitrate, duration, and related fields where data exists).
 - Sorting and column visibility preferences persisted per platform.
-- Demo catalog so the UI is explorable before connecting Plex.
 
 ### Plex integration
 
@@ -28,7 +49,7 @@ Phoebe is a Compose Multiplatform Plex-first music player for Android, iOS, desk
 
 - **Media sources:** multiple local folder roots with labels and enable/disable flags, stored in SQLDelight (with migration from older file-backed JSON where applicable).
 - **Catalog merge:** Plex catalog (with stable `plex:` id prefix) merged with indexed local-folder catalogs from `LocalFolderMusicSourcePlugin`.
-- **Platform indexing:** Desktop walks a chosen folder with common audio extensions and reads tags via JAudioTagger. Android uses Storage Access Framework (tree URI) and `MediaMetadataRetriever` for metadata. iOS has a native folder implementation. **Web:** local folder picker and indexing are currently stubbed (browser sandbox); Plex and the demo catalog work in the browser.
+- **Platform indexing:** Desktop walks a chosen folder with common audio extensions and reads tags via JAudioTagger. Android uses Storage Access Framework (tree URI) and `MediaMetadataRetriever` for metadata. iOS has a native folder implementation. **Web:** local folder picker and indexing are currently stubbed (browser sandbox); Plex streaming works in the browser.
 
 ### Metadata editing
 

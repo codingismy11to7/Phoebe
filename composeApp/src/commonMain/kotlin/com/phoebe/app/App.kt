@@ -48,6 +48,7 @@ fun App(dependencies: AppDependencies? = null) {
     var useLightAppearance by remember(readyDependencies) { mutableStateOf(false) }
 
     LaunchedEffect(readyDependencies) {
+        installPlatformPlayback(readyDependencies)
         val stored = readyDependencies.platformStorage.readText(AppearanceThemeFile)?.trim()?.lowercase()
         useLightAppearance = stored == "light" || stored == "true"
     }
