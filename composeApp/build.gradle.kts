@@ -33,6 +33,7 @@ plugins {
     alias(libs.plugins.composeCompiler)
     alias(libs.plugins.kotlinSerialization)
     alias(libs.plugins.sqldelight)
+    alias(libs.plugins.roborazzi)
 }
 
 kotlin {
@@ -62,6 +63,7 @@ kotlin {
         val desktopMain by getting
         val desktopTest by getting
         val wasmJsMain by getting
+        val androidUnitTest by getting
         val androidInstrumentedTest by getting
         commonMain.dependencies {
             implementation(compose.runtime)
@@ -87,6 +89,8 @@ kotlin {
             implementation(kotlin("test"))
             implementation(libs.junit)
             implementation(libs.coroutines.test)
+            implementation("org.jetbrains.compose.ui:ui-test-junit4:${libs.versions.compose.get()}")
+            implementation(libs.roborazzi.compose.desktop)
             implementation(libs.ktor.client.mock)
             implementation(libs.ktor.client.cio)
             implementation(libs.ktor.client.content.negotiation)
@@ -117,6 +121,24 @@ kotlin {
             implementation(libs.sqldelight.async.extensions)
             implementation(libs.sqldelight.coroutines.extensions)
             implementation(libs.sqldelight.primitive.adapters)
+            implementation(compose.foundation)
+            implementation(compose.material3)
+            implementation(compose.runtime)
+        }
+        androidUnitTest.dependencies {
+            implementation(kotlin("test"))
+            implementation(libs.junit)
+            implementation(libs.androidx.test.core)
+            implementation(libs.androidx.test.runner)
+            implementation(libs.androidx.test.rules)
+            implementation(libs.androidx.test.ext.junit)
+            implementation(project.dependencies.platform(libs.androidx.compose.bom))
+            implementation(libs.androidx.activity.compose)
+            implementation("androidx.compose.ui:ui-test-junit4")
+            implementation("androidx.compose.ui:ui-test-manifest")
+            implementation(libs.robolectric)
+            implementation(libs.roborazzi.compose)
+            implementation(libs.roborazzi.core)
             implementation(compose.foundation)
             implementation(compose.material3)
             implementation(compose.runtime)
@@ -172,6 +194,10 @@ sqldelight {
     }
 }
 
+roborazzi {
+    outputDir.set(layout.projectDirectory.dir("src/screenshotTest/roborazzi"))
+}
+
 android {
     namespace = "com.phoebe.app"
     compileSdk = 36
@@ -183,6 +209,17 @@ android {
         versionCode = phoebeVersionCode.get()
         versionName = phoebeVersionName.get()
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+            isReturnDefaultValues = true
+            all {
+                it.systemProperties["robolectric.pixelCopyRenderMode"] = "hardware"
+                it.maxHeapSize = "4096m"
+            }
+        }
     }
 
     val releaseStoreFile = providerValue("phoebe.android.signing.storeFile", "PHOEBE_ANDROID_SIGNING_STORE_FILE")

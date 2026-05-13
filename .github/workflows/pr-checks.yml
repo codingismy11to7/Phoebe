@@ -34,6 +34,96 @@ jobs:
       - name: Run desktop tests
         run: ./gradlew :composeApp:desktopTest
 
+      - name: Upload desktop screenshot artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-screenshot-artifacts
+          if-no-files-found: ignore
+          path: |
+            composeApp/build/reports/roborazzi/**
+            composeApp/build/outputs/roborazzi/**
+            composeApp/build/test-results/desktopTest/**
+
+  android-screenshots:
+    name: Android screenshots
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Verify Android screenshots
+        run: ./gradlew :composeApp:verifyRoborazziDebug
+
+      - name: Upload Android screenshot artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-screenshot-artifacts
+          if-no-files-found: ignore
+          path: |
+            composeApp/build/reports/roborazzi/**
+            composeApp/build/outputs/roborazzi/**
+            composeApp/build/test-results/testDebugUnitTest/**
+
+  web-screenshots:
+    name: Web screenshots
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install web screenshot dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npm run web:install-browsers
+
+      - name: Build wasm web bundle
+        run: ./gradlew :composeApp:wasmJsBrowserDevelopmentWebpack
+
+      - name: Verify web screenshots
+        run: npm run web:screenshots
+
+      - name: Upload web screenshot artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-screenshot-artifacts
+          if-no-files-found: ignore
+          path: |
+            playwright-report/**
+            test-results/**
+            web-screenshot-tests/**/*-snapshots/**
+
   wasm-test:
     name: Wasm JS tests
     runs-on: ubuntu-latest

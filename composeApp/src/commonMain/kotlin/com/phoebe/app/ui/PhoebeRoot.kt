@@ -1,6 +1,11 @@
 package com.phoebe.app.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
@@ -11,6 +16,9 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -26,6 +34,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -79,6 +88,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateMapOf
@@ -131,6 +141,7 @@ import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryUiPreferences
 import com.phoebe.app.domain.CatalogSnapshot
+import com.phoebe.app.domain.LocalFolderMediaSourceConfig
 import com.phoebe.app.domain.MediaSourcesState
 import com.phoebe.app.domain.MusicLibrary
 import com.phoebe.app.domain.PlexServer
@@ -561,28 +572,19 @@ private fun PlexLibraryPickerPanel(
             .padding(horizontal = 32.dp, vertical = 24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .clickable(enabled = !busy, onClick = onBack),
-                contentAlignment = Alignment.Center,
-            ) {
-                PhoebeIconView(PhoebeIcon.Back, tint = PhoebeUi.primaryText, modifier = Modifier.size(24.dp))
+        DetailBackButton(onBack = onBack, enabled = !busy)
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Choose a music library", color = PhoebeUi.primaryText, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+            serverName?.let { n ->
+                Text("Server: $n", color = PhoebeUi.mutedText, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Spacer(Modifier.weight(1f))
+            Text(
+                "Pick the Plex music library to browse in Phoebe.",
+                color = PhoebeUi.mutedText,
+                fontSize = 13.sp,
+                lineHeight = 18.sp,
+            )
         }
-        Text("Choose a music library", color = PhoebeUi.primaryText, fontSize = 26.sp, fontWeight = FontWeight.Bold)
-        serverName?.let { n ->
-            Text("Server: $n", color = PhoebeUi.mutedText, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-        Text(
-            "Pick the Plex music library to browse in Phoebe.",
-            color = PhoebeUi.mutedText,
-            fontSize = 13.sp,
-            lineHeight = 18.sp,
-        )
         if (libraries.isEmpty()) {
             Text("No music libraries found on this server.", color = PhoebeUi.secondaryText, fontSize = 14.sp)
         } else {
@@ -632,6 +634,12 @@ fun PhoebeRoot(
     var browseSection by remember { mutableStateOf(DesktopSection.Home) }
     var selectedPlaylistId by remember { mutableStateOf<String?>(null) }
     var searchQuery by remember { mutableStateOf("") }
+    var playerSwipeDismiss by remember { mutableStateOf(false) }
+    LaunchedEffect(screen) {
+        if (screen != AppScreen.Player) {
+            playerSwipeDismiss = false
+        }
+    }
     var recentSearches by remember { mutableStateOf(emptyList<String>()) }
     var libraryFilter by remember { mutableStateOf(LibraryFilterTab.Artists) }
 
@@ -748,6 +756,7 @@ fun PhoebeRoot(
                 Modifier
                     .fillMaxSize()
                     .background(PhoebeUi.shellTop)
+                    .statusBarsPadding()
             } else {
                 Modifier
                     .fillMaxSize()
@@ -762,7 +771,33 @@ fun PhoebeRoot(
             }
             Box(modifier = shellModifier) {
             if (compact) {
-                when (val scr = screen) {
+                AnimatedContent(
+                    targetState = screen,
+                    modifier = Modifier.fillMaxSize(),
+                    transitionSpec = {
+                        val openingPlayer = targetState == AppScreen.Player && initialState != AppScreen.Player
+                        val closingPlayer = initialState == AppScreen.Player && targetState != AppScreen.Player
+                        val motion = tween<IntOffset>(durationMillis = 340, easing = FastOutSlowInEasing)
+                        val fade = tween<Float>(durationMillis = 220, easing = FastOutSlowInEasing)
+                        when {
+                            openingPlayer -> {
+                                slideInVertically(animationSpec = motion) { it } + fadeIn(fade) togetherWith
+                                    slideOutVertically(animationSpec = motion) { -it / 6 } + fadeOut(fade)
+                            }
+                            closingPlayer -> {
+                                if (playerSwipeDismiss) {
+                                    fadeIn(tween(120)) togetherWith ExitTransition.None
+                                } else {
+                                    slideInVertically(animationSpec = motion) { it / 6 } + fadeIn(fade) togetherWith
+                                        slideOutVertically(animationSpec = motion) { it } + fadeOut(fade)
+                                }
+                            }
+                            else -> fadeIn(tween(180)) togetherWith fadeOut(tween(180))
+                        }
+                    },
+                    label = "mobile-screen",
+                ) { scr ->
+                when (scr) {
                     is AppScreen.ServerPicker -> PlexServerPickerPanel(
                         servers = servers,
                         busy = busy,
@@ -856,6 +891,10 @@ fun PhoebeRoot(
                         onMoveUpNext = state::moveUpNext,
                         onRemoveUpNext = state::removeUpNext,
                         onBack = { state.open(AppScreen.Home) },
+                        onSwipeDismiss = {
+                            playerSwipeDismiss = true
+                            state.open(AppScreen.Home)
+                        },
                     )
                     AppScreen.Home -> MobileBrowseShell(
                         catalog = catalog,
@@ -912,6 +951,7 @@ fun PhoebeRoot(
                         useLightAppearance = useLightAppearance,
                         onUseLightAppearanceChange = onUseLightAppearanceChange,
                     )
+                }
                 }
             } else {
                 DesktopPlayer(
@@ -1224,9 +1264,7 @@ private fun DesktopPlayer(
                                 else -> when {
                                     section == DesktopSection.Home && selectedPlaylistId == null -> MainFeature(
                                         track = track,
-                                        searchQuery = searchQuery,
                                         modifier = Modifier.weight(1f).fillMaxHeight(),
-                                        onSearchQuery = onSearchQuery,
                                     )
                                     section == DesktopSection.Search && selectedPlaylistId == null -> SearchDesktopView(
                                         catalog = catalog,
@@ -1810,7 +1848,7 @@ private fun LibraryTopBar(searchQuery: String, onSearchQuery: (String) -> Unit) 
 }
 
 @Composable
-private fun MainFeature(track: Track?, searchQuery: String, modifier: Modifier, onSearchQuery: (String) -> Unit) {
+private fun MainFeature(track: Track?, modifier: Modifier) {
     Column(modifier.padding(36.dp), verticalArrangement = Arrangement.spacedBy(26.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1818,8 +1856,6 @@ private fun MainFeature(track: Track?, searchQuery: String, modifier: Modifier, 
                 GlassIcon(PhoebeIcon.Forward, "Forward")
             }
             Spacer(Modifier.weight(1f))
-            SearchPill(searchQuery, onSearchQuery)
-            Spacer(Modifier.width(12.dp))
             GlassIcon(PhoebeIcon.Bell, "Notifications")
         }
 
@@ -1959,27 +1995,26 @@ private fun DesktopContent(
         ),
         verticalArrangement = Arrangement.spacedBy(22.dp),
     ) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                SectionLabel(
-                    when {
-                        selectedPlaylist != null -> "Playlist"
-                        section == DesktopSection.Search -> "Search"
-                        section == DesktopSection.Library -> "Your Library"
-                        section == DesktopSection.Playlists -> "Playlists"
-                        section == DesktopSection.Settings -> "Settings"
-                        else -> "Home"
-                    },
-                    PhoebeUi.accentLight,
-                )
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val sectionLabel = when {
+                selectedPlaylist != null -> "Playlist"
+                section == DesktopSection.Search -> "Search"
+                section == DesktopSection.Library -> "Your Library"
+                section == DesktopSection.Playlists -> "Playlists"
+                section == DesktopSection.Settings -> "Settings"
+                else -> "Home"
+            }
+            val headline = selectedPlaylist?.title ?: when (section) {
+                DesktopSection.Search -> "Find your sound"
+                DesktopSection.Library -> "Albums, artists, and songs"
+                DesktopSection.Playlists -> "Your Plex playlists"
+                DesktopSection.Settings -> "Customize your listening experience"
+                DesktopSection.Home -> "Now playing"
+            }
+            val titleBlock: @Composable () -> Unit = {
+                SectionLabel(sectionLabel, PhoebeUi.accentLight)
                 Text(
-                    selectedPlaylist?.title ?: when (section) {
-                        DesktopSection.Search -> "Find your sound"
-                        DesktopSection.Library -> "Albums, artists, and songs"
-                        DesktopSection.Playlists -> "Your Plex playlists"
-                        DesktopSection.Settings -> "Customize your listening experience"
-                        DesktopSection.Home -> "Now playing"
-                    },
+                    headline,
                     color = PhoebeUi.primaryText,
                     fontSize = headlineFontSize,
                     lineHeight = headlineLineHeight,
@@ -1988,7 +2023,17 @@ private fun DesktopContent(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            SearchPill(searchQuery, onSearchQuery, searchPillModifier)
+            if (maxWidth < 640.dp) {
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Column(Modifier.fillMaxWidth()) { titleBlock() }
+                    SearchPill(searchQuery, onSearchQuery, searchPillModifier)
+                }
+            } else {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) { titleBlock() }
+                    SearchPill(searchQuery, onSearchQuery, searchPillModifier)
+                }
+            }
         }
 
         when {
@@ -3051,6 +3096,35 @@ private fun songCountLabel(count: Int): String {
     return "$count $word"
 }
 
+@Composable
+private fun DetailBackButton(onBack: () -> Unit, enabled: Boolean = true) {
+    Box(
+        Modifier
+            .size(44.dp)
+            .clip(CircleShape)
+            .clickable(enabled = enabled, onClick = onBack),
+        contentAlignment = Alignment.Center,
+    ) {
+        PhoebeIconView(PhoebeIcon.Back, tint = PhoebeUi.primaryText, modifier = Modifier.size(24.dp))
+    }
+}
+
+@Composable
+private fun DetailSectionIntro(
+    onBack: () -> Unit,
+    label: String,
+    labelColor: Color = PhoebeUi.accentLight,
+    enabled: Boolean = true,
+) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        DetailBackButton(onBack = onBack, enabled = enabled)
+        SectionLabel(label, labelColor)
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ArtistDetailPanel(
@@ -3093,30 +3167,22 @@ private fun ArtistDetailPanel(
 
     BoxWithConstraints(modifier.fillMaxSize()) {
         val useTable = maxWidth >= 640.dp
+        val edgePadding = if (maxWidth < 640.dp) 20.dp else 36.dp
+        val topPadding = if (maxWidth < 640.dp) 16.dp else 36.dp
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(start = 36.dp, end = 36.dp, top = 36.dp, bottom = 24.dp),
+        modifier = Modifier.fillMaxSize().padding(start = edgePadding, end = edgePadding, top = topPadding, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item(contentType = "artist-header") {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onBack),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    PhoebeIconView(PhoebeIcon.Back, tint = PhoebeUi.primaryText, modifier = Modifier.size(24.dp))
-                }
-                Spacer(Modifier.weight(1f))
-            }
-            Spacer(Modifier.height(8.dp))
-            SectionLabel("Artist", PhoebeUi.accentLight)
-            Text(artist.title, color = PhoebeUi.primaryText, fontSize = 30.sp, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text("${albums.size} $albumWord · ${tracks.size} $songWord", color = PhoebeUi.secondaryText, fontSize = 14.sp)
-            Spacer(Modifier.height(14.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                DetailSectionIntro(onBack = onBack, label = "Artist")
+                Text(artist.title, color = PhoebeUi.primaryText, fontSize = 30.sp, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text("${albums.size} $albumWord · ${tracks.size} $songWord", color = PhoebeUi.secondaryText, fontSize = 14.sp)
+                Spacer(Modifier.height(6.dp))
                 ArtworkImage(artist.title, artist.thumbUrl, Modifier.size(120.dp))
+                Spacer(Modifier.height(10.dp))
+                SectionLabel("Albums", PhoebeUi.primaryText)
             }
-            Spacer(Modifier.height(18.dp))
-            SectionLabel("Albums", PhoebeUi.primaryText)
         }
         item(contentType = "artist-album-toolbar") {
             DetailSectionToolbar(
@@ -3280,34 +3346,27 @@ private fun AlbumDetailPanel(
 
     BoxWithConstraints(modifier.fillMaxSize()) {
         val useTable = maxWidth >= 640.dp
+        val edgePadding = if (maxWidth < 640.dp) 20.dp else 36.dp
+        val topPadding = if (maxWidth < 640.dp) 16.dp else 36.dp
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(start = 36.dp, end = 36.dp, top = 36.dp, bottom = 24.dp),
+        modifier = Modifier.fillMaxSize().padding(start = edgePadding, end = edgePadding, top = topPadding, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item(contentType = "album-header") {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onBack),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    PhoebeIconView(PhoebeIcon.Back, tint = PhoebeUi.primaryText, modifier = Modifier.size(24.dp))
-                }
-                Spacer(Modifier.weight(1f))
-            }
-            Spacer(Modifier.height(8.dp))
-            SectionLabel("Album", PhoebeUi.accentLight)
-            Row(horizontalArrangement = Arrangement.spacedBy(22.dp), verticalAlignment = Alignment.CenterVertically) {
-                ArtworkImage(album.title, album.thumbUrl, Modifier.size(160.dp))
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(album.title, color = PhoebeUi.primaryText, fontSize = 26.sp, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Text(album.artist.uppercase(), color = PhoebeUi.secondaryText, fontSize = 14.sp, letterSpacing = 0.05.em)
-                    album.year?.let { y ->
-                        Text("$y", color = PhoebeUi.mutedText, fontSize = 13.sp)
+            Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
+                DetailSectionIntro(onBack = onBack, label = "Album")
+                Row(horizontalArrangement = Arrangement.spacedBy(22.dp), verticalAlignment = Alignment.CenterVertically) {
+                    ArtworkImage(album.title, album.thumbUrl, Modifier.size(160.dp))
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(album.title, color = PhoebeUi.primaryText, fontSize = 26.sp, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(album.artist.uppercase(), color = PhoebeUi.secondaryText, fontSize = 14.sp, letterSpacing = 0.05.em)
+                        album.year?.let { y ->
+                            Text("$y", color = PhoebeUi.mutedText, fontSize = 13.sp)
+                        }
                     }
                 }
+                SectionLabel("Tracks", PhoebeUi.primaryText)
             }
-            Spacer(Modifier.height(18.dp))
-            SectionLabel("Tracks", PhoebeUi.primaryText)
         }
         item(contentType = "album-track-toolbar") {
             DetailSectionToolbar(
@@ -3405,21 +3464,13 @@ private fun PlaylistDetailPanel(
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item(contentType = "playlist-header") {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onBack),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    PhoebeIconView(PhoebeIcon.Back, tint = PhoebeUi.primaryText, modifier = Modifier.size(24.dp))
-                }
-                Spacer(Modifier.weight(1f))
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                DetailSectionIntro(onBack = onBack, label = "Playlist")
+                Text(playlist.title, color = PhoebeUi.primaryText, fontSize = 24.sp, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text("${playlist.trackCount} songs", color = PhoebeUi.secondaryText, fontSize = 14.sp)
+                Spacer(Modifier.height(6.dp))
+                SectionLabel("Tracks", PhoebeUi.primaryText)
             }
-            Spacer(Modifier.height(8.dp))
-            SectionLabel("Playlist", PhoebeUi.accentLight)
-            Text(playlist.title, color = PhoebeUi.primaryText, fontSize = 24.sp, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text("${playlist.trackCount} songs", color = PhoebeUi.secondaryText, fontSize = 14.sp)
-            Spacer(Modifier.height(14.dp))
-            SectionLabel("Tracks", PhoebeUi.primaryText)
         }
         item(contentType = "playlist-track-toolbar") {
             DetailSectionToolbar(
@@ -4737,8 +4788,6 @@ private fun CastIcon(onClick: () -> Unit) {
 @Composable
 private fun MobileCompactMainFeature(
     track: Track?,
-    searchQuery: String,
-    onSearchQuery: (String) -> Unit,
     onOpenFullPlayer: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -4750,7 +4799,6 @@ private fun MobileCompactMainFeature(
             .padding(horizontal = 20.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
-        SearchPill(searchQuery, onSearchQuery, Modifier.fillMaxWidth())
         MobileHomeHero(track, onOpenFullPlayer)
     }
 }
@@ -4962,9 +5010,7 @@ private fun MobileBrowseShell(
     val pickLocalFolder = rememberPickLocalFolder(onPicked = onAddLocalFolder)
     val toolbarTitle = when {
         section == DesktopSection.Settings -> "Settings"
-        selectedPlaylistId != null -> {
-            catalog.playlists.firstOrNull { it.id == selectedPlaylistId }?.title ?: "Playlist"
-        }
+        selectedPlaylistId != null -> "Playlist"
         else -> mobileSectionTitle(section)
     }
     Box(
@@ -4974,8 +5020,7 @@ private fun MobileBrowseShell(
     ) {
         Column(
             Modifier
-                .fillMaxSize()
-                .statusBarsPadding(),
+                .fillMaxSize(),
         ) {
         MobileScreenToolbar(
             title = toolbarTitle,
@@ -5041,8 +5086,6 @@ private fun MobileBrowseShell(
                 )
                 section == DesktopSection.Home && selectedPlaylistId == null -> MobileCompactMainFeature(
                     track = currentTrack,
-                    searchQuery = searchQuery,
-                    onSearchQuery = onSearchQuery,
                     onOpenFullPlayer = onOpenNowPlaying,
                     modifier = Modifier.fillMaxSize(),
                 )
@@ -5173,12 +5216,60 @@ private fun MobilePlayer(
     onMoveUpNext: (Int, Int) -> Unit,
     onRemoveUpNext: (Int) -> Unit,
     onBack: () -> Unit,
+    onSwipeDismiss: () -> Unit,
 ) {
     var mobileUpNextExpanded by remember { mutableStateOf(true) }
+    var dragOffset by remember { mutableFloatStateOf(0f) }
+    var isDragging by remember { mutableStateOf(false) }
+    var dismissing by remember { mutableStateOf(false) }
+    val density = LocalDensity.current
+    val dismissThresholdPx = with(density) { 96.dp.toPx() }
+    val offScreenPx = with(density) { 1200.dp.toPx() }
+    val animatedOffset by animateFloatAsState(
+        targetValue = when {
+            dismissing -> offScreenPx
+            else -> dragOffset.coerceAtLeast(0f)
+        },
+        animationSpec = if (dismissing) {
+            tween(durationMillis = 260, easing = FastOutSlowInEasing)
+        } else {
+            spring(stiffness = Spring.StiffnessMedium, dampingRatio = Spring.DampingRatioLowBouncy)
+        },
+        finishedListener = { value ->
+            if (dismissing && value >= offScreenPx * 0.9f) {
+                onSwipeDismiss()
+            }
+        },
+        label = "player-swipe-settle",
+    )
+    val displayOffset = if (isDragging) dragOffset.coerceAtLeast(0f) else animatedOffset
     val hasTrack = track != null
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .offset { IntOffset(0, displayOffset.roundToInt()) }
+            .pointerInput(onBack, dismissThresholdPx, offScreenPx) {
+                detectVerticalDragGestures(
+                    onDragStart = { isDragging = true },
+                    onDragEnd = {
+                        isDragging = false
+                        if (dragOffset > dismissThresholdPx) {
+                            dismissing = true
+                        } else {
+                            dragOffset = 0f
+                        }
+                    },
+                    onDragCancel = {
+                        isDragging = false
+                        dragOffset = 0f
+                    },
+                    onVerticalDrag = { _, dragAmount ->
+                        if (!dismissing && (dragAmount > 0f || dragOffset > 0f)) {
+                            dragOffset = (dragOffset + dragAmount).coerceAtLeast(0f)
+                        }
+                    },
+                )
+            }
             .background(
                 Brush.radialGradient(
                     listOf(PhoebeUi.shellRadialTint, Color.Transparent),
@@ -5187,7 +5278,6 @@ private fun MobilePlayer(
                 ),
             )
             .background(Brush.verticalGradient(listOf(PhoebeUi.shellTop, PhoebeUi.canvasBackground)))
-            .statusBarsPadding()
             .navigationBarsPadding()
             .padding(horizontal = 20.dp),
     ) {
@@ -5814,6 +5904,368 @@ internal fun Modifier.playlistDropTarget(playlist: Playlist): Modifier = compose
     onGloballyPositioned { controller.register(playlist, it.boundsInRoot()) }
 }
 
+internal enum class PhoebeScreenshotScenario {
+    Home,
+    Library,
+    Playlist,
+    Artist,
+    Album,
+    Search,
+    Player,
+    Settings,
+    SignIn,
+}
+
+@Composable
+internal fun PhoebeScreenshotApp(
+    scenario: PhoebeScreenshotScenario,
+    useLightAppearance: Boolean = false,
+    modifier: Modifier = Modifier,
+) {
+    val fixture = remember { PhoebeScreenshotFixture }
+    PhoebeTheme(useLightAppearance = useLightAppearance) {
+        CompositionLocalProvider(
+            LocalCatalogHasContent provides true,
+            LocalNowPlaying provides NowPlayingIndicatorState(
+                trackId = fixture.currentTrack.id,
+                isPlaying = false,
+            ),
+            LocalPlayHistory provides fixture.playHistory,
+            LocalNowMs provides fixture.nowMs,
+            LocalPlaylistActions provides PlaylistActions(
+                playlists = fixture.catalog.playlists,
+                playlistsEnabled = true,
+            ),
+            LocalMetadataEditorActions provides MetadataEditorActions(),
+            LocalSearchHistory provides SearchHistoryState(
+                recentSearches = listOf("moon", "quartet", "field recordings"),
+                commitSearch = {},
+                removeSearch = {},
+                clearSearches = {},
+            ),
+            LocalDragDrop provides DragDropController(),
+        ) {
+            BoxWithConstraints(modifier.fillMaxSize()) {
+                if (maxWidth < 900.dp) {
+                    PhoebeMobileScreenshotScenario(scenario, fixture, Modifier.fillMaxSize())
+                } else {
+                    PhoebeDesktopScreenshotScenario(
+                        scenario = scenario,
+                        fixture = fixture,
+                        useLightAppearance = useLightAppearance,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+                DragGhost()
+            }
+        }
+    }
+}
+
+@Composable
+private fun PhoebeDesktopScreenshotScenario(
+    scenario: PhoebeScreenshotScenario,
+    fixture: PhoebeScreenshotFixtureData,
+    useLightAppearance: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val screen = when (scenario) {
+        PhoebeScreenshotScenario.Artist -> AppScreen.ArtistDetail(fixture.artist)
+        PhoebeScreenshotScenario.Album -> AppScreen.AlbumDetail(fixture.album)
+        PhoebeScreenshotScenario.SignIn -> AppScreen.SignIn
+        else -> AppScreen.Home
+    }
+    val section = when (scenario) {
+        PhoebeScreenshotScenario.Library -> DesktopSection.Library
+        PhoebeScreenshotScenario.Playlist -> DesktopSection.Library
+        PhoebeScreenshotScenario.Search -> DesktopSection.Search
+        PhoebeScreenshotScenario.Settings -> DesktopSection.Settings
+        else -> DesktopSection.Home
+    }
+    DesktopPlayer(
+        screen = screen,
+        catalog = fixture.catalog,
+        catalogRefreshing = false,
+        session = fixture.session,
+        mediaSources = fixture.mediaSources,
+        track = fixture.currentTrack,
+        upNext = fixture.upNext,
+        isPlaying = true,
+        positionMs = 96_000L,
+        currentIndex = 0,
+        section = section,
+        selectedPlaylistId = if (scenario == PhoebeScreenshotScenario.Playlist) fixture.playlist.id else null,
+        searchQuery = if (scenario == PhoebeScreenshotScenario.Search) "moon" else "",
+        libraryFilter = LibraryFilterTab.Artists,
+        libraryUi = fixture.libraryUi,
+        appMessage = "Sign in to Plex or add a local music folder to get started.",
+        pinCode = "PHOEBE",
+        shuffle = true,
+        repeat = RepeatMode.All,
+        volume = 0.72f,
+        showQueue = true,
+        compact = false,
+        busy = false,
+        onNavigate = {},
+        onSearchQuery = {},
+        onLibraryFilter = {},
+        onPlaylist = {},
+        onArtist = {},
+        onAlbum = {},
+        onPopDetail = {},
+        onToggle = {},
+        onPrevious = {},
+        onNext = {},
+        onShuffle = {},
+        onRepeat = {},
+        onVolume = {},
+        onSeek = {},
+        onPlayQueue = {},
+        onClearQueue = {},
+        onMoveUpNext = { _, _ -> },
+        onRemoveUpNext = {},
+        onPlayTracks = { _, _ -> },
+        onAddToUpNext = {},
+        onDownload = {},
+        onStartSignIn = {},
+        onFinishSignIn = {},
+        onSignOut = {},
+        onAddLocalFolder = {},
+        onRemoveLocalFolder = {},
+        onToggleLocalFolder = { _, _ -> },
+        onRefreshLibrary = {},
+        servers = fixture.servers,
+        libraries = fixture.libraries,
+        onSelectServer = {},
+        onSelectLibrary = {},
+        onCancelPlexSetup = {},
+        onBackToServerPicker = {},
+        onRetryServers = {},
+        onLibrarySortBy = {},
+        onLibraryAscending = {},
+        onLibraryColumns = {},
+        useLightAppearance = useLightAppearance,
+        onUseLightAppearanceChange = {},
+    )
+}
+
+@Composable
+private fun PhoebeMobileScreenshotScenario(
+    scenario: PhoebeScreenshotScenario,
+    fixture: PhoebeScreenshotFixtureData,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier
+            .background(PhoebeUi.shellTop)
+            .statusBarsPadding(),
+    ) {
+        when (scenario) {
+            PhoebeScreenshotScenario.SignIn -> MobileSignInWelcomeScreen(
+                message = "Sign in to Plex or add a local music folder to get started.",
+                pinCode = "PHOEBE",
+                onStartSignIn = {},
+                onFinishSignIn = {},
+                onAddLocalFolder = {},
+                modifier = Modifier.fillMaxSize(),
+            )
+            PhoebeScreenshotScenario.Artist -> ArtistDetailPanel(
+                artist = fixture.artist,
+                catalog = fixture.catalog,
+                libraryUi = fixture.libraryUi,
+                modifier = Modifier.fillMaxSize(),
+                onBack = {},
+                onAlbum = {},
+                onPlayTracks = { _, _ -> },
+                onAddToUpNext = {},
+                onDownload = {},
+                onLibraryColumns = {},
+            )
+            PhoebeScreenshotScenario.Album -> AlbumDetailPanel(
+                album = fixture.album,
+                catalog = fixture.catalog,
+                libraryUi = fixture.libraryUi,
+                modifier = Modifier.fillMaxSize(),
+                onBack = {},
+                onPlayTracks = { _, _ -> },
+                onAddToUpNext = {},
+                onDownload = {},
+                onLibraryColumns = {},
+            )
+            PhoebeScreenshotScenario.Playlist -> PlaylistDetailPanel(
+                playlist = fixture.playlist,
+                catalog = fixture.catalog,
+                catalogRefreshing = false,
+                libraryUi = fixture.libraryUi,
+                modifier = Modifier.fillMaxSize(),
+                onBack = {},
+                onPlayTracks = { _, _ -> },
+                onAddToUpNext = {},
+                onDownload = {},
+                onLibraryColumns = {},
+            )
+            PhoebeScreenshotScenario.Player -> MobilePlayer(
+                track = fixture.currentTrack,
+                upNext = fixture.upNext,
+                isPlaying = true,
+                shuffle = true,
+                repeat = RepeatMode.All,
+                positionMs = 96_000L,
+                currentIndex = 0,
+                onToggle = {},
+                onPrevious = {},
+                onNext = {},
+                onShuffle = {},
+                onRepeat = {},
+                onSeek = {},
+                onPlayQueue = {},
+                onMoveUpNext = { _, _ -> },
+                onRemoveUpNext = {},
+                onBack = {},
+                onSwipeDismiss = {},
+            )
+            else -> MobileBrowseShell(
+                catalog = fixture.catalog,
+                catalogRefreshing = false,
+                session = fixture.session,
+                section = when (scenario) {
+                    PhoebeScreenshotScenario.Library -> DesktopSection.Library
+                    PhoebeScreenshotScenario.Search -> DesktopSection.Search
+                    PhoebeScreenshotScenario.Settings -> DesktopSection.Settings
+                    else -> DesktopSection.Home
+                },
+                selectedPlaylistId = null,
+                searchQuery = if (scenario == PhoebeScreenshotScenario.Search) "moon" else "",
+                libraryFilter = LibraryFilterTab.Artists,
+                libraryUi = fixture.libraryUi,
+                currentTrack = fixture.currentTrack,
+                isPlaying = true,
+                onNavigate = {},
+                onSearchQuery = {},
+                onLibraryFilter = {},
+                onPlaylist = {},
+                onArtist = {},
+                onAlbum = {},
+                onPlayTracks = { _, _ -> },
+                onAddToUpNext = {},
+                onDownload = {},
+                onOpenNowPlaying = {},
+                onTogglePlayPause = {},
+                onSignOut = {},
+                onAddLocalFolder = {},
+                onRefreshLibrary = {},
+                onLibrarySortBy = {},
+                onLibraryAscending = {},
+                onLibraryColumns = {},
+                useLightAppearance = false,
+                onUseLightAppearanceChange = {},
+            )
+        }
+    }
+}
+
+private data class PhoebeScreenshotFixtureData(
+    val catalog: CatalogSnapshot,
+    val session: PlexSession,
+    val mediaSources: MediaSourcesState,
+    val libraryUi: LibraryUiPreferences,
+    val playHistory: PlayHistorySnapshot,
+    val servers: List<PlexServer>,
+    val libraries: List<MusicLibrary>,
+    val artist: Artist,
+    val album: Album,
+    val playlist: Playlist,
+    val currentTrack: Track,
+    val upNext: List<Track>,
+    val nowMs: Long,
+)
+
+private val PhoebeScreenshotFixture = run {
+    val artist = Artist(id = "artist-luna", title = "Luna North", albumCount = 3, songCount = 8)
+    val secondArtist = Artist(id = "artist-echo", title = "Echo Harbor", albumCount = 2, songCount = 6)
+    val thirdArtist = Artist(id = "artist-marrow", title = "Marrow & Pines", albumCount = 1, songCount = 4)
+    val album = Album(id = "album-moonlit", title = "Moonlit Signals", artist = artist.title, year = 2026)
+    val secondAlbum = Album(id = "album-velvet", title = "Velvet Transit", artist = artist.title, year = 2024)
+    val thirdAlbum = Album(id = "album-harbor", title = "Harbor Static", artist = secondArtist.title, year = 2025)
+    val fourthAlbum = Album(id = "album-field", title = "Field Notes", artist = thirdArtist.title, year = 2023)
+    val tracks = listOf(
+        Track("plex:track-aurora", "Aurora Wake", artist.title, album.title, 244_000L, "https://stream.example/aurora", "https://download.example/aurora", year = 2026, genre = "Dream pop", filepath = "/music/Luna North/Moonlit Signals/01 Aurora Wake.flac", audioCodec = "FLAC", bitrateKbps = 921),
+        Track("plex:track-moon", "Moon Over Meridian", artist.title, album.title, 272_000L, "https://stream.example/moon", "https://download.example/moon", year = 2026, genre = "Dream pop", filepath = "/music/Luna North/Moonlit Signals/02 Moon Over Meridian.flac", audioCodec = "FLAC", bitrateKbps = 1014),
+        Track("plex:track-static", "Soft Static Bloom", artist.title, album.title, 218_000L, "https://stream.example/static", "https://download.example/static", year = 2026, genre = "Dream pop", filepath = "/music/Luna North/Moonlit Signals/03 Soft Static Bloom.flac", audioCodec = "FLAC", bitrateKbps = 884),
+        Track("plex:track-window", "Window Seat Reverie", artist.title, secondAlbum.title, 236_000L, "https://stream.example/window", "https://download.example/window", year = 2024, genre = "Synth pop", filepath = "/music/Luna North/Velvet Transit/01 Window Seat Reverie.m4a", audioCodec = "AAC", bitrateKbps = 256),
+        Track("plex:track-harbor", "Harbor Lights", secondArtist.title, thirdAlbum.title, 208_000L, "https://stream.example/harbor", "https://download.example/harbor", year = 2025, genre = "Indie", filepath = "/music/Echo Harbor/Harbor Static/01 Harbor Lights.mp3", audioCodec = "MP3", bitrateKbps = 320),
+        Track("plex:track-quartet", "Quartz Quartet", secondArtist.title, thirdAlbum.title, 198_000L, "https://stream.example/quartet", "https://download.example/quartet", year = 2025, genre = "Indie", filepath = "/music/Echo Harbor/Harbor Static/02 Quartz Quartet.mp3", audioCodec = "MP3", bitrateKbps = 320),
+        Track("local:track-field", "Field Recording No. 7", thirdArtist.title, fourthAlbum.title, 314_000L, "file:///field", "", localUri = "file:///Users/music/Field Notes/field-7.flac", year = 2023, genre = "Ambient", filepath = "/Users/music/Field Notes/field-7.flac", audioCodec = "FLAC", bitrateKbps = 773),
+    )
+    val playlist = Playlist(id = "plex:playlist-night", title = "Night Drive Mix", trackCount = 5)
+    val secondPlaylist = Playlist(id = "plex:playlist-focus", title = "Focus Room", trackCount = 4)
+    val server = PlexServer(
+        id = "server-atlas",
+        name = "Atlas",
+        uri = "https://plex.example",
+        owned = true,
+        accessToken = "server-token",
+    )
+    val library = MusicLibrary(key = "42", title = "Music")
+    val nowMs = 1_800_000_000_000L
+    PhoebeScreenshotFixtureData(
+        catalog = CatalogSnapshot(
+            artists = listOf(artist, secondArtist, thirdArtist),
+            albums = listOf(album, secondAlbum, thirdAlbum, fourthAlbum),
+            playlists = listOf(playlist, secondPlaylist),
+            tracksByParent = mapOf(
+                album.id to tracks.take(3),
+                secondAlbum.id to listOf(tracks[3]),
+                thirdAlbum.id to tracks.slice(4..5),
+                fourthAlbum.id to listOf(tracks[6]),
+                playlist.id to listOf(tracks[1], tracks[4], tracks[0], tracks[5], tracks[3]),
+                secondPlaylist.id to listOf(tracks[6], tracks[2], tracks[3], tracks[5]),
+            ),
+        ),
+        session = PlexSession(
+            token = "fixture-token",
+            userName = "Phoebe Listener",
+            selectedServer = server,
+            selectedLibrary = library,
+        ),
+        mediaSources = MediaSourcesState(
+            localFolders = listOf(
+                LocalFolderMediaSourceConfig(
+                    id = "local-fixture",
+                    rootUri = "file:///Users/music",
+                    label = "Local Music",
+                    enabled = true,
+                ),
+            ),
+        ),
+        libraryUi = LibraryUiPreferences(
+            sortBy = LibrarySortBy.Name,
+            ascending = true,
+            columns = LibraryColumnVisibility(
+                year = true,
+                genre = true,
+                filepath = false,
+                audioCodec = true,
+                bitrate = true,
+                duration = true,
+            ),
+        ),
+        playHistory = PlayHistorySnapshot(
+            byArtist = mapOf(artist.title to nowMs - 3_600_000L, secondArtist.title to nowMs - 86_400_000L),
+            byAlbum = mapOf(album.title to nowMs - 3_600_000L, thirdAlbum.title to nowMs - 172_800_000L),
+            byTrack = mapOf(tracks[0].id to nowMs - 3_600_000L, tracks[4].id to nowMs - 86_400_000L),
+        ),
+        servers = listOf(server),
+        libraries = listOf(library),
+        artist = artist,
+        album = album,
+        playlist = playlist,
+        currentTrack = tracks[1],
+        upNext = listOf(tracks[4], tracks[0], tracks[5], tracks[3]),
+        nowMs = nowMs,
+    )
+}
+
 /**
  * Floating ghost rendered above all other UI while a drag is in flight.
  *
@@ -5893,6 +6345,22 @@ internal fun NowPlayingIndicator(
     modifier: Modifier = Modifier,
     barColor: Color = PhoebeUi.accentLight,
 ) {
+    if (isPlaying) {
+        AnimatedNowPlayingIndicator(modifier = modifier, barColor = barColor)
+    } else {
+        NowPlayingIndicatorBars(
+            heights = listOf(0.3f, 0.3f, 0.3f),
+            modifier = modifier,
+            barColor = barColor,
+        )
+    }
+}
+
+@Composable
+private fun AnimatedNowPlayingIndicator(
+    modifier: Modifier = Modifier,
+    barColor: Color = PhoebeUi.accentLight,
+) {
     val transition = rememberInfiniteTransition(label = "now-playing")
     val bar1 by transition.animateFloat(
         initialValue = 0.25f,
@@ -5921,8 +6389,20 @@ internal fun NowPlayingIndicator(
         ),
         label = "bar3",
     )
+    NowPlayingIndicatorBars(
+        heights = listOf(bar1, bar2, bar3),
+        modifier = modifier,
+        barColor = barColor,
+    )
+}
+
+@Composable
+private fun NowPlayingIndicatorBars(
+    heights: List<Float>,
+    modifier: Modifier = Modifier,
+    barColor: Color = PhoebeUi.accentLight,
+) {
     Canvas(modifier) {
-        val heights = if (isPlaying) listOf(bar1, bar2, bar3) else listOf(0.3f, 0.3f, 0.3f)
         val barWidth = size.width / 7f
         val gap = barWidth
         val totalWidth = barWidth * 3 + gap * 2
