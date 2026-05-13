@@ -1,6 +1,22 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import java.io.File
 
+val phoebeVersionName = providers.gradleProperty("phoebe.versionName")
+    .orElse(providers.environmentVariable("PHOEBE_VERSION_NAME"))
+    .orElse("0.1.0")
+
+val phoebeVersionCode = providers.gradleProperty("phoebe.versionCode")
+    .orElse(providers.environmentVariable("PHOEBE_VERSION_CODE"))
+    .map(String::toInt)
+    .orElse(1)
+
+val phoebeDesktopPackageVersion = phoebeVersionName.map { version ->
+    if (version.substringBefore(".").toIntOrNull() == 0) "1.0.0" else version
+}
+
+fun providerValue(name: String, envName: String): String? =
+    providers.gradleProperty(name).orElse(providers.environmentVariable(envName)).orNull
+
 val javaFxClassifier = when {
     System.getProperty("os.name").startsWith("Mac", ignoreCase = true) &&
         System.getProperty("os.arch") == "aarch64" -> "mac-aarch64"
@@ -164,9 +180,35 @@ android {
         applicationId = "com.phoebe.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = phoebeVersionCode.get()
+        versionName = phoebeVersionName.get()
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    val releaseStoreFile = providerValue("phoebe.android.signing.storeFile", "PHOEBE_ANDROID_SIGNING_STORE_FILE")
+    val releaseStorePassword = providerValue("phoebe.android.signing.storePassword", "PHOEBE_ANDROID_SIGNING_STORE_PASSWORD")
+    val releaseKeyAlias = providerValue("phoebe.android.signing.keyAlias", "PHOEBE_ANDROID_SIGNING_KEY_ALIAS")
+    val releaseKeyPassword = providerValue("phoebe.android.signing.keyPassword", "PHOEBE_ANDROID_SIGNING_KEY_PASSWORD")
+
+    if (
+        releaseStoreFile != null &&
+        releaseStorePassword != null &&
+        releaseKeyAlias != null &&
+        releaseKeyPassword != null
+    ) {
+        signingConfigs {
+            create("release") {
+                storeFile = file(releaseStoreFile)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+        buildTypes {
+            getByName("release") {
+                signingConfig = signingConfigs.getByName("release")
+            }
+        }
     }
 }
 
@@ -179,9 +221,10 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "Phoebe"
-            packageVersion = "1.0.0"
+            packageVersion = phoebeDesktopPackageVersion.get()
             val iconsDir = project.layout.projectDirectory.dir("src/desktopMain/resources/icons")
             macOS {
+                bundleID = "com.phoebe.app"
                 iconFile.set(iconsDir.file("icon.icns").asFile)
             }
             windows {

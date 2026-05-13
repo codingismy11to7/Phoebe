@@ -1,0 +1,360 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'release/*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semver version to release, for example 1.2.3
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ github.ref_name || inputs.version }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  JAVA_VERSION: 17
+  JAVA_DISTRIBUTION: temurin
+
+jobs:
+  version:
+    name: Validate version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      version_code: ${{ steps.version.outputs.version_code }}
+      tag_name: ${{ steps.version.outputs.tag_name }}
+
+    steps:
+      - name: Validate release version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            version="${{ inputs.version }}"
+            tag_name="release/${version}"
+          else
+            tag_name="${GITHUB_REF_NAME}"
+            version="${tag_name#release/}"
+          fi
+
+          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Release version must be plain semver, like release/1.2.3"
+            exit 1
+          fi
+
+          IFS='.' read -r major minor patch <<< "${version}"
+          if (( major == 0 )); then
+            echo "::error::Desktop release packages require a semver major version greater than 0"
+            exit 1
+          fi
+
+          if (( major > 2100 || minor > 999 || patch > 999 )); then
+            echo "::error::Version is too large to derive a safe Android versionCode"
+            exit 1
+          fi
+
+          version_code=$((major * 1000000 + minor * 1000 + patch))
+          {
+            echo "version=${version}"
+            echo "version_code=${version_code}"
+            echo "tag_name=${tag_name}"
+          } >> "${GITHUB_OUTPUT}"
+
+  android:
+    name: Android release
+    needs: version
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Validate Android signing secrets
+        shell: bash
+        run: |
+          missing=()
+          [[ -n "${ANDROID_KEYSTORE_BASE64}" ]] || missing+=("ANDROID_KEYSTORE_BASE64")
+          [[ -n "${ANDROID_KEYSTORE_PASSWORD}" ]] || missing+=("ANDROID_KEYSTORE_PASSWORD")
+          [[ -n "${ANDROID_KEY_ALIAS}" ]] || missing+=("ANDROID_KEY_ALIAS")
+          [[ -n "${ANDROID_KEY_PASSWORD}" ]] || missing+=("ANDROID_KEY_PASSWORD")
+          if (( ${#missing[@]} > 0 )); then
+            echo "::error::Missing required Android signing secrets: ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Configure Android signing
+        shell: bash
+        run: |
+          keystore_path="${RUNNER_TEMP}/phoebe-release.jks"
+          echo "${ANDROID_KEYSTORE_BASE64}" | base64 --decode > "${keystore_path}"
+          {
+            echo "PHOEBE_ANDROID_SIGNING_STORE_FILE=${keystore_path}"
+            echo "PHOEBE_ANDROID_SIGNING_STORE_PASSWORD=${ANDROID_KEYSTORE_PASSWORD}"
+            echo "PHOEBE_ANDROID_SIGNING_KEY_ALIAS=${ANDROID_KEY_ALIAS}"
+            echo "PHOEBE_ANDROID_SIGNING_KEY_PASSWORD=${ANDROID_KEY_PASSWORD}"
+          } >> "${GITHUB_ENV}"
+
+      - name: Build Android APK and bundle
+        run: >
+          ./gradlew
+          :composeApp:assembleRelease
+          :composeApp:bundleRelease
+          -Pphoebe.versionName=${{ needs.version.outputs.version }}
+          -Pphoebe.versionCode=${{ needs.version.outputs.version_code }}
+
+      - name: Upload Android artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release
+          if-no-files-found: error
+          path: |
+            composeApp/build/outputs/apk/release/*.apk
+            composeApp/build/outputs/bundle/release/*.aab
+
+  linux:
+    name: Linux release
+    needs: version
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fakeroot
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build Linux package
+        run: >
+          ./gradlew
+          :composeApp:packageReleaseDeb
+          -Pphoebe.versionName=${{ needs.version.outputs.version }}
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-release
+          if-no-files-found: error
+          path: |
+            composeApp/build/compose/binaries/main-release/deb/*.deb
+            composeApp/build/release/main-release/deb/*.deb
+
+  windows:
+    name: Windows release
+    needs: version
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Validate Windows signing secrets
+        shell: pwsh
+        run: |
+          $missing = @()
+          if (-not $env:WINDOWS_CERTIFICATE_BASE64) { $missing += "WINDOWS_CERTIFICATE_BASE64" }
+          if (-not $env:WINDOWS_CERTIFICATE_PASSWORD) { $missing += "WINDOWS_CERTIFICATE_PASSWORD" }
+          if ($missing.Count -gt 0) {
+            Write-Error "Missing required Windows signing secrets: $($missing -join ', ')"
+            exit 1
+          }
+
+      - name: Build Windows package
+        shell: pwsh
+        run: >
+          ./gradlew
+          :composeApp:packageReleaseMsi
+          "-Pphoebe.versionName=${{ needs.version.outputs.version }}"
+
+      - name: Sign Windows installer
+        shell: pwsh
+        run: |
+          $certPath = Join-Path $env:RUNNER_TEMP "windows-certificate.pfx"
+          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64))
+          $msi = Get-ChildItem -Path "composeApp/build" -Recurse -Filter "*.msi" | Select-Object -First 1
+          if (-not $msi) {
+            throw "Could not find MSI to sign"
+          }
+          $signtool = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) {
+            throw "Could not find signtool.exe"
+          }
+          & $signtool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f $certPath /p $env:WINDOWS_CERTIFICATE_PASSWORD $msi.FullName
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          if-no-files-found: error
+          path: |
+            composeApp/build/compose/binaries/main-release/msi/*.msi
+            composeApp/build/release/main-release/msi/*.msi
+
+  macos:
+    name: macOS release
+    needs: version
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      MACOS_CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
+      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      MACOS_DEVELOPER_IDENTITY: ${{ secrets.MACOS_DEVELOPER_IDENTITY }}
+      MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Validate macOS signing secrets
+        shell: bash
+        run: |
+          missing=()
+          [[ -n "${MACOS_CERTIFICATE_BASE64}" ]] || missing+=("MACOS_CERTIFICATE_BASE64")
+          [[ -n "${MACOS_CERTIFICATE_PASSWORD}" ]] || missing+=("MACOS_CERTIFICATE_PASSWORD")
+          [[ -n "${MACOS_DEVELOPER_IDENTITY}" ]] || missing+=("MACOS_DEVELOPER_IDENTITY")
+          [[ -n "${MACOS_KEYCHAIN_PASSWORD}" ]] || missing+=("MACOS_KEYCHAIN_PASSWORD")
+          [[ -n "${APPLE_ID}" ]] || missing+=("APPLE_ID")
+          [[ -n "${APPLE_APP_SPECIFIC_PASSWORD}" ]] || missing+=("APPLE_APP_SPECIFIC_PASSWORD")
+          [[ -n "${APPLE_TEAM_ID}" ]] || missing+=("APPLE_TEAM_ID")
+          if (( ${#missing[@]} > 0 )); then
+            echo "::error::Missing required macOS signing/notarization secrets: ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Import macOS signing certificate
+        shell: bash
+        run: |
+          cert_path="${RUNNER_TEMP}/developer-id.p12"
+          keychain_path="${RUNNER_TEMP}/app-signing.keychain-db"
+          echo "${MACOS_CERTIFICATE_BASE64}" | base64 --decode > "${cert_path}"
+
+          security create-keychain -p "${MACOS_KEYCHAIN_PASSWORD}" "${keychain_path}"
+          security set-keychain-settings -lut 21600 "${keychain_path}"
+          security unlock-keychain -p "${MACOS_KEYCHAIN_PASSWORD}" "${keychain_path}"
+          security import "${cert_path}" -P "${MACOS_CERTIFICATE_PASSWORD}" -A -t cert -f pkcs12 -k "${keychain_path}"
+          security list-keychains -d user -s "${keychain_path}" login.keychain
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "${MACOS_KEYCHAIN_PASSWORD}" "${keychain_path}"
+
+          {
+            echo "compose.desktop.mac.sign=true"
+            echo "compose.desktop.mac.signing.identity=${MACOS_DEVELOPER_IDENTITY}"
+            echo "compose.desktop.mac.signing.keychain=${keychain_path}"
+          } >> "${HOME}/.gradle/gradle.properties"
+
+      - name: Build macOS package
+        shell: bash
+        run: >
+          ./gradlew
+          :composeApp:packageReleaseDmg
+          -Pphoebe.versionName=${{ needs.version.outputs.version }}
+
+      - name: Notarize macOS package
+        shell: bash
+        run: |
+          dmg="$(find composeApp/build -name '*.dmg' -print -quit)"
+          if [[ -z "${dmg}" ]]; then
+            echo "::error::Could not find DMG to notarize"
+            exit 1
+          fi
+          xcrun notarytool submit "${dmg}" \
+            --apple-id "${APPLE_ID}" \
+            --password "${APPLE_APP_SPECIFIC_PASSWORD}" \
+            --team-id "${APPLE_TEAM_ID}" \
+            --wait
+          xcrun stapler staple "${dmg}"
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-release
+          if-no-files-found: error
+          path: |
+            composeApp/build/compose/binaries/main-release/dmg/*.dmg
+            composeApp/build/release/main-release/dmg/*.dmg
+
+  github-release:
+    name: Create GitHub release
+    needs:
+      - version
+      - android
+      - linux
+      - windows
+      - macos
+    if: always() && needs.version.result == 'success' && needs.android.result == 'success' && needs.linux.result == 'success' && needs.windows.result == 'success' && needs.macos.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Create draft GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag_name }}
+          name: Phoebe ${{ needs.version.outputs.version }}
+          draft: true
+          generate_release_notes: true
+          files: release-artifacts/*
