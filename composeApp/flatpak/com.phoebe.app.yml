@@ -7,7 +7,9 @@ command: Phoebe
 finish-args:
   - --share=ipc
   - --share=network
-  - --socket=fallback-x11
+  # Compose Desktop still uses AWT on Linux; fallback-x11 hides the XWayland socket on
+  # Wayland sessions, which makes the JVM start headless and exit immediately.
+  - --socket=x11
   - --socket=wayland
   - --socket=pulseaudio
   - --device=dri

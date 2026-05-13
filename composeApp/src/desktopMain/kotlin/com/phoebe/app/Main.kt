@@ -12,29 +12,43 @@ import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import javax.swing.RootPaneContainer
 
-fun main() = application {
-    // One-time loud banner so it's obvious which build the running JVM was started from.
-    // Bump this on each interesting change you want to verify is live.
-    println("[Phoebe] desktop launched — build tag: drag-drop-plex-sync-v2")
-    val windowState = rememberWindowState(width = 1320.dp, height = 880.dp)
-    val isMacOs = isMacOs()
-    // macOS bakes the squircle shape into app icons (unlike iOS/Android, which auto-mask),
-    // so on Mac we use a pre-rounded variant. Other desktops keep the full-bleed square.
-    val iconResource = if (isMacOs) {
-        "icon-macos.png"
-    } else {
-        "icon.png"
+fun main() {
+    configureSandboxedNativeLibraries()
+    application {
+        // One-time loud banner so it's obvious which build the running JVM was started from.
+        // Bump this on each interesting change you want to verify is live.
+        println("[Phoebe] desktop launched — build tag: drag-drop-plex-sync-v2")
+        val windowState = rememberWindowState(width = 1320.dp, height = 880.dp)
+        val isMacOs = isMacOs()
+        // macOS bakes the squircle shape into app icons (unlike iOS/Android, which auto-mask),
+        // so on Mac we use a pre-rounded variant. Other desktops keep the full-bleed square.
+        val iconResource = if (isMacOs) {
+            "icon-macos.png"
+        } else {
+            "icon.png"
+        }
+        val icon = useResource(iconResource) { BitmapPainter(loadImageBitmap(it)) }
+        Window(
+            onCloseRequest = ::exitApplication,
+            title = if (isMacOs) "" else "Phoebe",
+            state = windowState,
+            icon = icon,
+        ) {
+            ApplyMacWindowChrome()
+            App()
+        }
     }
-    val icon = useResource(iconResource) { BitmapPainter(loadImageBitmap(it)) }
-    Window(
-        onCloseRequest = ::exitApplication,
-        title = if (isMacOs) "" else "Phoebe",
-        state = windowState,
-        icon = icon,
-    ) {
-        ApplyMacWindowChrome()
-        App()
-    }
+}
+
+private fun configureSandboxedNativeLibraries() {
+    if (System.getProperty("os.name").orEmpty().lowercase().contains("mac")) return
+    if (System.getProperty("jnativehook.lib.path") != null) return
+
+    val cacheRoot = System.getenv("XDG_CACHE_HOME")?.takeIf { it.isNotBlank() }
+        ?: System.getProperty("user.home")?.plus("/.cache")
+        ?: return
+    val nativeLibDir = java.io.File(cacheRoot, "phoebe/native").apply { mkdirs() }
+    System.setProperty("jnativehook.lib.path", nativeLibDir.absolutePath)
 }
 
 private fun isMacOs(): Boolean =

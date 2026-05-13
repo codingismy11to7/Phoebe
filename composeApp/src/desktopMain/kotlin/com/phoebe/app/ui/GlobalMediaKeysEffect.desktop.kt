@@ -6,7 +6,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import com.github.kwhat.jnativehook.GlobalScreen
-import com.github.kwhat.jnativehook.NativeHookException
 import com.github.kwhat.jnativehook.keyboard.NativeKeyEvent
 import com.github.kwhat.jnativehook.keyboard.NativeKeyListener
 import com.phoebe.app.domain.PlayerState
@@ -78,53 +77,53 @@ actual fun GlobalMediaKeysEffect(
         }
     } else {
         DisposableEffect(Unit) {
-            runCatching {
-                LogManager.getLogManager()?.getLogger("com.github.kwhat.jnativehook")?.level = Level.WARNING
-            }
+            try {
+                runCatching {
+                    LogManager.getLogManager()?.getLogger("com.github.kwhat.jnativehook")?.level = Level.WARNING
+                }
 
-            val registeredHookHere = try {
-                if (!GlobalScreen.isNativeHookRegistered()) {
+                val registeredHookHere = if (!GlobalScreen.isNativeHookRegistered()) {
                     GlobalScreen.registerNativeHook()
                     true
                 } else {
                     false
                 }
-            } catch (e: NativeHookException) {
-                println("[Phoebe] Global media keys unavailable: ${e.message}")
-                return@DisposableEffect onDispose { }
-            }
 
-            val listener = object : NativeKeyListener {
-                override fun nativeKeyPressed(nativeKeyEvent: NativeKeyEvent) {
-                    EventQueue.invokeLater {
-                        runCatching {
-                            when (nativeKeyEvent.keyCode) {
-                                NativeKeyEvent.VC_MEDIA_PLAY -> toggle.value.invoke()
-                                NativeKeyEvent.VC_MEDIA_NEXT -> next.value.invoke()
-                                NativeKeyEvent.VC_MEDIA_PREVIOUS -> previous.value.invoke()
-                                NativeKeyEvent.VC_MEDIA_STOP -> pause.value.invoke()
-                                else -> Unit
+                val listener = object : NativeKeyListener {
+                    override fun nativeKeyPressed(nativeKeyEvent: NativeKeyEvent) {
+                        EventQueue.invokeLater {
+                            runCatching {
+                                when (nativeKeyEvent.keyCode) {
+                                    NativeKeyEvent.VC_MEDIA_PLAY -> toggle.value.invoke()
+                                    NativeKeyEvent.VC_MEDIA_NEXT -> next.value.invoke()
+                                    NativeKeyEvent.VC_MEDIA_PREVIOUS -> previous.value.invoke()
+                                    NativeKeyEvent.VC_MEDIA_STOP -> pause.value.invoke()
+                                    else -> Unit
+                                }
                             }
                         }
                     }
+
+                    override fun nativeKeyReleased(nativeKeyEvent: NativeKeyEvent) = Unit
+
+                    override fun nativeKeyTyped(nativeKeyEvent: NativeKeyEvent) = Unit
                 }
 
-                override fun nativeKeyReleased(nativeKeyEvent: NativeKeyEvent) = Unit
+                GlobalScreen.addNativeKeyListener(listener)
 
-                override fun nativeKeyTyped(nativeKeyEvent: NativeKeyEvent) = Unit
-            }
-
-            GlobalScreen.addNativeKeyListener(listener)
-
-            onDispose {
-                GlobalScreen.removeNativeKeyListener(listener)
-                if (registeredHookHere && GlobalScreen.isNativeHookRegistered()) {
-                    runCatching {
-                        GlobalScreen.unregisterNativeHook()
-                    }.onFailure { e ->
-                        println("[Phoebe] Failed to unregister global media key hook: ${e.message}")
+                onDispose {
+                    GlobalScreen.removeNativeKeyListener(listener)
+                    if (registeredHookHere && GlobalScreen.isNativeHookRegistered()) {
+                        runCatching {
+                            GlobalScreen.unregisterNativeHook()
+                        }.onFailure { e ->
+                            println("[Phoebe] Failed to unregister global media key hook: ${e.message}")
+                        }
                     }
                 }
+            } catch (t: Throwable) {
+                println("[Phoebe] Global media keys unavailable: ${t.message}")
+                onDispose { }
             }
         }
     }
