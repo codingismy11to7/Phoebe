@@ -13,6 +13,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.phoebe.app.ui.GlobalMediaKeysEffect
+import com.phoebe.app.ui.PlatformBackHandler
 import com.phoebe.app.ui.PhoebeTheme
 import com.phoebe.app.ui.PhoebeRoot
 import com.phoebe.app.ui.mediaPlaybackShortcuts
@@ -34,6 +35,7 @@ fun App(dependencies: AppDependencies? = null) {
     val session by state.session.collectAsState()
     val mediaSources by state.mediaSources.collectAsState()
     val player by state.player.collectAsState()
+    val screen by state.screen.collectAsState()
 
     // Keep navigation in sync when session / local folders appear after async restore.
     // Catalog refresh is handled by [AppState]'s startup coroutine and explicit user actions
@@ -51,6 +53,10 @@ fun App(dependencies: AppDependencies? = null) {
     }
 
     PhoebeTheme(useLightAppearance = useLightAppearance) {
+        PlatformBackHandler(
+            enabled = state.canHandleBack(screen),
+            onBack = state::handleBack,
+        )
         GlobalMediaKeysEffect(
             player = player,
             onTogglePlayPause = { state.mediaKeyTogglePlayPause() },

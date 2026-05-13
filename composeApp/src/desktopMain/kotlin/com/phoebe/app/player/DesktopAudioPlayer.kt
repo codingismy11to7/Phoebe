@@ -1,12 +1,18 @@
 package com.phoebe.app.player
 
 import javazoom.spi.vorbis.sampled.file.VorbisAudioFileReader
+import com.phoebe.app.domain.Track
 import javafx.application.Platform
 import javafx.scene.media.Media
 import javafx.scene.media.MediaPlayer
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.net.URI
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -29,11 +35,24 @@ actual fun createAudioPlayer(): AudioPlayer = DesktopAudioPlayer()
 private class DesktopAudioPlayer : SimpleAudioPlayer() {
     private var player: MediaPlayer? = null
     private var sampledClip: Clip? = null
+    private var remoteSampledFile: File? = null
+    private val httpClient = HttpClient.newBuilder()
+        .followRedirects(HttpClient.Redirect.NORMAL)
+        .build()
     private val playbackExecutor = Executors.newSingleThreadExecutor { r ->
         Thread(r, "Phoebe-desktop-playback").apply { isDaemon = true }
     }
 
     override fun playUri(uri: String) {
+        playUri(uri, preferredSampledExtension = null)
+    }
+
+    override fun playTrack(track: Track) {
+        val uri = track.localUri ?: track.streamUrl
+        playUri(uri, preferredSampledExtension = sampledPlaybackExtensionFromTrack(track))
+    }
+
+    private fun playUri(uri: String, preferredSampledExtension: String?) {
         if (uri.isBlank()) return
         playbackExecutor.execute {
             runCatching {
@@ -46,6 +65,18 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
                         applyVolumesFromState()
                         return@execute
                     }
+                }
+                val remoteExtension = preferredSampledExtension ?: sampledPlaybackExtensionFromUri(uri)
+                if (file == null && remoteExtension != null) {
+                    val downloaded = downloadRemoteAudio(uri, remoteExtension)
+                    remoteSampledFile = downloaded
+                    val clip = openAndStartSampledClip(downloaded)
+                    if (clip != null) {
+                        sampledClip = clip
+                        applyVolumesFromState()
+                        return@execute
+                    }
+                    disposeSampled()
                 }
                 playJavaFxSync(uri)
                 applyVolumesFromState()
@@ -132,10 +163,26 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
     }.getOrNull()
 
     private fun preferSampledPlayback(file: File): Boolean {
-        return when (file.extension.lowercase()) {
+        return sampledPlaybackExtensionFromSuffix(file.extension) != null
+    }
+
+    private fun sampledPlaybackExtensionFromUri(uri: String): String? {
+        val path = runCatching { URI(uri).path }.getOrNull()
+            ?: uri.substringBefore('?').substringBefore('#')
+        return sampledPlaybackExtensionFromSuffix(path.substringAfterLast('.', missingDelimiterValue = ""))
+    }
+
+    private fun sampledPlaybackExtensionFromTrack(track: Track): String? {
+        sampledPlaybackExtensionFromSuffix(track.audioCodec.orEmpty())?.let { return it }
+        sampledPlaybackExtensionFromUri(track.localUri ?: track.streamUrl)?.let { return it }
+        return sampledPlaybackExtensionFromSuffix(track.filepath.orEmpty().substringAfterLast('.', missingDelimiterValue = ""))
+    }
+
+    private fun sampledPlaybackExtensionFromSuffix(extension: String): String? {
+        return when (extension.lowercase()) {
             // Local MP3/M4A: JavaFX decodes reliably; mp3spi + Clip can mis-handle some MP3s (noise/static).
-            "wav", "wave", "aif", "aiff", "flac", "ogg", "opus" -> true
-            else -> false
+            "wav", "wave", "aif", "aiff", "flac", "ogg", "opus" -> extension.lowercase()
+            else -> null
         }
     }
 
@@ -305,12 +352,46 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
         }
     }
 
+    private fun downloadRemoteAudio(uri: String, extension: String): File {
+        val request = HttpRequest.newBuilder(URI(uri)).GET().build()
+        val response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream())
+        if (response.statusCode() !in 200..299) {
+            response.body().close()
+            error("Plex stream request failed (${response.statusCode()})")
+        }
+        val contentType = response.headers().firstValue("content-type").orElse("").lowercase()
+        if (contentType.startsWith("text/") ||
+            contentType.contains("html") ||
+            contentType.contains("json") ||
+            contentType.contains("xml")
+        ) {
+            response.body().close()
+            error("Plex stream returned $contentType instead of audio")
+        }
+        val suffix = ".$extension"
+        val temp = Files.createTempFile("phoebe-plex-stream-", suffix).toFile()
+        temp.deleteOnExit()
+        try {
+            response.body().use { input ->
+                Files.copy(input, temp.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            }
+        } catch (e: Throwable) {
+            temp.delete()
+            throw e
+        }
+        return temp
+    }
+
     private fun disposeSampled() {
         runCatching {
             sampledClip?.stop()
             sampledClip?.close()
         }
         sampledClip = null
+        remoteSampledFile?.let { temp ->
+            runCatching { temp.delete() }
+        }
+        remoteSampledFile = null
     }
 
     private fun disposeJavaFxBlocking() {

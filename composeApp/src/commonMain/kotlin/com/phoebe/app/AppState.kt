@@ -260,6 +260,26 @@ class AppState(
         mutableScreen.value = detailStack.removeLastOrNull() ?: defaultBrowseScreen()
     }
 
+    fun canHandleBack(screenSnapshot: AppScreen = mutableScreen.value): Boolean =
+        when (screenSnapshot) {
+            AppScreen.SignIn, AppScreen.Home -> false
+            AppScreen.Player, AppScreen.ServerPicker, AppScreen.LibraryPicker -> true
+            is AppScreen.ArtistDetail, is AppScreen.AlbumDetail, is AppScreen.PlaylistDetail -> true
+        }
+
+    fun handleBack() {
+        when (mutableScreen.value) {
+            AppScreen.SignIn, AppScreen.Home -> Unit
+            AppScreen.Player -> mutableScreen.value = defaultBrowseScreen()
+            AppScreen.ServerPicker -> {
+                detailStack.clear()
+                mutableScreen.value = AppScreen.SignIn
+            }
+            AppScreen.LibraryPicker -> returnToServerPicker()
+            is AppScreen.ArtistDetail, is AppScreen.AlbumDetail, is AppScreen.PlaylistDetail -> popDetail()
+        }
+    }
+
     fun dismissDetailsToHome() {
         detailStack.clear()
         mutableScreen.value = defaultBrowseScreen()

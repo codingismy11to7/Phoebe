@@ -27,7 +27,7 @@ abstract class SimpleAudioPlayer : AudioPlayer {
             positionMs = 0L,
             durationMs = track?.durationMs ?: 0L,
         )
-        track?.let { playUri(it.localUri ?: it.streamUrl) }
+        track?.let { playTrack(it) }
         setOutputVolume(mutableState.value.volume)
         if (track != null) startProgressTicker()
     }
@@ -148,6 +148,9 @@ abstract class SimpleAudioPlayer : AudioPlayer {
     }
 
     protected abstract fun playUri(uri: String)
+    protected open fun playTrack(track: Track) {
+        playUri(track.localUri ?: track.streamUrl)
+    }
     protected open fun pause() = Unit
     protected open fun resume() = Unit
     protected open fun seek(positionMs: Long) = Unit

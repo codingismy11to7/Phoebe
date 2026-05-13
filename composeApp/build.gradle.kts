@@ -3,7 +3,7 @@ import java.io.File
 
 val phoebeVersionName = providers.gradleProperty("phoebe.versionName")
     .orElse(providers.environmentVariable("PHOEBE_VERSION_NAME"))
-    .orElse("0.1.0")
+    .orElse("1.0.0")
 
 val phoebeVersionCode = providers.gradleProperty("phoebe.versionCode")
     .orElse(providers.environmentVariable("PHOEBE_VERSION_CODE"))

@@ -33,16 +33,33 @@ jobs:
       tag_name: ${{ steps.version.outputs.tag_name }}
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Validate release version
         id: version
         shell: bash
         run: |
+          version="$(grep '^phoebe.versionName=' gradle.properties | cut -d'=' -f2- | tr -d '[:space:]')"
+          configured_version_code="$(grep '^phoebe.versionCode=' gradle.properties | cut -d'=' -f2- | tr -d '[:space:]' || true)"
+          if [[ -z "${version}" ]]; then
+            echo "::error::gradle.properties must define phoebe.versionName"
+            exit 1
+          fi
+
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            version="${{ inputs.version }}"
+            if [[ "${{ inputs.version }}" != "${version}" ]]; then
+              echo "::error::workflow_dispatch version '${{ inputs.version }}' must match gradle.properties phoebe.versionName '${version}'"
+              exit 1
+            fi
             tag_name="release/${version}"
           else
             tag_name="${GITHUB_REF_NAME}"
-            version="${tag_name#release/}"
+            expected_tag_name="release/${version}"
+            if [[ "${tag_name}" != "${expected_tag_name}" ]]; then
+              echo "::error::release tag '${tag_name}' must match gradle.properties version '${expected_tag_name}'"
+              exit 1
+            fi
           fi
 
           if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -61,7 +78,15 @@ jobs:
             exit 1
           fi
 
-          version_code=$((major * 1000000 + minor * 1000 + patch))
+          if [[ -n "${configured_version_code}" ]]; then
+            if [[ ! "${configured_version_code}" =~ ^[0-9]+$ ]]; then
+              echo "::error::phoebe.versionCode must be a positive integer"
+              exit 1
+            fi
+            version_code="${configured_version_code}"
+          else
+            version_code=$((major * 1000000 + minor * 1000 + patch))
+          fi
           {
             echo "version=${version}"
             echo "version_code=${version_code}"
@@ -178,9 +203,6 @@ jobs:
     needs: version
     runs-on: windows-latest
     timeout-minutes: 45
-    env:
-      WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
-      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
 
     steps:
       - name: Checkout
@@ -195,38 +217,12 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Validate Windows signing secrets
-        shell: pwsh
-        run: |
-          $missing = @()
-          if (-not $env:WINDOWS_CERTIFICATE_BASE64) { $missing += "WINDOWS_CERTIFICATE_BASE64" }
-          if (-not $env:WINDOWS_CERTIFICATE_PASSWORD) { $missing += "WINDOWS_CERTIFICATE_PASSWORD" }
-          if ($missing.Count -gt 0) {
-            Write-Error "Missing required Windows signing secrets: $($missing -join ', ')"
-            exit 1
-          }
-
       - name: Build Windows package
         shell: pwsh
         run: >
           ./gradlew
           :composeApp:packageReleaseMsi
           "-Pphoebe.versionName=${{ needs.version.outputs.version }}"
-
-      - name: Sign Windows installer
-        shell: pwsh
-        run: |
-          $certPath = Join-Path $env:RUNNER_TEMP "windows-certificate.pfx"
-          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64))
-          $msi = Get-ChildItem -Path "composeApp/build" -Recurse -Filter "*.msi" | Select-Object -First 1
-          if (-not $msi) {
-            throw "Could not find MSI to sign"
-          }
-          $signtool = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName -Descending | Select-Object -First 1
-          if (-not $signtool) {
-            throw "Could not find signtool.exe"
-          }
-          & $signtool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f $certPath /p $env:WINDOWS_CERTIFICATE_PASSWORD $msi.FullName
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4

@@ -17,6 +17,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import phoebe.composeapp.generated.resources.Res
 import phoebe.composeapp.generated.resources.phoebe_bird
+import phoebe.composeapp.generated.resources.phoebe_icon_rounded
 import org.jetbrains.compose.resources.painterResource
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.background
@@ -276,6 +277,213 @@ private fun SignInWelcomeScreen(
 }
 
 @Composable
+private fun MobileSignInWelcomeScreen(
+    message: String,
+    pinCode: String?,
+    onStartSignIn: () -> Unit,
+    onFinishSignIn: () -> Unit,
+    onAddLocalFolder: (String?) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var providersExpanded by remember { mutableStateOf(false) }
+    val pickLocalFolder = rememberPickLocalFolder(onPicked = onAddLocalFolder)
+    val lightMode = LocalPhoebePalette.current == PhoebePaletteLight
+
+    Column(
+        modifier
+            .fillMaxSize()
+            .background(AuthFlowBackgroundColor())
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 24.dp, vertical = 28.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Row(
+            modifier = Modifier.padding(top = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            BrandMark(size = 34.dp)
+            Text("phoebe", color = PhoebeUi.primaryText, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+        }
+
+        Spacer(Modifier.height(34.dp))
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 342.dp)
+                .aspectRatio(1f)
+                .clip(RoundedCornerShape(24.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Image(
+                painter = painterResource(Res.drawable.phoebe_icon_rounded),
+                contentDescription = "Phoebe app icon",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+
+        Spacer(Modifier.height(28.dp))
+
+        Text(
+            "Your music.\nBeautifully played.",
+            color = PhoebeUi.primaryText,
+            fontSize = 32.sp,
+            lineHeight = 38.sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(14.dp))
+        Text(
+            message.ifBlank { "High-fidelity playback, rich metadata, and a listening experience that puts your music first." },
+            color = PhoebeUi.secondaryText,
+            fontSize = 16.sp,
+            lineHeight = 23.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.widthIn(max = 350.dp),
+        )
+
+        Spacer(Modifier.height(24.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+        ) {
+            WelcomeFeatureChip(PhoebeIcon.Music, "Lossless", lightMode = lightMode)
+            WelcomeFeatureChip(PhoebeIcon.Library, "Local", lightMode = lightMode)
+            WelcomeFeatureChip(PhoebeIcon.Settings, "Metadata", lightMode = lightMode)
+        }
+
+        Spacer(Modifier.height(28.dp))
+
+        AnimatedVisibility(
+            visible = !providersExpanded,
+            enter = fadeIn(animationSpec = tween(180)) + expandVertically(animationSpec = tween(220)),
+            exit = fadeOut(animationSpec = tween(120)) + shrinkVertically(animationSpec = tween(180)),
+        ) {
+            GradientActionButton(
+                text = "Add media provider",
+                onClick = { providersExpanded = true },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+
+        AnimatedVisibility(
+            visible = providersExpanded,
+            enter = fadeIn(animationSpec = tween(180)) + expandVertically(animationSpec = tween(240)),
+            exit = fadeOut(animationSpec = tween(120)) + shrinkVertically(animationSpec = tween(180)),
+        ) {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                ProviderChoiceRow(
+                    icon = PhoebeIcon.Cast,
+                    title = if (pinCode == null) "Sign in with Plex" else "Finish Plex sign-in",
+                    subtitle = if (pinCode == null) "Stream from your Plex music library" else "Approve code $pinCode in your browser first",
+                    lightMode = lightMode,
+                    onClick = {
+                        if (pinCode == null) onStartSignIn() else onFinishSignIn()
+                    },
+                )
+                ProviderChoiceRow(
+                    icon = PhoebeIcon.Plus,
+                    title = "Add local files",
+                    subtitle = "Choose music stored on this device",
+                    lightMode = lightMode,
+                    onClick = { pickLocalFolder() },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AuthFlowBackgroundColor(): Color =
+    if (LocalPhoebePalette.current == PhoebePaletteLight) Color.White else PhoebeUi.canvasBackground
+
+@Composable
+private fun WelcomeFeatureChip(icon: PhoebeIcon, label: String, lightMode: Boolean) {
+    val chipBackground = if (lightMode) PhoebeUi.glass else PhoebeUi.subtleFill
+    Row(
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(chipBackground)
+            .border(BorderStroke(1.dp, PhoebeUi.border), CircleShape)
+            .padding(horizontal = 12.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        PhoebeIconView(icon, tint = PhoebeUi.accentLight, modifier = Modifier.size(15.dp))
+        Text(label, color = PhoebeUi.primaryText, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+    }
+}
+
+@Composable
+private fun GradientActionButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val lightMode = LocalPhoebePalette.current == PhoebePaletteLight
+    val shadowColor = if (lightMode) {
+        PhoebeUi.accent.copy(alpha = 0.22f)
+    } else {
+        PhoebeUi.accent.copy(alpha = 0.32f)
+    }
+    Box(
+        modifier
+            .height(62.dp)
+            .shadow(18.dp, RoundedCornerShape(18.dp), ambientColor = shadowColor, spotColor = shadowColor)
+            .clip(RoundedCornerShape(18.dp))
+            .background(Brush.linearGradient(listOf(PhoebeUi.accentLight, PhoebeUi.accent)))
+            .clickable(onClick = onClick)
+            .semantics { contentDescription = text },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun ProviderChoiceRow(
+    icon: PhoebeIcon,
+    title: String,
+    subtitle: String,
+    lightMode: Boolean,
+    onClick: () -> Unit,
+) {
+    val rowShape = RoundedCornerShape(18.dp)
+    val rowBackground = if (lightMode) PhoebeUi.glass else PhoebeUi.subtleFill
+    val rowShadow = if (lightMode) Modifier.shadow(12.dp, rowShape, ambientColor = Color(0x14141820), spotColor = Color(0x14141820)) else Modifier
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(rowShadow)
+            .clip(rowShape)
+            .background(rowBackground)
+            .border(BorderStroke(1.dp, PhoebeUi.border), rowShape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Box(
+            Modifier
+                .size(38.dp)
+                .clip(CircleShape)
+                .background(PhoebeUi.accent.copy(alpha = 0.16f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            PhoebeIconView(icon, tint = PhoebeUi.accentLight, modifier = Modifier.size(19.dp))
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(title, color = PhoebeUi.primaryText, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Text(subtitle, color = PhoebeUi.secondaryText, fontSize = 12.sp, lineHeight = 16.sp)
+        }
+        PhoebeIconView(PhoebeIcon.Forward, tint = PhoebeUi.mutedText, modifier = Modifier.size(18.dp))
+    }
+}
+
+@Composable
 private fun PlexServerPickerPanel(
     servers: List<PlexServer>,
     busy: Boolean,
@@ -287,6 +495,7 @@ private fun PlexServerPickerPanel(
     Column(
         modifier
             .fillMaxSize()
+            .background(AuthFlowBackgroundColor())
             .padding(horizontal = 32.dp, vertical = 24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
@@ -347,9 +556,22 @@ private fun PlexLibraryPickerPanel(
     Column(
         modifier
             .fillMaxSize()
+            .background(AuthFlowBackgroundColor())
             .padding(horizontal = 32.dp, vertical = 24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .clickable(enabled = !busy, onClick = onBack),
+                contentAlignment = Alignment.Center,
+            ) {
+                PhoebeIconView(PhoebeIcon.Back, tint = PhoebeUi.primaryText, modifier = Modifier.size(24.dp))
+            }
+            Spacer(Modifier.weight(1f))
+        }
         Text("Choose a music library", color = PhoebeUi.primaryText, fontSize = 26.sp, fontWeight = FontWeight.Bold)
         serverName?.let { n ->
             Text("Server: $n", color = PhoebeUi.mutedText, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -381,10 +603,7 @@ private fun PlexLibraryPickerPanel(
                 }
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            TextButton(onClick = onBack, enabled = !busy) { Text("Back", color = PhoebeUi.secondaryText) }
-            OutlinedButton(onClick = onCancel, enabled = !busy) { Text("Cancel sign-in") }
-        }
+        OutlinedButton(onClick = onCancel, enabled = !busy) { Text("Cancel sign-in") }
     }
 }
 
@@ -553,12 +772,12 @@ fun PhoebeRoot(
                         onCancel = state::signOut,
                         modifier = Modifier.fillMaxSize(),
                     )
-                    is AppScreen.SignIn -> SignInWelcomeScreen(
+                    is AppScreen.SignIn -> MobileSignInWelcomeScreen(
                         message = message,
                         pinCode = pin?.code,
                         onStartSignIn = state::startPlexSignIn,
                         onFinishSignIn = state::finishPlexSignIn,
-                        showLocalFolderHint = false,
+                        onAddLocalFolder = state::addLocalFolderFromUri,
                         modifier = Modifier.fillMaxSize(),
                     )
                     is AppScreen.ArtistDetail -> ArtistDetailPanel(
