@@ -18,7 +18,14 @@ git tag release/1.2.3
 git push origin release/1.2.3
 ```
 
-The release workflow validates that the tag is plain semver with a major version greater than `0`, derives Android `versionCode` from it, builds Android, Linux, Windows, and macOS packages, then creates a draft GitHub release with the generated assets. The major version requirement comes from Compose Desktop's macOS package version rules.
+The release version comes from `gradle.properties`:
+
+```properties
+phoebe.versionName=1.2.3
+phoebe.versionCode=1002003
+```
+
+The release workflow requires the pushed tag to match `phoebe.versionName`, so `phoebe.versionName=1.2.3` must be released with tag `release/1.2.3`. It validates that the version is plain semver with a major version greater than `0`, uses `phoebe.versionCode` for Android, builds Android, Linux, Windows, and macOS packages, then creates a draft GitHub release with the generated assets. The major version requirement comes from Compose Desktop's macOS package version rules.
 
 ## Secrets
 
@@ -29,10 +36,7 @@ Android signing:
 - `ANDROID_KEY_ALIAS`
 - `ANDROID_KEY_PASSWORD`
 
-Windows installer signing:
-
-- `WINDOWS_CERTIFICATE_BASE64`: base64-encoded `.pfx` certificate
-- `WINDOWS_CERTIFICATE_PASSWORD`
+Windows MSI artifacts are generated but not signed yet.
 
 macOS signing and notarization:
 
