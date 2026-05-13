@@ -251,6 +251,7 @@ jobs:
     needs: version
     runs-on: windows-latest
     timeout-minutes: 45
+    environment: release
     env:
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
       AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}

@@ -215,7 +215,23 @@ On the app registration:
 1. Open `Certificates & secrets`.
 2. Open `Federated credentials`.
 3. Add a credential for GitHub Actions.
-4. Scope it to this repository and the release workflow/tag environment you use.
+4. Scope it to this repository and the `release` environment.
+
+Use these values:
+
+```text
+Organization: j-roskopf
+Repository: Phoebe
+Entity type: Environment
+Environment name: release
+Audience: api://AzureADTokenExchange
+```
+
+That matches the Windows release job's GitHub environment:
+
+```yaml
+environment: release
+```
 
 GitHub docs:
 
