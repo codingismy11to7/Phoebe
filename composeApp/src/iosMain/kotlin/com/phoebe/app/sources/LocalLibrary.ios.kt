@@ -7,24 +7,47 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import platform.AVFoundation.AVURLAsset
 import platform.CoreMedia.CMTimeGetSeconds
+import platform.Foundation.NSDate
+import platform.Foundation.NSFileModificationDate
 import platform.Foundation.NSURL
+import platform.Foundation.NSFileSize
+import platform.Foundation.timeIntervalSince1970
 
 private val audioExt = setOf("mp3", "m4a", "flac", "wav", "aac", "ogg", "opus")
 
 actual object LocalLibraryIO {
-    actual suspend fun listAudioUris(rootUri: String): List<String> = withContext(Dispatchers.Default) {
+    @OptIn(ExperimentalForeignApi::class)
+    actual suspend fun listAudioFiles(rootUri: String): List<LocalAudioFile> = withContext(Dispatchers.Default) {
         if (!rootUri.startsWith("file:")) return@withContext emptyList()
         val path = NSURL.URLWithString(rootUri)?.path ?: return@withContext emptyList()
         val fm = platform.Foundation.NSFileManager.defaultManager
         val enumerator = fm.enumeratorAtPath(path) ?: return@withContext emptyList()
-        val out = mutableListOf<String>()
+        val out = mutableListOf<LocalAudioFile>()
         while (true) {
             val rel = enumerator.nextObject() as? String ?: break
             val ext = rel.substringAfterLast('.', "").lowercase()
             if (ext !in audioExt) continue
-            out.add(NSURL.fileURLWithPath("$path/$rel").absoluteString!!)
+            val filePath = "$path/$rel"
+            val attrs = fm.attributesOfItemAtPath(filePath, error = null)
+            val size = (attrs?.get(NSFileSize) as? Number)?.toLong() ?: 0L
+            val modified = (attrs?.get(NSFileModificationDate) as? NSDate)
+                ?.timeIntervalSince1970
+                ?.let { (it * 1000.0).toLong() }
+                ?: 0L
+            out.add(
+                LocalAudioFile(
+                    uri = NSURL.fileURLWithPath(filePath).absoluteString!!,
+                    sizeBytes = size.coerceAtLeast(0L),
+                    modifiedAtMs = modified.coerceAtLeast(0L),
+                    filepath = rel.substringAfterLast('/'),
+                ),
+            )
         }
-        out
+        out.sortedBy { it.uri }
+    }
+
+    actual suspend fun listAudioUris(rootUri: String): List<String> = withContext(Dispatchers.Default) {
+        listAudioFiles(rootUri).map { it.uri }
     }
 
     actual suspend fun fileExists(uri: String): Boolean = withContext(Dispatchers.Default) {

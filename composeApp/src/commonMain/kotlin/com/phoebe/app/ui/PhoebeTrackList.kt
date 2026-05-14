@@ -153,6 +153,7 @@ import com.phoebe.app.domain.canAddToLocalPlaylist
 import com.phoebe.app.domain.canAddToPlexPlaylist
 import com.phoebe.app.domain.isLocalMediaPlayback
 import com.phoebe.app.domain.isLocalPlaylist
+import com.phoebe.app.domain.isLikedSongsPlaylist
 import com.phoebe.app.domain.isPlexLibraryTrack
 import com.phoebe.app.domain.supportsPlexPlaylists
 import com.phoebe.app.platform.createPlatformHttpClient
@@ -245,6 +246,9 @@ internal fun ContentTrackRow(
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     val cols = libraryColumns
+    val likeActions = LocalLikeActions.current
+    val canLike = likeActions.likesEnabled && track.canAddToPlexPlaylist()
+    val liked = likeActions.isLiked(track)
     val techParts = remember(track.id, cols) {
         buildList {
             if (cols.audioCodec && !track.audioCodec.isNullOrBlank()) add(track.audioCodec!!)
@@ -348,6 +352,11 @@ internal fun ContentTrackRow(
             } else {
                 Spacer(Modifier.width(8.dp))
             }
+            LikeButton(
+                liked = liked,
+                enabled = canLike,
+                onClick = { likeActions.onToggleLiked(track) },
+            )
             Box(
                 Modifier.size(40.dp).clip(CircleShape).clickable { menuExpanded = true },
                 contentAlignment = Alignment.Center,
@@ -374,6 +383,7 @@ internal fun TrackActionMenu(
     track: Track? = null,
 ) {
     val actions = LocalPlaylistActions.current
+    val likeActions = LocalLikeActions.current
     val metadataEditorActions = LocalMetadataEditorActions.current
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
         if (track != null) {
@@ -393,6 +403,16 @@ internal fun TrackActionMenu(
             },
         )
         if (track != null) {
+            if (likeActions.likesEnabled && track.canAddToPlexPlaylist()) {
+                val liked = likeActions.isLiked(track)
+                DropdownMenuItem(
+                    text = { Text(if (liked) "Unlike Song" else "Like Song") },
+                    onClick = {
+                        likeActions.onToggleLiked(track)
+                        onDismiss()
+                    },
+                )
+            }
             AddToPlaylistMenuItems(
                 track = track,
                 actions = actions,
@@ -405,6 +425,33 @@ internal fun TrackActionMenu(
                 onDownload()
                 onDismiss()
             },
+        )
+    }
+}
+
+@Composable
+internal fun LikeButton(
+    liked: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier
+            .size(34.dp)
+            .clip(CircleShape)
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        PhoebeIconView(
+            PhoebeIcon.Heart,
+            tint = when {
+                liked -> PhoebeUi.accentLight
+                enabled -> PhoebeUi.secondaryText
+                else -> PhoebeUi.mutedText.copy(alpha = 0.35f)
+            },
+            modifier = Modifier.size(17.dp),
+            filled = liked,
         )
     }
 }
@@ -600,12 +647,15 @@ internal fun filterArtistsByQuery(artists: List<Artist>, query: String): List<Ar
 /** Filter playlists by query against playlist title. */
 internal fun filterPlaylistsByQuery(playlists: List<Playlist>, query: String): List<Playlist> {
     val trimmed = query.trim()
-    if (trimmed.isBlank()) return playlists
-    return playlists.filter { it.title.contains(trimmed, ignoreCase = true) }
+    val filtered = if (trimmed.isBlank()) {
+        playlists
+    } else {
+        playlists.filter { it.title.contains(trimmed, ignoreCase = true) }
+    }
+    return filtered.sortedWith(compareByDescending<Playlist> { it.isLikedSongsPlaylist() })
 }
 
 internal fun artistAlbumCountSubtitle(artist: Artist): String {
     val w = if (artist.albumCount == 1) "album" else "albums"
     return "${artist.albumCount} $w"
 }
-

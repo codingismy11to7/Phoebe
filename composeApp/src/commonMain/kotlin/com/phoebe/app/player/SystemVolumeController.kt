@@ -15,6 +15,13 @@ interface SystemVolumeController {
     /** Whether this controller actually drives system volume. */
     val isSupported: Boolean
 
+    /**
+     * Whether app playback should stay at unity while this controller owns audible
+     * volume. Desktop output devices can reject OS-level writes, so those platforms
+     * may expose system volume reads without making the app slider depend on them.
+     */
+    val controlsPlayerOutput: Boolean get() = isSupported
+
     /** Latest OS volume in 0..1, or 0.7f when [isSupported] is false. */
     val volume: StateFlow<Float>
 

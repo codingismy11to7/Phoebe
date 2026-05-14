@@ -94,6 +94,43 @@ class LocalMp3FolderEndToEndDesktopTest {
         assertEquals(track.localUri, player.lastUri)
         assertTrue(player.state.value.isPlaying)
     }
+
+    @Test
+    fun repeatedRefreshKeepsLocalTrackIdentityAndFirstSeenDates() = runTest {
+        val music = temp.newFolder("music")
+        val alpha = File(music, "alpha.mp3")
+        val beta = File(music, "beta.mp3")
+        alpha.writeMinimalMp3Bytes()
+        beta.writeMinimalMp3Bytes()
+        File(music, "notes.txt").writeText("not audio")
+
+        val (db, sqlDriver) = newInMemoryPhoebeDatabase()
+        driver = sqlDriver
+        val http = testHttpClient(MockEngine { respond("", HttpStatusCode.NotFound) })
+        val mediaSources = MediaSourcesRepository(db, PlatformStorage())
+        val catalog = CatalogRepository(
+            plexClient = PlexClient(http),
+            database = db,
+            storage = PlatformStorage(),
+            httpClient = http,
+            mediaSourcesRepository = mediaSources,
+        )
+        mediaSources.addLocalFolder(music.toURI().toString(), "Stable MP3s")
+
+        catalog.refreshAggregated(session = null)
+        val first = catalog.catalog.value.tracksByParent.values.flatten()
+            .associateBy { it.localUri.orEmpty() }
+
+        alpha.setLastModified(alpha.lastModified() + 5_000L)
+        catalog.refreshAggregated(session = null)
+        val second = catalog.catalog.value.tracksByParent.values.flatten()
+            .associateBy { it.localUri.orEmpty() }
+
+        assertEquals(first.keys, second.keys)
+        assertEquals(first[alpha.toURI().toString()]?.id, second[alpha.toURI().toString()]?.id)
+        assertEquals(first[alpha.toURI().toString()]?.dateAddedMs, second[alpha.toURI().toString()]?.dateAddedMs)
+        assertEquals(first[beta.toURI().toString()]?.dateAddedMs, second[beta.toURI().toString()]?.dateAddedMs)
+    }
 }
 
 private fun File.writeMinimalMp3Bytes() {

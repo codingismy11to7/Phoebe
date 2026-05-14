@@ -3,6 +3,8 @@ package com.phoebe.app.data
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.CatalogSnapshot
+import com.phoebe.app.domain.CatalogSyncPhase
+import com.phoebe.app.domain.CatalogSyncState
 import com.phoebe.app.domain.Track
 
 /**
@@ -58,6 +60,47 @@ private fun trackMatchesArtist(track: Track, artistTitle: String): Boolean {
 
 fun catalogTracksForAlbum(catalog: CatalogSnapshot, albumId: String): List<Track> =
     catalog.tracksByParent[albumId].orEmpty()
+
+/** True when album count for [artistTitle] is not yet available in [catalog]. */
+fun catalogArtistAlbumCountLoading(catalog: CatalogSnapshot, artist: Artist, sync: CatalogSyncState): Boolean {
+    val albums = catalogAlbumsForArtist(catalog, artist.title)
+    if (albums.isNotEmpty()) return false
+    if (artist.albumCount > 0) {
+        return sync.isActive && sync.phase <= CatalogSyncPhase.LoadingLibrary
+    }
+    return sync.isActive && sync.phase <= CatalogSyncPhase.LoadingLibrary
+}
+
+/** True when per-track stats (songs, duration, genre) for [artistTitle] are still being fetched. */
+fun catalogArtistTrackStatsLoading(
+    catalog: CatalogSnapshot,
+    artist: Artist,
+    sync: CatalogSyncState,
+    catalogRefreshing: Boolean = false,
+): Boolean {
+    if (catalogTracksForArtist(catalog, artist.title).isNotEmpty()) return false
+    val albums = catalogAlbumsForArtist(catalog, artist.title)
+    if (albums.isEmpty()) {
+        return sync.isActive &&
+            (sync.phase == CatalogSyncPhase.LoadingSongs || sync.phase == CatalogSyncPhase.LoadingLibrary)
+    }
+    val pending = albums.any { !catalog.tracksByParent.containsKey(it.id) }
+    if (!pending) return false
+    return (sync.isActive && sync.phase == CatalogSyncPhase.LoadingSongs) || catalogRefreshing
+}
+
+/** True when track list / duration for [albumId] has not been loaded into [catalog] yet. */
+fun catalogAlbumTrackStatsLoading(
+    catalog: CatalogSnapshot,
+    album: Album,
+    sync: CatalogSyncState,
+    catalogRefreshing: Boolean = false,
+): Boolean {
+    val loaded = catalog.tracksByParent[album.id]
+    if (!loaded.isNullOrEmpty()) return false
+    if (loaded != null) return false
+    return (sync.isActive && sync.phase == CatalogSyncPhase.LoadingSongs) || catalogRefreshing
+}
 
 /** Best-effort genre for an artist: most frequent non-blank genre across their tracks/albums. */
 fun catalogArtistGenre(catalog: CatalogSnapshot, artistTitle: String): String? {

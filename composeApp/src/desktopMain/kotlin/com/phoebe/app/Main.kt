@@ -10,16 +10,16 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowScope
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import com.phoebe.app.platform.PhoebeLog
+import com.phoebe.app.platform.isDebugBuild
 import com.phoebe.app.ui.RegisterDesktopWindowKeyDispatcher
 import javax.swing.RootPaneContainer
 
 fun main() {
     configureSandboxedNativeLibraries()
     application {
-        // One-time loud banner so it's obvious which build the running JVM was started from.
-        // Bump this on each interesting change you want to verify is live.
-        println("[Phoebe] desktop launched — build tag: space-playback-v3")
-        val windowState = rememberWindowState(width = 1320.dp, height = 880.dp)
+        PhoebeLog.d("Phoebe") { "desktop launched (debug=${isDebugBuild()})" }
+        val windowState = rememberWindowState(width = 1480.dp, height = 880.dp)
         val isMacOs = isMacOs()
         // macOS bakes the squircle shape into app icons (unlike iOS/Android, which auto-mask),
         // so on Mac we use a pre-rounded variant. Other desktops keep the full-bleed square.

@@ -149,6 +149,7 @@ import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
+import com.phoebe.app.domain.canAddToPlexPlaylist
 import com.phoebe.app.player.CastState
 import com.phoebe.app.domain.isLocalMediaPlayback
 import com.phoebe.app.domain.isPlexLibraryTrack
@@ -192,6 +193,9 @@ internal fun DesktopTransport(
     onCast: () -> Unit,
 ) {
     val hasTrack = track != null
+    val likeActions = LocalLikeActions.current
+    val canLike = track != null && likeActions.likesEnabled && track.canAddToPlexPlaylist()
+    val liked = track != null && likeActions.isLiked(track)
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -224,11 +228,11 @@ internal fun DesktopTransport(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        PhoebeIconView(
-            PhoebeIcon.Heart,
-            tint = if (hasTrack) PhoebeUi.accentLight else PhoebeUi.mutedText.copy(alpha = 0.35f),
-            modifier = Modifier.size(18.dp),
-            filled = hasTrack,
+        LikeButton(
+            liked = liked,
+            enabled = canLike,
+            onClick = { track?.let(likeActions.onToggleLiked) },
+            modifier = Modifier.size(34.dp),
         )
         Spacer(Modifier.weight(1f))
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -465,4 +469,3 @@ internal fun CastIcon(active: Boolean, loading: Boolean, enabled: Boolean, onCli
         }
     }
 }
-

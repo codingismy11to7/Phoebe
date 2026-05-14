@@ -16,6 +16,11 @@ import platform.UIKit.UIApplication
 import platform.UIKit.UIViewController
 import platform.UIKit.UIWindow
 import platform.UIKit.UIWindowScene
+import kotlin.experimental.ExperimentalNativeApi
+import kotlin.native.Platform
+
+@OptIn(ExperimentalNativeApi::class)
+actual fun isDebugBuild(): Boolean = Platform.isDebugBinary
 
 actual fun createPlatformHttpClient(): HttpClient = HttpClient(Darwin) {
     install(HttpTimeout) {
@@ -112,3 +117,7 @@ actual fun prefersReducedArtworkEffects(): Boolean = false
 actual fun catalogTrackPrefetchAlbumCount(): Int = 6
 
 actual fun catalogTrackPrefetchParallelism(): Int = 2
+
+internal actual fun platformLog(tag: String, message: String) {
+    println("[$tag] $message")
+}

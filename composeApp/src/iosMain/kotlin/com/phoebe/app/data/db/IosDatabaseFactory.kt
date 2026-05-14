@@ -29,7 +29,7 @@ private fun wipeIfRevisionChanged() {
     val defaults = NSUserDefaults.standardUserDefaults
     val present = defaults.objectForKey(LocalDbRevisionKey) != null
     val onDisk = if (present) defaults.integerForKey(LocalDbRevisionKey) else null
-    if (onDisk != null && onDisk != LocalDbRevision) {
+    if (onDisk != null && onDisk < 6L) {
         val docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, true)
             .firstOrNull() as? String
         if (docs != null) {

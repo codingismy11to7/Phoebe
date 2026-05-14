@@ -106,6 +106,28 @@ Phoebe is a Compose Multiplatform Plex-first music player for Android, iOS, desk
 
 The Android SDK path is set in `local.properties` for this machine and ignored by git.
 
+## Debug logging
+
+Verbose diagnostics use a shared `PhoebeLog` helper (`composeApp/src/commonMain/kotlin/com/phoebe/app/platform/PhoebeLog.kt`). All log calls are no-ops in release builds.
+
+```kotlin
+PhoebeLog.d("MyComponent") { "lifecycle or error detail" }
+PhoebeLog.v("MyComponent") { "high-volume trace" }
+```
+
+Lazy message lambdas avoid string work when logging is disabled.
+
+| Platform | Enabled when |
+|----------|----------------|
+| **Android** | `BuildConfig.DEBUG` (debug APK / `assembleDebug`) |
+| **iOS** | Xcode **Debug** configuration (`Platform.isDebugBinary`) |
+| **Desktop** | `-Dphoebe.debug=true` (set automatically for `./gradlew :composeApp:run` and desktop tests; off by default in packaged release builds) |
+| **Web (Wasm)** | Dev host (`localhost` / `127.0.0.1`), or `globalThis.PHOEBE_DEBUG = true` in the browser console |
+
+Android logs go to Logcat (`Log.d`). Other platforms print `[tag] message` to stdout / the browser console.
+
+Instrumented areas include catalog sync, Plex session and API calls, local folder indexing, playback, and app startup.
+
 ## Mockups
 
 Design direction and UI explorations from the `mockups/` folder (may differ slightly from the current app build).

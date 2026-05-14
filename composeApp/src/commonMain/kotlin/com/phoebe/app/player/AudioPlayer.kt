@@ -11,6 +11,7 @@ interface AudioPlayer {
     fun togglePlayPause()
     fun clearQueue()
     fun addToUpNext(track: Track)
+    fun appendToQueue(tracks: List<Track>)
     fun moveUpNext(fromIndex: Int, toIndex: Int)
     fun removeUpNext(index: Int)
     fun next()

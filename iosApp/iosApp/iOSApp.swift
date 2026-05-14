@@ -1,9 +1,10 @@
 import SwiftUI
+import ComposeApp
 
 @main
 struct iOSApp: App {
     init() {
-        EnsureIosPlaybackRuntimeKt.ensureIosPlaybackRuntime()
+        PlatformPlayback_iosKt.ensureIosPlaybackRuntime()
     }
 
     var body: some Scene {

@@ -31,6 +31,7 @@ actual fun createSystemVolumeController(): SystemVolumeController {
  */
 private class MacSystemVolumeController : SystemVolumeController {
     override val isSupported: Boolean = true
+    override val controlsPlayerOutput: Boolean = false
     private val _volume = MutableStateFlow(readSystemVolume() ?: 0.7f)
     override val volume: StateFlow<Float> = _volume
     private var pollJob: Job? = null
@@ -90,6 +91,7 @@ private class MacSystemVolumeController : SystemVolumeController {
  */
 private class LinuxSystemVolumeController : SystemVolumeController {
     override val isSupported: Boolean = readSinkVolume() != null
+    override val controlsPlayerOutput: Boolean = false
     private val _volume = MutableStateFlow(readSinkVolume() ?: 0.7f)
     override val volume: StateFlow<Float> = _volume
     private var pollJob: Job? = null

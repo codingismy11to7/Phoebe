@@ -118,6 +118,15 @@ abstract class SimpleAudioPlayer : AudioPlayer {
         mutableState.value = state.copy(queue = newQueue, currentIndex = newCurrent)
     }
 
+    override fun appendToQueue(tracks: List<Track>) {
+        if (tracks.isEmpty()) return
+        val state = mutableState.value
+        val existingIds = state.queue.map { it.id }.toMutableSet()
+        val additions = tracks.filter { existingIds.add(it.id) }
+        if (additions.isEmpty()) return
+        mutableState.value = state.copy(queue = state.queue + additions)
+    }
+
     override fun moveUpNext(fromIndex: Int, toIndex: Int) {
         val state = mutableState.value
         val base = state.currentIndex + 1

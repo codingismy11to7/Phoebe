@@ -212,6 +212,33 @@ internal fun Modifier.draggableSong(
         }
 }
 
+internal fun Modifier.draggablePlaylist(
+    playlist: Playlist,
+    enabled: Boolean = true,
+): Modifier = composed {
+    val controller = LocalDragDrop.current ?: return@composed this
+    if (!LocalPlaylistDragEnabled.current) return@composed this
+    val actions = LocalPlaylistActions.current
+    val allowDrag = enabled && actions.playlistsEnabled && playlist.id.startsWith("plex:")
+    if (!allowDrag) return@composed this
+    var origin by remember { mutableStateOf(Offset.Zero) }
+    this
+        .onGloballyPositioned { origin = it.positionInRoot() }
+        .pointerInput(playlist.id) {
+            detectDragGesturesAfterLongPress(
+                onDragStart = { offset -> controller.start(playlist, origin + offset) },
+                onDrag = { change, _ -> controller.update(origin + change.position) },
+                onDragEnd = {
+                    val target = controller.end()
+                    if (target != null && target.id != playlist.id) {
+                        actions.onCopyPlaylistToPlaylist(playlist, target)
+                    }
+                },
+                onDragCancel = { controller.cancel() },
+            )
+        }
+}
+
 /**
  * Marks this composable as a drop target for a song being dragged onto [playlist]. The
  * registered bounds are kept in root-window coordinates so they line up with the pointer

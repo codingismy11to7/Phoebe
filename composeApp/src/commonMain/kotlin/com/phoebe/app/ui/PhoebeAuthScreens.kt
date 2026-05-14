@@ -239,108 +239,130 @@ internal fun MobileSignInWelcomeScreen(
     val pickLocalFolder = rememberPickLocalFolder(onPicked = onAddLocalFolder)
     val lightMode = LocalPhoebePalette.current == PhoebePaletteLight
 
-    Column(
-        modifier
+    BoxWithConstraints(
+        modifier = modifier
             .fillMaxSize()
-            .background(AuthFlowBackgroundColor())
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 24.dp, vertical = 28.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+            .background(AuthFlowBackgroundColor()),
     ) {
-        Row(
-            modifier = Modifier.padding(top = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            BrandMark(size = 34.dp)
-            Text("phoebe", color = PhoebeUi.primaryText, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-        }
+        val compactHeight = maxHeight < 820.dp
+        val heroMaxSize = if (compactHeight) 282.dp else 342.dp
+        val topPadding = if (compactHeight) 18.dp else 28.dp
+        val brandTopPadding = if (compactHeight) 8.dp else 16.dp
+        val brandSpacer = if (compactHeight) 22.dp else 34.dp
+        val heroSpacer = if (compactHeight) 22.dp else 28.dp
+        val featureSpacer = if (compactHeight) 20.dp else 24.dp
+        val ctaSpacer = if (compactHeight) 22.dp else 28.dp
+        val titleSize = if (compactHeight) 30.sp else 32.sp
+        val titleLineHeight = if (compactHeight) 35.sp else 38.sp
 
-        Spacer(Modifier.height(34.dp))
-
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .widthIn(max = 342.dp)
-                .aspectRatio(1f)
-                .clip(RoundedCornerShape(24.dp)),
-            contentAlignment = Alignment.Center,
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(start = 24.dp, top = topPadding, end = 24.dp, bottom = 24.dp)
+                .navigationBarsPadding(),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Image(
-                painter = painterResource(Res.drawable.phoebe_icon_rounded),
-                contentDescription = "Phoebe app icon",
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxSize(),
+            Row(
+                modifier = Modifier.padding(top = brandTopPadding),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                BrandMark(size = if (compactHeight) 30.dp else 34.dp)
+                Text(
+                    "phoebe",
+                    color = PhoebeUi.primaryText,
+                    fontSize = if (compactHeight) 25.sp else 28.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+
+            Spacer(Modifier.height(brandSpacer))
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = heroMaxSize)
+                    .aspectRatio(1f)
+                    .clip(RoundedCornerShape(24.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Image(
+                    painter = painterResource(Res.drawable.phoebe_icon_rounded),
+                    contentDescription = "Phoebe app icon",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+
+            Spacer(Modifier.height(heroSpacer))
+
+            Text(
+                "Your music.\nBeautifully played.",
+                color = PhoebeUi.primaryText,
+                fontSize = titleSize,
+                lineHeight = titleLineHeight,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
             )
-        }
+            Spacer(Modifier.height(14.dp))
+            Text(
+                message.ifBlank { "High-fidelity playback, rich metadata, and a listening experience that puts your music first." },
+                color = PhoebeUi.secondaryText,
+                fontSize = 16.sp,
+                lineHeight = 23.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.widthIn(max = 350.dp),
+            )
 
-        Spacer(Modifier.height(28.dp))
+            Spacer(Modifier.height(featureSpacer))
 
-        Text(
-            "Your music.\nBeautifully played.",
-            color = PhoebeUi.primaryText,
-            fontSize = 32.sp,
-            lineHeight = 38.sp,
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(Modifier.height(14.dp))
-        Text(
-            message.ifBlank { "High-fidelity playback, rich metadata, and a listening experience that puts your music first." },
-            color = PhoebeUi.secondaryText,
-            fontSize = 16.sp,
-            lineHeight = 23.sp,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.widthIn(max = 350.dp),
-        )
-
-        Spacer(Modifier.height(24.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
-        ) {
-            WelcomeFeatureChip(PhoebeIcon.Music, "Lossless", lightMode = lightMode)
-            WelcomeFeatureChip(PhoebeIcon.Library, "Local", lightMode = lightMode)
-            WelcomeFeatureChip(PhoebeIcon.Settings, "Metadata", lightMode = lightMode)
-        }
-
-        Spacer(Modifier.height(28.dp))
-
-        AnimatedVisibility(
-            visible = !providersExpanded,
-            enter = fadeIn(animationSpec = tween(180)) + expandVertically(animationSpec = tween(220)),
-            exit = fadeOut(animationSpec = tween(120)) + shrinkVertically(animationSpec = tween(180)),
-        ) {
-            GradientActionButton(
-                text = "Add media provider",
-                onClick = { providersExpanded = true },
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-            )
-        }
+                horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+            ) {
+                WelcomeFeatureChip(PhoebeIcon.Music, "Lossless", lightMode = lightMode)
+                WelcomeFeatureChip(PhoebeIcon.Library, "Local", lightMode = lightMode)
+                WelcomeFeatureChip(PhoebeIcon.Settings, "Metadata", lightMode = lightMode)
+            }
 
-        AnimatedVisibility(
-            visible = providersExpanded,
-            enter = fadeIn(animationSpec = tween(180)) + expandVertically(animationSpec = tween(240)),
-            exit = fadeOut(animationSpec = tween(120)) + shrinkVertically(animationSpec = tween(180)),
-        ) {
-            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                ProviderChoiceRow(
-                    icon = PhoebeIcon.Cast,
-                    title = if (pinCode == null) "Sign in with Plex" else "Finish Plex sign-in",
-                    subtitle = if (pinCode == null) "Stream from your Plex music library" else "Approve code $pinCode in your browser first",
-                    lightMode = lightMode,
-                    onClick = {
-                        if (pinCode == null) onStartSignIn() else onFinishSignIn()
-                    },
+            Spacer(Modifier.height(ctaSpacer))
+
+            AnimatedVisibility(
+                visible = !providersExpanded,
+                enter = fadeIn(animationSpec = tween(180)) + expandVertically(animationSpec = tween(220)),
+                exit = fadeOut(animationSpec = tween(120)) + shrinkVertically(animationSpec = tween(180)),
+            ) {
+                GradientActionButton(
+                    text = "Add media provider",
+                    onClick = { providersExpanded = true },
+                    modifier = Modifier.fillMaxWidth(),
                 )
-                ProviderChoiceRow(
-                    icon = PhoebeIcon.Plus,
-                    title = "Add local files",
-                    subtitle = "Choose music stored on this device",
-                    lightMode = lightMode,
-                    onClick = { pickLocalFolder() },
-                )
+            }
+
+            AnimatedVisibility(
+                visible = providersExpanded,
+                enter = fadeIn(animationSpec = tween(180)) + expandVertically(animationSpec = tween(240)),
+                exit = fadeOut(animationSpec = tween(120)) + shrinkVertically(animationSpec = tween(180)),
+            ) {
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    ProviderChoiceRow(
+                        icon = PhoebeIcon.Cast,
+                        title = if (pinCode == null) "Sign in with Plex" else "Finish Plex sign-in",
+                        subtitle = if (pinCode == null) "Stream from your Plex music library" else "Approve code $pinCode in your browser first",
+                        lightMode = lightMode,
+                        onClick = {
+                            if (pinCode == null) onStartSignIn() else onFinishSignIn()
+                        },
+                    )
+                    ProviderChoiceRow(
+                        icon = PhoebeIcon.Plus,
+                        title = "Add local files",
+                        subtitle = "Choose music stored on this device",
+                        lightMode = lightMode,
+                        onClick = { pickLocalFolder() },
+                    )
+                }
             }
         }
     }
@@ -513,6 +535,7 @@ internal fun PlexLibraryPickerPanel(
     libraries: List<MusicLibrary>,
     serverName: String?,
     busy: Boolean,
+    librariesLoading: Boolean = false,
     onSelectLibrary: (MusicLibrary) -> Unit,
     onBack: () -> Unit,
     onCancel: () -> Unit,
@@ -538,7 +561,20 @@ internal fun PlexLibraryPickerPanel(
                 lineHeight = 18.sp,
             )
         }
-        if (libraries.isEmpty()) {
+        if (librariesLoading && libraries.isEmpty()) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
+                    color = PhoebeUi.accent,
+                    trackColor = PhoebeUi.progressTrack,
+                )
+                Text("Finding music libraries...", color = PhoebeUi.secondaryText, fontSize = 14.sp)
+            }
+        } else if (libraries.isEmpty()) {
             Text("No music libraries found on this server.", color = PhoebeUi.secondaryText, fontSize = 14.sp)
         } else {
             LazyColumn(
@@ -550,7 +586,7 @@ internal fun PlexLibraryPickerPanel(
                         Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(12.dp))
-                            .clickable(enabled = !busy) { onSelectLibrary(lib) }
+                            .clickable(enabled = !busy && !librariesLoading) { onSelectLibrary(lib) }
                             .background(PhoebeUi.elevatedFill)
                             .padding(horizontal = 16.dp, vertical = 14.dp),
                     ) {
@@ -562,4 +598,3 @@ internal fun PlexLibraryPickerPanel(
         OutlinedButton(onClick = onCancel, enabled = !busy) { Text("Cancel sign-in") }
     }
 }
-

@@ -6,6 +6,7 @@ import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.isPlexLibraryTrack
 import com.phoebe.app.domain.serverAuthToken
 import com.phoebe.app.player.AudioPlayer
+import com.phoebe.app.platform.PhoebeLog
 import com.phoebe.app.platform.currentTimeMs
 import com.phoebe.app.sources.CatalogMerge
 import kotlin.random.Random
@@ -28,6 +29,8 @@ class PlexPlaybackReporter(
     private var machineIdentifier: String? = null
     private var playQueueItemByRatingKey: Map<String, Long> = emptyMap()
     private var lastPlayQueueSignature: String? = null
+    private var failedPlayQueueSignature: String? = null
+    private var failedPlayQueueRetryAtMs: Long = 0L
 
     fun start(scope: CoroutineScope) {
         scope.launch { watchPlaybackState() }
@@ -86,27 +89,50 @@ class PlexPlaybackReporter(
         runCatching {
             val server = sess?.selectedServer ?: return@runCatching
             val token = sess.serverAuthToken() ?: return@runCatching
-            val ratingKeys = player.queue.mapNotNull { plexRatingKey(it.id) }
+            val queueWindow = plexPlayQueueWindow(player)
+            val ratingKeys = queueWindow.mapNotNull { plexRatingKey(it.id) }
             if (ratingKeys.isEmpty()) return@runCatching
             val signature = ratingKeys.joinToString(",")
             if (signature == lastPlayQueueSignature && playQueueItemByRatingKey.isNotEmpty()) return@runCatching
+            val now = currentTimeMs()
+            if (signature == failedPlayQueueSignature && now < failedPlayQueueRetryAtMs) return@runCatching
 
             val startKey = player.currentTrack?.let { plexRatingKey(it.id) } ?: return@runCatching
             val machineId = machineIdentifier
                 ?: plexClient.machineIdentifier(server, token).also { machineIdentifier = it }
 
             val queue = plexClient.createAudioPlayQueue(server, token, machineId, ratingKeys, startKey)
-                ?: return@runCatching
+            if (queue == null) {
+                failedPlayQueueSignature = signature
+                failedPlayQueueRetryAtMs = now + PlayQueueFailureBackoffMs
+                return@runCatching
+            }
             playQueueItemByRatingKey = queue.itemIdByRatingKey
             lastPlayQueueSignature = signature
+            failedPlayQueueSignature = null
+            failedPlayQueueRetryAtMs = 0L
         }.onFailure { e ->
-            println("[PlexPlaybackReporter] play queue setup failed: ${e.message}")
+            PhoebeLog.d("PlexPlaybackReporter") { "play queue setup failed: ${e.message}" }
         }
     }
 
     private fun clearPlayQueue() {
         playQueueItemByRatingKey = emptyMap()
         lastPlayQueueSignature = null
+        failedPlayQueueSignature = null
+        failedPlayQueueRetryAtMs = 0L
+    }
+
+    private fun plexPlayQueueWindow(player: PlayerState): List<Track> {
+        if (player.queue.size <= MaxPlayQueueItems) return player.queue
+        val currentId = player.currentTrack?.id
+        val currentIndex = player.queue.indexOfFirst { it.id == currentId }
+            .takeIf { it >= 0 }
+            ?: player.currentIndex.coerceIn(0, player.queue.lastIndex)
+        val halfWindow = MaxPlayQueueItems / 2
+        val start = (currentIndex - halfWindow)
+            .coerceIn(0, (player.queue.size - MaxPlayQueueItems).coerceAtLeast(0))
+        return player.queue.subList(start, start + MaxPlayQueueItems)
     }
 
     private suspend fun reportStopped(
@@ -133,7 +159,7 @@ class PlexPlaybackReporter(
                 playQueueItemId = playQueueItemByRatingKey[ratingKey],
             )
         }.onFailure { e ->
-            println("[PlexPlaybackReporter] stopped timeline failed: ${e.message}")
+            PhoebeLog.d("PlexPlaybackReporter") { "stopped timeline failed: ${e.message}" }
         }
     }
 
@@ -159,12 +185,14 @@ class PlexPlaybackReporter(
                 playQueueItemId = playQueueItemByRatingKey[ratingKey],
             )
         }.onFailure { e ->
-            println("[PlexPlaybackReporter] timeline failed: ${e.message}")
+            PhoebeLog.d("PlexPlaybackReporter") { "timeline failed: ${e.message}" }
         }
     }
 
     internal companion object {
         const val TimelineIntervalMs = 10_000L
+        const val PlayQueueFailureBackoffMs = 10L * 60L * 1000L
+        const val MaxPlayQueueItems = 200
 
         fun plexRatingKey(trackId: String): String? =
             CatalogMerge.stripPlexId(trackId).takeIf { trackId.startsWith("plex:") }

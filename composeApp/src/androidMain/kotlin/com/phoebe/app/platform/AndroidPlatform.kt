@@ -3,7 +3,9 @@ package com.phoebe.app.platform
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.util.Log
 import com.phoebe.app.AndroidContextHolder
+import com.phoebe.app.BuildConfig
 import com.phoebe.app.data.PlexClient
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpTimeout
@@ -70,3 +72,9 @@ actual fun prefersReducedArtworkEffects(): Boolean = false
 actual fun catalogTrackPrefetchAlbumCount(): Int = 0
 
 actual fun catalogTrackPrefetchParallelism(): Int = 1
+
+actual fun isDebugBuild(): Boolean = BuildConfig.DEBUG
+
+internal actual fun platformLog(tag: String, message: String) {
+    Log.d(tag, message)
+}

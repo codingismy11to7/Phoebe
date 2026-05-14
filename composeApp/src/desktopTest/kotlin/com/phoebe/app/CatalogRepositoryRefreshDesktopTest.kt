@@ -19,8 +19,11 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.yield
 import org.junit.After
 import org.junit.Before
 import org.junit.Rule
@@ -99,8 +102,9 @@ class CatalogRepositoryRefreshDesktopTest {
         val refresh = async { repo.refreshAggregated(testSession()) }
         childrenStarted.await()
 
-        assertTrue(repo.catalogRefreshing.value)
+        assertFalse(repo.catalogRefreshing.value)
         assertEquals(CatalogSyncPhase.LoadingSongs, repo.catalogSyncState.value.phase)
+        assertFalse(repo.catalogSyncState.value.showGlobalProgress)
         assertEquals(listOf("plex:artist1"), repo.catalog.value.artists.map { it.id })
         assertEquals(listOf("plex:a1"), repo.catalog.value.albums.map { it.id })
         assertEquals(listOf("plex:p1"), repo.catalog.value.playlists.map { it.id })
@@ -115,12 +119,92 @@ class CatalogRepositoryRefreshDesktopTest {
     }
 
     @Test
+    fun refreshDoesNotProbeIdentityBeforeLoadingLibrary() = runTest {
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/identity" -> awaitCancellation()
+                "/library/sections/1/all" -> if (request.url.parameters["type"] == "10") {
+                    respondJson(trackPageJson())
+                } else {
+                    respondJson(artistsJson())
+                }
+                "/library/sections/1/albums" -> respondJson(albumsJson())
+                "/library/metadata/a1/children" -> respondJson(albumTracksJson())
+                "/playlists" -> respondJson(playlistsJson(trackCount = 0))
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val http = testHttpClient(engine)
+        val media = MediaSourcesRepository(db, PlatformStorage())
+        val repo = CatalogRepository(
+            plexClient = PlexClient(http),
+            database = db,
+            storage = PlatformStorage(),
+            httpClient = http,
+            mediaSourcesRepository = media,
+        )
+
+        repo.refreshAggregated(testSession())
+
+        assertEquals(listOf("plex:a1"), repo.catalog.value.albums.map { it.id })
+    }
+
+    @Test
+    fun refreshPublishesPlexPlaylistsBeforeArtistsFinish() = runTest {
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        val artistsStarted = CompletableDeferred<Unit>()
+        val releaseArtists = CompletableDeferred<Unit>()
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/library/sections/1/all" -> if (request.url.parameters["type"] == "10") {
+                    respondJson(trackPageJson())
+                } else {
+                    artistsStarted.complete(Unit)
+                    releaseArtists.await()
+                    respondJson(artistsJson())
+                }
+                "/library/sections/1/albums" -> respondJson(albumsJson())
+                "/playlists" -> respondJson(playlistsJson(trackCount = 1))
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val http = testHttpClient(engine)
+        val media = MediaSourcesRepository(db, PlatformStorage())
+        val repo = CatalogRepository(
+            plexClient = PlexClient(http),
+            database = db,
+            storage = PlatformStorage(),
+            httpClient = http,
+            mediaSourcesRepository = media,
+        )
+
+        val refresh = async { repo.refreshAggregated(testSession()) }
+        artistsStarted.await()
+        withTimeout(1_000) {
+            while (repo.catalog.value.playlists.map { it.id } != listOf("plex:p1")) {
+                yield()
+            }
+        }
+
+        assertTrue(repo.catalogRefreshing.value)
+        assertEquals(CatalogSyncPhase.LoadingLibrary, repo.catalogSyncState.value.phase)
+        assertEquals(listOf("plex:a1"), repo.catalog.value.albums.map { it.id })
+        assertEquals(listOf("plex:p1"), repo.catalog.value.playlists.map { it.id })
+
+        releaseArtists.complete(Unit)
+        refresh.await()
+    }
+
+    @Test
     fun metadataPublishPreservesCachedTracksUntilFreshTracksArrive() = runTest {
         val (db, d) = newInMemoryPhoebeDatabase()
         driver = d
         db.transaction {
-            db.catalogQueries.upsertArtist("plex:artist1", "Artist One", null, 1, 0, 0)
-            db.catalogQueries.upsertAlbum("plex:a1", "Album One", "Artist One", null, null, 0)
+            db.catalogQueries.upsertArtist("plex:artist1", "Artist One", null, 1, 0, 0, null)
+            db.catalogQueries.upsertAlbum("plex:a1", "Album One", "Artist One", null, null, 0, null)
             db.catalogQueries.upsertTrack(
                 id = "plex:old",
                 title = "Cached Song",
@@ -136,6 +220,8 @@ class CatalogRepositoryRefreshDesktopTest {
                 filepath = null,
                 audioCodec = null,
                 bitrateKbps = null,
+                dateAddedMs = null,
+                parentAlbumId = null,
             )
             db.catalogQueries.upsertTrackParent("plex:a1", "plex:old", 0)
         }
@@ -174,6 +260,100 @@ class CatalogRepositoryRefreshDesktopTest {
         refresh.await()
 
         assertEquals(listOf("plex:t1"), repo.catalog.value.tracksByParent["plex:a1"].orEmpty().map { it.id })
+    }
+
+    @Test
+    fun refreshPreservesExistingFirstSeenDateWhenSourceOmitsAddedAt() = runTest {
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        db.transaction {
+            db.catalogQueries.upsertArtist("plex:artist1", "Artist One", null, 1, 0, 0, 41L)
+            db.catalogQueries.upsertAlbum("plex:a1", "Album One", "Artist One", null, null, 0, 41L)
+            db.catalogQueries.upsertTrack(
+                id = "plex:t1",
+                title = "Cached Song",
+                artist = "Artist One",
+                album = "Album One",
+                durationMs = 10,
+                streamUrl = "https://plex.example/t1?X-Plex-Token=token",
+                downloadUrl = "https://plex.example/t1?X-Plex-Token=token&download=1",
+                thumbUrl = null,
+                localUri = null,
+                year = null,
+                genre = null,
+                filepath = null,
+                audioCodec = null,
+                bitrateKbps = null,
+                dateAddedMs = 41L,
+                parentAlbumId = null,
+            )
+            db.catalogQueries.upsertTrackParent("plex:a1", "plex:t1", 0)
+        }
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/library/sections/1/all" -> respondJson(artistsJson())
+                "/library/sections/1/albums" -> respondJson(albumsJson())
+                "/playlists" -> respondJson(playlistsJson(trackCount = 0))
+                "/library/metadata/a1/children" -> respondJson(albumTracksJson())
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val media = MediaSourcesRepository(db, PlatformStorage())
+        val repo = CatalogRepository(
+            plexClient = PlexClient(testHttpClient(engine)),
+            database = db,
+            storage = PlatformStorage(),
+            httpClient = testHttpClient(engine),
+            mediaSourcesRepository = media,
+        )
+        repo.restoreCachedCatalog()
+        repo.refreshAggregated(testSession())
+
+        assertEquals(41L, repo.catalog.value.tracksByParent["plex:a1"].orEmpty().single().dateAddedMs)
+    }
+
+    @Test
+    fun refreshIndexesPagedTracksIntoAlbumParentsAndRestoresThem() = runTest {
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/library/sections/1/all" -> if (request.url.parameters["type"] == "10") {
+                    respondJson(trackPageJson())
+                } else {
+                    respondJson(artistsJson())
+                }
+                "/library/sections/1/albums" -> respondJson(albumsJson())
+                "/playlists" -> respondJson(playlistsJson(trackCount = 0))
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val http = testHttpClient(engine)
+        val media = MediaSourcesRepository(db, PlatformStorage())
+        val repo = CatalogRepository(
+            plexClient = PlexClient(http),
+            database = db,
+            storage = PlatformStorage(),
+            httpClient = http,
+            mediaSourcesRepository = media,
+        )
+
+        repo.refreshAggregated(testSession())
+
+        assertEquals(listOf("plex:t1"), repo.catalog.value.tracksByParent["plex:a1"].orEmpty().map { it.id })
+        assertEquals("a1", repo.catalog.value.tracksByParent["plex:a1"].orEmpty().single().parentAlbumId)
+
+        val restored = CatalogRepository(
+            plexClient = PlexClient(http),
+            database = db,
+            storage = PlatformStorage(),
+            httpClient = http,
+            mediaSourcesRepository = media,
+        )
+        restored.restoreCachedCatalog()
+
+        assertEquals(listOf("plex:t1"), restored.catalog.value.tracksByParent["plex:a1"].orEmpty().map { it.id })
+        assertEquals("a1", restored.catalog.value.tracksByParent["plex:a1"].orEmpty().single().parentAlbumId)
     }
 
     @Test
@@ -233,9 +413,11 @@ class CatalogRepositoryRefreshDesktopTest {
         headers = headersOf(HttpHeaders.ContentType, "application/json"),
     )
 
-    private fun testSession(): PlexSession = PlexSession(
+    private fun testSession(
+        server: PlexServer = PlexServer("server", "Plex", "https://plex.example:32400", owned = true),
+    ): PlexSession = PlexSession(
         token = "token",
-        selectedServer = PlexServer("server", "Plex", "https://plex.example:32400", owned = true),
+        selectedServer = server,
         selectedLibrary = MusicLibrary("1", "Music"),
     )
 
@@ -253,7 +435,7 @@ class CatalogRepositoryRefreshDesktopTest {
         {
           "MediaContainer": {
             "Metadata": [
-              { "ratingKey": "a1", "title": "Album One", "parentTitle": "Artist One" }
+              { "ratingKey": "a1", "title": "Album One", "parentTitle": "Artist One", "librarySectionID": 1 }
             ]
           }
         }
@@ -279,6 +461,31 @@ class CatalogRepositoryRefreshDesktopTest {
                 "grandparentTitle": "Artist One",
                 "parentTitle": "Album One",
                 "duration": 1000,
+                "Media": [
+                  { "Part": [ { "key": "/library/parts/t1/file.mp3", "file": "file.mp3" } ] }
+                ]
+              }
+            ]
+          }
+        }
+    """.trimIndent()
+
+    private fun trackPageJson(): String = """
+        {
+          "MediaContainer": {
+            "size": 1,
+            "offset": 0,
+            "totalSize": 1,
+            "Metadata": [
+              {
+                "ratingKey": "t1",
+                "parentRatingKey": "a1",
+                "title": "Fresh Song",
+                "grandparentTitle": "Artist One",
+                "parentTitle": "Album One",
+                "parentYear": 1995,
+                "duration": 1000,
+                "addedAt": 1700000200,
                 "Media": [
                   { "Part": [ { "key": "/library/parts/t1/file.mp3", "file": "file.mp3" } ] }
                 ]

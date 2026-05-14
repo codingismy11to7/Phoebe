@@ -10,6 +10,7 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.phoebe.app.AndroidContextHolder
 import com.phoebe.app.domain.Track
+import com.phoebe.app.platform.PhoebeLog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -66,7 +67,7 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
         }
 
         override fun onPlayerError(error: PlaybackException) {
-            println("[AndroidAudioPlayer] playback failed: ${error.message}")
+            PhoebeLog.d("AndroidAudioPlayer") { "playback failed: ${error.message}" }
             stopBufferingTimeout()
             markPlaybackFailed()
             stopPositionSyncLoop()
@@ -226,7 +227,7 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
             } catch (e: CancellationException) {
                 throw e
             } catch (error: Throwable) {
-                println("[AndroidAudioPlayer] platform load failed: ${error.message}")
+                PhoebeLog.d("AndroidAudioPlayer") { "platform load failed: ${error.message}" }
                 stopBufferingTimeout()
                 markPlaybackFailed(generation)
             }
@@ -341,7 +342,7 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
         bufferingTimeoutJob = scope.launch {
             delay(PlaybackBufferingTimeoutMs)
             if (!isPlayRequestCurrent(generation) || !state.value.isBuffering) return@launch
-            println("[AndroidAudioPlayer] playback timed out while buffering")
+            PhoebeLog.d("AndroidAudioPlayer") { "playback timed out while buffering" }
             controllerMutex.withLock {
                 controller?.stop()
             }

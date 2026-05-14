@@ -53,6 +53,7 @@ import com.phoebe.app.domain.LibraryUiPreferences
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.isLocalMediaPlayback
+import com.phoebe.app.domain.isLikedSongsPlaylist
 import com.phoebe.app.domain.isPlexLibraryTrack
 
 @Composable
@@ -204,6 +205,10 @@ private fun MobileLibraryToolbar(
                             text = { Text("Artist name") },
                             onClick = { onSortBy(LibrarySortBy.Name); sortExpanded = false },
                         )
+                        DropdownMenuItem(
+                            text = { Text("Date added") },
+                            onClick = { onSortBy(LibrarySortBy.DateAdded); sortExpanded = false },
+                        )
                     }
                     LibraryFilterTab.Albums -> {
                         DropdownMenuItem(
@@ -217,6 +222,10 @@ private fun MobileLibraryToolbar(
                         DropdownMenuItem(
                             text = { Text("Release date") },
                             onClick = { onSortBy(LibrarySortBy.Year); sortExpanded = false },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Date added") },
+                            onClick = { onSortBy(LibrarySortBy.DateAdded); sortExpanded = false },
                         )
                     }
                     LibraryFilterTab.Songs -> {
@@ -235,6 +244,10 @@ private fun MobileLibraryToolbar(
                         DropdownMenuItem(
                             text = { Text("Release date") },
                             onClick = { onSortBy(LibrarySortBy.Year); sortExpanded = false },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Date added") },
+                            onClick = { onSortBy(LibrarySortBy.DateAdded); sortExpanded = false },
                         )
                     }
                 }
@@ -376,7 +389,16 @@ private fun MobileArtistCard(
         verticalArrangement = Arrangement.spacedBy(8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        ArtworkImage(artist.title, artist.thumbUrl, Modifier.size(112.dp).clip(CircleShape), radius = 56.dp, elevated = false)
+        ArtworkImage(
+            artist.title,
+            artist.thumbUrl,
+            Modifier
+                .size(112.dp)
+                .sharedArtworkTransition("artist:${artist.id}")
+                .clip(CircleShape),
+            radius = 56.dp,
+            elevated = false,
+        )
         Text(
             artist.title,
             color = PhoebeUi.primaryText,
@@ -384,6 +406,7 @@ private fun MobileArtistCard(
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.sharedBoundsTransition("artist:${artist.id}:title"),
         )
         Text(
             subtitle,
@@ -420,9 +443,26 @@ private fun MobileArtistRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        ArtworkImage(artist.title, artist.thumbUrl, Modifier.size(44.dp).clip(CircleShape), radius = 22.dp, elevated = false)
+        ArtworkImage(
+            artist.title,
+            artist.thumbUrl,
+            Modifier
+                .size(44.dp)
+                .sharedArtworkTransition("artist:${artist.id}")
+                .clip(CircleShape),
+            radius = 22.dp,
+            elevated = false,
+        )
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(artist.title, color = PhoebeUi.primaryText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                artist.title,
+                color = PhoebeUi.primaryText,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.sharedBoundsTransition("artist:${artist.id}:title"),
+            )
             Text(
                 subtitle,
                 color = PhoebeUi.secondaryText,
@@ -495,10 +535,31 @@ private fun MobileAlbumCard(
             .padding(6.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        ArtworkImage(album.title, album.thumbUrl, Modifier.fillMaxWidth().aspectRatio(1f), radius = 10.dp, elevated = false)
+        ArtworkImage(
+            album.title,
+            album.thumbUrl,
+            Modifier.fillMaxWidth().aspectRatio(1f).sharedArtworkTransition("album:${album.id}"),
+            radius = 10.dp,
+            elevated = false,
+        )
         Column(verticalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.padding(horizontal = 2.dp)) {
-            Text(album.title, color = PhoebeUi.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(album.artist, color = PhoebeUi.secondaryText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                album.title,
+                color = PhoebeUi.primaryText,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.sharedBoundsTransition("album:${album.id}:title"),
+            )
+            Text(
+                album.artist,
+                color = PhoebeUi.secondaryText,
+                fontSize = 11.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.sharedBoundsTransition("album:${album.id}:subtitle"),
+            )
             Text(
                 buildString {
                     album.year?.let { append(it.toString()) }
@@ -531,10 +592,31 @@ private fun MobileAlbumListRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        ArtworkImage(album.title, album.thumbUrl, Modifier.size(48.dp), radius = 8.dp, elevated = false)
+        ArtworkImage(
+            album.title,
+            album.thumbUrl,
+            Modifier.size(48.dp).sharedArtworkTransition("album:${album.id}"),
+            radius = 8.dp,
+            elevated = false,
+        )
         Column(Modifier.weight(1f)) {
-            Text(album.title, color = PhoebeUi.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(album.artist, color = PhoebeUi.secondaryText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                album.title,
+                color = PhoebeUi.primaryText,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.sharedBoundsTransition("album:${album.id}:title"),
+            )
+            Text(
+                album.artist,
+                color = PhoebeUi.secondaryText,
+                fontSize = 11.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.sharedBoundsTransition("album:${album.id}:subtitle"),
+            )
             Text(
                 buildString {
                     album.year?.let { append(it.toString()) }
@@ -623,7 +705,13 @@ private fun MobileSongRow(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
-            ArtworkImage(track.album, track.thumbUrl, Modifier.fillMaxSize(), radius = 8.dp, elevated = false)
+            ArtworkImage(
+                track.album,
+                track.thumbUrl,
+                Modifier.fillMaxSize().sharedArtworkTransition("song:${track.id}"),
+                radius = 8.dp,
+                elevated = false,
+            )
             if (isNowPlaying) {
                 Box(
                     Modifier
@@ -648,6 +736,7 @@ private fun MobileSongRow(
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.sharedBoundsTransition("song:${track.id}:title"),
             )
             Text(
                 buildString {
@@ -789,7 +878,7 @@ internal fun PlaylistsMobileView(
                     }
                 } else {
                     items(visiblePlaylists, key = { it.id }, contentType = { "playlist" }) { playlist ->
-                        val liked = playlist.title.contains("Liked", ignoreCase = true)
+                        val liked = playlist.isLikedSongsPlaylist()
                         MobilePlaylistRow(
                             icon = if (liked) PhoebeIcon.Heart else null,
                             title = playlist.title,

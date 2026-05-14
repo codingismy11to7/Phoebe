@@ -8,6 +8,11 @@ CREATE TABLE SessionRow (
     selectedServerName TEXT,
     selectedServerUri TEXT,
     selectedServerOwned INTEGER,
+    selectedServerConnectionUris TEXT,
+    selectedServerAdvertisedConnectionUris TEXT,
+    selectedServerLocalConnectionUris TEXT,
+    selectedServerAccessToken TEXT,
+    selectedServerHttpsRequired INTEGER,
     selectedLibraryKey TEXT,
     selectedLibraryTitle TEXT
 );
@@ -19,8 +24,10 @@ upsert:
 INSERT OR REPLACE INTO SessionRow(
     id, token, userName,
     selectedServerId, selectedServerName, selectedServerUri, selectedServerOwned,
+    selectedServerConnectionUris, selectedServerAdvertisedConnectionUris,
+    selectedServerLocalConnectionUris, selectedServerAccessToken, selectedServerHttpsRequired,
     selectedLibraryKey, selectedLibraryTitle
-) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?);
+) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 clear:
 DELETE FROM SessionRow;

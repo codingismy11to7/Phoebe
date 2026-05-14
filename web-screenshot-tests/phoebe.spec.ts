@@ -12,7 +12,7 @@ const coreScenarios = [
   'SignIn',
 ] as const;
 
-const lightScenarios = ['Library', 'Search', 'Player'] as const;
+const lightScenarios = ['Home', 'Library', 'Search', 'Player'] as const;
 
 for (const scenario of coreScenarios) {
   test(`web ${scenario} dark`, async ({ page }) => {

@@ -1,6 +1,7 @@
 package com.phoebe.app.data
 
 import app.cash.sqldelight.coroutines.asFlow
+import app.cash.sqldelight.async.coroutines.awaitAsOneOrNull
 import app.cash.sqldelight.coroutines.mapToList
 import com.phoebe.app.db.PhoebeDatabase
 import com.phoebe.app.domain.Track
@@ -63,6 +64,17 @@ class PlayHistoryRepository(
         }
         .stateIn(scope, SharingStarted.Eagerly, emptyMap())
 
+    val playCountsByTrack: StateFlow<Map<String, Long>> = database.playHistoryQueries
+        .selectPlayCountsByTrack()
+        .asFlow()
+        .mapToList(Dispatchers.Default)
+        .map { rows ->
+            buildMap(rows.size) {
+                for (row in rows) put(row.track_id, row.playCount)
+            }
+        }
+        .stateIn(scope, SharingStarted.Eagerly, emptyMap())
+
     /**
      * Eager warm-up. The aggregate flows are already subscribed via
      * `stateIn(Eagerly)`, so this exists only so callers can keep the same
@@ -87,6 +99,60 @@ class PlayHistoryRepository(
                 album = cleanAlbum,
                 played_at_ms = atMs,
             )
+        }
+    }
+
+    suspend fun maxImportedPlexPlayedAt(serverId: String): Long? =
+        withContext(Dispatchers.Default) {
+            database.playHistoryQueries.selectMaxImportedPlexPlayedAt(serverId).awaitAsOneOrNull()?.lastPlayed
+        }
+
+    suspend fun importPlexPlay(
+        track: Track,
+        serverId: String,
+        historyKey: String,
+        playedAtMs: Long,
+        importedAtMs: Long,
+        mergeWindowMs: Long,
+    ): Boolean {
+        if (track.id.isBlank() || historyKey.isBlank()) return false
+        val cleanArtist = track.artist.ifBlank { "Unknown Artist" }
+        val cleanAlbum = track.album.ifBlank { "Unknown Album" }
+        return withContext(Dispatchers.Default) {
+            val alreadyImported = database.playHistoryQueries
+                .selectImportedPlexHistoryKey(historyKey)
+                .awaitAsOneOrNull() != null
+            if (alreadyImported) return@withContext false
+
+            val candidatePlayedAtMs = database.playHistoryQueries
+                .selectLocalMergeCandidate(
+                    track_id = track.id,
+                    played_at_ms = playedAtMs - mergeWindowMs,
+                    played_at_ms_ = playedAtMs + mergeWindowMs,
+                )
+                .awaitAsOneOrNull()
+
+            if (candidatePlayedAtMs != null) {
+                database.playHistoryQueries.markLocalPlayAsImportedPlex(
+                    played_at_ms = playedAtMs,
+                    plex_server_id = serverId,
+                    plex_history_key = historyKey,
+                    plex_imported_at_ms = importedAtMs,
+                    track_id = track.id,
+                    played_at_ms_ = candidatePlayedAtMs,
+                )
+            } else {
+                database.playHistoryQueries.insertImportedPlexPlay(
+                    track_id = track.id,
+                    artist = cleanArtist,
+                    album = cleanAlbum,
+                    played_at_ms = playedAtMs,
+                    plex_server_id = serverId,
+                    plex_history_key = historyKey,
+                    plex_imported_at_ms = importedAtMs,
+                )
+            }
+            true
         }
     }
 

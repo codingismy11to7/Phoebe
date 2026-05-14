@@ -4,6 +4,7 @@ import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.LocalFolderMediaSourceConfig
 import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.serverAuthToken
+import com.phoebe.app.data.LocalFileMetadataCache
 import com.phoebe.app.data.PlexClient
 import io.ktor.client.HttpClient
 
@@ -21,6 +22,7 @@ data class SourceBuildContext(
     val plexClient: PlexClient,
     val httpClient: HttpClient,
     val localFolders: List<LocalFolderMediaSourceConfig>,
+    val localFileMetadataCache: LocalFileMetadataCache? = null,
 )
 
 object PlexMusicSourcePlugin : MusicSourcePlugin {
@@ -42,7 +44,7 @@ object LocalFolderMusicSourcePlugin : MusicSourcePlugin {
         if (enabled.isEmpty()) return CatalogSnapshot()
         var acc = CatalogSnapshot()
         for (cfg in enabled) {
-            val slice = LocalFolderCatalogBuilder.build(cfg)
+            val slice = LocalFolderCatalogBuilder.build(cfg, ctx.localFileMetadataCache)
             acc = CatalogMerge.merge(acc, slice)
         }
         return acc

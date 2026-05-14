@@ -225,6 +225,7 @@ internal fun LibrarySortAndDisplayBar(
                                 LibrarySortBy.Album -> "Album"
                                 LibrarySortBy.Year -> "Year"
                                 LibrarySortBy.PlaylistOrder -> "Playlist order"
+                                LibrarySortBy.DateAdded -> "Date added"
                             })
                             append(" ")
                             append(if (prefs.ascending) "↑" else "↓")
@@ -441,6 +442,7 @@ internal fun LibraryRow(
     thumbUrl: String? = null,
     modifier: Modifier = Modifier,
     elevatedArtwork: Boolean = true,
+    sharedKey: String? = null,
     onClick: () -> Unit,
 ) {
     Row(
@@ -453,12 +455,26 @@ internal fun LibraryRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        ArtworkImage(seed, thumbUrl, Modifier.size(46.dp), elevated = elevatedArtwork)
+        ArtworkImage(seed, thumbUrl, Modifier.size(46.dp).sharedArtworkTransition(sharedKey), elevated = elevatedArtwork)
         Column(Modifier.weight(1f)) {
-            Text(title, color = PhoebeUi.primaryText, fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(subtitle, color = PhoebeUi.secondaryText, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                title,
+                color = PhoebeUi.primaryText,
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.sharedBoundsTransition(sharedKey?.let { "$it:title" }),
+            )
+            Text(
+                subtitle,
+                color = PhoebeUi.secondaryText,
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.sharedBoundsTransition(sharedKey?.let { "$it:subtitle" }),
+            )
         }
         PhoebeIconView(PhoebeIcon.Forward, tint = PhoebeUi.mutedText, modifier = Modifier.size(18.dp))
     }
 }
-

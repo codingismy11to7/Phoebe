@@ -135,6 +135,7 @@ class CatalogBrowseTree(
             filepath = filepath,
             audioCodec = audioCodec,
             bitrateKbps = bitrateKbps?.toInt(),
+            dateAddedMs = dateAddedMs,
         )
 
     private fun browseFolder(

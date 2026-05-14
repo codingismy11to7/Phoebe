@@ -82,3 +82,10 @@ actual fun prefersReducedArtworkEffects(): Boolean = false
 actual fun catalogTrackPrefetchAlbumCount(): Int = 24
 
 actual fun catalogTrackPrefetchParallelism(): Int = 6
+
+actual fun isDebugBuild(): Boolean =
+    System.getProperty("phoebe.debug")?.toBooleanStrictOrNull() ?: false
+
+internal actual fun platformLog(tag: String, message: String) {
+    println("[$tag] $message")
+}

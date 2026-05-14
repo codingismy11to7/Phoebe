@@ -37,9 +37,9 @@ fun App(dependencies: AppDependencies? = null) {
     val player by state.player.collectAsState()
 
     // Keep navigation in sync when session / local folders appear after async restore.
-    // Catalog refresh is handled by [AppState]'s startup coroutine and explicit user actions
-    // (library pick, folder add/remove, sign-out) — refreshing here too duplicated full Plex
-    // rebuilds and long SQLite persists, which blocked the UI thread on wasm/js.
+    // Catalog refresh is handled by explicit user actions (manual refresh, post sign-in library
+    // pick, folder add/remove, sign-out). Startup restores the cached catalog without kicking off
+    // a full Plex rebuild.
     LaunchedEffect(session, mediaSources) {
         state.reconcileBrowseScreenIfNeeded()
     }

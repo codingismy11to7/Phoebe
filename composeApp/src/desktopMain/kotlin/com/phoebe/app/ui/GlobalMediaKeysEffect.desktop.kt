@@ -12,6 +12,7 @@ import com.github.kwhat.jnativehook.keyboard.NativeKeyListener
 import com.phoebe.app.domain.PlayerState
 import com.phoebe.app.media.MacMediaSession
 import com.phoebe.app.media.loadMacMediaDylib
+import com.phoebe.app.platform.PhoebeLog
 import java.util.logging.Level
 import java.util.logging.LogManager
 import kotlinx.coroutines.flow.collectLatest
@@ -39,10 +40,10 @@ actual fun GlobalMediaKeysEffect(
     if (isMacOs) {
         LaunchedEffect(Unit) {
             if (!loadMacMediaDylib()) {
-                println(
-                    "[Phoebe] macOS media bridge dylib not found. Run a desktop build on a Mac first " +
-                        "(e.g. ./gradlew :composeApp:compileMacMediaKeysNative) so libPhoebeMediaKeys.dylib exists.",
-                )
+                PhoebeLog.d("Phoebe") {
+                    "macOS media bridge dylib not found. Run a desktop build on a Mac first " +
+                        "(e.g. ./gradlew :composeApp:compileMacMediaKeysNative) so libPhoebeMediaKeys.dylib exists."
+                }
                 return@LaunchedEffect
             }
             MacMediaSession.onToggle = Runnable { toggle.value.invoke() }
@@ -53,7 +54,7 @@ actual fun GlobalMediaKeysEffect(
             runCatching {
                 MacMediaSession.nativeInit()
             }.onFailure { e ->
-                println("[Phoebe] macOS media session init failed: ${e.message}")
+                PhoebeLog.d("Phoebe") { "macOS media session init failed: ${e.message}" }
                 return@LaunchedEffect
             }
             try {
@@ -120,13 +121,13 @@ actual fun GlobalMediaKeysEffect(
                         runCatching {
                             GlobalScreen.unregisterNativeHook()
                         }.onFailure { e ->
-                            println("[Phoebe] Failed to unregister global media key hook: ${e.message}")
+                            PhoebeLog.d("Phoebe") { "Failed to unregister global media key hook: ${e.message}" }
                         }
                     }
                 }
             } catch (t: Throwable) {
                 DesktopGlobalMediaKeyHook.isActive = false
-                println("[Phoebe] Global media keys unavailable: ${t.message}")
+                PhoebeLog.d("Phoebe") { "Global media keys unavailable: ${t.message}" }
                 t.printStackTrace()
                 onDispose { }
             }

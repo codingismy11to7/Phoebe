@@ -4,6 +4,7 @@ import app.cash.sqldelight.async.coroutines.awaitAsList
 import com.phoebe.app.db.PhoebeDatabase
 import com.phoebe.app.domain.LocalFolderMediaSourceConfig
 import com.phoebe.app.domain.MediaSourcesState
+import com.phoebe.app.platform.PhoebeLog
 import com.phoebe.app.platform.PlatformStorage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,11 +22,13 @@ class MediaSourcesRepository(
     val state: StateFlow<MediaSourcesState> = mutableState.asStateFlow()
 
     suspend fun restore() {
+        PhoebeLog.d("MediaSourcesRepository") { "restore" }
         val rows = withContext(Dispatchers.Default) {
             database.mediaSourcesQueries.selectAll().awaitAsList()
         }
         if (rows.isNotEmpty()) {
             mutableState.value = MediaSourcesState(rows.map { it.toConfig() })
+            PhoebeLog.d("MediaSourcesRepository") { "restore from DB → ${rows.size} local folders" }
             return
         }
         val legacy = storage.readText(LegacySourcesFile) ?: return
@@ -46,9 +49,11 @@ class MediaSourcesRepository(
         }
         mutableState.value = parsed
         storage.delete(LegacySourcesFile)
+        PhoebeLog.d("MediaSourcesRepository") { "restore from legacy file → ${parsed.localFolders.size} local folders" }
     }
 
     suspend fun addLocalFolder(rootUri: String, label: String) {
+        PhoebeLog.d("MediaSourcesRepository") { "addLocalFolder label='$label' uri=$rootUri" }
         val id = "lf-${(Random.nextLong() and Long.MAX_VALUE).toString(16)}"
         val cleanLabel = label.ifBlank { "Local folder" }
         withContext(Dispatchers.Default) {
@@ -63,13 +68,18 @@ class MediaSourcesRepository(
     }
 
     suspend fun removeLocalFolder(id: String) {
+        PhoebeLog.d("MediaSourcesRepository") { "removeLocalFolder id=$id" }
         withContext(Dispatchers.Default) {
-            database.mediaSourcesQueries.delete(id)
+            database.transaction {
+                database.mediaSourcesQueries.delete(id)
+                database.catalogQueries.clearLocalFileMetadataCacheForFolder(id)
+            }
             reload()
         }
     }
 
     suspend fun setLocalFolderEnabled(id: String, enabled: Boolean) {
+        PhoebeLog.d("MediaSourcesRepository") { "setLocalFolderEnabled id=$id enabled=$enabled" }
         withContext(Dispatchers.Default) {
             database.mediaSourcesQueries.setEnabled(enabled.toDb(), id)
             reload()

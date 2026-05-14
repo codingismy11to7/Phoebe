@@ -1,9 +1,12 @@
 package com.phoebe.app.ui
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
@@ -190,6 +193,7 @@ internal data class PlayHistorySnapshot(
     val byArtist: Map<String, Long> = emptyMap(),
     val byAlbum: Map<String, Long> = emptyMap(),
     val byTrack: Map<String, Long> = emptyMap(),
+    val playCountByTrack: Map<String, Long> = emptyMap(),
 )
 
 internal val LocalPlayHistory = compositionLocalOf { PlayHistorySnapshot() }
@@ -214,12 +218,24 @@ internal data class PlaylistActions(
     /** Plex session or enabled local folders — required for any playlist UI or mutations. */
     val playlistsEnabled: Boolean = false,
     val onAddTrackToPlaylist: (Playlist, Track) -> Unit = { _, _ -> },
+    val onCopyPlaylistToPlaylist: (source: Playlist, target: Playlist) -> Unit = { _, _ -> },
     val onCreatePlaylist: (title: String, initialTracks: List<Track>) -> Unit = { _, _ -> },
     val onRequestCreatePlaylist: (initialTracks: List<Track>) -> Unit = {},
+    val onOpenLikedSongs: () -> Unit = {},
     val onExportLocalPlaylist: (Playlist, PlaylistExportFormat) -> Unit = { _, _ -> },
 )
 
 internal val LocalPlaylistActions = compositionLocalOf { PlaylistActions() }
+
+internal data class LikeActions(
+    val likedTrackIds: Set<String> = emptySet(),
+    val likesEnabled: Boolean = false,
+    val onToggleLiked: (Track) -> Unit = {},
+) {
+    fun isLiked(track: Track): Boolean = track.id in likedTrackIds
+}
+
+internal val LocalLikeActions = compositionLocalOf { LikeActions() }
 
 /**
  * Drag state for "drag a song row onto a sidebar playlist row to add it". Song rows update
@@ -228,6 +244,8 @@ internal val LocalPlaylistActions = compositionLocalOf { PlaylistActions() }
  * highlight when the pointer is hovering above them.
  */
 internal class DragDropController {
+    var draggedPlaylist by mutableStateOf<Playlist?>(null)
+        private set
     var draggedTrack by mutableStateOf<Track?>(null)
         private set
     var pointer by mutableStateOf<Offset?>(null)
@@ -239,7 +257,14 @@ internal class DragDropController {
         get() = currentHover()?.title
 
     fun start(track: Track, initialPointer: Offset) {
+        draggedPlaylist = null
         draggedTrack = track
+        pointer = initialPointer
+    }
+
+    fun start(playlist: Playlist, initialPointer: Offset) {
+        draggedTrack = null
+        draggedPlaylist = playlist
         pointer = initialPointer
     }
 
@@ -250,12 +275,14 @@ internal class DragDropController {
     /** Drops the dragged track, returning the playlist it landed on (if any). */
     fun end(): Playlist? {
         val hit = currentHover()
+        draggedPlaylist = null
         draggedTrack = null
         pointer = null
         return hit
     }
 
     fun cancel() {
+        draggedPlaylist = null
         draggedTrack = null
         pointer = null
     }
@@ -270,7 +297,7 @@ internal class DragDropController {
 
     /** True when the active drag pointer is currently hovering over [playlistId]. */
     fun isHovering(playlistId: String): Boolean {
-        if (draggedTrack == null) return false
+        if (draggedTrack == null && draggedPlaylist == null) return false
         val pt = pointer ?: return false
         return targets[playlistId]?.bounds?.contains(pt) == true
     }
@@ -287,3 +314,10 @@ internal val LocalDragDrop = compositionLocalOf<DragDropController?> { null }
 
 /** When false, song rows skip playlist drag-and-drop (mobile compact layout). */
 internal val LocalPlaylistDragEnabled = compositionLocalOf { true }
+
+internal val LocalSharedElementTransitionsEnabled = compositionLocalOf { true }
+
+@OptIn(ExperimentalSharedTransitionApi::class)
+internal val LocalSharedTransitionScope = compositionLocalOf<SharedTransitionScope?> { null }
+
+internal val LocalAnimatedVisibilityScope = compositionLocalOf<AnimatedVisibilityScope?> { null }

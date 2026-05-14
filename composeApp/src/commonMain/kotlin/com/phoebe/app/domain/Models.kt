@@ -64,6 +64,7 @@ data class Artist(
     val albumCount: Int = 0,
     /** Tracks currently loaded in [CatalogSnapshot.tracksByParent] for this artist (subset until fully fetched). */
     val songCount: Int = 0,
+    val dateAddedMs: Long? = null,
 )
 
 @Serializable
@@ -73,6 +74,7 @@ data class Album(
     val artist: String,
     val year: Int? = null,
     val thumbUrl: String? = null,
+    val dateAddedMs: Long? = null,
 )
 
 @Serializable
@@ -102,6 +104,11 @@ data class Track(
     val audioCodec: String? = null,
     /** Kilobits per second when known. */
     val bitrateKbps: Int? = null,
+    val dateAddedMs: Long? = null,
+    /** Plex playlist entry id, present when this track was loaded from a playlist. */
+    val playlistItemId: Long? = null,
+    /** Plex album rating key for flat track index responses, if known. */
+    val parentAlbumId: String? = null,
 )
 
 data class TrackMetadataUpdate(
@@ -121,6 +128,7 @@ enum class LibrarySortBy {
     Artist,
     Album,
     Year,
+    DateAdded,
 }
 
 @Serializable
@@ -159,6 +167,7 @@ enum class CatalogSyncPhase {
     LoadingSongs,
     RefreshingPlaylists,
     FinishingArtwork,
+    Persisting,
     Complete,
     Failed,
 }
@@ -168,11 +177,15 @@ data class CatalogSyncState(
     val message: String? = null,
     val loadedAlbums: Int = 0,
     val loadedTracks: Int = 0,
+    val blocking: Boolean = false,
 ) {
     val isActive: Boolean
         get() = phase != CatalogSyncPhase.Idle &&
             phase != CatalogSyncPhase.Complete &&
             phase != CatalogSyncPhase.Failed
+
+    val showGlobalProgress: Boolean
+        get() = isActive && blocking
 }
 
 @Serializable
@@ -208,8 +221,24 @@ sealed interface AppScreen {
     data object Home : AppScreen
     data class AlbumDetail(val album: Album) : AppScreen
     data class ArtistDetail(val artist: Artist) : AppScreen
+    data class SongDetail(val track: Track) : AppScreen
+    data class RecentlyAdded(val kind: RecentlyAddedKind) : AppScreen
+    data class PlayHistory(val kind: PlayHistoryKind) : AppScreen
     data class PlaylistDetail(val playlist: Playlist) : AppScreen
     data object Player : AppScreen
+}
+
+@Serializable
+enum class RecentlyAddedKind {
+    Songs,
+    Artists,
+    Albums,
+}
+
+@Serializable
+enum class PlayHistoryKind {
+    RecentlyPlayed,
+    MostPlayed,
 }
 
 /** Repeat cycle used by the audio player and surfaced in the UI. */
@@ -252,9 +281,14 @@ fun Track.isLocalMediaPlayback(): Boolean = !localUri.isNullOrBlank()
 fun Track.isPlexLibraryTrack(): Boolean = id.startsWith("plex:")
 
 const val LOCAL_PLAYLIST_ID_PREFIX = "local:playlist:"
+const val LIKED_SONGS_PLAYLIST_TITLE = "Liked Songs"
+const val PENDING_LIKED_SONGS_PLAYLIST_ID = "plex:liked-songs-pending"
 
 /** User-created playlist stored only in Phoebe (not synced to Plex). */
 fun Playlist.isLocalPlaylist(): Boolean = id.startsWith(LOCAL_PLAYLIST_ID_PREFIX)
+
+fun Playlist.isLikedSongsPlaylist(): Boolean =
+    !isLocalPlaylist() && title.equals(LIKED_SONGS_PLAYLIST_TITLE, ignoreCase = false)
 
 /** Local playlists accept on-device audio files only. */
 fun Track.canAddToLocalPlaylist(): Boolean = isLocalMediaPlayback()

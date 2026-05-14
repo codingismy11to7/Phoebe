@@ -77,6 +77,33 @@ jobs:
             composeApp/build/outputs/roborazzi/**
             composeApp/build/test-results/testDebugUnitTest/**
 
+  ios-build:
+    name: iOS build
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build iOS app
+        run: >
+          xcodebuild
+          -project iosApp/iosApp.xcodeproj
+          -scheme iosApp
+          -configuration Debug
+          -destination 'generic/platform=iOS Simulator'
+          build
+
   web-screenshots:
     name: Web screenshots
     runs-on: ubuntu-latest

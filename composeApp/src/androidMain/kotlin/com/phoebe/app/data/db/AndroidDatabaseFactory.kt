@@ -26,7 +26,7 @@ actual suspend fun createSqlDriver(schema: SqlSchema<QueryResult.AsyncValue<Unit
 private fun wipeIfRevisionChanged(context: Context) {
     val prefs = context.getSharedPreferences("phoebe-db-meta", Context.MODE_PRIVATE)
     val onDisk = if (prefs.contains(LocalDbRevisionKey)) prefs.getLong(LocalDbRevisionKey, -1L) else null
-    if (onDisk != null && onDisk != LocalDbRevision) {
+    if (onDisk != null && onDisk < 6L) {
         context.deleteDatabase(LocalDbName)
     }
     prefs.edit().putLong(LocalDbRevisionKey, LocalDbRevision).apply()

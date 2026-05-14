@@ -22,12 +22,14 @@ class PhoebeAndroidPhoneScreenshotTest {
     @Test fun phonePlaylistDark() = capturePhone("playlist", PhoebeScreenshotScenario.Playlist)
     @Test fun phoneArtistDark() = capturePhone("artist", PhoebeScreenshotScenario.Artist)
     @Test fun phoneAlbumDark() = capturePhone("album", PhoebeScreenshotScenario.Album)
+    @Test fun phoneSongDark() = capturePhone("song", PhoebeScreenshotScenario.Song)
     @Test fun phoneSearchDark() = capturePhone("search", PhoebeScreenshotScenario.Search)
     @Test fun phonePlayerDark() = capturePhone("player", PhoebeScreenshotScenario.Player)
     @Test fun phonePlayerUpNextExpandedDark() = capturePhone("player-upnext-expanded", PhoebeScreenshotScenario.PlayerUpNextExpanded)
     @Test fun phoneSettingsDark() = capturePhone("settings", PhoebeScreenshotScenario.Settings)
     @Test fun phoneSignInDark() = capturePhone("signin", PhoebeScreenshotScenario.SignIn)
 
+    @Test fun phoneHomeLight() = capturePhone("home", PhoebeScreenshotScenario.Home, useLightAppearance = true)
     @Test fun phoneLibraryLight() = capturePhone("library", PhoebeScreenshotScenario.Library, useLightAppearance = true)
     @Test fun phoneSearchLight() = capturePhone("search", PhoebeScreenshotScenario.Search, useLightAppearance = true)
     @Test fun phonePlayerLight() = capturePhone("player", PhoebeScreenshotScenario.Player, useLightAppearance = true)
@@ -40,9 +42,11 @@ class PhoebeAndroidPhoneScreenshotTest {
 class PhoebeAndroidTabletScreenshotTest {
     @Test fun tabletHomeDark() = captureTablet("home", PhoebeScreenshotScenario.Home)
     @Test fun tabletLibraryDark() = captureTablet("library", PhoebeScreenshotScenario.Library)
+    @Test fun tabletLibraryUpNextExpandedDark() = captureTabletUpNextExpanded("library", PhoebeScreenshotScenario.Library)
     @Test fun tabletPlaylistDark() = captureTablet("playlist", PhoebeScreenshotScenario.Playlist)
     @Test fun tabletArtistDark() = captureTablet("artist", PhoebeScreenshotScenario.Artist)
     @Test fun tabletSearchDark() = captureTablet("search", PhoebeScreenshotScenario.Search)
+    @Test fun tabletSearchUpNextExpandedDark() = captureTabletUpNextExpanded("search", PhoebeScreenshotScenario.Search)
     @Test fun tabletPlayerDark() = captureTablet("player", PhoebeScreenshotScenario.Player)
 }
 
@@ -68,6 +72,17 @@ private fun captureTablet(
     heightDp = 820,
 )
 
+private fun captureTabletUpNextExpanded(
+    slug: String,
+    scenario: PhoebeScreenshotScenario,
+) = capture(
+    name = "android-tablet-$slug-upnext-expanded-dark",
+    scenario = scenario,
+    widthDp = 1180,
+    heightDp = 820,
+    forceShowQueue = true,
+)
+
 @OptIn(ExperimentalRoborazziApi::class)
 private fun capture(
     name: String,
@@ -75,6 +90,7 @@ private fun capture(
     widthDp: Int,
     heightDp: Int,
     useLightAppearance: Boolean = false,
+    forceShowQueue: Boolean = false,
 ) {
     captureRoboImage(
         filePath = "src/screenshotTest/roborazzi/$name.png",
@@ -85,6 +101,7 @@ private fun capture(
         PhoebeScreenshotApp(
             scenario = scenario,
             useLightAppearance = useLightAppearance,
+            forceShowQueue = forceShowQueue,
             modifier = Modifier,
         )
     }

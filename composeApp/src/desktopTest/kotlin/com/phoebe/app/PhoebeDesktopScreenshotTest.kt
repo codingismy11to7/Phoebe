@@ -45,6 +45,7 @@ class PhoebeDesktopScreenshotTest {
     @Test
     fun desktopRepresentativeFlowsLight() = runDesktopComposeUiTest(width = 1365, height = 900) {
         listOf(
+            PhoebeScreenshotScenario.Home,
             PhoebeScreenshotScenario.Library,
             PhoebeScreenshotScenario.Search,
             PhoebeScreenshotScenario.Player,
