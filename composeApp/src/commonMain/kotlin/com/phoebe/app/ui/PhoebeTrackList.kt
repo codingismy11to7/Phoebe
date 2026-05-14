@@ -271,14 +271,14 @@ internal fun ContentTrackRow(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             if (playlistDragEnabled) {
-                Text(
-                    "⠿",
-                    color = PhoebeUi.mutedText,
-                    fontSize = 15.sp,
-                    modifier = Modifier
+                Box(
+                    Modifier
                         .draggableSong(track, immediate = true)
                         .padding(horizontal = 2.dp, vertical = 6.dp),
-                )
+                    contentAlignment = Alignment.Center,
+                ) {
+                    PhoebeIconView(PhoebeIcon.Drag, tint = PhoebeUi.mutedText, modifier = Modifier.size(15.dp))
+                }
             }
             Box(Modifier.size(46.dp), contentAlignment = Alignment.Center) {
                 ArtworkImage(

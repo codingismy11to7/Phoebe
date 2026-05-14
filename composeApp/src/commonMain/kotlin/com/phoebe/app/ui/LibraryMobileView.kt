@@ -663,11 +663,14 @@ private fun MobileSongRow(
         }
         Text(formatMinutesSeconds(track.durationMs), color = PhoebeUi.mutedText, fontSize = 11.sp)
         Box {
-            Text(
-                "⋯",
-                color = PhoebeUi.secondaryText,
-                fontSize = 17.sp,
-                modifier = Modifier.clip(CircleShape).clickable(onClick = { menuExpanded = true }).padding(horizontal = 4.dp),
+            PhoebeIconView(
+                PhoebeIcon.More,
+                tint = PhoebeUi.secondaryText,
+                modifier = Modifier
+                    .size(17.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = { menuExpanded = true })
+                    .padding(horizontal = 4.dp),
             )
             DropdownMenu(
                 expanded = menuExpanded,

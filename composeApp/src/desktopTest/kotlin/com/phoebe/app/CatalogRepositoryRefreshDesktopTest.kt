@@ -8,6 +8,7 @@ import com.phoebe.app.domain.CatalogSyncPhase
 import com.phoebe.app.domain.MusicLibrary
 import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.PlexSession
+import com.phoebe.app.domain.Track
 import com.phoebe.app.platform.PlatformStorage
 import com.phoebe.app.testing.newInMemoryPhoebeDatabase
 import com.phoebe.app.testing.testHttpClient
@@ -175,6 +176,57 @@ class CatalogRepositoryRefreshDesktopTest {
         assertEquals(listOf("plex:t1"), repo.catalog.value.tracksByParent["plex:a1"].orEmpty().map { it.id })
     }
 
+    @Test
+    fun addTracksToPlaylistRefetchesWhenPlaylistTracksAreNotCached() = runTest {
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/library/sections/1/all" -> respondJson(artistsJson())
+                "/library/sections/1/albums" -> respondJson(albumsJson())
+                "/playlists" -> respondJson(playlistsJson(trackCount = 2))
+                "/library/metadata/a1/children" -> respondJson(albumTracksJson())
+                "/playlists/p1/items" -> when (request.method.value) {
+                    "PUT" -> respondJson(playlistAddResponseJson(leafCount = 3))
+                    else -> respondJson(playlistTracksJson())
+                }
+                "/identity" -> respondJson(identityJson())
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val media = MediaSourcesRepository(db, PlatformStorage())
+        val repo = CatalogRepository(
+            plexClient = PlexClient(testHttpClient(engine)),
+            database = db,
+            storage = PlatformStorage(),
+            httpClient = testHttpClient(engine),
+            mediaSourcesRepository = media,
+        )
+        repo.refreshAggregated(testSession())
+
+        val playlist = repo.catalog.value.playlists.single()
+        assertEquals(2, playlist.trackCount)
+        assertTrue(repo.catalog.value.tracksByParent[playlist.id].isNullOrEmpty())
+
+        val newTrack = Track(
+            id = "plex:t3",
+            title = "Added Song",
+            artist = "Artist One",
+            album = "Album One",
+            durationMs = 2_000,
+            streamUrl = "https://plex.example/t3?X-Plex-Token=token",
+            downloadUrl = "https://plex.example/t3?X-Plex-Token=token&download=1",
+        )
+        repo.addTracksToPlaylist(testSession(), playlist, listOf(newTrack))
+
+        val updated = repo.catalog.value.playlists.single { it.id == playlist.id }
+        assertEquals(3, updated.trackCount)
+        assertEquals(
+            listOf("plex:t1", "plex:t2", "plex:t3"),
+            repo.catalog.value.tracksByParent[playlist.id].orEmpty().map { it.id },
+        )
+    }
+
     private fun MockRequestHandleScope.respondJson(content: String) = respond(
         content = content,
         status = HttpStatusCode.OK,
@@ -231,6 +283,54 @@ class CatalogRepositoryRefreshDesktopTest {
                   { "Part": [ { "key": "/library/parts/t1/file.mp3", "file": "file.mp3" } ] }
                 ]
               }
+            ]
+          }
+        }
+    """.trimIndent()
+
+    private fun playlistTracksJson(): String = """
+        {
+          "MediaContainer": {
+            "Metadata": [
+              {
+                "ratingKey": "t1",
+                "title": "Playlist Song One",
+                "grandparentTitle": "Artist One",
+                "parentTitle": "Album One",
+                "duration": 1000,
+                "Media": [
+                  { "Part": [ { "key": "/library/parts/t1/file.mp3", "file": "one.mp3" } ] }
+                ]
+              },
+              {
+                "ratingKey": "t2",
+                "title": "Playlist Song Two",
+                "grandparentTitle": "Artist One",
+                "parentTitle": "Album One",
+                "duration": 2000,
+                "Media": [
+                  { "Part": [ { "key": "/library/parts/t2/file.mp3", "file": "two.mp3" } ] }
+                ]
+              }
+            ]
+          }
+        }
+    """.trimIndent()
+
+    private fun identityJson(): String = """
+        {
+          "MediaContainer": {
+            "machineIdentifier": "server"
+          }
+        }
+    """.trimIndent()
+
+    private fun playlistAddResponseJson(leafCount: Int): String = """
+        {
+          "MediaContainer": {
+            "leafCountAdded": 1,
+            "Metadata": [
+              { "ratingKey": "p1", "title": "Playlist One", "leafCount": $leafCount, "key": "/playlists/p1/items" }
             ]
           }
         }

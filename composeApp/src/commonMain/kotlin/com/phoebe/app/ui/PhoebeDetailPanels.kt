@@ -202,6 +202,7 @@ internal fun ArtistDetailPanel(
     artist: Artist,
     catalog: CatalogSnapshot,
     libraryUi: LibraryUiPreferences,
+    catalogRefreshing: Boolean = false,
     modifier: Modifier = Modifier,
     searchQuery: String = "",
     onBack: () -> Unit,
@@ -343,24 +344,37 @@ internal fun ArtistDetailPanel(
             SectionLabel("Songs", PhoebeUi.primaryText)
         }
         item(contentType = "artist-song-toolbar") {
-            DetailSectionToolbar(
-                sortBy = songSortBy,
-                sortKeys = listOf(LibrarySortBy.Name, LibrarySortBy.Album, LibrarySortBy.Year),
-                sortLabel = { key ->
-                    when (key) {
-                        LibrarySortBy.Album -> "Album name"
-                        LibrarySortBy.Year -> "Release date"
-                        else -> "Song name"
-                    }
-                },
-                onSortBy = { songSortBy = it },
-                ascending = songAscending,
-                onAscending = { songAscending = it },
-                columns = libraryUi.columns,
-                onColumns = onLibraryColumns,
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                DetailSectionToolbar(
+                    sortBy = songSortBy,
+                    sortKeys = listOf(LibrarySortBy.Name, LibrarySortBy.Album, LibrarySortBy.Year),
+                    sortLabel = { key ->
+                        when (key) {
+                            LibrarySortBy.Album -> "Album name"
+                            LibrarySortBy.Year -> "Release date"
+                            else -> "Song name"
+                        }
+                    },
+                    onSortBy = { songSortBy = it },
+                    ascending = songAscending,
+                    onAscending = { songAscending = it },
+                    columns = libraryUi.columns,
+                    onColumns = onLibraryColumns,
+                )
+                if (catalogRefreshing && searchQuery.isBlank()) {
+                    CatalogLoadingStrip()
+                }
+            }
         }
-        if (visibleTracks.isEmpty() && searchQuery.isNotBlank()) {
+        if (visibleTracks.isEmpty() && searchQuery.isBlank()) {
+            item(contentType = "artist-song-empty") {
+                Text(
+                    if (catalogRefreshing) "Fetching songs…" else "No songs loaded yet.",
+                    color = PhoebeUi.mutedText,
+                    fontSize = 14.sp,
+                )
+            }
+        } else if (visibleTracks.isEmpty() && searchQuery.isNotBlank()) {
             item(contentType = "artist-song-empty") {
                 Text("No songs by ${artist.title} match \"$searchQuery\".", color = PhoebeUi.mutedText, fontSize = 14.sp)
             }
@@ -446,6 +460,7 @@ internal fun AlbumDetailPanel(
     album: Album,
     catalog: CatalogSnapshot,
     libraryUi: LibraryUiPreferences,
+    catalogRefreshing: Boolean = false,
     modifier: Modifier = Modifier,
     searchQuery: String = "",
     onBack: () -> Unit,
@@ -496,29 +511,34 @@ internal fun AlbumDetailPanel(
             }
         }
         item(contentType = "album-track-toolbar") {
-            DetailSectionToolbar(
-                sortBy = sortBy,
-                sortKeys = listOf(LibrarySortBy.Name, LibrarySortBy.Year),
-                sortLabel = { key ->
-                    when (key) {
-                        LibrarySortBy.Year -> "Release date"
-                        else -> "Song name"
-                    }
-                },
-                onSortBy = { sortBy = it },
-                ascending = ascending,
-                onAscending = { ascending = it },
-                columns = libraryUi.columns,
-                onColumns = onLibraryColumns,
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                DetailSectionToolbar(
+                    sortBy = sortBy,
+                    sortKeys = listOf(LibrarySortBy.Name, LibrarySortBy.Year),
+                    sortLabel = { key ->
+                        when (key) {
+                            LibrarySortBy.Year -> "Release date"
+                            else -> "Song name"
+                        }
+                    },
+                    onSortBy = { sortBy = it },
+                    ascending = ascending,
+                    onAscending = { ascending = it },
+                    columns = libraryUi.columns,
+                    onColumns = onLibraryColumns,
+                )
+                if (catalogRefreshing && searchQuery.isBlank()) {
+                    CatalogLoadingStrip()
+                }
+            }
         }
         if (visibleTracks.isEmpty()) {
             item(contentType = "album-empty") {
                 Text(
-                    if (searchQuery.isNotBlank()) {
-                        "No tracks on ${album.title} match \"$searchQuery\"."
-                    } else {
-                        "No tracks loaded yet."
+                    when {
+                        searchQuery.isNotBlank() -> "No tracks on ${album.title} match \"$searchQuery\"."
+                        catalogRefreshing -> "Fetching songs…"
+                        else -> "No tracks loaded yet."
                     },
                     color = PhoebeUi.mutedText,
                     fontSize = 15.sp,
@@ -633,16 +653,18 @@ internal fun PlaylistDetailPanel(
         }
         if (visibleTracks.isEmpty()) {
             item(contentType = "playlist-empty") {
-                if (catalogRefreshing && searchQuery.isBlank()) CatalogLoadingStrip()
-                Text(
-                    if (searchQuery.isNotBlank()) {
-                        "No tracks / artists in this playlist match \"$searchQuery\"."
-                    } else {
-                        "No tracks loaded for this playlist yet."
-                    },
-                    color = PhoebeUi.mutedText,
-                    fontSize = 15.sp,
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (catalogRefreshing && searchQuery.isBlank()) CatalogLoadingStrip()
+                    Text(
+                        when {
+                            searchQuery.isNotBlank() -> "No tracks / artists in this playlist match \"$searchQuery\"."
+                            catalogRefreshing -> "Fetching songs…"
+                            else -> "No tracks loaded for this playlist yet."
+                        },
+                        color = PhoebeUi.mutedText,
+                        fontSize = 15.sp,
+                    )
+                }
             }
         } else if (useTable) {
             item(contentType = "playlist-track-header") {

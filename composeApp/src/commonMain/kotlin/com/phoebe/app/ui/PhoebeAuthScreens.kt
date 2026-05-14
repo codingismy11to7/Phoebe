@@ -437,6 +437,7 @@ internal fun ProviderChoiceRow(
 internal fun PlexServerPickerPanel(
     servers: List<PlexServer>,
     busy: Boolean,
+    serversLoading: Boolean = false,
     onSelectServer: (PlexServer) -> Unit,
     onCancel: () -> Unit,
     onRetry: () -> Unit,
@@ -456,11 +457,25 @@ internal fun PlexServerPickerPanel(
             fontSize = 13.sp,
             lineHeight = 18.sp,
         )
-        if (servers.isEmpty()) {
+        if (serversLoading && servers.isEmpty()) {
+            Column(
+                Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(32.dp),
+                    color = PhoebeUi.accentLight,
+                    strokeWidth = 2.5.dp,
+                    trackColor = PhoebeUi.progressTrack,
+                )
+                Text("Finding your Plex servers…", color = PhoebeUi.secondaryText, fontSize = 14.sp)
+            }
+        } else if (servers.isEmpty()) {
             Text("No servers were found for this Plex account.", color = PhoebeUi.secondaryText, fontSize = 14.sp)
             FilledTonalButton(
                 onClick = onRetry,
-                enabled = !busy,
+                enabled = !busy && !serversLoading,
                 colors = ButtonDefaults.filledTonalButtonColors(
                     containerColor = PhoebeUi.accent.copy(alpha = 0.22f),
                     contentColor = PhoebeUi.primaryText,
@@ -476,7 +491,7 @@ internal fun PlexServerPickerPanel(
                         Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(12.dp))
-                            .clickable(enabled = !busy) { onSelectServer(server) }
+                            .clickable(enabled = !busy && !serversLoading) { onSelectServer(server) }
                             .background(PhoebeUi.elevatedFill)
                             .padding(horizontal = 16.dp, vertical = 14.dp),
                         verticalAlignment = Alignment.CenterVertically,
