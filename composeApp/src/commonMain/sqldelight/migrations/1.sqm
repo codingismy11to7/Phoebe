@@ -1,0 +1,7 @@
+ALTER TABLE SessionRow ADD COLUMN selectedServerConnectionUris TEXT;
+ALTER TABLE SessionRow ADD COLUMN selectedServerAdvertisedConnectionUris TEXT;
+ALTER TABLE SessionRow ADD COLUMN selectedServerLocalConnectionUris TEXT;
+ALTER TABLE SessionRow ADD COLUMN selectedServerAccessToken TEXT;
+ALTER TABLE SessionRow ADD COLUMN selectedServerHttpsRequired INTEGER;
+
+ALTER TABLE TrackRow ADD COLUMN parentAlbumId TEXT;

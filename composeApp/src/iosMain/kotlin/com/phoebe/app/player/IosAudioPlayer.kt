@@ -1,5 +1,6 @@
 package com.phoebe.app.player
 
+import com.phoebe.app.platform.PhoebeLog
 import kotlinx.cinterop.CValue
 import kotlinx.cinterop.ExperimentalForeignApi
 import platform.AVFAudio.AVAudioSession
@@ -92,7 +93,7 @@ private class IosAudioPlayer : SimpleAudioPlayer() {
             session.setCategory(AVAudioSessionCategoryPlayback, error = null)
             session.setActive(active = true, error = null)
         }.onFailure { error ->
-            println("[IosAudioPlayer] audio session setup failed: ${error.message}")
+            PhoebeLog.d("IosAudioPlayer") { "audio session setup failed: ${error.message}" }
         }
     }
 

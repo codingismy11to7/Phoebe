@@ -4,7 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 
 actual object LocalLibraryIO {
-    actual suspend fun listAudioUris(rootUri: String): List<String> {
+    actual suspend fun listAudioFiles(rootUri: String): List<LocalAudioFile> {
         if (!rootUri.startsWith(TestRootPrefix)) return emptyList()
         val files = rootUri.substringAfter("?files=", missingDelimiterValue = "")
             .split('|')
@@ -12,7 +12,18 @@ actual object LocalLibraryIO {
             .filter { it.isNotBlank() }
             .filter { it.substringAfterLast('.', "").lowercase() in audioExt }
         val root = rootUri.substringBefore('?').trimEnd('/')
-        return files.map { "$root/$it" }
+        return files.mapIndexed { index, file ->
+            LocalAudioFile(
+                uri = "$root/$file",
+                sizeBytes = file.length.toLong(),
+                modifiedAtMs = index.toLong(),
+                filepath = file.substringAfterLast('/'),
+            )
+        }.sortedBy { it.uri }
+    }
+
+    actual suspend fun listAudioUris(rootUri: String): List<String> {
+        return listAudioFiles(rootUri).map { it.uri }
     }
 
     actual suspend fun fileExists(uri: String): Boolean =

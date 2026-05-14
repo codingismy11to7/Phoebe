@@ -381,6 +381,7 @@ internal fun MobileBrowseShell(
     libraryFilter: LibraryFilterTab,
     libraryUi: LibraryUiPreferences,
     currentTrack: Track?,
+    homeUiState: HomeUiState,
     isPlaying: Boolean,
     isBuffering: Boolean = false,
     onNavigate: (DesktopSection) -> Unit,
@@ -389,6 +390,19 @@ internal fun MobileBrowseShell(
     onPlaylist: (Playlist) -> Unit,
     onArtist: (Artist) -> Unit,
     onAlbum: (Album) -> Unit,
+    onSong: (Track) -> Unit,
+    onRecentSongs: () -> Unit,
+    onRecentArtists: () -> Unit,
+    onRecentAlbums: () -> Unit,
+    onRecentlyPlayed: () -> Unit,
+    onMostPlayed: () -> Unit,
+    onRefreshRandomArtists: () -> Unit,
+    onRefreshRandomAlbums: () -> Unit,
+    onPrefetchHomeArtist: (Artist) -> Unit = {},
+    onPrefetchHomeAlbum: (Album) -> Unit = {},
+    onPlayDecadeMix: (Int) -> Unit = {},
+    decadeMixNotice: String? = null,
+    onClearDecadeMixNotice: () -> Unit = {},
     onPlayTracks: (List<Track>, Int) -> Unit,
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
@@ -438,6 +452,13 @@ internal fun MobileBrowseShell(
                     enabled = false,
                 )
             }
+            if (LocalCatalogSyncState.current.isActive) {
+                DropdownMenuItem(
+                    text = { CatalogMenuSyncIndicator() },
+                    onClick = {},
+                    enabled = false,
+                )
+            }
             DropdownMenuItem(
                 text = {
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -481,11 +502,32 @@ internal fun MobileBrowseShell(
                     onLightModeChange = onUseLightAppearanceChange,
                     modifier = Modifier.fillMaxSize(),
                 )
-                section == DesktopSection.Home && selectedPlaylistId == null -> MobileCompactMainFeature(
-                    track = currentTrack,
-                    onOpenFullPlayer = onOpenNowPlaying,
+                section == DesktopSection.Home && selectedPlaylistId == null -> {
+                    val homeListState = RetainedLazyListStates.remember("mobile-home")
+                    MobileHomeScreen(
+                    state = homeUiState,
+                    catalog = catalog,
+                    catalogRefreshing = catalogRefreshing,
+                    listState = homeListState,
                     modifier = Modifier.fillMaxSize(),
+                    onTrack = onSong,
+                    onArtist = onArtist,
+                    onAlbum = onAlbum,
+                    onRecentSongs = onRecentSongs,
+                    onRecentArtists = onRecentArtists,
+                    onRecentAlbums = onRecentAlbums,
+                    onRecentlyPlayed = onRecentlyPlayed,
+                    onMostPlayed = onMostPlayed,
+                    onRefreshArtists = onRefreshRandomArtists,
+                    onRefreshAlbums = onRefreshRandomAlbums,
+                    onPrefetchArtist = onPrefetchHomeArtist,
+                    onPrefetchAlbum = onPrefetchHomeAlbum,
+                    onPlayDecadeMix = onPlayDecadeMix,
+                    decadeMixNotice = decadeMixNotice,
+                    onClearDecadeMixNotice = onClearDecadeMixNotice,
+                    onPlayTracks = onPlayTracks,
                 )
+                }
                 section == DesktopSection.Library && selectedPlaylistId == null -> LibraryMobileView(
                     catalog = catalog,
                     catalogRefreshing = catalogRefreshing,

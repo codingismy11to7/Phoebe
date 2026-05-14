@@ -13,13 +13,19 @@ import io.ktor.http.headersOf
 fun plexCatalogMockEngine(
     playlistTrackCount: Int = 2,
     onPlaylistAdd: (() -> Unit)? = null,
+    onPlaylistRemove: (() -> Unit)? = null,
+    includeLikedPlaylist: Boolean = false,
 ): MockEngine = MockEngine { request ->
     when (request.url.encodedPath) {
-        "/library/sections/1/all" -> respondPlexJson(artistsJson())
+        "/library/sections/1/all" -> if (request.url.parameters["type"] == "10") {
+            respondPlexJson(albumTracksJson())
+        } else {
+            respondPlexJson(artistsJson())
+        }
         "/library/sections/1/albums" -> respondPlexJson(albumsJson())
         "/playlists" -> when (request.method.value) {
-            "POST" -> respondPlexJson(createdPlaylistJson())
-            else -> respondPlexJson(playlistsJson(playlistTrackCount))
+            "POST" -> respondPlexJson(createdPlaylistJson(request.url.parameters["title"] ?: "New Mix"))
+            else -> respondPlexJson(playlistsJson(playlistTrackCount, includeLikedPlaylist))
         }
         "/library/metadata/a1/children" -> respondPlexJson(albumTracksJson())
         "/playlists/p1/items" -> when (request.method.value) {
@@ -28,6 +34,27 @@ fun plexCatalogMockEngine(
                 respondPlexJson(playlistAddResponseJson(leafCount = playlistTrackCount + 1))
             }
             else -> respondPlexJson(playlistTracksJson())
+        }
+        "/playlists/p2/items" -> when (request.method.value) {
+            "PUT" -> {
+                onPlaylistAdd?.invoke()
+                respondPlexJson(playlistAddResponseJson(leafCount = 2))
+            }
+            else -> respondPlexJson(likedPlaylistTracksJson())
+        }
+        "/playlists/p2/items/201" -> when (request.method.value) {
+            "DELETE" -> {
+                onPlaylistRemove?.invoke()
+                respondPlexJson("""{ "MediaContainer": { "size": 0 } }""")
+            }
+            else -> respond("", HttpStatusCode.NotFound)
+        }
+        "/playlists/p99/items" -> when (request.method.value) {
+            "PUT" -> {
+                onPlaylistAdd?.invoke()
+                respondPlexJson(playlistAddResponseJson(leafCount = 1))
+            }
+            else -> respondPlexJson("""{ "MediaContainer": { "Metadata": [] } }""")
         }
         "/identity" -> respondPlexJson(identityJson())
         else -> respond("", HttpStatusCode.NotFound)
@@ -50,7 +77,7 @@ fun artistsJson(): String = """
     {
       "MediaContainer": {
         "Metadata": [
-          { "ratingKey": "artist1", "type": "artist", "title": "Artist One", "leafCount": 1 }
+          { "ratingKey": "artist1", "type": "artist", "title": "Artist One", "leafCount": 1, "addedAt": 1700000000 }
         ]
       }
     }
@@ -60,27 +87,35 @@ fun albumsJson(): String = """
     {
       "MediaContainer": {
         "Metadata": [
-          { "ratingKey": "a1", "title": "Album One", "parentTitle": "Artist One" }
+          { "ratingKey": "a1", "title": "Album One", "parentTitle": "Artist One", "year": 1995, "addedAt": 1700000100 }
         ]
       }
     }
 """.trimIndent()
 
-fun playlistsJson(trackCount: Int): String = """
+fun playlistsJson(trackCount: Int, includeLikedPlaylist: Boolean = false): String {
+    val liked = if (includeLikedPlaylist) {
+        """,
+          { "ratingKey": "p2", "title": "Liked Songs", "leafCount": 1, "key": "/playlists/p2/items" }"""
+    } else {
+        ""
+    }
+    return """
     {
       "MediaContainer": {
         "Metadata": [
-          { "ratingKey": "p1", "title": "Playlist One", "leafCount": $trackCount, "key": "/playlists/p1/items" }
+          { "ratingKey": "p1", "title": "Playlist One", "leafCount": $trackCount, "key": "/playlists/p1/items" }$liked
         ]
       }
     }
 """.trimIndent()
+}
 
-fun createdPlaylistJson(): String = """
+fun createdPlaylistJson(title: String = "New Mix"): String = """
     {
       "MediaContainer": {
         "Metadata": [
-          { "ratingKey": "p99", "title": "New Mix", "leafCount": 1, "key": "/playlists/p99/items" }
+          { "ratingKey": "p99", "title": "$title", "leafCount": 1, "key": "/playlists/p99/items" }
         ]
       }
     }
@@ -95,7 +130,9 @@ fun albumTracksJson(): String = """
             "title": "Fresh Song",
             "grandparentTitle": "Artist One",
             "parentTitle": "Album One",
+            "parentYear": 1995,
             "duration": 1000,
+            "addedAt": 1700000200,
             "Media": [
               { "Part": [ { "key": "/library/parts/t1/file.mp3", "file": "file.mp3" } ] }
             ]
@@ -111,6 +148,7 @@ fun playlistTracksJson(): String = """
         "Metadata": [
           {
             "ratingKey": "t1",
+            "playlistItemID": 101,
             "title": "Playlist Song One",
             "grandparentTitle": "Artist One",
             "parentTitle": "Album One",
@@ -121,12 +159,33 @@ fun playlistTracksJson(): String = """
           },
           {
             "ratingKey": "t2",
+            "playlistItemID": 102,
             "title": "Playlist Song Two",
             "grandparentTitle": "Artist One",
             "parentTitle": "Album One",
             "duration": 2000,
             "Media": [
               { "Part": [ { "key": "/library/parts/t2/file.mp3", "file": "two.mp3" } ] }
+            ]
+          }
+        ]
+      }
+    }
+""".trimIndent()
+
+fun likedPlaylistTracksJson(): String = """
+    {
+      "MediaContainer": {
+        "Metadata": [
+          {
+            "ratingKey": "t1",
+            "playlistItemID": 201,
+            "title": "Fresh Song",
+            "grandparentTitle": "Artist One",
+            "parentTitle": "Album One",
+            "duration": 1000,
+            "Media": [
+              { "Part": [ { "key": "/library/parts/t1/file.mp3", "file": "file.mp3" } ] }
             ]
           }
         ]

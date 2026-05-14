@@ -31,7 +31,7 @@ actual suspend fun createSqlDriver(schema: SqlSchema<QueryResult.AsyncValue<Unit
  */
 private fun wipeIfRevisionChanged(dbFile: File, revFile: File) {
     val onDiskRev = revFile.takeIf { it.exists() }?.runCatching { readText().trim().toLong() }?.getOrNull()
-    if (dbFile.exists() && onDiskRev != LocalDbRevision) {
+    if (dbFile.exists() && onDiskRev != null && onDiskRev < 6L) {
         dbFile.delete()
         // SQLite may leave auxiliary journal/WAL/SHM files alongside the main db; drop
         // them too so the rebuilt schema doesn't pick up half-written pages.

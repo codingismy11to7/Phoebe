@@ -2,6 +2,7 @@ package com.phoebe.app.player
 
 import javazoom.spi.vorbis.sampled.file.VorbisAudioFileReader
 import com.phoebe.app.domain.Track
+import com.phoebe.app.platform.PhoebeLog
 import javafx.application.Platform
 import javafx.scene.media.Media
 import javafx.scene.media.MediaPlayer
@@ -464,10 +465,10 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
                 player = MediaPlayer(media).also { mediaPlayer ->
                     mediaPlayer.volume = effectiveOutputVolume().toDouble().coerceIn(0.0, 1.0)
                     mediaPlayer.setOnError {
-                        println("Phoebe desktop playback error: ${mediaPlayer.error?.message}")
+                        PhoebeLog.d("DesktopAudioPlayer") { "playback error: ${mediaPlayer.error?.message}" }
                     }
                     media.setOnError {
-                        println("Phoebe desktop media error: ${media.error?.message}")
+                        PhoebeLog.d("DesktopAudioPlayer") { "media error: ${media.error?.message}" }
                     }
                     mediaPlayer.play()
                 }
@@ -480,7 +481,7 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
 
     private fun logPlaybackFailure(error: Throwable) {
         val message = error.message ?: error::class.simpleName.orEmpty()
-        println("Phoebe desktop playback error: $message")
+        PhoebeLog.d("DesktopAudioPlayer") { "playback error: $message" }
     }
 }
 
@@ -492,7 +493,7 @@ private object JavaFxRuntime {
         start()
         ready.whenComplete { _, error ->
             if (error != null) {
-                println("Phoebe desktop playback error: ${error.message ?: error::class.simpleName.orEmpty()}")
+                PhoebeLog.d("DesktopAudioPlayer") { "playback error: ${error.message ?: error::class.simpleName.orEmpty()}" }
                 return@whenComplete
             }
             Platform.runLater(block)

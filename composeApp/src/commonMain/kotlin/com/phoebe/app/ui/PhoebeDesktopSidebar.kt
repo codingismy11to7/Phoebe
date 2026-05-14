@@ -140,6 +140,8 @@ import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryUiPreferences
+import com.phoebe.app.domain.LIKED_SONGS_PLAYLIST_TITLE
+import com.phoebe.app.domain.PENDING_LIKED_SONGS_PLAYLIST_ID
 import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.LocalFolderMediaSourceConfig
 import com.phoebe.app.domain.MediaSourcesState
@@ -150,6 +152,7 @@ import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.isLocalMediaPlayback
+import com.phoebe.app.domain.isLikedSongsPlaylist
 import com.phoebe.app.domain.isPlexLibraryTrack
 import com.phoebe.app.domain.supportsPlexPlaylists
 import com.phoebe.app.platform.createPlatformHttpClient
@@ -186,6 +189,15 @@ internal fun Sidebar(
     var profileExpanded by remember { mutableStateOf(false) }
     val pickLocalFolder = rememberPickLocalFolder(onPicked = onAddLocalFolder)
     val playlistActions = LocalPlaylistActions.current
+    val syncState = LocalCatalogSyncState.current
+    val showPlaylistRefreshBar = catalogRefreshing || syncState.isActive
+    val likedSongsPlaylist = playlistActions.playlists.firstOrNull { it.isLikedSongsPlaylist() }
+        ?: if (playlistActions.playlistsEnabled) {
+            Playlist(id = PENDING_LIKED_SONGS_PLAYLIST_ID, title = LIKED_SONGS_PLAYLIST_TITLE, trackCount = 0)
+        } else {
+            null
+        }
+    val regularPlaylists = playlistActions.playlists.filterNot { it.isLikedSongsPlaylist() }
 
     Column(
         modifier = Modifier
@@ -211,7 +223,7 @@ internal fun Sidebar(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item(contentType = "label") { SectionLabel("Playlists", PhoebeUi.mutedText) }
-            if (catalogRefreshing) {
+            if (showPlaylistRefreshBar) {
                 item(contentType = "loading") { CatalogLoadingStrip(Modifier.padding(bottom = 4.dp)) }
             }
             if (playlistActions.playlistsEnabled) {
@@ -224,34 +236,25 @@ internal fun Sidebar(
                     )
                 }
             }
-            items(playlistActions.playlists, key = { it.id }, contentType = { "playlist-nav" }) { playlist ->
-                val controller = LocalDragDrop.current
-                val isHovered = controller?.draggedTrack != null &&
-                    controller.isHovering(playlist.id)
-                Box(
-                    modifier = Modifier
-                        .playlistDropTarget(playlist)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(if (isHovered) PhoebeUi.accentLight.copy(alpha = 0.32f) else Color.Transparent)
-                        .border(
-                            BorderStroke(
-                                width = if (isHovered) 1.5.dp else 0.dp,
-                                color = if (isHovered) PhoebeUi.accentLight else Color.Transparent,
-                            ),
-                            RoundedCornerShape(10.dp),
-                        )
-                        .padding(2.dp),
-                ) {
-                    PlaylistRow(
-                        icon = if (playlist.title.contains("Liked", ignoreCase = true)) PhoebeIcon.Heart else null,
-                        title = playlist.title,
-                        subtitle = "${playlist.trackCount} songs",
-                        thumbUrl = playlist.thumbUrl,
-                        accent = playlist.title.contains("Liked", ignoreCase = true),
-                        active = playlist.id == selectedPlaylistId,
-                        onClick = { onPlaylist(playlist) },
+            if (likedSongsPlaylist != null) {
+                item(key = likedSongsPlaylist.id, contentType = "playlist-nav-liked") {
+                    SidebarPlaylistDropRow(
+                        playlist = likedSongsPlaylist,
+                        selectedPlaylistId = selectedPlaylistId,
+                        onPlaylist = if (likedSongsPlaylist.id == PENDING_LIKED_SONGS_PLAYLIST_ID) {
+                            { playlistActions.onOpenLikedSongs() }
+                        } else {
+                            onPlaylist
+                        },
                     )
                 }
+            }
+            items(regularPlaylists, key = { it.id }, contentType = { "playlist-nav" }) { playlist ->
+                SidebarPlaylistDropRow(
+                    playlist = playlist,
+                    selectedPlaylistId = selectedPlaylistId,
+                    onPlaylist = onPlaylist,
+                )
             }
         }
 
@@ -306,6 +309,11 @@ internal fun Sidebar(
                     session?.selectedLibrary?.title?.let { t ->
                         Text(t, color = PhoebeUi.mutedText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
+                    CatalogMenuSyncIndicator(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(top = 2.dp, bottom = 2.dp),
+                    )
                     if (session?.token?.isNotBlank() == true) {
                         OutlinedButton(
                             onClick = {
@@ -365,6 +373,42 @@ internal fun Sidebar(
 }
 
 @Composable
+private fun SidebarPlaylistDropRow(
+    playlist: Playlist,
+    selectedPlaylistId: String?,
+    onPlaylist: (Playlist) -> Unit,
+) {
+    val controller = LocalDragDrop.current
+    val isHovered = (controller?.draggedTrack != null || controller?.draggedPlaylist != null) &&
+        controller.isHovering(playlist.id)
+    Box(
+        modifier = Modifier
+            .draggablePlaylist(playlist)
+            .playlistDropTarget(playlist)
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (isHovered) PhoebeUi.accentLight.copy(alpha = 0.32f) else Color.Transparent)
+            .border(
+                BorderStroke(
+                    width = if (isHovered) 1.5.dp else 0.dp,
+                    color = if (isHovered) PhoebeUi.accentLight else Color.Transparent,
+                ),
+                RoundedCornerShape(10.dp),
+            )
+            .padding(2.dp),
+    ) {
+        PlaylistRow(
+            icon = if (playlist.isLikedSongsPlaylist()) PhoebeIcon.Heart else null,
+            title = playlist.title,
+            subtitle = "${playlist.trackCount} songs",
+            thumbUrl = playlist.thumbUrl,
+            accent = playlist.isLikedSongsPlaylist(),
+            active = playlist.id == selectedPlaylistId,
+            onClick = { onPlaylist(playlist) },
+        )
+    }
+}
+
+@Composable
 internal fun NavRow(icon: PhoebeIcon, label: String, active: Boolean, onClick: () -> Unit) {
     Row(
         modifier = Modifier
@@ -417,4 +461,3 @@ internal fun PlaylistRow(icon: PhoebeIcon?, title: String, subtitle: String?, th
         }
     }
 }
-

@@ -6,9 +6,12 @@ import com.phoebe.app.data.PlayHistoryRepository
 import com.phoebe.app.domain.Track
 import com.phoebe.app.testing.newInMemoryPhoebeDatabase
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.first
 import org.junit.After
 import org.junit.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class PlayHistoryRepositoryDesktopTest {
     private var driver: SqlDriver? = null
@@ -34,5 +37,83 @@ class PlayHistoryRepositoryDesktopTest {
         assertEquals(1, rows.size)
         assertEquals("tid", rows.single().track_id)
         assertEquals(12345L, rows.single().lastPlayed)
+    }
+
+    @Test
+    fun playCountsAggregateByTrack() = runBlocking {
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        val repo = PlayHistoryRepository(db)
+        repository = repo
+        val track = Track("tid", "Song", "Art", "Alb", 30_000L, "", "")
+        repo.recordPlay(track, 1L)
+        repo.recordPlay(track, 2L)
+
+        val counts = repo.playCountsByTrack.first { it["tid"] == 2L }
+        assertEquals(2L, counts["tid"])
+    }
+
+    @Test
+    fun importedPlexPlayUpdatesAggregates() = runBlocking {
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        val repo = PlayHistoryRepository(db)
+        repository = repo
+        val track = Track("plex:t1", "Song", "Art", "Alb", 30_000L, "", "")
+
+        assertTrue(repo.importPlexPlay(track, "server", "history-1", 12345L, 20000L, 600_000L))
+
+        val counts = repo.playCountsByTrack.first { it["plex:t1"] == 1L }
+        val lastPlayed = repo.lastPlayedByTrack.first { it["plex:t1"] == 12345L }
+        assertEquals(1L, counts["plex:t1"])
+        assertEquals(12345L, lastPlayed["plex:t1"])
+        assertEquals(12345L, repo.maxImportedPlexPlayedAt("server"))
+    }
+
+    @Test
+    fun reimportingSamePlexHistoryKeyDoesNotIncrementCount() = runBlocking {
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        val repo = PlayHistoryRepository(db)
+        repository = repo
+        val track = Track("plex:t1", "Song", "Art", "Alb", 30_000L, "", "")
+
+        assertTrue(repo.importPlexPlay(track, "server", "history-1", 12345L, 20000L, 600_000L))
+        assertFalse(repo.importPlexPlay(track, "server", "history-1", 12345L, 21000L, 600_000L))
+
+        val counts = repo.playCountsByTrack.first { it["plex:t1"] == 1L }
+        assertEquals(1L, counts["plex:t1"])
+    }
+
+    @Test
+    fun plexImportWithinMergeWindowClaimsLocalPlay() = runBlocking {
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        val repo = PlayHistoryRepository(db)
+        repository = repo
+        val track = Track("plex:t1", "Song", "Art", "Alb", 30_000L, "", "")
+        repo.recordPlay(track, 1_000L)
+
+        assertTrue(repo.importPlexPlay(track, "server", "history-1", 1_100L, 2_000L, 600_000L))
+
+        val counts = repo.playCountsByTrack.first { it["plex:t1"] == 1L }
+        val lastPlayed = repo.lastPlayedByTrack.first { it["plex:t1"] == 1_100L }
+        assertEquals(1L, counts["plex:t1"])
+        assertEquals(1_100L, lastPlayed["plex:t1"])
+    }
+
+    @Test
+    fun plexImportOutsideMergeWindowInsertsSeparatePlay() = runBlocking {
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        val repo = PlayHistoryRepository(db)
+        repository = repo
+        val track = Track("plex:t1", "Song", "Art", "Alb", 30_000L, "", "")
+        repo.recordPlay(track, 1_000L)
+
+        assertTrue(repo.importPlexPlay(track, "server", "history-1", 1_000_000L, 2_000_000L, 600_000L))
+
+        val counts = repo.playCountsByTrack.first { it["plex:t1"] == 2L }
+        assertEquals(2L, counts["plex:t1"])
     }
 }

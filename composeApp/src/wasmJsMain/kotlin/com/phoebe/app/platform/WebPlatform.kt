@@ -52,6 +52,27 @@ actual fun catalogTrackPrefetchAlbumCount(): Int = 6
 
 actual fun catalogTrackPrefetchParallelism(): Int = 2
 
+actual fun isDebugBuild(): Boolean = wasmDebugBuildEnabled()
+
+@OptIn(ExperimentalWasmJsInterop::class)
+@JsFun(
+    """
+    () => {
+      if (typeof globalThis.PHOEBE_DEBUG === 'boolean') return globalThis.PHOEBE_DEBUG;
+      if (typeof location !== 'undefined') {
+        const host = location.hostname;
+        if (host === 'localhost' || host === '127.0.0.1') return true;
+      }
+      return false;
+    }
+    """,
+)
+private external fun wasmDebugBuildEnabled(): Boolean
+
+internal actual fun platformLog(tag: String, message: String) {
+    println("[$tag] $message")
+}
+
 private fun ByteArray.toBinaryString(): String =
     joinToString(separator = "") { (it.toInt() and 0xff).toChar().toString() }
 

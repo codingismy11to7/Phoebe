@@ -8,6 +8,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -69,6 +70,7 @@ import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryUiPreferences
 import com.phoebe.app.domain.Track
+import com.phoebe.app.domain.canAddToPlexPlaylist
 
 internal enum class LibraryFilterTab { Artists, Albums, Songs }
 
@@ -97,8 +99,9 @@ internal fun LibraryDesktopView(
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
     modifier: Modifier = Modifier,
-    detailWidth: androidx.compose.ui.unit.Dp = 290.dp,
+    detailWidth: androidx.compose.ui.unit.Dp = 278.dp,
     searchQuery: String = "",
+    onSearchQuery: (String) -> Unit = {},
 ) {
     var selectedArtistId by remember { mutableStateOf<String?>(null) }
     var selectedAlbumId by remember { mutableStateOf<String?>(null) }
@@ -169,112 +172,123 @@ internal fun LibraryDesktopView(
         }
     }
 
-    Row(modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-        Column(Modifier.weight(1f).fillMaxHeight().padding(start = 36.dp, top = 28.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-            LibraryHeader(filter)
-            LibraryToolbarRow(
-                filter = filter,
-                onFilter = onFilter,
-                prefs = libraryUi,
-                onSortBy = onLibrarySortBy,
-                onAscending = onLibraryAscending,
-                onColumns = onLibraryColumns,
-                libraryViewMode = libraryViewMode,
-                onLibraryViewMode = { libraryViewMode = it },
-                songFilter = songFilter,
-                onSongFilter = { songFilter = it },
-            )
-            if (catalogRefreshing) {
-                LibraryLoadingStrip(Modifier.padding(top = 2.dp))
+    BoxWithConstraints(modifier.fillMaxSize()) {
+        val narrowPane = maxWidth < 760.dp
+        Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(28.dp)) {
+            Column(
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .padding(start = 36.dp, top = 32.dp, end = if (narrowPane) 28.dp else 0.dp, bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(18.dp),
+            ) {
+                LibraryHeader(filter, searchQuery, onSearchQuery, narrowPane)
+                LibraryToolbarRow(
+                    filter = filter,
+                    onFilter = onFilter,
+                    prefs = libraryUi,
+                    onSortBy = onLibrarySortBy,
+                    onAscending = onLibraryAscending,
+                    onColumns = onLibraryColumns,
+                    libraryViewMode = libraryViewMode,
+                    onLibraryViewMode = { libraryViewMode = it },
+                    songFilter = songFilter,
+                    onSongFilter = { songFilter = it },
+                )
+                if (catalogRefreshing) {
+                    LibraryLoadingStrip(Modifier.padding(top = 2.dp))
+                }
+                when (filter) {
+                    LibraryFilterTab.Artists -> ArtistsContent(
+                        catalog = catalog,
+                        artists = visibleArtists,
+                        selectedArtistId = selectedArtistId,
+                        viewMode = libraryViewMode,
+                        onSelect = { selectedArtistId = it.id },
+                        onOpen = onArtist,
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                    )
+                    LibraryFilterTab.Albums -> AlbumsGrid(
+                        catalog = catalog,
+                        albums = visibleAlbums,
+                        selectedAlbumId = selectedAlbumId,
+                        viewMode = libraryViewMode,
+                        onSelect = { selectedAlbumId = it.id },
+                        onOpen = onAlbum,
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                    )
+                    LibraryFilterTab.Songs -> SongsTable(
+                        tracks = visibleTracks,
+                        selectedTrackId = selectedTrackId,
+                        columns = libraryUi.columns,
+                        onSelect = { selectedTrackId = it.id },
+                        onPlay = { index -> onPlayTracks(visibleTracks, index) },
+                        onAddToUpNext = onAddToUpNext,
+                        onDownload = onDownload,
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                    )
+                }
             }
-            when (filter) {
-                LibraryFilterTab.Artists -> ArtistsContent(
-                    catalog = catalog,
-                    artists = visibleArtists,
-                    selectedArtistId = selectedArtistId,
-                    viewMode = libraryViewMode,
-                    onSelect = { selectedArtistId = it.id },
-                    onOpen = onArtist,
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
-                )
-                LibraryFilterTab.Albums -> AlbumsGrid(
-                    catalog = catalog,
-                    albums = visibleAlbums,
-                    selectedAlbumId = selectedAlbumId,
-                    viewMode = libraryViewMode,
-                    onSelect = { selectedAlbumId = it.id },
-                    onOpen = onAlbum,
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
-                )
-                LibraryFilterTab.Songs -> SongsTable(
-                    tracks = visibleTracks,
-                    selectedTrackId = selectedTrackId,
-                    columns = libraryUi.columns,
-                    onSelect = { selectedTrackId = it.id },
-                    onPlay = { index -> onPlayTracks(visibleTracks, index) },
-                    onAddToUpNext = onAddToUpNext,
-                    onDownload = onDownload,
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
-                )
-            }
-        }
 
-        Column(
-            modifier = Modifier
-                .width(detailWidth)
-                .fillMaxHeight()
-                .padding(top = 28.dp, bottom = 24.dp, end = 28.dp),
-        ) {
-            when (filter) {
-                LibraryFilterTab.Artists -> {
-                    val selected = visibleArtists.firstOrNull { it.id == selectedArtistId }
-                        ?: sortedArtists.firstOrNull { it.id == selectedArtistId }
-                    if (selected != null) {
-                        ArtistDetailSidebar(
-                            artist = selected,
-                            catalog = catalog,
-                            onOpenAlbum = onAlbum,
-                            onPlayTrack = { tracks, index -> onPlayTracks(tracks, index) },
-                        )
-                    } else {
-                        LibraryEmptyDetail("Select an artist to see details.")
-                    }
-                }
-                LibraryFilterTab.Albums -> {
-                    val selected = visibleAlbums.firstOrNull { it.id == selectedAlbumId }
-                        ?: sortedAlbums.firstOrNull { it.id == selectedAlbumId }
-                    if (selected != null) {
-                        AlbumDetailSidebar(
-                            album = selected,
-                            columns = libraryUi.columns,
-                            catalog = catalog,
-                            onPlayTrack = { tracks, index -> onPlayTracks(tracks, index) },
-                        )
-                    } else {
-                        LibraryEmptyDetail("Select an album to see details.")
-                    }
-                }
-                LibraryFilterTab.Songs -> {
-                    val selected = visibleTracks.firstOrNull { it.id == selectedTrackId }
-                        ?: sortedTracks.firstOrNull { it.id == selectedTrackId }
-                    if (selected != null) {
-                        SongDetailSidebar(
-                            track = selected,
-                            columns = libraryUi.columns,
-                            onPlay = {
-                                val idx = visibleTracks.indexOfFirst { it.id == selected.id }
-                                if (idx >= 0) {
-                                    onPlayTracks(visibleTracks, idx)
-                                } else {
-                                    val fallback = sortedTracks.indexOfFirst { it.id == selected.id }
-                                    if (fallback >= 0) onPlayTracks(sortedTracks, fallback)
-                                }
-                            },
-                            onAddToPlaylist = { onAddToUpNext(selected) },
-                            onDownload = { onDownload(selected) },
-                        )
-                    } else {
-                        LibraryEmptyDetail("Select a song to see details.")
+            if (!narrowPane) {
+                Column(
+                    modifier = Modifier
+                        .width(detailWidth)
+                        .fillMaxHeight()
+                        .padding(top = 32.dp, bottom = 24.dp, end = 28.dp),
+                ) {
+                    when (filter) {
+                        LibraryFilterTab.Artists -> {
+                            val selected = visibleArtists.firstOrNull { it.id == selectedArtistId }
+                                ?: sortedArtists.firstOrNull { it.id == selectedArtistId }
+                            if (selected != null) {
+                                ArtistDetailSidebar(
+                                    artist = selected,
+                                    catalog = catalog,
+                                    onOpenAlbum = onAlbum,
+                                    onPlayTrack = { tracks, index -> onPlayTracks(tracks, index) },
+                                )
+                            } else {
+                                LibraryEmptyDetail("Select an artist to see details.")
+                            }
+                        }
+                        LibraryFilterTab.Albums -> {
+                            val selected = visibleAlbums.firstOrNull { it.id == selectedAlbumId }
+                                ?: sortedAlbums.firstOrNull { it.id == selectedAlbumId }
+                            if (selected != null) {
+                                AlbumDetailSidebar(
+                                    album = selected,
+                                    columns = libraryUi.columns,
+                                    catalog = catalog,
+                                    onPlayTrack = { tracks, index -> onPlayTracks(tracks, index) },
+                                )
+                            } else {
+                                LibraryEmptyDetail("Select an album to see details.")
+                            }
+                        }
+                        LibraryFilterTab.Songs -> {
+                            val selected = visibleTracks.firstOrNull { it.id == selectedTrackId }
+                                ?: sortedTracks.firstOrNull { it.id == selectedTrackId }
+                            if (selected != null) {
+                                SongDetailSidebar(
+                                    track = selected,
+                                    columns = libraryUi.columns,
+                                    onPlay = {
+                                        val idx = visibleTracks.indexOfFirst { it.id == selected.id }
+                                        if (idx >= 0) {
+                                            onPlayTracks(visibleTracks, idx)
+                                        } else {
+                                            val fallback = sortedTracks.indexOfFirst { it.id == selected.id }
+                                            if (fallback >= 0) onPlayTracks(sortedTracks, fallback)
+                                        }
+                                    },
+                                    onAddToPlaylist = { onAddToUpNext(selected) },
+                                    onDownload = { onDownload(selected) },
+                                )
+                            } else {
+                                LibraryEmptyDetail("Select a song to see details.")
+                            }
+                        }
                     }
                 }
             }
@@ -283,25 +297,44 @@ internal fun LibraryDesktopView(
 }
 
 @Composable
-private fun LibraryHeader(filter: LibraryFilterTab) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(
-            "Your Library".uppercase(),
-            color = PhoebeUi.mutedText,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.SemiBold,
-            letterSpacing = 0.08.em,
-        )
-        Text(
-            when (filter) {
-                LibraryFilterTab.Artists -> "Artists"
-                LibraryFilterTab.Albums -> "Albums"
-                LibraryFilterTab.Songs -> "Songs"
-            },
-            color = PhoebeUi.primaryText,
-            fontSize = 30.sp,
-            fontWeight = FontWeight.Black,
-        )
+private fun LibraryHeader(
+    filter: LibraryFilterTab,
+    searchQuery: String,
+    onSearchQuery: (String) -> Unit,
+    compact: Boolean,
+) {
+    if (compact) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Text(
+                text = when (filter) {
+                    LibraryFilterTab.Artists -> "Artists"
+                    LibraryFilterTab.Albums -> "Albums"
+                    LibraryFilterTab.Songs -> "Songs"
+                },
+                color = PhoebeUi.primaryText,
+                fontSize = 30.sp,
+                fontWeight = FontWeight.Black,
+            )
+            Text("Your Library", color = PhoebeUi.mutedText, fontSize = 13.sp)
+            SearchPill(searchQuery, onSearchQuery, Modifier.fillMaxWidth())
+        }
+    } else {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = when (filter) {
+                        LibraryFilterTab.Artists -> "Artists"
+                        LibraryFilterTab.Albums -> "Albums"
+                        LibraryFilterTab.Songs -> "Songs"
+                    },
+                    color = PhoebeUi.primaryText,
+                    fontSize = 30.sp,
+                    fontWeight = FontWeight.Black,
+                )
+                Text("Your Library", color = PhoebeUi.mutedText, fontSize = 13.sp)
+            }
+            SearchPill(searchQuery, onSearchQuery, Modifier.width(380.dp))
+        }
     }
 }
 
@@ -379,7 +412,6 @@ private fun LibraryToolbarRow(
                     DropdownMenuItem(text = { Text("Lossless") }, onClick = { onSongFilter(SongFileFilter.Lossless); it() })
                     DropdownMenuItem(text = { Text("Lossy") }, onClick = { onSongFilter(SongFileFilter.Lossy); it() })
                 }
-                else -> {}
             }
             if (filter != LibraryFilterTab.Artists) {
                 ColumnsPickerButton(prefs.columns, onColumns)
@@ -672,7 +704,13 @@ private fun ArtistCard(
         verticalArrangement = Arrangement.spacedBy(10.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Box(Modifier.size(112.dp).clip(CircleShape).clickable(onClick = onOpen)) {
+        Box(
+            Modifier
+                .size(112.dp)
+                .sharedArtworkTransition("artist:${artist.id}")
+                .clip(CircleShape)
+                .clickable(onClick = onOpen),
+        ) {
             ArtworkImage(artist.title, artist.thumbUrl, Modifier.fillMaxSize(), radius = 56.dp)
         }
         Text(
@@ -682,6 +720,7 @@ private fun ArtistCard(
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.sharedBoundsTransition("artist:${artist.id}:title"),
         )
         Text(
             buildString {
@@ -747,7 +786,11 @@ private fun ArtistRow(
     ) {
         Row(modifier = Modifier.weight(2.4f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             Box(
-                Modifier.size(42.dp).clip(CircleShape).clickable(onClick = onOpen),
+                Modifier
+                    .size(42.dp)
+                    .sharedArtworkTransition("artist:${artist.id}")
+                    .clip(CircleShape)
+                    .clickable(onClick = onOpen),
             ) {
                 ArtworkImage(artist.title, artist.thumbUrl, Modifier.fillMaxSize(), radius = 21.dp)
             }
@@ -758,6 +801,7 @@ private fun ArtistRow(
                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.sharedBoundsTransition("artist:${artist.id}:title"),
             )
         }
         TableCellText(genre, modifier = Modifier.weight(1.6f), color = PhoebeUi.secondaryText)
@@ -856,12 +900,27 @@ private fun AlbumCard(
             .padding(6.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Box(Modifier.fillMaxWidth().aspectRatio(1f).clickable(onClick = onOpen)) {
+        Box(Modifier.fillMaxWidth().aspectRatio(1f).sharedArtworkTransition("album:${album.id}").clickable(onClick = onOpen)) {
             ArtworkImage(album.title, album.thumbUrl, Modifier.fillMaxSize(), radius = 10.dp)
         }
         Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(horizontal = 4.dp)) {
-            Text(album.title, color = PhoebeUi.primaryText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(album.artist, color = PhoebeUi.secondaryText, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                album.title,
+                color = PhoebeUi.primaryText,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.sharedBoundsTransition("album:${album.id}:title"),
+            )
+            Text(
+                album.artist,
+                color = PhoebeUi.secondaryText,
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.sharedBoundsTransition("album:${album.id}:subtitle"),
+            )
             Text(
                 buildString {
                     album.year?.let { append(it.toString()) }
@@ -912,12 +971,27 @@ private fun AlbumListRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Box(Modifier.size(46.dp).clickable(onClick = onOpen)) {
+        Box(Modifier.size(46.dp).sharedArtworkTransition("album:${album.id}").clickable(onClick = onOpen)) {
             ArtworkImage(album.title, album.thumbUrl, Modifier.fillMaxSize(), radius = 8.dp)
         }
         Column(Modifier.weight(1f)) {
-            Text(album.title, color = PhoebeUi.primaryText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(album.artist, color = PhoebeUi.secondaryText, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                album.title,
+                color = PhoebeUi.primaryText,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.sharedBoundsTransition("album:${album.id}:title"),
+            )
+            Text(
+                album.artist,
+                color = PhoebeUi.secondaryText,
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.sharedBoundsTransition("album:${album.id}:subtitle"),
+            )
         }
         Text("${tracks.size} tracks", color = PhoebeUi.mutedText, fontSize = 11.sp)
         Text(formatMinutesLabel(durationMs), color = PhoebeUi.mutedText, fontSize = 11.sp)
@@ -1015,6 +1089,7 @@ internal fun SongRow(
     val metadataEditorActions = LocalMetadataEditorActions.current
     val hasMenu = true
     val nowPlaying = LocalNowPlaying.current
+    val likeActions = LocalLikeActions.current
     val isCurrent = nowPlaying.trackId == track.id
     val playlistDragEnabled = LocalPlaylistDragEnabled.current
     Row(
@@ -1047,7 +1122,7 @@ internal fun SongRow(
                     PhoebeIconView(PhoebeIcon.Drag, tint = PhoebeUi.mutedText, modifier = Modifier.size(15.dp))
                 }
             }
-            Box(Modifier.size(42.dp).clickable(onClick = onPlay), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(42.dp).sharedArtworkTransition("song:${track.id}").clickable(onClick = onPlay), contentAlignment = Alignment.Center) {
                 ArtworkImage(track.album, track.thumbUrl, Modifier.fillMaxSize(), radius = 6.dp)
                 if (isCurrent) {
                     Box(
@@ -1076,6 +1151,7 @@ internal fun SongRow(
                 fontWeight = if (isCurrent || selected) FontWeight.SemiBold else FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.sharedBoundsTransition("song:${track.id}:title"),
             )
         }
         TableCellText(track.artist, modifier = Modifier.weight(1.4f), color = PhoebeUi.secondaryText)
@@ -1087,6 +1163,12 @@ internal fun SongRow(
         if (columns.fileType) TableCellText(displayFileTypeLabel(track), modifier = Modifier.width(70.dp), color = PhoebeUi.secondaryText)
         if (columns.dateAdded) TableCellText("—", modifier = Modifier.width(96.dp), color = PhoebeUi.mutedText)
         if (columns.filepath) TableCellText(track.filepath?.let(::shortenFilepath) ?: "—", modifier = Modifier.weight(1.4f), color = PhoebeUi.mutedText)
+        LikeButton(
+            liked = likeActions.isLiked(track),
+            enabled = likeActions.likesEnabled && track.canAddToPlexPlaylist(),
+            onClick = { likeActions.onToggleLiked(track) },
+            modifier = Modifier.width(36.dp),
+        )
         Box(Modifier.width(36.dp), contentAlignment = Alignment.Center) {
             PhoebeIconView(
                 PhoebeIcon.More,
@@ -1114,6 +1196,16 @@ internal fun SongRow(
                             text = { Text("Add to Up Next") },
                             onClick = {
                                 onAddToUpNext()
+                                menuExpanded = false
+                            },
+                        )
+                    }
+                    if (likeActions.likesEnabled && track.canAddToPlexPlaylist()) {
+                        val liked = likeActions.isLiked(track)
+                        DropdownMenuItem(
+                            text = { Text(if (liked) "Unlike Song" else "Like Song") },
+                            onClick = {
+                                likeActions.onToggleLiked(track)
                                 menuExpanded = false
                             },
                         )
@@ -1318,6 +1410,7 @@ private fun SongDetailSidebar(
 ) {
     var playlistMenuExpanded by remember(track.id) { mutableStateOf(false) }
     val nowPlaying = LocalNowPlaying.current
+    val likeActions = LocalLikeActions.current
     val isCurrent = nowPlaying.trackId == track.id
     Column(
         modifier = Modifier
@@ -1374,6 +1467,12 @@ private fun SongDetailSidebar(
         }
         Spacer(Modifier.height(2.dp))
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            if (likeActions.likesEnabled && track.canAddToPlexPlaylist()) {
+                SongDetailAction(
+                    PhoebeIcon.Heart,
+                    if (likeActions.isLiked(track)) "Unlike Song" else "Like Song",
+                ) { likeActions.onToggleLiked(track) }
+            }
             SongDetailAction(PhoebeIcon.Search, "Reveal in Finder", onPlay)
             Box {
                 SongDetailAction(PhoebeIcon.Plus, "Add to Playlist") { playlistMenuExpanded = true }
@@ -1552,9 +1651,9 @@ internal fun isLossless(track: Track): Boolean {
 
 /** Sort keys that apply to each tab. The first entry is the tab default. */
 internal fun sortKeysFor(filter: LibraryFilterTab): List<LibrarySortBy> = when (filter) {
-    LibraryFilterTab.Artists -> listOf(LibrarySortBy.Name)
-    LibraryFilterTab.Albums -> listOf(LibrarySortBy.Name, LibrarySortBy.Artist, LibrarySortBy.Year)
-    LibraryFilterTab.Songs -> listOf(LibrarySortBy.Name, LibrarySortBy.Album, LibrarySortBy.Artist, LibrarySortBy.Year)
+    LibraryFilterTab.Artists -> listOf(LibrarySortBy.Name, LibrarySortBy.DateAdded)
+    LibraryFilterTab.Albums -> listOf(LibrarySortBy.Name, LibrarySortBy.Artist, LibrarySortBy.Year, LibrarySortBy.DateAdded)
+    LibraryFilterTab.Songs -> listOf(LibrarySortBy.Name, LibrarySortBy.Album, LibrarySortBy.Artist, LibrarySortBy.Year, LibrarySortBy.DateAdded)
 }
 
 internal fun normalizeSortKey(filter: LibraryFilterTab, sortBy: LibrarySortBy): LibrarySortBy {
@@ -1565,16 +1664,18 @@ internal fun normalizeSortKey(filter: LibraryFilterTab, sortBy: LibrarySortBy): 
 internal fun sortLabelFor(filter: LibraryFilterTab, sortBy: LibrarySortBy): String {
     val key = normalizeSortKey(filter, sortBy)
     return when (filter) {
-        LibraryFilterTab.Artists -> "Artist name"
+        LibraryFilterTab.Artists -> if (key == LibrarySortBy.DateAdded) "Date added" else "Artist name"
         LibraryFilterTab.Albums -> when (key) {
             LibrarySortBy.Artist -> "Artist"
             LibrarySortBy.Year -> "Release date"
+            LibrarySortBy.DateAdded -> "Date added"
             else -> "Album name"
         }
         LibraryFilterTab.Songs -> when (key) {
             LibrarySortBy.Album -> "Album name"
             LibrarySortBy.Artist -> "Artist"
             LibrarySortBy.Year -> "Release date"
+            LibrarySortBy.DateAdded -> "Date added"
             else -> "Song name"
         }
     }
@@ -1590,8 +1691,13 @@ internal fun shortenFilepath(path: String): String {
 // =====================================================================
 
 internal fun sortArtistsForLibrary(catalog: CatalogSnapshot, sortBy: LibrarySortBy, ascending: Boolean): List<Artist> {
-    // Artists only support Name; any other key falls back to Name.
     val artists = catalog.artists
+    if (sortBy == LibrarySortBy.DateAdded) {
+        return artists.sortedWith(
+            if (ascending) compareBy<Artist>({ it.dateAddedMs ?: Long.MAX_VALUE }, { it.title.lowercase() })
+            else compareByDescending<Artist> { it.dateAddedMs ?: Long.MIN_VALUE }.thenBy { it.title.lowercase() },
+        )
+    }
     return artists.sortedWith(
         if (ascending) compareBy(String.CASE_INSENSITIVE_ORDER) { it.title }
         else compareByDescending(String.CASE_INSENSITIVE_ORDER) { it.title },
@@ -1612,6 +1718,10 @@ internal fun sortAlbumsForLibrary(albums: List<Album>, sortBy: LibrarySortBy, as
             )
             sortedKnown + unknown.sortedBy { it.title.lowercase() }
         }
+        LibrarySortBy.DateAdded -> albums.sortedWith(
+            if (ascending) compareBy<Album>({ it.dateAddedMs ?: Long.MAX_VALUE }, { it.title.lowercase() })
+            else compareByDescending<Album> { it.dateAddedMs ?: Long.MIN_VALUE }.thenBy { it.title.lowercase() },
+        )
         // Name and Album both mean "Album title" here.
         else -> albums.sortedWith(
             if (ascending) compareBy(String.CASE_INSENSITIVE_ORDER) { it.title }
@@ -1640,6 +1750,10 @@ internal fun sortTracksForLibrary(tracks: List<Track>, sortBy: LibrarySortBy, as
             )
             sortedKnown + unknown.sortedBy { it.title.lowercase() }
         }
+        LibrarySortBy.DateAdded -> tracks.sortedWith(
+            if (ascending) compareBy<Track>({ it.dateAddedMs ?: Long.MAX_VALUE }, { it.title.lowercase() })
+            else compareByDescending<Track> { it.dateAddedMs ?: Long.MIN_VALUE }.thenBy { it.title.lowercase() },
+        )
         // Name means "Song title".
         else -> tracks.sortedWith(
             if (ascending) compareBy(String.CASE_INSENSITIVE_ORDER) { it.title }

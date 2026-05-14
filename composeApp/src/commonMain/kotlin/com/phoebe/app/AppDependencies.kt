@@ -5,6 +5,7 @@ import com.phoebe.app.data.LibraryUiRepository
 import com.phoebe.app.data.MediaSourcesRepository
 import com.phoebe.app.data.PlayHistoryRepository
 import com.phoebe.app.data.PlexClient
+import com.phoebe.app.data.PlexPlayHistorySyncer
 import com.phoebe.app.data.PlexPlaybackReporter
 import com.phoebe.app.data.SessionRepository
 import com.phoebe.app.data.db.createPhoebeDatabase
@@ -25,6 +26,7 @@ class AppDependencies(
     val catalogRepository: CatalogRepository,
     val libraryUiRepository: LibraryUiRepository,
     val playHistoryRepository: PlayHistoryRepository,
+    val plexPlayHistorySyncer: PlexPlayHistorySyncer,
     val plexPlaybackReporter: PlexPlaybackReporter,
     val audioPlayer: AudioPlayer,
     val castController: CastController,
@@ -40,10 +42,11 @@ class AppDependencies(
             val database = createPhoebeDatabase()
             val mediaSourcesRepository = MediaSourcesRepository(database, storage)
             val libraryUiRepository = LibraryUiRepository(database, storage)
+            val playHistoryRepository = PlayHistoryRepository(database)
             val audioPlayer = createAudioPlayer()
             val castController = createCastController(audioPlayer)
             val sessionRepository = SessionRepository(plexClient, database, storage)
-            sessionRepository.restore()
+            sessionRepository.restore(refreshConnections = false)
             mediaSourcesRepository.restore()
             return AppDependencies(
                 database = database,
@@ -57,7 +60,11 @@ class AppDependencies(
                     mediaSourcesRepository = mediaSourcesRepository,
                 ),
                 libraryUiRepository = libraryUiRepository,
-                playHistoryRepository = PlayHistoryRepository(database),
+                playHistoryRepository = playHistoryRepository,
+                plexPlayHistorySyncer = PlexPlayHistorySyncer(
+                    plexClient = plexClient,
+                    playHistoryRepository = playHistoryRepository,
+                ),
                 plexPlaybackReporter = PlexPlaybackReporter(
                     plexClient = plexClient,
                     audioPlayer = audioPlayer,

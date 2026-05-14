@@ -150,6 +150,7 @@ import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.isLocalMediaPlayback
+import com.phoebe.app.domain.isLikedSongsPlaylist
 import com.phoebe.app.domain.isPlexLibraryTrack
 import com.phoebe.app.domain.supportsPlexPlaylists
 import com.phoebe.app.platform.createPlatformHttpClient
@@ -172,11 +173,9 @@ internal fun LibraryTopBar(searchQuery: String, onSearchQuery: (String) -> Unit)
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 36.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
     ) {
-        Spacer(Modifier.weight(1f))
         SearchPill(searchQuery, onSearchQuery, Modifier.width(380.dp))
-        Spacer(Modifier.weight(1f))
-        GlassIcon(PhoebeIcon.Bell, "Notifications")
     }
 }
 
@@ -486,6 +485,7 @@ internal fun DesktopContent(
                 val visiblePlaylists = remember(playlistActions.playlists, searchQuery) {
                     filterPlaylistsByQuery(playlistActions.playlists, searchQuery)
                 }
+                val playlistsLoading = catalogRefreshing && searchQuery.isBlank() && visiblePlaylists.isEmpty()
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (!playlistActions.playlistsEnabled) {
                         Text(
@@ -493,6 +493,8 @@ internal fun DesktopContent(
                             color = PhoebeUi.mutedText,
                             fontSize = 14.sp,
                         )
+                    } else if (playlistsLoading) {
+                        CatalogLoadingStrip()
                     } else if (visiblePlaylists.isEmpty()) {
                         Text(
                             if (searchQuery.isNotBlank()) {
@@ -505,15 +507,17 @@ internal fun DesktopContent(
                         )
                     } else {
                         visiblePlaylists.forEach { playlist ->
-                            val liked = playlist.title.contains("Liked", ignoreCase = true)
-                            PlaylistRow(
-                                icon = if (liked) PhoebeIcon.Heart else null,
-                                title = playlist.title,
-                                subtitle = "${playlist.trackCount} songs",
-                                thumbUrl = playlist.thumbUrl,
-                                accent = liked,
-                                onClick = { onPlaylist(playlist) },
-                            )
+                            val liked = playlist.isLikedSongsPlaylist()
+                            Box(Modifier.draggablePlaylist(playlist).playlistDropTarget(playlist)) {
+                                PlaylistRow(
+                                    icon = if (liked) PhoebeIcon.Heart else null,
+                                    title = playlist.title,
+                                    subtitle = "${playlist.trackCount} songs",
+                                    thumbUrl = playlist.thumbUrl,
+                                    accent = liked,
+                                    onClick = { onPlaylist(playlist) },
+                                )
+                            }
                         }
                     }
                 }

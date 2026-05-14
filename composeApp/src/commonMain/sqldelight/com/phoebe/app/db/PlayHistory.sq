@@ -6,17 +6,70 @@ CREATE TABLE PlayHistoryRow (
     track_id TEXT NOT NULL,
     artist TEXT NOT NULL,
     album TEXT NOT NULL,
-    played_at_ms INTEGER NOT NULL
+    played_at_ms INTEGER NOT NULL,
+    source TEXT NOT NULL DEFAULT 'local',
+    plex_server_id TEXT,
+    plex_history_key TEXT,
+    plex_imported_at_ms INTEGER
 );
 
 CREATE INDEX play_history_artist_idx ON PlayHistoryRow(artist);
 CREATE INDEX play_history_album_idx ON PlayHistoryRow(album);
 CREATE INDEX play_history_track_idx ON PlayHistoryRow(track_id);
 CREATE INDEX play_history_played_at_idx ON PlayHistoryRow(played_at_ms);
+CREATE UNIQUE INDEX play_history_plex_history_key_idx ON PlayHistoryRow(plex_history_key)
+WHERE plex_history_key IS NOT NULL;
 
 recordPlay:
 INSERT INTO PlayHistoryRow(track_id, artist, album, played_at_ms)
 VALUES (?, ?, ?, ?);
+
+insertImportedPlexPlay:
+INSERT OR IGNORE INTO PlayHistoryRow(
+    track_id,
+    artist,
+    album,
+    played_at_ms,
+    source,
+    plex_server_id,
+    plex_history_key,
+    plex_imported_at_ms
+)
+VALUES (?, ?, ?, ?, 'plex', ?, ?, ?);
+
+selectMaxImportedPlexPlayedAt:
+SELECT MAX(played_at_ms) AS lastPlayed
+FROM PlayHistoryRow
+WHERE source = 'plex'
+AND plex_server_id = ?;
+
+selectImportedPlexHistoryKey:
+SELECT plex_history_key
+FROM PlayHistoryRow
+WHERE plex_history_key = ?
+LIMIT 1;
+
+selectLocalMergeCandidate:
+SELECT played_at_ms
+FROM PlayHistoryRow
+WHERE track_id = ?
+AND source = 'local'
+AND plex_history_key IS NULL
+AND played_at_ms BETWEEN ? AND ?
+ORDER BY played_at_ms DESC
+LIMIT 1;
+
+markLocalPlayAsImportedPlex:
+UPDATE PlayHistoryRow
+SET played_at_ms = ?,
+    source = 'plex',
+    plex_server_id = ?,
+    plex_history_key = ?,
+    plex_imported_at_ms = ?
+WHERE track_id = ?
+AND played_at_ms = ?
+AND source = 'local'
+AND plex_history_key IS NULL;
 
 selectLastPlayedByArtist:
 SELECT artist, MAX(played_at_ms) AS lastPlayed
@@ -30,6 +83,11 @@ GROUP BY album;
 
 selectLastPlayedByTrack:
 SELECT track_id, MAX(played_at_ms) AS lastPlayed
+FROM PlayHistoryRow
+GROUP BY track_id;
+
+selectPlayCountsByTrack:
+SELECT track_id, COUNT(*) AS playCount
 FROM PlayHistoryRow
 GROUP BY track_id;
 

@@ -13,7 +13,28 @@ data class AudioMetadata(
     val audioCodec: String? = null,
 )
 
+data class LocalAudioFile(
+    val uri: String,
+    val sizeBytes: Long,
+    val modifiedAtMs: Long,
+    val filepath: String,
+)
+
+interface LocalAudioLibraryReader {
+    suspend fun listAudioFiles(rootUri: String): List<LocalAudioFile>
+    suspend fun readAudioMetadata(uri: String): AudioMetadata
+}
+
+object PlatformLocalAudioLibraryReader : LocalAudioLibraryReader {
+    override suspend fun listAudioFiles(rootUri: String): List<LocalAudioFile> =
+        LocalLibraryIO.listAudioFiles(rootUri)
+
+    override suspend fun readAudioMetadata(uri: String): AudioMetadata =
+        LocalLibraryIO.readAudioMetadata(uri)
+}
+
 expect object LocalLibraryIO {
+    suspend fun listAudioFiles(rootUri: String): List<LocalAudioFile>
     suspend fun listAudioUris(rootUri: String): List<String>
     suspend fun fileExists(uri: String): Boolean
     suspend fun readAudioMetadata(uri: String): AudioMetadata

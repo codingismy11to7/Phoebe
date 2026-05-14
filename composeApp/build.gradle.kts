@@ -1,4 +1,6 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+import org.gradle.api.tasks.JavaExec
+import org.gradle.api.tasks.testing.Test
 import java.io.File
 
 val phoebeVersionName = providers.gradleProperty("phoebe.versionName")
@@ -66,7 +68,7 @@ kotlin {
         val wasmJsMain by getting
         val androidUnitTest by getting
         val androidInstrumentedTest by getting {
-            dependsOn(commonTest)
+            kotlin.srcDir("src/commonTest/kotlin")
         }
         commonMain.dependencies {
             implementation(compose.runtime)
@@ -215,6 +217,10 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    buildFeatures {
+        buildConfig = true
+    }
+
     testOptions {
         unitTests {
             isIncludeAndroidResources = true
@@ -316,3 +322,15 @@ val compileMacMediaKeysNative = tasks.register<Exec>("compileMacMediaKeysNative"
 }
 
 tasks.named("compileKotlinDesktop") { dependsOn(compileMacMediaKeysNative) }
+
+tasks.withType<JavaExec>().configureEach {
+    if (name == "run") {
+        systemProperty("phoebe.debug", "true")
+    }
+}
+
+tasks.withType<Test>().configureEach {
+    if (name.contains("desktop", ignoreCase = true)) {
+        systemProperty("phoebe.debug", "true")
+    }
+}

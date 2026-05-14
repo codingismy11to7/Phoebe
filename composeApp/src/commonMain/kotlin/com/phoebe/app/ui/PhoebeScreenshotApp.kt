@@ -173,6 +173,7 @@ internal enum class PhoebeScreenshotScenario {
     Playlist,
     Artist,
     Album,
+    Song,
     Search,
     Player,
     PlayerUpNextExpanded,
@@ -184,6 +185,7 @@ internal enum class PhoebeScreenshotScenario {
 internal fun PhoebeScreenshotApp(
     scenario: PhoebeScreenshotScenario,
     useLightAppearance: Boolean = false,
+    forceShowQueue: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val fixture = remember { PhoebeScreenshotFixture }
@@ -208,15 +210,19 @@ internal fun PhoebeScreenshotApp(
                 clearSearches = {},
             ),
             LocalDragDrop provides DragDropController(),
+            LocalSharedElementTransitionsEnabled provides false,
         ) {
             BoxWithConstraints(modifier.fillMaxSize()) {
                 if (maxWidth < 900.dp) {
                     PhoebeMobileScreenshotScenario(scenario, fixture, Modifier.fillMaxSize())
                 } else {
+                    val wideDesktop = maxWidth >= 1280.dp
                     PhoebeDesktopScreenshotScenario(
                         scenario = scenario,
                         fixture = fixture,
                         useLightAppearance = useLightAppearance,
+                        showQueue = wideDesktop || forceShowQueue,
+                        compact = !wideDesktop,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
@@ -231,11 +237,14 @@ internal fun PhoebeDesktopScreenshotScenario(
     scenario: PhoebeScreenshotScenario,
     fixture: PhoebeScreenshotFixtureData,
     useLightAppearance: Boolean,
+    showQueue: Boolean,
+    compact: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val screen = when (scenario) {
         PhoebeScreenshotScenario.Artist -> AppScreen.ArtistDetail(fixture.artist)
         PhoebeScreenshotScenario.Album -> AppScreen.AlbumDetail(fixture.album)
+        PhoebeScreenshotScenario.Song -> AppScreen.SongDetail(fixture.currentTrack)
         PhoebeScreenshotScenario.SignIn -> AppScreen.SignIn
         else -> AppScreen.Home
     }
@@ -253,6 +262,8 @@ internal fun PhoebeDesktopScreenshotScenario(
         session = fixture.session,
         mediaSources = fixture.mediaSources,
         track = fixture.currentTrack,
+        homeUiState = deriveHomeUiState(fixture.catalog, fixture.playHistory, randomArtistSeed = 7, randomAlbumSeed = 11, nowMs = fixture.nowMs),
+        playHistory = fixture.playHistory,
         upNext = fixture.upNext,
         isPlaying = true,
         positionMs = 96_000L,
@@ -267,8 +278,8 @@ internal fun PhoebeDesktopScreenshotScenario(
         shuffle = true,
         repeat = RepeatMode.All,
         volume = 0.72f,
-        showQueue = true,
-        compact = false,
+        showQueue = showQueue,
+        compact = compact,
         busy = false,
         onNavigate = {},
         onSearchQuery = {},
@@ -276,6 +287,14 @@ internal fun PhoebeDesktopScreenshotScenario(
         onPlaylist = {},
         onArtist = {},
         onAlbum = {},
+        onSong = {},
+        onRecentSongs = {},
+        onRecentArtists = {},
+        onRecentAlbums = {},
+        onRecentlyPlayed = {},
+        onMostPlayed = {},
+        onRefreshRandomArtists = {},
+        onRefreshRandomAlbums = {},
         onPopDetail = {},
         onToggle = {},
         onPrevious = {},
@@ -356,6 +375,14 @@ internal fun PhoebeMobileScreenshotScenario(
                 onDownload = {},
                 onLibraryColumns = {},
             )
+            PhoebeScreenshotScenario.Song -> SongDetailPanel(
+                track = fixture.currentTrack,
+                modifier = Modifier.fillMaxSize(),
+                onBack = {},
+                onPlay = {},
+                onAddToUpNext = {},
+                onDownload = {},
+            )
             PhoebeScreenshotScenario.Playlist -> PlaylistDetailPanel(
                 playlist = fixture.playlist,
                 catalog = fixture.catalog,
@@ -406,6 +433,7 @@ internal fun PhoebeMobileScreenshotScenario(
                 libraryFilter = LibraryFilterTab.Artists,
                 libraryUi = fixture.libraryUi,
                 currentTrack = fixture.currentTrack,
+                homeUiState = deriveHomeUiState(fixture.catalog, fixture.playHistory, randomArtistSeed = 7, randomAlbumSeed = 11, nowMs = fixture.nowMs),
                 isPlaying = true,
                 onNavigate = {},
                 onSearchQuery = {},
@@ -413,6 +441,14 @@ internal fun PhoebeMobileScreenshotScenario(
                 onPlaylist = {},
                 onArtist = {},
                 onAlbum = {},
+                onSong = {},
+                onRecentSongs = {},
+                onRecentArtists = {},
+                onRecentAlbums = {},
+                onRecentlyPlayed = {},
+                onMostPlayed = {},
+                onRefreshRandomArtists = {},
+                onRefreshRandomAlbums = {},
                 onPlayTracks = { _, _ -> },
                 onAddToUpNext = {},
                 onDownload = {},
@@ -448,21 +484,22 @@ internal data class PhoebeScreenshotFixtureData(
 )
 
 internal val PhoebeScreenshotFixture = run {
-    val artist = Artist(id = "artist-luna", title = "Luna North", albumCount = 3, songCount = 8)
-    val secondArtist = Artist(id = "artist-echo", title = "Echo Harbor", albumCount = 2, songCount = 6)
-    val thirdArtist = Artist(id = "artist-marrow", title = "Marrow & Pines", albumCount = 1, songCount = 4)
-    val album = Album(id = "album-moonlit", title = "Moonlit Signals", artist = artist.title, year = 2026)
-    val secondAlbum = Album(id = "album-velvet", title = "Velvet Transit", artist = artist.title, year = 2024)
-    val thirdAlbum = Album(id = "album-harbor", title = "Harbor Static", artist = secondArtist.title, year = 2025)
-    val fourthAlbum = Album(id = "album-field", title = "Field Notes", artist = thirdArtist.title, year = 2023)
+    val nowMs = 1_800_000_000_000L
+    val artist = Artist(id = "artist-luna", title = "Luna North", albumCount = 3, songCount = 8, dateAddedMs = nowMs - 86_400_000L)
+    val secondArtist = Artist(id = "artist-echo", title = "Echo Harbor", albumCount = 2, songCount = 6, dateAddedMs = nowMs - 172_800_000L)
+    val thirdArtist = Artist(id = "artist-marrow", title = "Marrow & Pines", albumCount = 1, songCount = 4, dateAddedMs = nowMs - 259_200_000L)
+    val album = Album(id = "album-moonlit", title = "Moonlit Signals", artist = artist.title, year = 2026, dateAddedMs = nowMs - 86_400_000L)
+    val secondAlbum = Album(id = "album-velvet", title = "Velvet Transit", artist = artist.title, year = 2024, dateAddedMs = nowMs - 172_800_000L)
+    val thirdAlbum = Album(id = "album-harbor", title = "Harbor Static", artist = secondArtist.title, year = 2025, dateAddedMs = nowMs - 259_200_000L)
+    val fourthAlbum = Album(id = "album-field", title = "Field Notes", artist = thirdArtist.title, year = 2023, dateAddedMs = nowMs - 345_600_000L)
     val tracks = listOf(
-        Track("plex:track-aurora", "Aurora Wake", artist.title, album.title, 244_000L, "https://stream.example/aurora", "https://download.example/aurora", year = 2026, genre = "Dream pop", filepath = "/music/Luna North/Moonlit Signals/01 Aurora Wake.flac", audioCodec = "FLAC", bitrateKbps = 921),
-        Track("plex:track-moon", "Moon Over Meridian", artist.title, album.title, 272_000L, "https://stream.example/moon", "https://download.example/moon", year = 2026, genre = "Dream pop", filepath = "/music/Luna North/Moonlit Signals/02 Moon Over Meridian.flac", audioCodec = "FLAC", bitrateKbps = 1014),
-        Track("plex:track-static", "Soft Static Bloom", artist.title, album.title, 218_000L, "https://stream.example/static", "https://download.example/static", year = 2026, genre = "Dream pop", filepath = "/music/Luna North/Moonlit Signals/03 Soft Static Bloom.flac", audioCodec = "FLAC", bitrateKbps = 884),
-        Track("plex:track-window", "Window Seat Reverie", artist.title, secondAlbum.title, 236_000L, "https://stream.example/window", "https://download.example/window", year = 2024, genre = "Synth pop", filepath = "/music/Luna North/Velvet Transit/01 Window Seat Reverie.m4a", audioCodec = "AAC", bitrateKbps = 256),
-        Track("plex:track-harbor", "Harbor Lights", secondArtist.title, thirdAlbum.title, 208_000L, "https://stream.example/harbor", "https://download.example/harbor", year = 2025, genre = "Indie", filepath = "/music/Echo Harbor/Harbor Static/01 Harbor Lights.mp3", audioCodec = "MP3", bitrateKbps = 320),
-        Track("plex:track-quartet", "Quartz Quartet", secondArtist.title, thirdAlbum.title, 198_000L, "https://stream.example/quartet", "https://download.example/quartet", year = 2025, genre = "Indie", filepath = "/music/Echo Harbor/Harbor Static/02 Quartz Quartet.mp3", audioCodec = "MP3", bitrateKbps = 320),
-        Track("local:track-field", "Field Recording No. 7", thirdArtist.title, fourthAlbum.title, 314_000L, "file:///field", "", localUri = "file:///Users/music/Field Notes/field-7.flac", year = 2023, genre = "Ambient", filepath = "/Users/music/Field Notes/field-7.flac", audioCodec = "FLAC", bitrateKbps = 773),
+        Track("plex:track-aurora", "Aurora Wake", artist.title, album.title, 244_000L, "https://stream.example/aurora", "https://download.example/aurora", year = 2026, genre = "Dream pop", filepath = "/music/Luna North/Moonlit Signals/01 Aurora Wake.flac", audioCodec = "FLAC", bitrateKbps = 921, dateAddedMs = nowMs - 86_400_000L),
+        Track("plex:track-moon", "Moon Over Meridian", artist.title, album.title, 272_000L, "https://stream.example/moon", "https://download.example/moon", year = 2026, genre = "Dream pop", filepath = "/music/Luna North/Moonlit Signals/02 Moon Over Meridian.flac", audioCodec = "FLAC", bitrateKbps = 1014, dateAddedMs = nowMs - 90_000_000L),
+        Track("plex:track-static", "Soft Static Bloom", artist.title, album.title, 218_000L, "https://stream.example/static", "https://download.example/static", year = 2026, genre = "Dream pop", filepath = "/music/Luna North/Moonlit Signals/03 Soft Static Bloom.flac", audioCodec = "FLAC", bitrateKbps = 884, dateAddedMs = nowMs - 96_000_000L),
+        Track("plex:track-window", "Window Seat Reverie", artist.title, secondAlbum.title, 236_000L, "https://stream.example/window", "https://download.example/window", year = 2024, genre = "Synth pop", filepath = "/music/Luna North/Velvet Transit/01 Window Seat Reverie.m4a", audioCodec = "AAC", bitrateKbps = 256, dateAddedMs = nowMs - 172_800_000L),
+        Track("plex:track-harbor", "Harbor Lights", secondArtist.title, thirdAlbum.title, 208_000L, "https://stream.example/harbor", "https://download.example/harbor", year = 2025, genre = "Indie", filepath = "/music/Echo Harbor/Harbor Static/01 Harbor Lights.mp3", audioCodec = "MP3", bitrateKbps = 320, dateAddedMs = nowMs - 259_200_000L),
+        Track("plex:track-quartet", "Quartz Quartet", secondArtist.title, thirdAlbum.title, 198_000L, "https://stream.example/quartet", "https://download.example/quartet", year = 2025, genre = "Indie", filepath = "/music/Echo Harbor/Harbor Static/02 Quartz Quartet.mp3", audioCodec = "MP3", bitrateKbps = 320, dateAddedMs = nowMs - 266_200_000L),
+        Track("local:track-field", "Field Recording No. 7", thirdArtist.title, fourthAlbum.title, 314_000L, "file:///field", "", localUri = "file:///Users/music/Field Notes/field-7.flac", year = 2023, genre = "Ambient", filepath = "/Users/music/Field Notes/field-7.flac", audioCodec = "FLAC", bitrateKbps = 773, dateAddedMs = nowMs - 345_600_000L),
     )
     val playlist = Playlist(id = "plex:playlist-night", title = "Night Drive Mix", trackCount = 5)
     val secondPlaylist = Playlist(id = "plex:playlist-focus", title = "Focus Room", trackCount = 4)
@@ -474,7 +511,6 @@ internal val PhoebeScreenshotFixture = run {
         accessToken = "server-token",
     )
     val library = MusicLibrary(key = "42", title = "Music")
-    val nowMs = 1_800_000_000_000L
     PhoebeScreenshotFixtureData(
         catalog = CatalogSnapshot(
             artists = listOf(artist, secondArtist, thirdArtist),
@@ -520,7 +556,8 @@ internal val PhoebeScreenshotFixture = run {
         playHistory = PlayHistorySnapshot(
             byArtist = mapOf(artist.title to nowMs - 3_600_000L, secondArtist.title to nowMs - 86_400_000L),
             byAlbum = mapOf(album.title to nowMs - 3_600_000L, thirdAlbum.title to nowMs - 172_800_000L),
-            byTrack = mapOf(tracks[0].id to nowMs - 3_600_000L, tracks[4].id to nowMs - 86_400_000L),
+            byTrack = mapOf(tracks[1].id to nowMs - 60_000L, tracks[0].id to nowMs - 3_600_000L, tracks[4].id to nowMs - 86_400_000L, tracks[2].id to nowMs - 92_000_000L),
+            playCountByTrack = mapOf(tracks[1].id to 1284L, tracks[0].id to 982L, tracks[4].id to 876L, tracks[2].id to 741L, tracks[3].id to 695L),
         ),
         servers = listOf(server),
         libraries = listOf(library),

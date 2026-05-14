@@ -2,8 +2,10 @@ package com.phoebe.app.ui
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
@@ -168,6 +170,7 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.yield
 import kotlin.math.max
 
+@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 internal fun DesktopPlayer(
     screen: AppScreen,
@@ -176,6 +179,8 @@ internal fun DesktopPlayer(
     session: PlexSession?,
     mediaSources: MediaSourcesState,
     track: Track?,
+    homeUiState: HomeUiState,
+    playHistory: PlayHistorySnapshot,
     upNext: List<Track>,
     isPlaying: Boolean,
     isBuffering: Boolean = false,
@@ -202,6 +207,19 @@ internal fun DesktopPlayer(
     onPlaylist: (Playlist) -> Unit,
     onArtist: (Artist) -> Unit,
     onAlbum: (Album) -> Unit,
+    onSong: (Track) -> Unit,
+    onRecentSongs: () -> Unit,
+    onRecentArtists: () -> Unit,
+    onRecentAlbums: () -> Unit,
+    onRecentlyPlayed: () -> Unit,
+    onMostPlayed: () -> Unit,
+    onRefreshRandomArtists: () -> Unit,
+    onRefreshRandomAlbums: () -> Unit,
+    onPrefetchHomeArtist: (Artist) -> Unit = {},
+    onPrefetchHomeAlbum: (Album) -> Unit = {},
+    onPlayDecadeMix: (Int) -> Unit = {},
+    decadeMixNotice: String? = null,
+    onClearDecadeMixNotice: () -> Unit = {},
     onPopDetail: () -> Unit,
     onToggle: () -> Unit,
     onPrevious: () -> Unit,
@@ -227,6 +245,7 @@ internal fun DesktopPlayer(
     onRefreshLibrary: () -> Unit,
     servers: List<PlexServer>,
     libraries: List<MusicLibrary>,
+    librariesLoading: Boolean = false,
     onSelectServer: (PlexServer) -> Unit,
     onSelectLibrary: (MusicLibrary) -> Unit,
     onCancelPlexSetup: () -> Unit,
@@ -273,7 +292,20 @@ internal fun DesktopPlayer(
                     )
                     Column(Modifier.weight(1f).fillMaxHeight()) {
                         Row(Modifier.weight(1f).fillMaxWidth()) {
-                            when (screen) {
+                            SharedTransitionLayout(Modifier.weight(1f).fillMaxHeight()) {
+                                val sharedTransitionScope = this
+                                CompositionLocalProvider(LocalSharedTransitionScope provides sharedTransitionScope) {
+                                    AnimatedContent(
+                                        targetState = screen,
+                                        modifier = Modifier.fillMaxSize(),
+                                        transitionSpec = {
+                                            fadeIn(tween(180, easing = FastOutSlowInEasing)) togetherWith
+                                                fadeOut(tween(160, easing = FastOutSlowInEasing))
+                                        },
+                                        label = "desktop-screen",
+                                    ) { targetScreen ->
+                                        CompositionLocalProvider(LocalAnimatedVisibilityScope provides this@AnimatedContent) {
+                            when (targetScreen) {
                                 is AppScreen.ServerPicker -> PlexServerPickerPanel(
                                     servers = servers,
                                     busy = busy,
@@ -281,16 +313,17 @@ internal fun DesktopPlayer(
                                     onSelectServer = onSelectServer,
                                     onCancel = onCancelPlexSetup,
                                     onRetry = onRetryServers,
-                                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                                    modifier = Modifier.fillMaxSize(),
                                 )
                                 is AppScreen.LibraryPicker -> PlexLibraryPickerPanel(
                                     libraries = libraries,
                                     serverName = session?.selectedServer?.name,
                                     busy = busy,
+                                    librariesLoading = librariesLoading,
                                     onSelectLibrary = onSelectLibrary,
                                     onBack = onBackToServerPicker,
                                     onCancel = onCancelPlexSetup,
-                                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                                    modifier = Modifier.fillMaxSize(),
                                 )
                                 is AppScreen.SignIn -> SignInWelcomeScreen(
                                     message = appMessage,
@@ -298,12 +331,12 @@ internal fun DesktopPlayer(
                                     onStartSignIn = onStartSignIn,
                                     onFinishSignIn = onFinishSignIn,
                                     showLocalFolderHint = true,
-                                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                                    modifier = Modifier.fillMaxSize(),
                                 )
-                                is AppScreen.ArtistDetail -> Column(Modifier.weight(1f).fillMaxHeight()) {
+                                is AppScreen.ArtistDetail -> Column(Modifier.fillMaxSize()) {
                                     LibraryTopBar(searchQuery = searchQuery, onSearchQuery = onSearchQuery)
                                     ArtistDetailPanel(
-                                        artist = screen.artist,
+                                        artist = targetScreen.artist,
                                         catalog = catalog,
                                         libraryUi = libraryUi,
                                         catalogRefreshing = catalogRefreshing,
@@ -317,10 +350,10 @@ internal fun DesktopPlayer(
                                         onLibraryColumns = onLibraryColumns,
                                     )
                                 }
-                                is AppScreen.AlbumDetail -> Column(Modifier.weight(1f).fillMaxHeight()) {
+                                is AppScreen.AlbumDetail -> Column(Modifier.fillMaxSize()) {
                                     LibraryTopBar(searchQuery = searchQuery, onSearchQuery = onSearchQuery)
                                     AlbumDetailPanel(
-                                        album = screen.album,
+                                        album = targetScreen.album,
                                         catalog = catalog,
                                         libraryUi = libraryUi,
                                         catalogRefreshing = catalogRefreshing,
@@ -333,16 +366,80 @@ internal fun DesktopPlayer(
                                         onLibraryColumns = onLibraryColumns,
                                     )
                                 }
-                                else -> when {
-                                    section == DesktopSection.Home && selectedPlaylistId == null -> MainFeature(
-                                        track = track,
-                                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                                is AppScreen.SongDetail -> Column(Modifier.fillMaxSize()) {
+                                    LibraryTopBar(searchQuery = searchQuery, onSearchQuery = onSearchQuery)
+                                    SongDetailPanel(
+                                        track = targetScreen.track,
+                                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                                        onBack = onPopDetail,
+                                        onPlay = { onPlayTracks(listOf(targetScreen.track), 0) },
+                                        onAddToUpNext = onAddToUpNext,
+                                        onDownload = onDownload,
                                     )
+                                }
+                                is AppScreen.RecentlyAdded -> Column(Modifier.fillMaxSize()) {
+                                    LibraryTopBar(searchQuery = searchQuery, onSearchQuery = onSearchQuery)
+                                    RecentlyAddedScreen(
+                                        kind = targetScreen.kind,
+                                        catalog = catalog,
+                                        nowMs = LocalNowMs.current,
+                                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                                        onBack = onPopDetail,
+                                        onArtist = onArtist,
+                                        onAlbum = onAlbum,
+                                        onSong = onSong,
+                                        onPlayTracks = onPlayTracks,
+                                        onAddToUpNext = onAddToUpNext,
+                                        onDownload = onDownload,
+                                    )
+                                }
+                                is AppScreen.PlayHistory -> Column(Modifier.fillMaxSize()) {
+                                    LibraryTopBar(searchQuery = searchQuery, onSearchQuery = onSearchQuery)
+                                    PlayHistoryScreen(
+                                        kind = targetScreen.kind,
+                                        catalog = catalog,
+                                        playHistory = playHistory,
+                                        nowMs = LocalNowMs.current,
+                                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                                        onBack = onPopDetail,
+                                        onSong = onSong,
+                                        onPlayTracks = onPlayTracks,
+                                        onAddToUpNext = onAddToUpNext,
+                                        onDownload = onDownload,
+                                    )
+                                }
+                                else -> when {
+                                    section == DesktopSection.Home && selectedPlaylistId == null -> {
+                                        val homeListState = RetainedLazyListStates.remember("desktop-home")
+                                        DesktopHomeScreen(
+                                        state = homeUiState,
+                                        catalog = catalog,
+                                        catalogRefreshing = catalogRefreshing,
+                                        listState = homeListState,
+                                        modifier = Modifier.fillMaxSize(),
+                                        onTrack = onSong,
+                                        onArtist = onArtist,
+                                        onAlbum = onAlbum,
+                                        onRecentSongs = onRecentSongs,
+                                        onRecentArtists = onRecentArtists,
+                                        onRecentAlbums = onRecentAlbums,
+                                        onRecentlyPlayed = onRecentlyPlayed,
+                                        onMostPlayed = onMostPlayed,
+                                        onRefreshArtists = onRefreshRandomArtists,
+                                        onRefreshAlbums = onRefreshRandomAlbums,
+                                        onPrefetchArtist = onPrefetchHomeArtist,
+                                        onPrefetchAlbum = onPrefetchHomeAlbum,
+                                        onPlayDecadeMix = onPlayDecadeMix,
+                                        decadeMixNotice = decadeMixNotice,
+                                        onClearDecadeMixNotice = onClearDecadeMixNotice,
+                                        onPlayTracks = onPlayTracks,
+                                    )
+                                    }
                                     section == DesktopSection.Search && selectedPlaylistId == null -> SearchDesktopView(
                                         catalog = catalog,
                                         catalogRefreshing = catalogRefreshing,
                                         searchQuery = searchQuery,
-                                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                                        modifier = Modifier.fillMaxSize(),
                                         onSearchQuery = onSearchQuery,
                                         onArtist = onArtist,
                                         onAlbum = onAlbum,
@@ -351,31 +448,29 @@ internal fun DesktopPlayer(
                                         onDownload = onDownload,
                                     )
                                     section == DesktopSection.Library && selectedPlaylistId == null -> {
-                                        Column(Modifier.weight(1f).fillMaxHeight()) {
-                                            LibraryTopBar(searchQuery = searchQuery, onSearchQuery = onSearchQuery)
-                                            LibraryDesktopView(
-                                                catalog = catalog,
-                                                catalogRefreshing = catalogRefreshing,
-                                                filter = libraryFilter,
-                                                libraryUi = libraryUi,
-                                                onFilter = onLibraryFilter,
-                                                onLibrarySortBy = onLibrarySortBy,
-                                                onLibraryAscending = onLibraryAscending,
-                                                onLibraryColumns = onLibraryColumns,
-                                                onArtist = onArtist,
-                                                onAlbum = onAlbum,
-                                                onPlayTracks = onPlayTracks,
-                                                searchQuery = searchQuery,
-                                                onAddToUpNext = onAddToUpNext,
-                                                onDownload = onDownload,
-                                                modifier = Modifier.weight(1f).fillMaxWidth(),
-                                            )
-                                        }
+                                        LibraryDesktopView(
+                                            catalog = catalog,
+                                            catalogRefreshing = catalogRefreshing,
+                                            filter = libraryFilter,
+                                            libraryUi = libraryUi,
+                                            onFilter = onLibraryFilter,
+                                            onLibrarySortBy = onLibrarySortBy,
+                                            onLibraryAscending = onLibraryAscending,
+                                            onLibraryColumns = onLibraryColumns,
+                                            onArtist = onArtist,
+                                            onAlbum = onAlbum,
+                                            onPlayTracks = onPlayTracks,
+                                            searchQuery = searchQuery,
+                                            onSearchQuery = onSearchQuery,
+                                            onAddToUpNext = onAddToUpNext,
+                                            onDownload = onDownload,
+                                            modifier = Modifier.fillMaxSize(),
+                                        )
                                     }
                                     section == DesktopSection.Settings && selectedPlaylistId == null -> SettingsDesktopView(
                                         isLightMode = useLightAppearance,
                                         onLightModeChange = onUseLightAppearanceChange,
-                                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                                        modifier = Modifier.fillMaxSize(),
                                     )
                                     else -> DesktopContent(
                                         catalog = catalog,
@@ -385,7 +480,7 @@ internal fun DesktopPlayer(
                                         searchQuery = searchQuery,
                                         libraryFilter = libraryFilter,
                                         libraryUi = libraryUi,
-                                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                                        modifier = Modifier.fillMaxSize(),
                                         onSearchQuery = onSearchQuery,
                                         onLibraryFilter = onLibraryFilter,
                                         onPlaylist = onPlaylist,
@@ -400,18 +495,23 @@ internal fun DesktopPlayer(
                                     )
                                 }
                             }
-                            val isLibrary = section == DesktopSection.Library && selectedPlaylistId == null &&
-                                screen !is AppScreen.ArtistDetail && screen !is AppScreen.AlbumDetail
-                            val isSearch = section == DesktopSection.Search && selectedPlaylistId == null &&
-                                screen !is AppScreen.ArtistDetail && screen !is AppScreen.AlbumDetail
-                            val isSettings = section == DesktopSection.Settings && selectedPlaylistId == null &&
-                                screen !is AppScreen.ArtistDetail && screen !is AppScreen.AlbumDetail
-                            if (showQueue && !isLibrary && !isSearch && !isSettings && desktopUpNextExpanded) {
+                                }
+                                    }
+                                }
+                            }
+                            if (showQueue && desktopUpNextExpanded) {
+                                Box(
+                                    Modifier
+                                        .fillMaxHeight()
+                                        .padding(top = 132.dp, bottom = 24.dp)
+                                        .width(1.dp)
+                                        .background(PhoebeUi.border),
+                                )
                                 QueuePanel(
                                     upNext = upNext,
                                     currentTrack = track,
                                     repeat = repeat,
-                                    modifier = Modifier.width(330.dp).fillMaxHeight(),
+                                    modifier = Modifier.width(330.dp).fillMaxHeight().padding(start = 24.dp),
                                     onPlayQueue = onPlayQueue,
                                     onClearQueue = onClearQueue,
                                     onMoveUpNext = onMoveUpNext,
@@ -447,4 +547,3 @@ internal fun DesktopPlayer(
         }
     }
 }
-

@@ -102,6 +102,65 @@ class PlexPlaylistEndToEndDesktopTest {
         assertEquals(listOf("plex:t1", "plex:t2"), tracks.map { it.id })
     }
 
+    @Test
+    fun toggleLikedTrackFindsExistingLikedPlaylistAndRemovesItem() = runTest {
+        var plexRemoveCalled = false
+        val (db, sqlDriver) = newInMemoryPhoebeDatabase()
+        driver = sqlDriver
+        val http = testHttpClient(plexCatalogMockEngine(includeLikedPlaylist = true, onPlaylistRemove = { plexRemoveCalled = true }))
+        val repo = catalogRepository(db, http)
+
+        repo.refreshAggregated(testPlexSession())
+        val track = repo.tracksForAlbum(testPlexSession(), repo.catalog.value.albums.single()).single()
+        assertTrue(repo.toggleLikedTrack(testPlexSession(), track).not())
+
+        assertTrue(plexRemoveCalled)
+        val liked = repo.catalog.value.playlists.single { it.title == "Liked Songs" }
+        assertTrue(repo.catalog.value.tracksByParent[liked.id].orEmpty().none { it.id == track.id })
+    }
+
+    @Test
+    fun toggleLikedTrackCreatesLikedPlaylistWhenMissing() = runTest {
+        val (db, sqlDriver) = newInMemoryPhoebeDatabase()
+        driver = sqlDriver
+        val http = testHttpClient(plexCatalogMockEngine())
+        val repo = catalogRepository(db, http)
+
+        repo.refreshAggregated(testPlexSession())
+        val track = repo.tracksForAlbum(testPlexSession(), repo.catalog.value.albums.single()).single()
+        val liked = repo.toggleLikedTrack(testPlexSession(), track)
+
+        assertTrue(liked)
+        assertTrue(repo.catalog.value.playlists.any { it.title == "Liked Songs" })
+    }
+
+    @Test
+    fun copyPlexPlaylistIntoPlaylistSkipsSelfDrop() = runTest {
+        val (db, sqlDriver) = newInMemoryPhoebeDatabase()
+        driver = sqlDriver
+        val http = testHttpClient(plexCatalogMockEngine())
+        val repo = catalogRepository(db, http)
+
+        repo.refreshAggregated(testPlexSession())
+        val playlist = repo.catalog.value.playlists.single()
+
+        assertEquals(0, repo.copyPlexPlaylistIntoPlaylist(testPlexSession(), playlist, playlist))
+    }
+
+    @Test
+    fun tracksForDecadeFetchesMatchingAlbumTracks() = runTest {
+        val (db, sqlDriver) = newInMemoryPhoebeDatabase()
+        driver = sqlDriver
+        val http = testHttpClient(plexCatalogMockEngine())
+        val repo = catalogRepository(db, http)
+
+        repo.refreshAggregated(testPlexSession())
+        val tracks = repo.tracksForDecade(testPlexSession(), 1990)
+
+        assertEquals(listOf("plex:t1"), tracks.map { it.id })
+        assertEquals(1995, tracks.single().year)
+    }
+
     private fun catalogRepository(db: com.phoebe.app.db.PhoebeDatabase, http: io.ktor.client.HttpClient): CatalogRepository {
         val mediaSources = MediaSourcesRepository(db, PlatformStorage())
         return CatalogRepository(

@@ -1,0 +1,7 @@
+ALTER TABLE PlayHistoryRow ADD COLUMN source TEXT NOT NULL DEFAULT 'local';
+ALTER TABLE PlayHistoryRow ADD COLUMN plex_server_id TEXT;
+ALTER TABLE PlayHistoryRow ADD COLUMN plex_history_key TEXT;
+ALTER TABLE PlayHistoryRow ADD COLUMN plex_imported_at_ms INTEGER;
+
+CREATE UNIQUE INDEX play_history_plex_history_key_idx ON PlayHistoryRow(plex_history_key)
+WHERE plex_history_key IS NOT NULL;

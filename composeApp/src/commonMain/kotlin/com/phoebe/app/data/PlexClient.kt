@@ -8,10 +8,12 @@ import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.TrackMetadataUpdate
+import com.phoebe.app.platform.PhoebeLog
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.get
+import io.ktor.client.request.delete
 import io.ktor.client.request.header
 import io.ktor.client.request.parameter
 import io.ktor.client.request.post
@@ -24,6 +26,10 @@ import io.ktor.http.appendPathSegments
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 class PlexClient(
     private val httpClient: HttpClient = HttpClient {
@@ -101,6 +107,29 @@ class PlexClient(
             .map { MusicLibrary(key = it.key, title = it.title) }
     }
 
+    suspend fun resolveFastestBase(server: PlexServer, token: String, timeoutMs: Long = 1_500L): String? = coroutineScope {
+        val candidates = server.reachableBaseUris(apiBaseCache[server.id])
+        if (candidates.isEmpty()) return@coroutineScope null
+        val results = Channel<String>(capacity = candidates.size)
+        candidates.forEach { base ->
+            launch {
+                val ok = withTimeoutOrNull(timeoutMs) {
+                    runCatching {
+                        val response = httpClient.get("$base/identity") {
+                            plexServerAuth(token)
+                            header(HttpHeaders.Accept, "application/json")
+                        }
+                        response.status.isSuccess()
+                    }.getOrDefault(false)
+                } == true
+                if (ok) results.trySend(base)
+            }
+        }
+        val winner = withTimeoutOrNull(timeoutMs + 250L) { results.receive() }
+        if (winner != null) apiBaseCache[server.id] = winner
+        winner
+    }
+
     suspend fun artists(server: PlexServer, library: MusicLibrary, token: String): List<Artist> {
         val response = plexGet<PlexMediaContainerResponse>(server, token, "/library/sections/${library.key}/all")
         val fromDirectories = response.mediaContainer.directories.map {
@@ -109,6 +138,7 @@ class PlexClient(
                 title = it.title,
                 thumbUrl = it.thumb?.let { thumb -> server.assetUrl(thumb, token) },
                 albumCount = it.leafCount ?: 0,
+                dateAddedMs = it.addedAt?.times(1000L),
             )
         }
         val meta = response.mediaContainer.metadata
@@ -122,6 +152,7 @@ class PlexClient(
                 title = item.title,
                 thumbUrl = item.thumb?.let { thumb -> server.assetUrl(thumb, token) },
                 albumCount = item.leafCount ?: 0,
+                dateAddedMs = item.addedAt?.times(1000L),
             )
         }
         return (fromDirectories + fromMetadata).distinctBy { it.id }
@@ -136,6 +167,7 @@ class PlexClient(
                 artist = it.parentTitle ?: "Unknown artist",
                 year = it.year,
                 thumbUrl = it.thumb?.let { thumb -> server.assetUrl(thumb, token) },
+                dateAddedMs = it.addedAt?.times(1000L),
             )
         }
     }
@@ -164,6 +196,131 @@ class PlexClient(
     suspend fun children(server: PlexServer, parentKey: String, token: String): List<Track> {
         val response = plexGet<PlexMediaContainerResponse>(server, token, "/library/metadata/$parentKey/children")
         return response.mediaContainer.metadata.mapNotNull { it.toTrack(server, token) }
+    }
+
+    suspend fun playbackHistoryPage(
+        server: PlexServer,
+        token: String,
+        library: MusicLibrary,
+        minViewedAtMs: Long?,
+        start: Int,
+        size: Int,
+    ): PlexPlaybackHistoryPage {
+        val response: PlexMediaContainerResponse = withReachableBase(server) { base ->
+            val response = httpClient.get("$base/status/sessions/history/all") {
+                plexServerAuth(token)
+                header(HttpHeaders.Accept, "application/json")
+                header("X-Plex-Container-Start", start.toString())
+                header("X-Plex-Container-Size", size.toString())
+                parameter("X-Plex-Container-Start", start)
+                parameter("X-Plex-Container-Size", size)
+                parameter("librarySectionID", library.key)
+                parameter("sort", "viewedAt:desc")
+                minViewedAtMs?.let { parameter("viewedAt", "viewedAt>=${it / 1000L}") }
+            }
+            if (!response.status.isSuccess()) {
+                val body = response.bodyAsText()
+                error("Plex playback history failed (${response.status.value}) via $base: ${body.take(200)}")
+            }
+            response.body()
+        }
+        val container = response.mediaContainer
+        return PlexPlaybackHistoryPage(
+            entries = container.metadata.mapNotNull { it.toPlaybackHistoryEntry() },
+            offset = container.offset ?: start,
+            size = container.size,
+            totalSize = container.totalSize,
+        )
+    }
+
+    suspend fun libraryTracksPage(
+        server: PlexServer,
+        library: MusicLibrary,
+        token: String,
+        start: Int,
+        size: Int,
+    ): PlexTrackPage {
+        val response: PlexMediaContainerResponse = withReachableBase(server) { base ->
+            val response = httpClient.get("$base/library/sections/${library.key}/all") {
+                plexServerAuth(token)
+                header(HttpHeaders.Accept, "application/json")
+                header("X-Plex-Container-Start", start.toString())
+                header("X-Plex-Container-Size", size.toString())
+                parameter("X-Plex-Container-Start", start)
+                parameter("X-Plex-Container-Size", size)
+                parameter("type", PlexTrackType)
+            }
+            if (!response.status.isSuccess()) {
+                val body = response.bodyAsText()
+                error("Plex track page failed (${response.status.value}) via $base: ${body.take(200)}")
+            }
+            response.body()
+        }
+        return response.toTrackPage(server, token, requestedStart = start, requestedSize = size)
+    }
+
+    suspend fun tracksForYearRange(
+        server: PlexServer,
+        library: MusicLibrary,
+        token: String,
+        startYear: Int,
+        endYear: Int,
+        start: Int = 0,
+        size: Int = 500,
+        limit: Int? = null,
+    ): List<Track> {
+        val response: PlexMediaContainerResponse = withReachableBase(server) { base ->
+            val response = httpClient.get("$base/library/sections/${library.key}/all") {
+                plexServerAuth(token)
+                header(HttpHeaders.Accept, "application/json")
+                header("X-Plex-Container-Start", start.toString())
+                header("X-Plex-Container-Size", size.toString())
+                parameter("X-Plex-Container-Start", start)
+                parameter("X-Plex-Container-Size", size)
+                parameter("type", PlexTrackType)
+                parameter("year>=", startYear)
+                parameter("year<=", endYear)
+                limit?.let { parameter("limit", it) }
+            }
+            if (!response.status.isSuccess()) {
+                val body = response.bodyAsText()
+                error("Plex track year search failed (${response.status.value}) via $base: ${body.take(200)}")
+            }
+            response.body()
+        }
+        return response.mediaContainer.metadata.mapNotNull { it.toTrack(server, token) }
+    }
+
+    suspend fun tracksForYearRangePage(
+        server: PlexServer,
+        library: MusicLibrary,
+        token: String,
+        startYear: Int,
+        endYear: Int,
+        start: Int,
+        size: Int,
+        limit: Int? = null,
+    ): PlexTrackPage {
+        val response: PlexMediaContainerResponse = withReachableBase(server) { base ->
+            val response = httpClient.get("$base/library/sections/${library.key}/all") {
+                plexServerAuth(token)
+                header(HttpHeaders.Accept, "application/json")
+                header("X-Plex-Container-Start", start.toString())
+                header("X-Plex-Container-Size", size.toString())
+                parameter("X-Plex-Container-Start", start)
+                parameter("X-Plex-Container-Size", size)
+                parameter("type", PlexTrackType)
+                parameter("year>=", startYear)
+                parameter("year<=", endYear)
+                limit?.let { parameter("limit", it) }
+            }
+            if (!response.status.isSuccess()) {
+                val body = response.bodyAsText()
+                error("Plex track year page failed (${response.status.value}) via $base: ${body.take(200)}")
+            }
+            response.body()
+        }
+        return response.toTrackPage(server, token, requestedStart = start, requestedSize = size)
     }
 
     /**
@@ -256,6 +413,27 @@ class PlexClient(
             ?: parsed.mediaContainer.size
     }
 
+    suspend fun removePlaylistItems(
+        server: PlexServer,
+        token: String,
+        playlistRatingKey: String,
+        playlistItemIds: List<Long>,
+    ) {
+        if (playlistItemIds.isEmpty()) return
+        withReachableBase(server) { base ->
+            playlistItemIds.forEach { itemId ->
+                val response = httpClient.delete("$base/playlists/$playlistRatingKey/items/$itemId") {
+                    plexServerAuth(token)
+                    header(HttpHeaders.Accept, "application/json")
+                }
+                if (!response.status.isSuccess()) {
+                    val body = response.bodyAsText()
+                    error("Plex remove playlist item failed (${response.status.value}) via $base: ${body.take(200)}")
+                }
+            }
+        }
+    }
+
     /**
      * Report playback position to Plex so the server can mark items played and scrobble to
      * linked services (e.g. ListenBrainz). Clients must hit this on state changes and
@@ -326,7 +504,7 @@ class PlexClient(
             val body = response.bodyAsText()
             if (!response.status.isSuccess()) {
                 if (response.status.value == 401) continue
-                println("[PlexClient] createAudioPlayQueue failed → HTTP ${response.status.value}: ${body.take(300)}")
+                PhoebeLog.d("PlexClient") { "createAudioPlayQueue failed → HTTP ${response.status.value}: ${body.take(300)}" }
                 return null
             }
             apiBaseCache[server.id] = base
@@ -393,10 +571,10 @@ class PlexClient(
         }
         val body = response.bodyAsText()
         if (!response.status.isSuccess()) {
-            println("[PlexClient] editTrackMetadata failed for '$ratingKey' → HTTP ${response.status.value}: $body")
+            PhoebeLog.d("PlexClient") { "editTrackMetadata failed for '$ratingKey' → HTTP ${response.status.value}: $body" }
             error("Plex metadata sync failed (${response.status.value}): $body")
         }
-        println("[PlexClient] editTrackMetadata ok for '$ratingKey' (${response.status.value}): ${body.take(400)}")
+        PhoebeLog.v("PlexClient") { "editTrackMetadata ok for '$ratingKey' (${response.status.value}): ${body.take(400)}" }
     }
 
     /**
@@ -413,12 +591,12 @@ class PlexClient(
     ): PlexMediaContainerResponse {
         val body = response.bodyAsText()
         if (!response.status.isSuccess()) {
-            println("[PlexClient] $op failed for '$context' → HTTP ${response.status.value}: $body")
+            PhoebeLog.d("PlexClient") { "$op failed for '$context' → HTTP ${response.status.value}: $body" }
             error("Plex $op failed (${response.status.value}): $body")
         }
         // Helpful for diagnosing "request succeeded but nothing happened" cases where Plex
         // returns 200 + leafCountAdded=0.
-        println("[PlexClient] $op ok for '$context' (${response.status.value}): ${body.take(400)}")
+        PhoebeLog.v("PlexClient") { "$op ok for '$context' (${response.status.value}): ${body.take(400)}" }
         return PlexJson.decodeFromString(PlexMediaContainerResponse.serializer(), body)
     }
 
@@ -479,13 +657,54 @@ class PlexClient(
             durationMs = duration ?: 0L,
             streamUrl = streamUrl,
             downloadUrl = "$streamUrl&download=1",
-            thumbUrl = thumb?.let { server.assetUrl(it, token) },
-            year = year,
+            thumbUrl = (thumb ?: parentThumb ?: grandparentThumb)?.let { server.assetUrl(it, token) },
+            year = year ?: parentYear,
             genre = genre,
             filepath = part.file,
             audioCodec = mediaItem.audioCodec?.takeIf { it.isNotBlank() },
             bitrateKbps = bitrateKbps,
+            dateAddedMs = addedAt?.times(1000L),
+            playlistItemId = playlistItemId,
+            parentAlbumId = parentRatingKey,
         )
+    }
+
+    private fun PlexMetadataDto.toPlaybackHistoryEntry(): PlexPlaybackHistoryEntry? {
+        val key = historyKey?.takeIf { it.isNotBlank() } ?: return null
+        val viewed = viewedAt ?: return null
+        return PlexPlaybackHistoryEntry(
+            ratingKey = ratingKey,
+            historyKey = key,
+            viewedAtMs = viewed * 1000L,
+            type = type,
+            librarySectionId = librarySectionID,
+            title = title,
+            artist = grandparentTitle ?: parentTitle ?: "Unknown Artist",
+            album = parentTitle ?: "Unknown Album",
+        )
+    }
+
+    private fun PlexMediaContainerResponse.toTrackPage(
+        server: PlexServer,
+        token: String,
+        requestedStart: Int,
+        requestedSize: Int,
+    ): PlexTrackPage {
+        val container = mediaContainer
+        val tracks = container.metadata.mapNotNull { it.toTrack(server, token) }
+        val offset = container.offset ?: requestedStart
+        val totalSize = container.totalSize ?: responseHeaderTotalSizeFallback(offset, container.size, tracks.size, requestedSize)
+        return PlexTrackPage(
+            tracks = tracks,
+            offset = offset,
+            size = container.size.takeIf { it > 0 } ?: tracks.size,
+            totalSize = totalSize,
+        )
+    }
+
+    private fun responseHeaderTotalSizeFallback(offset: Int, containerSize: Int, trackSize: Int, requestedSize: Int): Int? {
+        val actual = containerSize.takeIf { it > 0 } ?: trackSize
+        return if (actual < requestedSize) offset + actual else null
     }
 
     private fun PlexServer.assetUrl(path: String, token: String): String {
@@ -502,11 +721,27 @@ class PlexClient(
     companion object {
         const val LibraryIdentifier = "com.plexapp.plugins.library"
         const val ClientIdentifier = "phoebe-compose-multiplatform"
+        private const val PlexTrackType = 10
         val PlexJson = Json {
             ignoreUnknownKeys = true
             explicitNulls = false
         }
     }
+}
+
+data class PlexTrackPage(
+    val tracks: List<Track>,
+    val offset: Int,
+    val size: Int,
+    val totalSize: Int?,
+) {
+    val nextOffset: Int get() = offset + size
+    val hasMore: Boolean
+        get() = when {
+            tracks.isEmpty() -> false
+            totalSize != null -> nextOffset < totalSize
+            else -> size > 0
+        }
 }
 
 enum class PlexTimelineState(val wireValue: String) {

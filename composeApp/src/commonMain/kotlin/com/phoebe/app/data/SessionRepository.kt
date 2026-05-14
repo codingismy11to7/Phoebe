@@ -6,6 +6,7 @@ import com.phoebe.app.domain.MusicLibrary
 import com.phoebe.app.domain.PlexPin
 import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.PlexSession
+import com.phoebe.app.platform.PhoebeLog
 import com.phoebe.app.platform.PlatformStorage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -23,7 +24,8 @@ class SessionRepository(
     private val mutableSession = MutableStateFlow<PlexSession?>(null)
     val session: StateFlow<PlexSession?> = mutableSession
 
-    suspend fun restore() {
+    suspend fun restore(refreshConnections: Boolean = true) {
+        PhoebeLog.d("SessionRepository") { "restore(refreshConnections=$refreshConnections)" }
         val row = withContext(Dispatchers.Default) {
             database.sessionQueries.selectCurrent().awaitAsOneOrNull()
         }
@@ -38,7 +40,11 @@ class SessionRepository(
             mutableSession.value = parsed
             storage.delete(LegacySessionFile)
         }
-        refreshSelectedServerConnections()
+        if (refreshConnections) refreshSelectedServerConnections()
+        PhoebeLog.d("SessionRepository") {
+            val s = mutableSession.value
+            "restore complete → user=${s?.userName ?: "none"}, server=${s?.selectedServer?.name ?: "none"}, library=${s?.selectedLibrary?.title ?: "none"}"
+        }
     }
 
     /** Refresh server URLs from plex.tv so we pick up LAN addresses for timeline API calls. */
@@ -46,10 +52,12 @@ class SessionRepository(
         val current = mutableSession.value ?: return
         val selected = current.selectedServer ?: return
         if (current.token.isBlank()) return
+        PhoebeLog.v("SessionRepository") { "refreshSelectedServerConnections for '${selected.name}'" }
         val fresh = runCatching { plexClient.servers(current.token) }.getOrNull()
             ?.find { it.id == selected.id }
             ?: return
         if (fresh != selected) {
+            PhoebeLog.d("SessionRepository") { "updated server connections for '${fresh.name}'" }
             save(current.copy(selectedServer = fresh))
         }
     }
@@ -69,6 +77,7 @@ class SessionRepository(
      */
     suspend fun completePinAndListServers(pin: PlexPin): List<PlexServer>? {
         val token = plexClient.pollPin(pin.id) ?: return null
+        PhoebeLog.d("SessionRepository") { "pin complete, loading servers" }
         return coroutineScope {
             val userNameDeferred = async {
                 runCatching { plexClient.userName(token) }.getOrNull() ?: "Plex listener"
@@ -87,20 +96,24 @@ class SessionRepository(
     suspend fun libraries(server: PlexServer): List<MusicLibrary> {
         val token = mutableSession.value?.token ?: return emptyList()
         val resolved = mutableSession.value?.selectedServer?.takeIf { it.id == server.id } ?: server
+        runCatching { plexClient.resolveFastestBase(resolved, resolved.authToken(token)) }
         return plexClient.musicLibraries(resolved, resolved.authToken(token))
     }
 
-    suspend fun selectServer(server: PlexServer): PlexServer {
+    suspend fun selectServer(server: PlexServer, refreshConnections: Boolean = true): PlexServer {
+        PhoebeLog.d("SessionRepository") { "selectServer '${server.name}' (refreshConnections=$refreshConnections)" }
         mutableSession.value?.let { save(it.copy(selectedServer = server, selectedLibrary = null)) }
-        refreshSelectedServerConnections()
+        if (refreshConnections) refreshSelectedServerConnections()
         return mutableSession.value?.selectedServer ?: server
     }
 
     suspend fun selectLibrary(library: MusicLibrary) {
+        PhoebeLog.d("SessionRepository") { "selectLibrary '${library.title}'" }
         mutableSession.value?.let { save(it.copy(selectedLibrary = library)) }
     }
 
     suspend fun signOut() {
+        PhoebeLog.d("SessionRepository") { "signOut" }
         mutableSession.value = null
         withContext(Dispatchers.Default) { database.sessionQueries.clear() }
     }
@@ -119,16 +132,21 @@ class SessionRepository(
     private suspend fun persist(session: PlexSession) {
         val server = session.selectedServer
         val library = session.selectedLibrary
-        database.sessionQueries.upsert(
-            token = session.token,
-            userName = session.userName,
-            selectedServerId = server?.id,
-            selectedServerName = server?.name,
-            selectedServerUri = server?.uri,
-            selectedServerOwned = server?.owned?.toDb(),
-            selectedLibraryKey = library?.key,
-            selectedLibraryTitle = library?.title,
-        )
+            database.sessionQueries.upsert(
+                token = session.token,
+                userName = session.userName,
+                selectedServerId = server?.id,
+                selectedServerName = server?.name,
+                selectedServerUri = server?.uri,
+                selectedServerOwned = server?.owned?.toDb(),
+                selectedServerConnectionUris = server?.connectionUris?.toDbList(),
+                selectedServerAdvertisedConnectionUris = server?.advertisedConnectionUris?.toDbList(),
+                selectedServerLocalConnectionUris = server?.localConnectionUris?.toDbList(),
+                selectedServerAccessToken = server?.accessToken,
+                selectedServerHttpsRequired = server?.httpsRequired?.toDb(),
+                selectedLibraryKey = library?.key,
+                selectedLibraryTitle = library?.title,
+            )
     }
 
     private fun com.phoebe.app.db.SessionRow.toSession(): PlexSession {
@@ -138,6 +156,11 @@ class SessionRepository(
                 name = selectedServerName,
                 uri = selectedServerUri,
                 owned = (selectedServerOwned ?: 0L).toBool(),
+                connectionUris = selectedServerConnectionUris.fromDbList(),
+                advertisedConnectionUris = selectedServerAdvertisedConnectionUris.fromDbList(),
+                localConnectionUris = selectedServerLocalConnectionUris.fromDbList(),
+                accessToken = selectedServerAccessToken,
+                httpsRequired = (selectedServerHttpsRequired ?: 0L).toBool(),
             )
         } else {
             null
@@ -162,3 +185,11 @@ class SessionRepository(
 
 private fun Boolean.toDb(): Long = if (this) 1L else 0L
 private fun Long.toBool(): Boolean = this != 0L
+
+private const val DbListSeparator = "\u001F"
+
+private fun List<String>.toDbList(): String =
+    filter { it.isNotBlank() }.joinToString(DbListSeparator)
+
+private fun String?.fromDbList(): List<String> =
+    this?.takeIf { it.isNotBlank() }?.split(DbListSeparator).orEmpty()

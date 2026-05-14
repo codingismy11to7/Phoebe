@@ -5,48 +5,60 @@ import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.LocalFolderMediaSourceConfig
 import com.phoebe.app.domain.Track
+import com.phoebe.app.data.LocalFileMetadataCache
+import com.phoebe.app.data.LocalFileMetadataCacheEntry
 import com.phoebe.app.data.enrichArtistAlbumCountsOnly
 import com.phoebe.app.data.enrichArtistArtwork
+import com.phoebe.app.platform.PhoebeLog
+import com.phoebe.app.platform.catalogTrackPrefetchParallelism
+import com.phoebe.app.platform.currentTimeMs
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.yield
 
 object LocalFolderCatalogBuilder {
 
-    suspend fun build(config: LocalFolderMediaSourceConfig): CatalogSnapshot {
+    suspend fun build(
+        config: LocalFolderMediaSourceConfig,
+        cache: LocalFileMetadataCache? = null,
+        reader: LocalAudioLibraryReader = PlatformLocalAudioLibraryReader,
+    ): CatalogSnapshot {
+        val indexedAtMs = currentTimeMs()
         val root = config.rootUri
-        val uris = runCatching { LocalLibraryIO.listAudioUris(root) }.getOrElse { emptyList() }
-            .filter { runCatching { LocalLibraryIO.fileExists(it) }.getOrDefault(false) }
-        if (uris.isEmpty()) return CatalogSnapshot()
+        val files = runCatching { reader.listAudioFiles(root) }.getOrElse { emptyList() }
+        if (files.isEmpty()) {
+            PhoebeLog.d("LocalFolderCatalogBuilder") { "build folder='${config.label}' → empty, clearing cache" }
+            cache?.clearFolder(config.id)
+            return CatalogSnapshot()
+        }
 
         val prefix = "local_${config.id}"
-        val tracksByAlbum = linkedMapOf<String, MutableList<Pair<String, Track>>>()
+        val cachedByUri = cache?.rowsForFolder(config.id).orEmpty()
+        PhoebeLog.d("LocalFolderCatalogBuilder") {
+            "build folder='${config.label}' files=${files.size} cached=${cachedByUri.size}"
+        }
+        val result = buildEntries(
+            folderId = config.id,
+            prefix = prefix,
+            files = files,
+            cachedByUri = cachedByUri,
+            indexedAtMs = indexedAtMs,
+            reader = reader,
+        )
+        val currentUris = files.mapTo(mutableSetOf()) { it.uri }
+        cache?.applyFolderDelta(
+            folderId = config.id,
+            changedEntries = result.changedEntries,
+            removedUris = cachedByUri.keys - currentUris,
+        )
+        val entries = result.entries
 
-        for (uri in uris) {
-            val meta = runCatching { LocalLibraryIO.readAudioMetadata(uri) }.getOrElse {
-                AudioMetadata(title = null, artist = null, album = null, durationMs = 0L)
-            }
-            val parent = parentFolderLabel(uri)
-            val albumTitle = meta.album?.takeIf { it.isNotBlank() } ?: parent
-            val artistName = meta.artist?.takeIf { it.isNotBlank() } ?: "Local files"
-            val trackTitle = meta.title?.takeIf { it.isNotBlank() }
-                ?: uri.substringAfterLast('/').substringBeforeLast('.')
-            val albumKey = "$prefix:album:${albumTitle.hashCode().toUInt()}"
-            val trackId = "$prefix:track:${uri.hashCode()}"
-            val track = Track(
-                id = trackId,
-                title = trackTitle,
-                artist = artistName,
-                album = albumTitle,
-                durationMs = meta.durationMs,
-                streamUrl = "",
-                downloadUrl = "",
-                thumbUrl = null,
-                localUri = uri,
-                year = meta.year,
-                genre = meta.genre,
-                filepath = filepathDisplay(uri),
-                audioCodec = meta.audioCodec,
-                bitrateKbps = meta.bitrateKbps,
-            )
-            tracksByAlbum.getOrPut(albumKey) { mutableListOf() }.add(albumTitle to track)
+        val tracksByAlbum = linkedMapOf<String, MutableList<Pair<String, Track>>>()
+        for (entry in entries) {
+            tracksByAlbum.getOrPut(entry.albumId) { mutableListOf() }
+                .add(entry.track.album to entry.track)
         }
 
         val albums = mutableListOf<Album>()
@@ -63,22 +75,127 @@ object LocalFolderCatalogBuilder {
                     artist = artistGuess,
                     year = null,
                     thumbUrl = null,
+                    dateAddedMs = tracks.mapNotNull { it.dateAddedMs }.maxOrNull(),
                 ),
             )
             tracksByParent[albumId] = tracks
         }
 
         val rawArtists = albums.map { it.artist }.distinct().map { name ->
-            Artist(id = "$prefix:artist:${name.hashCode()}", title = name, thumbUrl = null, albumCount = 0)
+            val artistAdded = albums
+                .filter { it.artist.equals(name, ignoreCase = true) }
+                .mapNotNull { it.dateAddedMs }
+                .maxOrNull()
+            Artist(id = "$prefix:artist:${name.hashCode()}", title = name, thumbUrl = null, albumCount = 0, dateAddedMs = artistAdded)
         }
         val artists = enrichArtistAlbumCountsOnly(enrichArtistArtwork(rawArtists, albums), albums)
 
+        PhoebeLog.d("LocalFolderCatalogBuilder") {
+            "build complete folder='${config.label}' → ${artists.size} artists, ${albums.size} albums, ${tracksByParent.values.sumOf { it.size }} tracks"
+        }
         return CatalogSnapshot(
             artists = artists,
             albums = albums,
             playlists = emptyList(),
             tracksByParent = tracksByParent,
             downloads = emptyList(),
+        )
+    }
+
+    private suspend fun buildEntries(
+        folderId: String,
+        prefix: String,
+        files: List<LocalAudioFile>,
+        cachedByUri: Map<String, LocalFileMetadataCacheEntry>,
+        indexedAtMs: Long,
+        reader: LocalAudioLibraryReader,
+    ): LocalFolderBuildEntries = coroutineScope {
+        val parallelism = minOf(catalogTrackPrefetchParallelism().coerceAtLeast(1), 4)
+        val entries = MutableList<LocalFileMetadataCacheEntry?>(files.size) { null }
+        val changedFiles = mutableListOf<Pair<Int, LocalAudioFile>>()
+        for ((index, file) in files.withIndex()) {
+            val cached = cachedByUri[file.uri]
+            if (cached?.fingerprintMatches(file.sizeBytes, file.modifiedAtMs) == true) {
+                entries[index] = cached.copy(
+                    sizeBytes = file.sizeBytes,
+                    modifiedAtMs = file.modifiedAtMs,
+                    track = cached.track.copy(filepath = file.filepath.ifBlank { cached.track.filepath }),
+                )
+            } else {
+                changedFiles.add(index to file)
+            }
+        }
+
+        PhoebeLog.v("LocalFolderCatalogBuilder") {
+            "metadata scan folder=$folderId → ${changedFiles.size} changed, ${files.size - changedFiles.size} cache hits"
+        }
+        val changedEntries = mutableListOf<LocalFileMetadataCacheEntry>()
+        for (chunk in changedFiles.chunked(parallelism)) {
+            val built = chunk.map { (index, file) ->
+                async {
+                    index to buildEntry(folderId, prefix, file, cachedByUri[file.uri], indexedAtMs, reader)
+                }
+            }.awaitAll()
+            for ((index, entry) in built) {
+                entries[index] = entry
+                changedEntries += entry
+            }
+            yield()
+        }
+        LocalFolderBuildEntries(
+            entries = entries.mapNotNull { it },
+            changedEntries = changedEntries,
+        )
+    }
+
+    private suspend fun buildEntry(
+        folderId: String,
+        prefix: String,
+        file: LocalAudioFile,
+        previous: LocalFileMetadataCacheEntry?,
+        indexedAtMs: Long,
+        reader: LocalAudioLibraryReader,
+    ): LocalFileMetadataCacheEntry {
+        val meta = try {
+            reader.readAudioMetadata(file.uri)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Throwable) {
+            AudioMetadata(title = null, artist = null, album = null, durationMs = 0L)
+        }
+        val parent = parentFolderLabel(file.uri)
+        val albumTitle = meta.album?.takeIf { it.isNotBlank() } ?: parent
+        val artistName = meta.artist?.takeIf { it.isNotBlank() } ?: "Local files"
+        val trackTitle = meta.title?.takeIf { it.isNotBlank() }
+            ?: file.filepath.substringBeforeLast('.', file.filepath).ifBlank {
+                file.uri.substringAfterLast('/').substringBeforeLast('.')
+            }
+        val albumId = "$prefix:album:${albumTitle.hashCode().toUInt()}"
+        val trackId = previous?.track?.id ?: "$prefix:track:${file.uri.hashCode()}"
+        val track = Track(
+            id = trackId,
+            title = trackTitle,
+            artist = artistName,
+            album = albumTitle,
+            durationMs = meta.durationMs,
+            streamUrl = "",
+            downloadUrl = "",
+            thumbUrl = null,
+            localUri = file.uri,
+            year = meta.year,
+            genre = meta.genre,
+            filepath = file.filepath.ifBlank { filepathDisplay(file.uri) },
+            audioCodec = meta.audioCodec,
+            bitrateKbps = meta.bitrateKbps,
+            dateAddedMs = previous?.track?.dateAddedMs ?: indexedAtMs,
+        )
+        return LocalFileMetadataCacheEntry(
+            folderId = folderId,
+            uri = file.uri,
+            sizeBytes = file.sizeBytes,
+            modifiedAtMs = file.modifiedAtMs,
+            albumId = albumId,
+            track = track,
         )
     }
 
@@ -100,3 +217,8 @@ object LocalFolderCatalogBuilder {
         }
     }
 }
+
+private data class LocalFolderBuildEntries(
+    val entries: List<LocalFileMetadataCacheEntry>,
+    val changedEntries: List<LocalFileMetadataCacheEntry>,
+)

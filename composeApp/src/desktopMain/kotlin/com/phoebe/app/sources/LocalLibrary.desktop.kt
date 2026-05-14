@@ -7,8 +7,10 @@ import kotlinx.coroutines.withContext
 import org.jaudiotagger.audio.AudioFileIO
 import org.jaudiotagger.tag.FieldKey
 import java.net.URI
+import java.nio.file.LinkOption
 import java.nio.file.Files
 import java.nio.file.Paths
+import java.nio.file.attribute.BasicFileAttributes
 import javax.swing.JFileChooser
 import javax.swing.SwingUtilities
 import javax.swing.filechooser.FileSystemView
@@ -16,19 +18,34 @@ import javax.swing.filechooser.FileSystemView
 private val audioExt = setOf("mp3", "m4a", "flac", "wav", "aac", "ogg", "opus")
 
 actual object LocalLibraryIO {
-    actual suspend fun listAudioUris(rootUri: String): List<String> = withContext(Dispatchers.IO) {
+    actual suspend fun listAudioFiles(rootUri: String): List<LocalAudioFile> = withContext(Dispatchers.IO) {
         val uri = runCatching { URI(rootUri) }.getOrNull() ?: return@withContext emptyList()
         val path = Paths.get(uri)
         if (!Files.exists(path) || !Files.isDirectory(path)) return@withContext emptyList()
         Files.walk(path).use { stream ->
-            stream.filter { Files.isRegularFile(it) }
-                .filter {
-                    val n = it.fileName.toString()
-                    audioExt.contains(n.substringAfterLast('.', "").lowercase())
-                }
-                .map { it.toUri().toString() }
-                .toList()
+            val files = mutableListOf<LocalAudioFile>()
+            val iterator = stream.iterator()
+            while (iterator.hasNext()) {
+                val candidate = iterator.next()
+                val name = candidate.fileName?.toString() ?: continue
+                if (!audioExt.contains(name.substringAfterLast('.', "").lowercase())) continue
+                val attrs = runCatching {
+                    Files.readAttributes(candidate, BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS)
+                }.getOrNull() ?: continue
+                if (!attrs.isRegularFile) continue
+                files += LocalAudioFile(
+                    uri = candidate.toUri().toString(),
+                    sizeBytes = attrs.size(),
+                    modifiedAtMs = attrs.lastModifiedTime().toMillis(),
+                    filepath = name,
+                )
+            }
+            files.sortedBy { it.uri }
         }
+    }
+
+    actual suspend fun listAudioUris(rootUri: String): List<String> = withContext(Dispatchers.IO) {
+        listAudioFiles(rootUri).map { it.uri }
     }
 
     actual suspend fun fileExists(uri: String): Boolean = withContext(Dispatchers.IO) {

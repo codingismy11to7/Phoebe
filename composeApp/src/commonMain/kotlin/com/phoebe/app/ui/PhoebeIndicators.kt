@@ -342,6 +342,50 @@ internal fun CatalogLoadingStrip(modifier: Modifier = Modifier) {
     }
 }
 
+@Composable
+internal fun CatalogMenuSyncIndicator(modifier: Modifier = Modifier) {
+    val syncState = LocalCatalogSyncState.current
+    if (!syncState.isActive) return
+    val message = syncState.message ?: "Syncing library…"
+    val detail = when {
+        syncState.loadedTracks > 0 -> "${syncState.loadedTracks} songs"
+        syncState.loadedAlbums > 0 -> "${syncState.loadedAlbums} albums"
+        else -> null
+    }
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CircularProgressIndicator(
+            modifier = Modifier
+                .size(16.dp)
+                .semantics { contentDescription = "Library sync in progress" },
+            color = PhoebeUi.accentLight,
+            strokeWidth = 2.dp,
+        )
+        Column {
+            Text(
+                message,
+                color = PhoebeUi.secondaryText,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (detail != null) {
+                Text(
+                    detail,
+                    color = PhoebeUi.mutedText,
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
 private val countTransitionSpec: AnimatedContentTransitionScope<Int>.() -> ContentTransform = {
     (slideInVertically(animationSpec = tween(200)) { it / 3 } + fadeIn(tween(200))) togetherWith
         (slideOutVertically(animationSpec = tween(160)) { -it / 3 } + fadeOut(tween(160)))

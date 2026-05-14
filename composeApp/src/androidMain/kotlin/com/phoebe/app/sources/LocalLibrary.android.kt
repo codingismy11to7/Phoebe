@@ -18,31 +18,51 @@ import java.io.File
 private val audioExt = setOf("mp3", "m4a", "flac", "wav", "aac", "ogg", "opus")
 
 actual object LocalLibraryIO {
-    actual suspend fun listAudioUris(rootUri: String): List<String> = withContext(Dispatchers.IO) {
+    actual suspend fun listAudioFiles(rootUri: String): List<LocalAudioFile> = withContext(Dispatchers.IO) {
         val fileRoot = rootUri.toFileOrNull()
         if (fileRoot != null) {
             if (!fileRoot.exists() || !fileRoot.isDirectory) return@withContext emptyList()
             return@withContext fileRoot.walkTopDown()
                 .filter { it.isFile }
                 .filter { it.extension.lowercase() in audioExt }
-                .map { it.toURI().toString() }
+                .map {
+                    LocalAudioFile(
+                        uri = it.toURI().toString(),
+                        sizeBytes = it.length().coerceAtLeast(0L),
+                        modifiedAtMs = it.lastModified().coerceAtLeast(0L),
+                        filepath = it.name,
+                    )
+                }
+                .sortedBy { it.uri }
                 .toList()
         }
 
         val ctx = AndroidContextHolder.application
         val treeUri = Uri.parse(rootUri)
         val root = DocumentFile.fromTreeUri(ctx, treeUri) ?: return@withContext emptyList()
-        val out = mutableListOf<String>()
+        val out = mutableListOf<LocalAudioFile>()
         fun walk(dir: DocumentFile) {
             for (f in dir.listFiles() ?: emptyArray()) {
-                if (f.isDirectory) walk(f)
-                else if (f.isFile && f.name?.substringAfterLast('.', "")?.lowercase() in audioExt) {
-                    out.add(f.uri.toString())
+                if (f.isDirectory) {
+                    walk(f)
+                } else if (f.isFile && f.name?.substringAfterLast('.', "")?.lowercase() in audioExt) {
+                    out.add(
+                        LocalAudioFile(
+                            uri = f.uri.toString(),
+                            sizeBytes = f.length().coerceAtLeast(0L),
+                            modifiedAtMs = f.lastModified().coerceAtLeast(0L),
+                            filepath = f.name ?: f.uri.lastPathSegment.orEmpty(),
+                        ),
+                    )
                 }
             }
         }
         walk(root)
-        out
+        out.sortedBy { it.uri }
+    }
+
+    actual suspend fun listAudioUris(rootUri: String): List<String> = withContext(Dispatchers.IO) {
+        listAudioFiles(rootUri).map { it.uri }
     }
 
     actual suspend fun fileExists(uri: String): Boolean = withContext(Dispatchers.IO) {

@@ -1,13 +1,19 @@
+use correct icons
+
+create a mix functionality
+-improve
+
+caching / downloading
+
+web target 
+- continue to iterate on perf
+- publish
+
+ios
+-car play - Apple CarPlay entitlement — request com.apple.developer.carplay-audio in the Apple Developer portal and enable it on your App ID. Without it, signing will fail even though the code is in place.
+
 settings page
 
 tv
 
-sync takes awhile
-
-clean up logs
-
-mac / windows toolbar icon for controlling media?
-
-web target - continue to iterate on perf
-
-ios
+sync recently played / most played between devices (backend?)
