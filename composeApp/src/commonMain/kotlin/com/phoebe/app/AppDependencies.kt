@@ -12,8 +12,10 @@ import com.phoebe.app.db.PhoebeDatabase
 import com.phoebe.app.platform.PlatformStorage
 import com.phoebe.app.platform.createPlatformHttpClient
 import com.phoebe.app.player.AudioPlayer
+import com.phoebe.app.player.CastController
 import com.phoebe.app.player.SystemVolumeController
 import com.phoebe.app.player.createAudioPlayer
+import com.phoebe.app.player.createCastController
 import com.phoebe.app.player.createSystemVolumeController
 
 class AppDependencies(
@@ -25,6 +27,7 @@ class AppDependencies(
     val playHistoryRepository: PlayHistoryRepository,
     val plexPlaybackReporter: PlexPlaybackReporter,
     val audioPlayer: AudioPlayer,
+    val castController: CastController,
     val systemVolume: SystemVolumeController,
     /** File-backed on desktop; NSUserDefaults keys on iOS; etc. Used for lightweight UI prefs. */
     val platformStorage: PlatformStorage,
@@ -38,7 +41,10 @@ class AppDependencies(
             val mediaSourcesRepository = MediaSourcesRepository(database, storage)
             val libraryUiRepository = LibraryUiRepository(database, storage)
             val audioPlayer = createAudioPlayer()
+            val castController = createCastController(audioPlayer)
             val sessionRepository = SessionRepository(plexClient, database, storage)
+            sessionRepository.restore()
+            mediaSourcesRepository.restore()
             return AppDependencies(
                 database = database,
                 sessionRepository = sessionRepository,
@@ -58,6 +64,7 @@ class AppDependencies(
                     session = sessionRepository.session,
                 ),
                 audioPlayer = audioPlayer,
+                castController = castController,
                 systemVolume = createSystemVolumeController(),
                 platformStorage = storage,
             )

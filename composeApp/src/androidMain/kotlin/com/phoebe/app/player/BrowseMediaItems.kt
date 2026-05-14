@@ -1,6 +1,7 @@
 package com.phoebe.app.player
 
 import android.net.Uri
+import android.os.Bundle
 import androidx.core.net.toUri
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
@@ -70,7 +71,19 @@ internal fun Playlist.toBrowseItem(): MediaItem =
         artworkUri = thumbUrl?.toUri(),
     )
 
-internal fun playbackMediaItem(track: Track): MediaItem = browseTrackItem(track)
+internal const val InAppPlaybackExtra: String = "com.phoebe.app.IN_APP_PLAYBACK"
+
+internal fun playbackMediaItem(track: Track, inAppPlayback: Boolean = false): MediaItem {
+    val item = browseTrackItem(track)
+    if (!inAppPlayback) return item
+    return item.buildUpon()
+        .setRequestMetadata(
+            MediaItem.RequestMetadata.Builder()
+                .setExtras(Bundle().apply { putBoolean(InAppPlaybackExtra, true) })
+                .build(),
+        )
+        .build()
+}
 
 private fun Track.descriptionForCarDisplay(): String =
     listOf(artist, album)

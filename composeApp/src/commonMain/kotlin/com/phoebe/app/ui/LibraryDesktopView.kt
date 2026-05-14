@@ -736,7 +736,6 @@ private fun ArtistRow(
         resolveArtistLastPlayed(artist.title, artistTracks, playHistory)
     }
     val lastPlayedLabel = remember(lastPlayed, nowMs) { formatLastPlayed(lastPlayed, nowMs) }
-    var favorited by remember { mutableStateOf(false) }
     Row(
         Modifier
             .fillMaxWidth()
@@ -770,8 +769,7 @@ private fun ArtistRow(
             modifier = Modifier.width(110.dp),
             color = if (lastPlayed != null) PhoebeUi.secondaryText else PhoebeUi.mutedText,
         )
-        Row(modifier = Modifier.width(64.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            HeartIcon(filled = favorited) { favorited = !favorited }
+        Row(modifier = Modifier.width(40.dp), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
             Text(
                 "⋯",
                 color = PhoebeUi.secondaryText,
@@ -1058,6 +1056,7 @@ internal fun SongRow(
                     ) {
                         NowPlayingIndicator(
                             isPlaying = nowPlaying.isPlaying,
+                            isBuffering = nowPlaying.isBuffering,
                             modifier = Modifier.size(18.dp),
                         )
                     }
@@ -1240,7 +1239,6 @@ private fun AlbumDetailSidebar(
     val bitrate = remember(catalog, album.id) { catalogAlbumBitrateKbps(catalog, album.id) }
     val duration = remember(tracks) { tracks.sumOf { it.durationMs } }
     val sampleRate = remember(tracks) { tracks.firstOrNull { isLossless(it) }?.let { "44.1 kHz" } ?: tracks.firstOrNull()?.let { "—" } ?: "—" }
-    var favorited by remember(album.id) { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -1258,7 +1256,6 @@ private fun AlbumDetailSidebar(
                 Text(album.title, color = PhoebeUi.primaryText, fontSize = 18.sp, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(album.artist.uppercase(), color = PhoebeUi.secondaryText, fontSize = 11.sp, letterSpacing = 0.06.em)
             }
-            HeartIcon(filled = favorited) { favorited = !favorited }
         }
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             album.year?.let { DetailMetaRow("Released", "Sep 8, $it") }
@@ -1317,8 +1314,9 @@ private fun SongDetailSidebar(
     onAddToPlaylist: () -> Unit,
     onDownload: () -> Unit,
 ) {
-    var favorited by remember(track.id) { mutableStateOf(false) }
     var playlistMenuExpanded by remember(track.id) { mutableStateOf(false) }
+    val nowPlaying = LocalNowPlaying.current
+    val isCurrent = nowPlaying.trackId == track.id
     Column(
         modifier = Modifier
             .fillMaxHeight()
@@ -1326,8 +1324,29 @@ private fun SongDetailSidebar(
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-            Box(Modifier.fillMaxWidth().aspectRatio(1f).widthIn(max = 232.dp)) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(1f)
+                    .widthIn(max = 232.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable(onClick = onPlay),
+            ) {
                 ArtworkImage(track.album, track.thumbUrl, Modifier.fillMaxSize(), radius = 12.dp)
+                if (isCurrent) {
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.45f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        NowPlayingIndicator(
+                            isPlaying = nowPlaying.isPlaying,
+                            isBuffering = nowPlaying.isBuffering,
+                            modifier = Modifier.size(36.dp),
+                        )
+                    }
+                }
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1338,7 +1357,6 @@ private fun SongDetailSidebar(
                     Text(track.album, color = PhoebeUi.mutedText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
-            HeartIcon(filled = favorited) { favorited = !favorited }
         }
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             if (columns.duration) DetailMetaRow("Duration", formatMinutesSeconds(track.durationMs))
@@ -1418,24 +1436,6 @@ internal fun TableHeaderCell(label: String, modifier: Modifier = Modifier) {
 @Composable
 internal fun TableCellText(text: String, modifier: Modifier = Modifier, color: Color = PhoebeUi.secondaryText) {
     Text(text, color = color, fontSize = 12.sp, modifier = modifier, maxLines = 1, overflow = TextOverflow.Ellipsis)
-}
-
-@Composable
-private fun HeartIcon(filled: Boolean, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .clip(CircleShape)
-            .clickable(onClick = onClick)
-            .padding(6.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        PhoebeIconView(
-            PhoebeIcon.Heart,
-            tint = if (filled) PhoebeUi.accentLight else PhoebeUi.mutedText,
-            modifier = Modifier.size(16.dp),
-            filled = filled,
-        )
-    }
 }
 
 internal fun formatHoursMinutes(ms: Long): String {
@@ -1619,6 +1619,7 @@ internal fun sortAlbumsForLibrary(albums: List<Album>, sortBy: LibrarySortBy, as
 
 internal fun sortTracksForLibrary(tracks: List<Track>, sortBy: LibrarySortBy, ascending: Boolean): List<Track> =
     when (sortBy) {
+        LibrarySortBy.PlaylistOrder -> if (ascending) tracks else tracks.asReversed()
         LibrarySortBy.Album -> tracks.sortedWith(
             if (ascending) compareBy<Track>({ it.album.lowercase() }, { it.title.lowercase() })
             else compareByDescending<Track> { it.album.lowercase() }.thenBy { it.title.lowercase() },

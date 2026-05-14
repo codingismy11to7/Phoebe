@@ -17,6 +17,16 @@
 </head>
 <body>
 <div id="composeApp"></div>
+<script>
+    window.__onGCastApiAvailable = function(isAvailable) {
+        if (!isAvailable || !window.cast || !window.cast.framework) return;
+        window.cast.framework.CastContext.getInstance().setOptions({
+            receiverApplicationId: chrome.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID,
+            autoJoinPolicy: chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED
+        });
+    };
+</script>
+<script async src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
 <script src="phoebe.js"></script>
 </body>
 </html>

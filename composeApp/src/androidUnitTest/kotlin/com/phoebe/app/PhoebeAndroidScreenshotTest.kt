@@ -15,7 +15,7 @@ import org.robolectric.annotation.GraphicsMode
 
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
-@Config(sdk = [35])
+@Config(sdk = [35], application = ScreenshotTestApplication::class)
 class PhoebeAndroidPhoneScreenshotTest {
     @Test fun phoneHomeDark() = capturePhone("home", PhoebeScreenshotScenario.Home)
     @Test fun phoneLibraryDark() = capturePhone("library", PhoebeScreenshotScenario.Library)
@@ -24,17 +24,19 @@ class PhoebeAndroidPhoneScreenshotTest {
     @Test fun phoneAlbumDark() = capturePhone("album", PhoebeScreenshotScenario.Album)
     @Test fun phoneSearchDark() = capturePhone("search", PhoebeScreenshotScenario.Search)
     @Test fun phonePlayerDark() = capturePhone("player", PhoebeScreenshotScenario.Player)
+    @Test fun phonePlayerUpNextExpandedDark() = capturePhone("player-upnext-expanded", PhoebeScreenshotScenario.PlayerUpNextExpanded)
     @Test fun phoneSettingsDark() = capturePhone("settings", PhoebeScreenshotScenario.Settings)
     @Test fun phoneSignInDark() = capturePhone("signin", PhoebeScreenshotScenario.SignIn)
 
     @Test fun phoneLibraryLight() = capturePhone("library", PhoebeScreenshotScenario.Library, useLightAppearance = true)
     @Test fun phoneSearchLight() = capturePhone("search", PhoebeScreenshotScenario.Search, useLightAppearance = true)
     @Test fun phonePlayerLight() = capturePhone("player", PhoebeScreenshotScenario.Player, useLightAppearance = true)
+    @Test fun phonePlayerUpNextExpandedLight() = capturePhone("player-upnext-expanded", PhoebeScreenshotScenario.PlayerUpNextExpanded, useLightAppearance = true)
 }
 
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
-@Config(sdk = [35])
+@Config(sdk = [35], application = ScreenshotTestApplication::class)
 class PhoebeAndroidTabletScreenshotTest {
     @Test fun tabletHomeDark() = captureTablet("home", PhoebeScreenshotScenario.Home)
     @Test fun tabletLibraryDark() = captureTablet("library", PhoebeScreenshotScenario.Library)

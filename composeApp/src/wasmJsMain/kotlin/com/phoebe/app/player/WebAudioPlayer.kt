@@ -11,10 +11,29 @@ private class WebAudioPlayer : SimpleAudioPlayer() {
         preload = "auto"
     }
 
+    override fun stopCurrentPlaybackImmediately() {
+        audio.pause()
+    }
+
     override fun playUri(uri: String) {
+        if (uri.isBlank()) {
+            markPlaybackFailed()
+            return
+        }
+        val generation = activePlayGeneration
         audio.volume = effectiveOutputVolume().toDouble().coerceIn(0.0, 1.0)
+        audio.currentTime = 0.0
         audio.src = uri
-        audio.play()
+        audio.onplaying = {
+            markPlaybackReady(generation = generation)
+        }
+        audio.onerror = { _, _, _, _, _ ->
+            markPlaybackFailed(generation = generation)
+            null
+        }
+        if (playWhenReady) {
+            audio.play()
+        }
     }
 
     override fun pause() {

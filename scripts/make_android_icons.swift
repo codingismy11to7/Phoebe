@@ -21,12 +21,26 @@ struct Density {
     let legacyPx: Int
 }
 
+struct NotificationDensity {
+    let name: String
+    let sizePx: Int
+}
+
 let densities: [Density] = [
     .init(name: "mipmap-mdpi", foregroundPx: 108, legacyPx: 48),
     .init(name: "mipmap-hdpi", foregroundPx: 162, legacyPx: 72),
     .init(name: "mipmap-xhdpi", foregroundPx: 216, legacyPx: 96),
     .init(name: "mipmap-xxhdpi", foregroundPx: 324, legacyPx: 144),
     .init(name: "mipmap-xxxhdpi", foregroundPx: 432, legacyPx: 192),
+]
+
+// Status-bar notification icons are 24dp; use full-bleed artwork (no adaptive safe zone).
+let notificationDensities: [NotificationDensity] = [
+    .init(name: "drawable-mdpi", sizePx: 24),
+    .init(name: "drawable-hdpi", sizePx: 36),
+    .init(name: "drawable-xhdpi", sizePx: 48),
+    .init(name: "drawable-xxhdpi", sizePx: 72),
+    .init(name: "drawable-xxxhdpi", sizePx: 96),
 ]
 
 func loadImage(_ path: String) -> CGImage {
@@ -69,6 +83,27 @@ func renderForeground(source: CGImage, size: Int) -> CGImage {
     context.draw(
         source,
         in: CGRect(x: inset, y: inset, width: content, height: content),
+    )
+    return context.makeImage()!
+}
+
+func renderNotificationIcon(source: CGImage, size: Int) -> CGImage {
+    let canvas = CGFloat(size)
+    let colorSpace = CGColorSpaceCreateDeviceRGB()
+    let context = CGContext(
+        data: nil,
+        width: size,
+        height: size,
+        bitsPerComponent: 8,
+        bytesPerRow: 0,
+        space: colorSpace,
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue,
+    )!
+    context.clear(CGRect(x: 0, y: 0, width: canvas, height: canvas))
+    context.interpolationQuality = .high
+    context.draw(
+        source,
+        in: CGRect(x: 0, y: 0, width: canvas, height: canvas),
     )
     return context.makeImage()!
 }
@@ -123,6 +158,16 @@ for density in densities {
     writePNG(renderLegacyIcon(source: source, size: density.legacyPx), to: roundPath)
 
     print("wrote \(density.name)")
+}
+
+for density in notificationDensities {
+    let dir = (resRoot as NSString).appendingPathComponent(density.name)
+    try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+
+    let notificationPath = (dir as NSString).appendingPathComponent("ic_notification.png")
+    writePNG(renderNotificationIcon(source: source, size: density.sizePx), to: notificationPath)
+
+    print("wrote \(density.name)/ic_notification.png")
 }
 
 print("done")

@@ -1,5 +1,8 @@
 package com.phoebe.app.player
 
+import android.net.Uri
+import com.phoebe.app.AndroidContextHolder
+import com.phoebe.app.R
 import com.phoebe.app.db.PhoebeDatabase
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.Artist
@@ -22,9 +25,21 @@ internal class AndroidAutoBrowseTree(
             )
         }
         return listOf(
-            browseFolderItem(BrowseMediaIds.ARTISTS, "Artists"),
-            browseFolderItem(BrowseMediaIds.ALBUMS, "Albums"),
-            browseFolderItem(BrowseMediaIds.PLAYLISTS, "Playlists"),
+            browseFolderItem(
+                BrowseMediaIds.ARTISTS,
+                "Artists",
+                artworkUri = drawableArtUri(R.drawable.ic_aa_tab_artists),
+            ),
+            browseFolderItem(
+                BrowseMediaIds.ALBUMS,
+                "Albums",
+                artworkUri = drawableArtUri(R.drawable.ic_aa_tab_albums),
+            ),
+            browseFolderItem(
+                BrowseMediaIds.PLAYLISTS,
+                "Playlists",
+                artworkUri = drawableArtUri(R.drawable.ic_aa_tab_playlists),
+            ),
         )
     }
 
@@ -136,4 +151,9 @@ internal class AndroidAutoBrowseTree(
             audioCodec = audioCodec,
             bitrateKbps = bitrateKbps?.toInt(),
         )
+
+    private fun drawableArtUri(drawableRes: Int): Uri {
+        val packageName = AndroidContextHolder.application.packageName
+        return Uri.parse("android.resource://$packageName/$drawableRes")
+    }
 }

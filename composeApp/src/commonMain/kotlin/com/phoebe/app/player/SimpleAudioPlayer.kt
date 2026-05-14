@@ -17,25 +17,78 @@ abstract class SimpleAudioPlayer : AudioPlayer {
     private val scope = CoroutineScope(Dispatchers.Default)
     private var progressJob: Job? = null
     private var preferUnityOutputVolume = false
+    private var playGeneration = 0
+
+    /** When false, a superseded or user-paused load must not start audible playback. */
+    protected var playWhenReady = false
+        private set
+
+    protected fun cancelPlayIntent() {
+        playWhenReady = false
+    }
+
+    protected val activePlayGeneration: Int
+        get() = playGeneration
+
+    protected fun isPlayRequestCurrent(generation: Int): Boolean = generation == playGeneration
 
     override fun play(queue: List<Track>, startIndex: Int) {
+        val previous = mutableState.value
         val index = startIndex.coerceIn(queue.indices)
         val track = queue.getOrNull(index)
-        mutableState.value = mutableState.value.copy(
+        val sameQueue = tracksMatch(previous.queue, queue)
+
+        if (sameQueue && track != null &&
+            previous.currentIndex == index &&
+            previous.currentTrack?.id == track.id
+        ) {
+            if (!previous.isPlaying && !previous.isBuffering) {
+                playGeneration++
+                playWhenReady = true
+                mutableState.value = previous.copy(isPlaying = true)
+                resume()
+                startProgressTicker()
+            }
+            return
+        }
+
+        playGeneration++
+        playWhenReady = true
+        val generation = playGeneration
+        stopProgressTicker()
+        if (!sameQueue) {
+            stopCurrentPlaybackImmediately()
+        }
+        mutableState.value = previous.copy(
             queue = queue,
             currentIndex = if (track == null) -1 else index,
-            isPlaying = track != null,
+            isPlaying = false,
+            isBuffering = track != null,
             positionMs = 0L,
             durationMs = track?.durationMs ?: 0L,
         )
         setOutputVolume(effectiveOutputVolume())
-        track?.let { playTrack(it) }
-        if (track != null) startProgressTicker()
+        if (track != null) {
+            if (sameQueue) {
+                skipToInQueueOnPlatform(queue, index, track, generation)
+            } else {
+                playQueueOnPlatform(queue, index, track, generation)
+            }
+        }
     }
 
     override fun togglePlayPause() {
-        val nextPlaying = !mutableState.value.isPlaying
-        mutableState.value = mutableState.value.copy(isPlaying = nextPlaying)
+        val state = mutableState.value
+        if (state.isBuffering) {
+            playWhenReady = false
+            mutableState.value = state.copy(isPlaying = false, isBuffering = false)
+            pause()
+            stopCurrentPlaybackImmediately()
+            return
+        }
+        val nextPlaying = !state.isPlaying
+        playWhenReady = nextPlaying
+        mutableState.value = state.copy(isPlaying = nextPlaying)
         if (nextPlaying) {
             resume()
             startProgressTicker()
@@ -163,6 +216,7 @@ abstract class SimpleAudioPlayer : AudioPlayer {
             queue = queue,
             currentIndex = if (track == null) -1 else index,
             isPlaying = isPlaying && track != null,
+            isBuffering = false,
             positionMs = 0L,
             durationMs = track?.durationMs ?: 0L,
         )
@@ -176,21 +230,75 @@ abstract class SimpleAudioPlayer : AudioPlayer {
     /** When false, [applyPlatformPlayback] drives position instead of the 1s ticker (Android). */
     protected open val useProgressTicker: Boolean get() = true
 
-    protected fun applyPlatformPlayback(positionMs: Long, durationMs: Long, isPlaying: Boolean) {
+    protected fun applyPlatformPlayback(
+        positionMs: Long,
+        durationMs: Long,
+        isPlaying: Boolean,
+        isBuffering: Boolean = false,
+        generation: Int = playGeneration,
+    ) {
+        if (!isPlayRequestCurrent(generation)) return
         val current = mutableState.value
+        val effectivePlaying = isPlaying && playWhenReady
         mutableState.value = current.copy(
             positionMs = positionMs,
             durationMs = if (durationMs > 0L) durationMs else current.durationMs,
-            isPlaying = isPlaying,
+            isPlaying = effectivePlaying,
+            isBuffering = isBuffering && playWhenReady,
         )
-        if (isPlaying && useProgressTicker) {
+        if (effectivePlaying && useProgressTicker) {
             startProgressTicker()
         } else {
             stopProgressTicker()
         }
     }
 
+    /** Stop audible output immediately when leaving the current track (before the next loads). */
+    protected open fun stopCurrentPlaybackImmediately() = Unit
+
+    protected fun markPlaybackReady(isPlaying: Boolean = true, generation: Int = playGeneration) {
+        if (!isPlayRequestCurrent(generation)) return
+        val current = mutableState.value
+        val effectivePlaying = isPlaying && playWhenReady
+        mutableState.value = current.copy(isBuffering = false, isPlaying = effectivePlaying)
+        if (effectivePlaying && useProgressTicker) {
+            startProgressTicker()
+        }
+    }
+
+    protected fun markPlaybackFailed(generation: Int = playGeneration) {
+        if (!isPlayRequestCurrent(generation)) return
+        mutableState.value = mutableState.value.copy(isBuffering = false, isPlaying = false)
+        stopProgressTicker()
+    }
+
     protected abstract fun playUri(uri: String)
+
+    /** Seek within an already-loaded queue without tearing down platform output. */
+    protected open fun skipToInQueueOnPlatform(
+        queue: List<Track>,
+        startIndex: Int,
+        track: Track,
+        generation: Int,
+    ) {
+        playQueueOnPlatform(queue, startIndex, track, generation)
+    }
+
+    /** Push the active queue to the platform player; default plays only the current track. */
+    protected open fun playQueueOnPlatform(
+        queue: List<Track>,
+        startIndex: Int,
+        track: Track,
+        generation: Int = activePlayGeneration,
+    ) {
+        playTrack(track)
+    }
+
+    private fun tracksMatch(left: List<Track>, right: List<Track>): Boolean {
+        if (left.size != right.size) return false
+        return left.indices.all { left[it].id == right[it].id }
+    }
+
     protected open fun playTrack(track: Track) {
         playUri(track.localUri ?: track.streamUrl)
     }

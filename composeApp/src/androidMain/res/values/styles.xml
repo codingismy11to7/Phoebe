@@ -1,7 +1,25 @@
 <resources>
-    <style name="AppTheme" parent="android:style/Theme.Material.NoActionBar">
+    <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
         <item name="android:windowNoTitle">true</item>
         <item name="android:fontFamily">sans</item>
         <item name="android:colorAccent">#4F6BD8</item>
+        <item name="colorAccent">#4F6BD8</item>
+        <item name="colorPrimary">#4F6BD8</item>
+        <item name="colorPrimaryDark">@color/phoebe_cast_dialog_background</item>
+        <item name="android:colorBackground">@color/phoebe_cast_dialog_background</item>
+        <item name="android:windowBackground">@color/phoebe_cast_dialog_background</item>
+        <item name="android:windowIsTranslucent">false</item>
+    </style>
+
+    <style name="MediaRouteButtonTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">#4F6BD8</item>
+        <item name="colorAccent">#4F6BD8</item>
+        <item name="colorPrimary">#4F6BD8</item>
+        <item name="colorPrimaryDark">@color/phoebe_cast_dialog_background</item>
+        <item name="android:colorBackground">@color/phoebe_cast_dialog_background</item>
+        <item name="android:windowBackground">@color/phoebe_cast_dialog_background</item>
+        <item name="android:windowIsTranslucent">false</item>
     </style>
 </resources>

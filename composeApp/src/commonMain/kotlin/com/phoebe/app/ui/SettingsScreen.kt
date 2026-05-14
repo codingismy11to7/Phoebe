@@ -231,7 +231,6 @@ private fun AudioQualityPlaceholderCard(compact: Boolean = false) {
         PlaceholderToggleRow("Normalize Audio", true)
         PlaceholderToggleRow("Explicit Content", true)
         if (!compact) {
-            PlaceholderToggleRow("Auto-download Favorites", true)
             PlaceholderToggleRow("Scan Library on Launch", true)
         }
         Spacer(Modifier.height(8.dp))

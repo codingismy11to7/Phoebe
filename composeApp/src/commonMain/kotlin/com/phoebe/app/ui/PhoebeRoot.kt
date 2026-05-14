@@ -4,6 +4,7 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
@@ -34,8 +35,13 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -49,6 +55,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -62,6 +69,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -91,6 +99,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.key
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -112,6 +123,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.composed
 import androidx.compose.ui.platform.LocalDensity
@@ -152,10 +164,14 @@ import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.isLocalMediaPlayback
 import com.phoebe.app.domain.isPlexLibraryTrack
 import com.phoebe.app.domain.supportsPlexPlaylists
+import com.phoebe.app.player.CastState
 import com.phoebe.app.platform.createPlatformHttpClient
 import com.phoebe.app.platform.currentTimeMs
 import com.phoebe.app.platform.prefersReducedArtworkEffects
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import com.phoebe.app.sources.rememberPickLocalFolder
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
@@ -165,7 +181,9 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.yield
+import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.min
 
 private enum class DesktopSection {
     Home,
@@ -622,6 +640,7 @@ fun PhoebeRoot(
     val session by state.session.collectAsState()
     val mediaSources by state.mediaSources.collectAsState()
     val player by state.player.collectAsState()
+    val cast by state.cast.collectAsState()
     val busy by state.busy.collectAsState()
     val message by state.message.collectAsState()
     val pin by state.pin.collectAsState()
@@ -633,6 +652,30 @@ fun PhoebeRoot(
     val lastPlayedByTrack by state.lastPlayedByTrack.collectAsState()
     var browseSection by remember { mutableStateOf(DesktopSection.Home) }
     var selectedPlaylistId by remember { mutableStateOf<String?>(null) }
+    val exitPlaylistDetail: () -> Unit = {
+        selectedPlaylistId = null
+        state.popDetail()
+    }
+    val canHandleBrowseBack = screen == AppScreen.Home &&
+        (selectedPlaylistId != null || browseSection != DesktopSection.Home)
+    PlatformBackHandler(
+        enabled = state.canHandleBack(screen) || canHandleBrowseBack,
+        onBack = {
+            when {
+                screen is AppScreen.PlaylistDetail -> {
+                    selectedPlaylistId = null
+                    state.handleBack()
+                }
+                screen == AppScreen.Home && selectedPlaylistId != null -> {
+                    selectedPlaylistId = null
+                }
+                screen == AppScreen.Home && browseSection != DesktopSection.Home -> {
+                    browseSection = DesktopSection.Home
+                }
+                else -> state.handleBack()
+            }
+        },
+    )
     var searchQuery by remember { mutableStateOf("") }
     var playerSwipeDismiss by remember { mutableStateOf(false) }
     LaunchedEffect(screen) {
@@ -650,8 +693,12 @@ fun PhoebeRoot(
         catalog.albums.isNotEmpty() ||
         catalog.playlists.isNotEmpty()
 
-    val nowPlaying = remember(currentTrack?.id, player.isPlaying) {
-        NowPlayingIndicatorState(trackId = currentTrack?.id, isPlaying = player.isPlaying)
+    val nowPlaying = remember(currentTrack?.id, player.isPlaying, player.isBuffering) {
+        NowPlayingIndicatorState(
+            trackId = currentTrack?.id,
+            isPlaying = player.isPlaying,
+            isBuffering = player.isBuffering,
+        )
     }
     val playHistory = remember(lastPlayedByArtist, lastPlayedByAlbum, lastPlayedByTrack) {
         PlayHistorySnapshot(
@@ -861,10 +908,7 @@ fun PhoebeRoot(
                         libraryUi = libraryUi,
                         modifier = Modifier.fillMaxSize(),
                         searchQuery = searchQuery,
-                        onBack = {
-                            state.popDetail()
-                            selectedPlaylistId = null
-                        },
+                        onBack = exitPlaylistDetail,
                         onPlayTracks = { tracks, index ->
                             state.playTracks(tracks, index)
                             state.open(AppScreen.Player)
@@ -876,24 +920,29 @@ fun PhoebeRoot(
                     AppScreen.Player -> MobilePlayer(
                         track = currentTrack,
                         upNext = upNext,
+                        previousTrack = player.queue.getOrNull(currentIndex - 1),
                         isPlaying = player.isPlaying,
+                        isBuffering = player.isBuffering,
                         shuffle = player.shuffle,
                         repeat = player.repeat,
                         positionMs = player.positionMs,
                         currentIndex = currentIndex,
+                        castState = cast,
                         onToggle = state::togglePlayPause,
                         onPrevious = state::previous,
                         onNext = state::next,
+                        onSkipQueueBy = state::skipQueueBy,
                         onShuffle = state::toggleShuffle,
                         onRepeat = state::cycleRepeat,
                         onSeek = state::seekTo,
                         onPlayQueue = state::playUpNext,
                         onMoveUpNext = state::moveUpNext,
                         onRemoveUpNext = state::removeUpNext,
-                        onBack = { state.open(AppScreen.Home) },
+                        onCast = state::showCastPicker,
+                        onBack = state::handleBack,
                         onSwipeDismiss = {
                             playerSwipeDismiss = true
-                            state.open(AppScreen.Home)
+                            state.handleBack()
                         },
                     )
                     AppScreen.Home -> MobileBrowseShell(
@@ -907,6 +956,7 @@ fun PhoebeRoot(
                         libraryUi = libraryUi,
                         currentTrack = currentTrack,
                         isPlaying = player.isPlaying,
+                        isBuffering = player.isBuffering,
                         onNavigate = {
                             state.dismissDetailsToHome()
                             browseSection = it
@@ -963,6 +1013,7 @@ fun PhoebeRoot(
                     track = currentTrack,
                     upNext = upNext,
                     isPlaying = player.isPlaying,
+                    isBuffering = player.isBuffering,
                     positionMs = player.positionMs,
                     currentIndex = currentIndex,
                     section = browseSection,
@@ -975,6 +1026,7 @@ fun PhoebeRoot(
                     shuffle = player.shuffle,
                     repeat = player.repeat,
                     volume = player.volume,
+                    castState = cast,
                     showQueue = wideDesktop,
                     compact = !wideDesktop,
                     busy = busy,
@@ -1014,6 +1066,7 @@ fun PhoebeRoot(
                     onRepeat = state::cycleRepeat,
                     onVolume = state::setVolume,
                     onSeek = state::seekTo,
+                    onCast = state::showCastPicker,
                     onPlayQueue = state::playUpNext,
                     onClearQueue = state::clearQueue,
                     onMoveUpNext = state::moveUpNext,
@@ -1113,6 +1166,7 @@ private fun DesktopPlayer(
     track: Track?,
     upNext: List<Track>,
     isPlaying: Boolean,
+    isBuffering: Boolean,
     positionMs: Long,
     currentIndex: Int,
     section: DesktopSection,
@@ -1125,6 +1179,7 @@ private fun DesktopPlayer(
     shuffle: Boolean,
     repeat: RepeatMode,
     volume: Float,
+    castState: CastState,
     showQueue: Boolean,
     compact: Boolean,
     busy: Boolean,
@@ -1142,6 +1197,7 @@ private fun DesktopPlayer(
     onRepeat: () -> Unit,
     onVolume: (Float) -> Unit,
     onSeek: (Long) -> Unit,
+    onCast: () -> Unit,
     onPlayQueue: (Int) -> Unit,
     onClearQueue: () -> Unit,
     onMoveUpNext: (Int, Int) -> Unit,
@@ -1350,10 +1406,12 @@ private fun DesktopPlayer(
                         DesktopTransport(
                             track = track,
                             isPlaying = isPlaying,
+                            isBuffering = isBuffering,
                             positionMs = positionMs,
                             shuffle = shuffle,
                             repeat = repeat,
                             volume = volume,
+                            castState = castState,
                             compact = compact,
                             upNextVisible = showQueue && desktopUpNextExpanded,
                             upNextToggleEnabled = showQueue,
@@ -1365,7 +1423,7 @@ private fun DesktopPlayer(
                             onVolume = onVolume,
                             onSeek = onSeek,
                             onToggleUpNext = { desktopUpNextExpanded = !desktopUpNextExpanded },
-                            onCast = { /* TODO: implement casting */ },
+                            onCast = onCast,
                         )
                     }
                 }
@@ -1873,7 +1931,6 @@ private fun MainFeature(track: Track?, modifier: Modifier) {
                     Text(track.title, color = PhoebeUi.primaryText, fontSize = 34.sp, lineHeight = 39.sp, fontWeight = FontWeight.Black)
                     Text(track.artist.uppercase(), color = PhoebeUi.secondaryText, fontSize = 20.sp, letterSpacing = 0.05.em)
                     Row(horizontalArrangement = Arrangement.spacedBy(22.dp), verticalAlignment = Alignment.CenterVertically) {
-                        PhoebeIconView(PhoebeIcon.Heart, tint = PhoebeUi.accentLight, modifier = Modifier.size(30.dp), filled = true)
                         PhoebeIconView(PhoebeIcon.Queue, tint = PhoebeUi.secondaryText, modifier = Modifier.size(24.dp))
                         PhoebeIconView(PhoebeIcon.More, tint = PhoebeUi.secondaryText, modifier = Modifier.size(24.dp))
                     }
@@ -2038,7 +2095,7 @@ private fun DesktopContent(
 
         when {
             selectedPlaylist != null -> {
-                var playlistSortBy by remember(selectedPlaylist.id) { mutableStateOf(LibrarySortBy.Name) }
+                var playlistSortBy by remember(selectedPlaylist.id) { mutableStateOf(LibrarySortBy.PlaylistOrder) }
                 var playlistAscending by remember(selectedPlaylist.id) { mutableStateOf(true) }
                 val sortedPlaylistTracks = remember(playlistTracks, playlistSortBy, playlistAscending) {
                     sortTracksForLibrary(playlistTracks, playlistSortBy, playlistAscending)
@@ -2049,9 +2106,15 @@ private fun DesktopContent(
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     DetailSectionToolbar(
                         sortBy = playlistSortBy,
-                        sortKeys = listOf(LibrarySortBy.Name, LibrarySortBy.Album, LibrarySortBy.Year),
+                        sortKeys = listOf(
+                            LibrarySortBy.PlaylistOrder,
+                            LibrarySortBy.Name,
+                            LibrarySortBy.Album,
+                            LibrarySortBy.Year,
+                        ),
                         sortLabel = { key ->
                             when (key) {
+                                LibrarySortBy.PlaylistOrder -> "Playlist order"
                                 LibrarySortBy.Album -> "Album name"
                                 LibrarySortBy.Year -> "Release date"
                                 else -> "Song name"
@@ -2063,6 +2126,8 @@ private fun DesktopContent(
                         columns = libraryUi.columns,
                         onColumns = onLibraryColumns,
                     )
+                    val fetchingPlaylistTracks = searchQuery.isBlank() &&
+                        playlistTracks.isEmpty() && selectedPlaylist.trackCount > 0
                     TrackList(
                         tracks = filteredPlaylistTracks,
                         empty = if (searchQuery.isNotBlank()) {
@@ -2071,6 +2136,8 @@ private fun DesktopContent(
                             "No tracks loaded for ${selectedPlaylist.title}."
                         },
                         catalogRefreshing = catalogRefreshing,
+                        loadingTracks = fetchingPlaylistTracks,
+                        loadingMessage = if (fetchingPlaylistTracks) FETCHING_PLAYLIST_TRACKS_MESSAGE else null,
                         onPlayTracks = onPlayTracks,
                         onAddToUpNext = onAddToUpNext,
                         onDownload = onDownload,
@@ -2104,12 +2171,16 @@ private fun DesktopContent(
                         onColumns = onLibraryColumns,
                     )
                     TrackList(
-                        results,
-                        if (query.isBlank()) "Start typing to search songs, artists, and albums." else "No matches for \"$query\".",
-                        catalogRefreshing,
-                        onPlayTracks,
-                        onAddToUpNext,
-                        onDownload,
+                        tracks = results,
+                        empty = if (query.isBlank()) {
+                            "Start typing to search songs, artists, and albums."
+                        } else {
+                            "No matches for \"$query\"."
+                        },
+                        catalogRefreshing = catalogRefreshing,
+                        onPlayTracks = onPlayTracks,
+                        onAddToUpNext = onAddToUpNext,
+                        onDownload = onDownload,
                         libraryColumns = libraryUi.columns,
                     )
                 }
@@ -2144,12 +2215,12 @@ private fun DesktopContent(
                         onColumns = onLibraryColumns,
                     )
                     TrackList(
-                        firstTracks,
-                        "Your library is empty.",
-                        catalogRefreshing,
-                        onPlayTracks,
-                        onAddToUpNext,
-                        onDownload,
+                        tracks = firstTracks,
+                        empty = "Your library is empty.",
+                        catalogRefreshing = catalogRefreshing,
+                        onPlayTracks = onPlayTracks,
+                        onAddToUpNext = onAddToUpNext,
+                        onDownload = onDownload,
                         libraryColumns = libraryUi.columns,
                     )
                 }
@@ -3169,7 +3240,9 @@ private fun ArtistDetailPanel(
         val useTable = maxWidth >= 640.dp
         val edgePadding = if (maxWidth < 640.dp) 20.dp else 36.dp
         val topPadding = if (maxWidth < 640.dp) 16.dp else 36.dp
+    val listState = RetainedLazyListStates.remember("artist-detail:${artist.id}")
     LazyColumn(
+        state = listState,
         modifier = Modifier.fillMaxSize().padding(start = edgePadding, end = edgePadding, top = topPadding, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -3348,7 +3421,9 @@ private fun AlbumDetailPanel(
         val useTable = maxWidth >= 640.dp
         val edgePadding = if (maxWidth < 640.dp) 20.dp else 36.dp
         val topPadding = if (maxWidth < 640.dp) 16.dp else 36.dp
+    val listState = RetainedLazyListStates.remember("album-detail:${album.id}")
     LazyColumn(
+        state = listState,
         modifier = Modifier.fillMaxSize().padding(start = edgePadding, end = edgePadding, top = topPadding, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -3448,7 +3523,7 @@ private fun PlaylistDetailPanel(
         catalog.tracksByParent[playlist.id].orEmpty()
     }
 
-    var sortBy by remember(playlist.id) { mutableStateOf(LibrarySortBy.Name) }
+    var sortBy by remember(playlist.id) { mutableStateOf(LibrarySortBy.PlaylistOrder) }
     var ascending by remember(playlist.id) { mutableStateOf(true) }
     val sortedTracks = remember(tracks, sortBy, ascending) {
         sortTracksForLibrary(tracks, sortBy, ascending)
@@ -3459,7 +3534,9 @@ private fun PlaylistDetailPanel(
 
     BoxWithConstraints(modifier.fillMaxSize()) {
         val useTable = maxWidth >= 640.dp
+    val listState = RetainedLazyListStates.remember("playlist-detail:${playlist.id}")
     LazyColumn(
+        state = listState,
         modifier = Modifier.fillMaxSize().padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -3475,9 +3552,15 @@ private fun PlaylistDetailPanel(
         item(contentType = "playlist-track-toolbar") {
             DetailSectionToolbar(
                 sortBy = sortBy,
-                sortKeys = listOf(LibrarySortBy.Name, LibrarySortBy.Album, LibrarySortBy.Year),
+                sortKeys = listOf(
+                    LibrarySortBy.PlaylistOrder,
+                    LibrarySortBy.Name,
+                    LibrarySortBy.Album,
+                    LibrarySortBy.Year,
+                ),
                 sortLabel = { key ->
                     when (key) {
+                        LibrarySortBy.PlaylistOrder -> "Playlist order"
                         LibrarySortBy.Album -> "Album name"
                         LibrarySortBy.Year -> "Release date"
                         else -> "Song name"
@@ -3492,16 +3575,25 @@ private fun PlaylistDetailPanel(
         }
         if (visibleTracks.isEmpty()) {
             item(contentType = "playlist-empty") {
-                if (catalogRefreshing) CatalogLoadingStrip()
-                Text(
-                    if (searchQuery.isNotBlank()) {
-                        "No tracks in this playlist match \"$searchQuery\"."
-                    } else {
-                        "No tracks loaded for this playlist yet."
-                    },
-                    color = PhoebeUi.mutedText,
-                    fontSize = 15.sp,
-                )
+                val fetchingPlaylistTracks = searchQuery.isBlank() &&
+                    tracks.isEmpty() && playlist.trackCount > 0
+                val loadingTracks = catalogRefreshing || fetchingPlaylistTracks
+                if (loadingTracks) {
+                    CatalogLoadingStrip(
+                        message = if (fetchingPlaylistTracks) FETCHING_PLAYLIST_TRACKS_MESSAGE else null,
+                    )
+                }
+                if (!loadingTracks) {
+                    Text(
+                        if (searchQuery.isNotBlank()) {
+                            "No tracks in this playlist match \"$searchQuery\"."
+                        } else {
+                            "No tracks in this playlist."
+                        },
+                        color = PhoebeUi.mutedText,
+                        fontSize = 15.sp,
+                    )
+                }
             }
         } else if (useTable) {
             item(contentType = "playlist-track-header") {
@@ -3541,17 +3633,22 @@ private fun TrackList(
     tracks: List<Track>,
     empty: String,
     catalogRefreshing: Boolean,
+    loadingTracks: Boolean = false,
+    loadingMessage: String? = null,
     onPlayTracks: (List<Track>, Int) -> Unit,
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
     libraryColumns: LibraryColumnVisibility = FullTrackMetadataColumns,
 ) {
     if (tracks.isEmpty()) {
+        val showLoading = catalogRefreshing || loadingTracks
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (catalogRefreshing) {
-                CatalogLoadingStrip()
+            if (showLoading) {
+                CatalogLoadingStrip(message = loadingMessage)
             }
-            Text(empty, color = PhoebeUi.mutedText, fontSize = 15.sp)
+            if (!showLoading) {
+                Text(empty, color = PhoebeUi.mutedText, fontSize = 15.sp)
+            }
         }
         return
     }
@@ -3619,93 +3716,84 @@ private fun ContentTrackRow(
     }
     val nowPlaying = LocalNowPlaying.current
     val isCurrent = nowPlaying.trackId == track.id
-    Box(modifier.draggableSong(track)) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(10.dp))
-                .combinedClickable(onClick = onPlay, onLongClick = { menuExpanded = true })
-                .background(
-                    if (isCurrent) PhoebeUi.accent.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.045f),
-                )
-                .padding(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(
-                "⠿",
-                color = PhoebeUi.mutedText,
-                fontSize = 15.sp,
-                modifier = Modifier
-                    .draggableSong(track, immediate = true)
-                    .padding(horizontal = 2.dp, vertical = 6.dp),
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .combinedClickable(onClick = onPlay, onLongClick = { menuExpanded = true })
+            .background(
+                if (isCurrent) PhoebeUi.accent.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.045f),
             )
-            Box(Modifier.size(46.dp), contentAlignment = Alignment.Center) {
-                ArtworkImage(track.album, track.thumbUrl, Modifier.fillMaxSize())
-                if (isCurrent) {
-                    Box(
-                        Modifier
-                            .fillMaxSize()
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color.Black.copy(alpha = 0.45f)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        NowPlayingIndicator(
+            .padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box(Modifier.size(46.dp), contentAlignment = Alignment.Center) {
+            ArtworkImage(track.album, track.thumbUrl, Modifier.fillMaxSize())
+            if (isCurrent) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color.Black.copy(alpha = 0.45f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    NowPlayingIndicator(
                             isPlaying = nowPlaying.isPlaying,
+                            isBuffering = nowPlaying.isBuffering,
                             modifier = Modifier.size(20.dp),
                         )
-                    }
                 }
-            }
-            Column(Modifier.weight(1f)) {
-                Text(
-                    track.title,
-                    color = if (isCurrent) PhoebeUi.accentLight else PhoebeUi.primaryText,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text("${track.artist} • ${track.album}", color = PhoebeUi.secondaryText, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (cols.year && track.year != null) {
-                    Text(track.year.toString(), color = PhoebeUi.mutedText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-                if (cols.genre && !track.genre.isNullOrBlank()) {
-                    Text(track.genre!!, color = PhoebeUi.mutedText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-                if (cols.filepath && !track.filepath.isNullOrBlank()) {
-                    Text(track.filepath!!, color = PhoebeUi.mutedText, fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                }
-                if (techParts.isNotEmpty()) {
-                    Text(techParts.joinToString(" · "), color = PhoebeUi.mutedText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-            }
-            if (cols.duration) {
-                WaveformDurationBar(
-                    seed = trackWaveformSeed(track),
-                    durationMs = track.durationMs,
-                    progress = null,
-                    contentDescription = "Duration ${formatDuration(track.durationMs)}",
-                    modifier = Modifier.width(64.dp).height(16.dp),
-                )
-            } else {
-                Spacer(Modifier.width(8.dp))
-            }
-            Box(
-                Modifier.size(40.dp).clip(CircleShape).clickable { menuExpanded = true },
-                contentAlignment = Alignment.Center,
-            ) {
-                Text("···", color = PhoebeUi.secondaryText, fontSize = 17.sp)
             }
         }
-        TrackActionMenu(
-            expanded = menuExpanded,
-            onDismiss = { menuExpanded = false },
-            onAddToUpNext = onAddToUpNext,
-            onDownload = onDownload,
-            track = track,
-        )
+        Column(Modifier.weight(1f)) {
+            Text(
+                track.title,
+                color = if (isCurrent) PhoebeUi.accentLight else PhoebeUi.primaryText,
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text("${track.artist} • ${track.album}", color = PhoebeUi.secondaryText, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (cols.year && track.year != null) {
+                Text(track.year.toString(), color = PhoebeUi.mutedText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (cols.genre && !track.genre.isNullOrBlank()) {
+                Text(track.genre!!, color = PhoebeUi.mutedText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (cols.filepath && !track.filepath.isNullOrBlank()) {
+                Text(track.filepath!!, color = PhoebeUi.mutedText, fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            if (techParts.isNotEmpty()) {
+                Text(techParts.joinToString(" · "), color = PhoebeUi.mutedText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        if (cols.duration) {
+            WaveformDurationBar(
+                seed = trackWaveformSeed(track),
+                durationMs = track.durationMs,
+                progress = null,
+                contentDescription = "Duration ${formatDuration(track.durationMs)}",
+                modifier = Modifier.width(64.dp).height(16.dp),
+            )
+        } else {
+            Spacer(Modifier.width(8.dp))
+        }
+        Box(
+            Modifier.size(40.dp).clip(CircleShape).clickable { menuExpanded = true },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("···", color = PhoebeUi.secondaryText, fontSize = 17.sp)
+        }
     }
+    TrackActionMenu(
+        expanded = menuExpanded,
+        onDismiss = { menuExpanded = false },
+        onAddToUpNext = onAddToUpNext,
+        onDownload = onDownload,
+        track = track,
+    )
 }
 
 @Composable
@@ -3990,6 +4078,7 @@ private fun LibrarySortAndDisplayBar(
                         buildString {
                             append("Sort: ")
                             append(when (prefs.sortBy) {
+                                LibrarySortBy.PlaylistOrder -> "Playlist order"
                                 LibrarySortBy.Name -> "Name"
                                 LibrarySortBy.Artist -> "Artist"
                                 LibrarySortBy.Album -> "Album"
@@ -4302,6 +4391,11 @@ private fun RepeatBadge(mode: RepeatMode) {
  * Vertical Up Next list with a non-draggable "currently playing" header row followed
  * by reorderable upcoming tracks. Used on both desktop and mobile expanded panels.
  */
+private enum class UpNextReorderGesture {
+    DragHandle,
+    LongPressRow,
+}
+
 @Composable
 private fun UpNextList(
     currentTrack: Track?,
@@ -4313,13 +4407,150 @@ private fun UpNextList(
     modifier: Modifier = Modifier,
     thumbnail: Dp = 44.dp,
     rowHeight: Dp = 60.dp,
+    reorderGesture: UpNextReorderGesture = UpNextReorderGesture.DragHandle,
+    removeOnLongPress: Boolean = true,
 ) {
     val density = LocalDensity.current
+    val scope = rememberCoroutineScope()
+    val listState = rememberLazyListState()
     val rowHeightPx = with(density) { rowHeight.toPx() }
+    val rowSpacingPx = with(density) { 2.dp.toPx() }
+    val rowStridePx = rowHeightPx + rowSpacingPx
+    val edgeScrollThresholdPx = with(density) { 56.dp.toPx() }
+    val edgeScrollMinSpeedPx = with(density) { 7.dp.toPx() }
+    val edgeScrollMaxSpeedPx = with(density) { 36.dp.toPx() }
     var draggingTrackId by remember { mutableStateOf<String?>(null) }
     var dragOffsetPx by remember { mutableStateOf(0f) }
+    var listBoundsInRoot by remember { mutableStateOf(Rect.Zero) }
+    var edgeScrollSpeedPx by remember { mutableFloatStateOf(0f) }
+    var edgeScrollJob by remember { mutableStateOf<Job?>(null) }
+    val upNextUpdated = rememberUpdatedState(upNext)
 
-    LazyColumn(modifier = modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    fun stopEdgeScroll() {
+        edgeScrollSpeedPx = 0f
+        edgeScrollJob?.cancel()
+        edgeScrollJob = null
+    }
+
+    fun applyReorderFromOffset() {
+        val currentId = draggingTrackId ?: return
+        val queue = upNextUpdated.value
+        val curIndex = queue.indexOfFirst { it.id == currentId }
+        if (curIndex < 0) return
+        val shift = (dragOffsetPx / rowStridePx).roundToInt()
+        if (shift != 0) {
+            val target = (curIndex + shift).coerceIn(0, queue.lastIndex)
+            if (target != curIndex) {
+                onMoveUpNext(curIndex, target)
+                dragOffsetPx -= shift * rowStridePx
+            }
+        }
+    }
+
+    fun compensateDragForScroll(scrollDeltaPx: Float) {
+        if (scrollDeltaPx == 0f || draggingTrackId == null) return
+        dragOffsetPx += scrollDeltaPx
+        applyReorderFromOffset()
+    }
+
+    fun ensureEdgeScrollLoop() {
+        if (edgeScrollJob?.isActive == true) return
+        edgeScrollJob = scope.launch {
+            while (isActive) {
+                val speed = edgeScrollSpeedPx
+                if (speed == 0f) break
+                val consumed = listState.scrollBy(speed)
+                compensateDragForScroll(consumed)
+                if (consumed == 0f) {
+                    edgeScrollSpeedPx = 0f
+                    break
+                }
+                delay(16)
+            }
+        }
+    }
+
+    fun updateEdgeScroll(pointerYInRoot: Float) {
+        val bounds = listBoundsInRoot
+        if (bounds.width == 0f && bounds.height == 0f) {
+            stopEdgeScroll()
+            return
+        }
+        val topZone = bounds.top + edgeScrollThresholdPx
+        val bottomZone = bounds.bottom - edgeScrollThresholdPx
+        edgeScrollSpeedPx = when {
+            pointerYInRoot < topZone -> {
+                val t = ((topZone - pointerYInRoot) / edgeScrollThresholdPx).coerceIn(0f, 1f)
+                -(edgeScrollMinSpeedPx + (edgeScrollMaxSpeedPx - edgeScrollMinSpeedPx) * t)
+            }
+            pointerYInRoot > bottomZone -> {
+                val t = ((pointerYInRoot - bottomZone) / edgeScrollThresholdPx).coerceIn(0f, 1f)
+                edgeScrollMinSpeedPx + (edgeScrollMaxSpeedPx - edgeScrollMinSpeedPx) * t
+            }
+            else -> {
+                stopEdgeScroll()
+                return
+            }
+        }
+        ensureEdgeScrollLoop()
+    }
+
+    fun handleReorderDrag(trackId: String, dragY: Float) {
+        dragOffsetPx += dragY
+        applyReorderFromOffset()
+    }
+
+    fun Modifier.upNextReorderDrag(
+        trackId: String,
+        pointerYInRoot: () -> Float,
+    ): Modifier = pointerInput(
+        trackId,
+        reorderGesture,
+        listBoundsInRoot,
+    ) {
+        var fingerYInRoot = 0f
+        val onStart: (Offset) -> Unit = { startOffset ->
+            draggingTrackId = trackId
+            dragOffsetPx = 0f
+            fingerYInRoot = pointerYInRoot() + startOffset.y
+        }
+        val onEnd = {
+            stopEdgeScroll()
+            draggingTrackId = null
+            dragOffsetPx = 0f
+        }
+        val onDrag: (androidx.compose.ui.input.pointer.PointerInputChange, Offset) -> Unit = { _, drag ->
+            fingerYInRoot += drag.y
+            handleReorderDrag(trackId, drag.y)
+            updateEdgeScroll(fingerYInRoot)
+        }
+        when (reorderGesture) {
+            UpNextReorderGesture.DragHandle -> detectDragGestures(
+                onDragStart = onStart,
+                onDragEnd = onEnd,
+                onDragCancel = onEnd,
+                onDrag = onDrag,
+            )
+            UpNextReorderGesture.LongPressRow -> detectDragGesturesAfterLongPress(
+                onDragStart = onStart,
+                onDragEnd = onEnd,
+                onDragCancel = onEnd,
+                onDrag = onDrag,
+            )
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { stopEdgeScroll() }
+    }
+
+    LazyColumn(
+        state = listState,
+        modifier = modifier.onGloballyPositioned { coordinates ->
+            listBoundsInRoot = coordinates.boundsInRoot()
+        },
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
         if (currentTrack != null) {
             item(key = "now-playing-${currentTrack.id}", contentType = "now-playing") {
                 UpNextRow(
@@ -4335,11 +4566,20 @@ private fun UpNextList(
         }
         itemsIndexed(upNext, key = { _, t -> t.id }, contentType = { _, _ -> "up-next" }) { index, track ->
             val isDragging = draggingTrackId == track.id
+            var rowTopInRoot by remember(track.id) { mutableFloatStateOf(0f) }
             Box(
                 Modifier
                     .fillMaxWidth()
+                    .onGloballyPositioned { rowTopInRoot = it.positionInRoot().y }
                     .offset { IntOffset(0, if (isDragging) dragOffsetPx.roundToInt() else 0) }
-                    .zIndex(if (isDragging) 1f else 0f),
+                    .zIndex(if (isDragging) 1f else 0f)
+                    .then(
+                        if (reorderGesture == UpNextReorderGesture.LongPressRow) {
+                            Modifier.upNextReorderDrag(track.id) { rowTopInRoot }
+                        } else {
+                            Modifier
+                        },
+                    ),
             ) {
                 UpNextRow(
                     track = track,
@@ -4347,50 +4587,38 @@ private fun UpNextList(
                     thumbnail = thumbnail,
                     rowHeight = rowHeight,
                     backgroundAlpha = if (isDragging) 0.22f else 0f,
-                    dragHandle = {
-                        Box(
-                            Modifier
-                                .size(36.dp)
-                                .pointerInput(Unit) {
-                                    detectDragGestures(
-                                        onDragStart = {
-                                            draggingTrackId = track.id
-                                            dragOffsetPx = 0f
-                                        },
-                                        onDragEnd = {
-                                            draggingTrackId = null
-                                            dragOffsetPx = 0f
-                                        },
-                                        onDragCancel = {
-                                            draggingTrackId = null
-                                            dragOffsetPx = 0f
-                                        },
-                                        onDrag = { _, drag ->
-                                            dragOffsetPx += drag.y
-                                            val currentId = draggingTrackId
-                                                ?: return@detectDragGestures
-                                            val curIndex = upNext.indexOfFirst { it.id == currentId }
-                                            if (curIndex < 0) return@detectDragGestures
-                                            val shift = (dragOffsetPx / rowHeightPx).roundToInt()
-                                            if (shift != 0) {
-                                                val target = (curIndex + shift)
-                                                    .coerceIn(0, upNext.lastIndex)
-                                                if (target != curIndex) {
-                                                    onMoveUpNext(curIndex, target)
-                                                    dragOffsetPx -= shift * rowHeightPx
-                                                }
-                                            }
-                                        },
-                                    )
-                                }
-                                .semantics { contentDescription = "Reorder ${track.title}" },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            PhoebeIconView(PhoebeIcon.Drag, tint = PhoebeUi.mutedText, modifier = Modifier.size(18.dp))
+                    dragHandle = if (reorderGesture == UpNextReorderGesture.DragHandle) {
+                        {
+                            var handleTopInRoot by remember(track.id) { mutableFloatStateOf(0f) }
+                            Box(
+                                Modifier
+                                    .size(36.dp)
+                                    .onGloballyPositioned { handleTopInRoot = it.positionInRoot().y }
+                                    .upNextReorderDrag(track.id) { handleTopInRoot }
+                                    .semantics { contentDescription = "Reorder ${track.title}" },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                PhoebeIconView(PhoebeIcon.Drag, tint = PhoebeUi.mutedText, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    } else {
+                        {
+                            Box(
+                                Modifier
+                                    .size(36.dp)
+                                    .semantics { contentDescription = "Reorder ${track.title}" },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                PhoebeIconView(PhoebeIcon.Drag, tint = PhoebeUi.mutedText.copy(alpha = 0.45f), modifier = Modifier.size(18.dp))
+                            }
                         }
                     },
                     onClick = { onPlayQueue(index) },
-                    onLongPress = { onRemoveUpNext(index) },
+                    onLongPress = if (removeOnLongPress) {
+                        { onRemoveUpNext(index) }
+                    } else {
+                        null
+                    },
                 )
             }
         }
@@ -4519,10 +4747,12 @@ private fun UpNextRow(
 private fun DesktopTransport(
     track: Track?,
     isPlaying: Boolean,
+    isBuffering: Boolean,
     positionMs: Long,
     shuffle: Boolean,
     repeat: RepeatMode,
     volume: Float,
+    castState: CastState,
     compact: Boolean,
     upNextVisible: Boolean,
     upNextToggleEnabled: Boolean,
@@ -4569,18 +4799,12 @@ private fun DesktopTransport(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        PhoebeIconView(
-            PhoebeIcon.Heart,
-            tint = if (hasTrack) PhoebeUi.accentLight else PhoebeUi.mutedText.copy(alpha = 0.35f),
-            modifier = Modifier.size(18.dp),
-            filled = hasTrack,
-        )
         Spacer(Modifier.weight(1f))
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(24.dp), verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(50.dp)) {
                 ShuffleIcon(active = shuffle, onClick = onShuffle)
                 TransportIcon(PhoebeIcon.Previous, "Previous Track", onPrevious)
-                PlayButton(isPlaying, 48.dp, onToggle, enabled = hasTrack)
+                PlayButton(isPlaying, isBuffering, 48.dp, onToggle, enabled = hasTrack)
                 TransportIcon(PhoebeIcon.Next, "Next Track", onNext)
                 RepeatIcon(mode = repeat, onClick = onRepeat)
             }
@@ -4609,7 +4833,12 @@ private fun DesktopTransport(
                 enabled = upNextToggleEnabled,
                 onClick = onToggleUpNext,
             )
-            CastIcon(onClick = onCast)
+            CastIcon(
+                active = castState.isConnected,
+                loading = castState.isBuffering,
+                enabled = castState.isAvailable || castState.isConnected,
+                onClick = onCast,
+            )
         }
     }
 }
@@ -4730,16 +4959,37 @@ private fun UpNextToggleIcon(visible: Boolean, enabled: Boolean, onClick: () -> 
 }
 
 @Composable
-private fun CastIcon(onClick: () -> Unit) {
-    val strokeColor = PhoebeUi.secondaryText
+private fun CastIcon(active: Boolean, loading: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    val strokeColor = when {
+        loading -> PhoebeUi.accentLight
+        active -> PhoebeUi.accentLight
+        enabled -> PhoebeUi.secondaryText
+        else -> PhoebeUi.mutedText.copy(alpha = 0.45f)
+    }
     Box(
         Modifier
             .size(40.dp)
             .clip(CircleShape)
-            .clickable(onClick = onClick)
-            .semantics { contentDescription = "Cast" },
+            .background(if (active || loading) PhoebeUi.accent.copy(alpha = 0.14f) else Color.Transparent)
+            .clickable(enabled = enabled && !loading, onClick = onClick)
+            .semantics {
+                contentDescription = when {
+                    loading -> "Connecting to Chromecast"
+                    active -> "Casting"
+                    enabled -> "Cast"
+                    else -> "Cast unavailable"
+                }
+            },
         contentAlignment = Alignment.Center,
     ) {
+        if (loading) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(18.dp),
+                color = PhoebeUi.accentLight,
+                strokeWidth = 2.dp,
+            )
+            return@Box
+        }
         // Match the Up Next toggle's 20.dp canvas. Inside that canvas, draw the cast
         // glyph in a 14.dp-tall band that is vertically centred — this keeps the icon's
         // optical centre on the same baseline as the music note, slider, and up-next bars.
@@ -4986,6 +5236,7 @@ private fun MobileBrowseShell(
     libraryUi: LibraryUiPreferences,
     currentTrack: Track?,
     isPlaying: Boolean,
+    isBuffering: Boolean,
     onNavigate: (DesktopSection) -> Unit,
     onSearchQuery: (String) -> Unit,
     onLibraryFilter: (LibraryFilterTab) -> Unit,
@@ -5188,7 +5439,7 @@ private fun MobileBrowseShell(
                         )
                     }
                 }
-                PlayButton(isPlaying, 40.dp, onTogglePlayPause, enabled = true)
+                PlayButton(isPlaying, isBuffering, 40.dp, onTogglePlayPause, enabled = true)
             }
         }
 
@@ -5198,31 +5449,196 @@ private fun MobileBrowseShell(
 }
 
 @Composable
+private fun SwipeableMobileArtwork(
+    trackId: String,
+    album: String,
+    thumbUrl: String?,
+    nextTrack: Track?,
+    previousTrack: Track?,
+    onSkipQueueBy: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val density = LocalDensity.current
+    val scope = rememberCoroutineScope()
+    val settleOffset = remember { Animatable(0f) }
+    var dragOffset by remember { mutableFloatStateOf(0f) }
+    var isDragging by remember { mutableStateOf(false) }
+    var isSwipeAnimating by remember { mutableStateOf(false) }
+    var settleJob by remember { mutableStateOf<Job?>(null) }
+
+    LaunchedEffect(trackId) {
+        if (isSwipeAnimating) return@LaunchedEffect
+        settleJob?.cancel()
+        settleOffset.stop()
+        settleOffset.snapTo(0f)
+        dragOffset = 0f
+        isDragging = false
+    }
+
+    BoxWithConstraints(
+        modifier = modifier
+            .aspectRatio(1f)
+            .clip(RoundedCornerShape(10.dp))
+            .semantics {
+                contentDescription = "Album artwork. Swipe left for next track, swipe right for previous track."
+            },
+    ) {
+        val widthPx = with(density) { maxWidth.toPx() }
+        val swipeThresholdPx = with(density) { 56.dp.toPx() }
+        val displayOffset = if (isDragging) dragOffset else settleOffset.value
+        val dragProgress = (abs(displayOffset) / widthPx).coerceIn(0f, 1f)
+
+        fun settleToCenter(fromOffset: Float) {
+            settleJob?.cancel()
+            settleJob = scope.launch {
+                settleOffset.snapTo(fromOffset)
+                settleOffset.animateTo(
+                    0f,
+                    animationSpec = spring(
+                        stiffness = Spring.StiffnessLow,
+                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                    ),
+                )
+            }
+        }
+
+        fun animateSwipeCommit(releaseOffset: Float) {
+            settleJob?.cancel()
+            settleJob = scope.launch {
+                settleOffset.snapTo(releaseOffset)
+                when {
+                    releaseOffset < -swipeThresholdPx -> {
+                        isSwipeAnimating = true
+                        settleOffset.animateTo(
+                            targetValue = -widthPx,
+                            animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing),
+                        )
+                        val steps = (abs(releaseOffset) / widthPx).toInt().coerceIn(1, 5)
+                        onSkipQueueBy(steps)
+                        settleOffset.snapTo(0f)
+                        isSwipeAnimating = false
+                    }
+                    releaseOffset > swipeThresholdPx -> {
+                        isSwipeAnimating = true
+                        settleOffset.animateTo(
+                            targetValue = widthPx,
+                            animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing),
+                        )
+                        val steps = -(abs(releaseOffset) / widthPx).toInt().coerceIn(1, 5)
+                        onSkipQueueBy(steps)
+                        settleOffset.snapTo(0f)
+                        isSwipeAnimating = false
+                    }
+                    else -> {
+                        settleOffset.animateTo(
+                            0f,
+                            animationSpec = spring(
+                                stiffness = Spring.StiffnessLow,
+                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(trackId, widthPx, swipeThresholdPx) {
+                    detectHorizontalDragGestures(
+                        onDragStart = {
+                            settleJob?.cancel()
+                            dragOffset = settleOffset.value
+                            isDragging = true
+                            scope.launch { settleOffset.stop() }
+                        },
+                        onDragEnd = {
+                            isDragging = false
+                            val releaseOffset = dragOffset
+                            dragOffset = 0f
+                            animateSwipeCommit(releaseOffset)
+                        },
+                        onDragCancel = {
+                            isDragging = false
+                            val releaseOffset = dragOffset
+                            dragOffset = 0f
+                            settleToCenter(releaseOffset)
+                        },
+                        onHorizontalDrag = { _, dragAmount -> dragOffset += dragAmount },
+                    )
+                },
+        ) {
+            if (displayOffset < 0f && nextTrack != null) {
+                ArtworkImage(
+                    nextTrack.album,
+                    nextTrack.thumbUrl,
+                    Modifier
+                        .fillMaxSize()
+                        .offset { IntOffset((widthPx + displayOffset).roundToInt(), 0) },
+                    radius = 10.dp,
+                )
+            }
+            if (displayOffset > 0f && previousTrack != null) {
+                ArtworkImage(
+                    previousTrack.album,
+                    previousTrack.thumbUrl,
+                    Modifier
+                        .fillMaxSize()
+                        .offset { IntOffset((displayOffset - widthPx).roundToInt(), 0) },
+                    radius = 10.dp,
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .offset { IntOffset(displayOffset.roundToInt(), 0) }
+                    .graphicsLayer {
+                        val scale = 1f - dragProgress * 0.03f
+                        scaleX = scale
+                        scaleY = scale
+                    },
+            ) {
+                key(trackId) {
+                    ArtworkImage(album, thumbUrl, Modifier.fillMaxSize(), radius = 10.dp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun MobilePlayer(
     track: Track?,
     upNext: List<Track>,
+    previousTrack: Track?,
     isPlaying: Boolean,
+    isBuffering: Boolean,
     shuffle: Boolean,
     repeat: RepeatMode,
     positionMs: Long,
     @Suppress("UNUSED_PARAMETER") currentIndex: Int,
+    castState: CastState,
     onToggle: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
+    onSkipQueueBy: (Int) -> Unit,
     onShuffle: () -> Unit,
     onRepeat: () -> Unit,
     onSeek: (Long) -> Unit,
     onPlayQueue: (Int) -> Unit,
     onMoveUpNext: (Int, Int) -> Unit,
     onRemoveUpNext: (Int) -> Unit,
+    onCast: () -> Unit,
     onBack: () -> Unit,
     onSwipeDismiss: () -> Unit,
+    initialQueueSheetExpanded: Boolean = false,
 ) {
-    var mobileUpNextExpanded by remember { mutableStateOf(true) }
-    var dragOffset by remember { mutableFloatStateOf(0f) }
-    var isDragging by remember { mutableStateOf(false) }
-    var dismissing by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     val density = LocalDensity.current
+    var dragOffset by remember { mutableFloatStateOf(0f) }
+    var isDraggingDismiss by remember { mutableStateOf(false) }
+    var dismissing by remember { mutableStateOf(false) }
     val dismissThresholdPx = with(density) { 96.dp.toPx() }
     val offScreenPx = with(density) { 1200.dp.toPx() }
     val animatedOffset by animateFloatAsState(
@@ -5242,34 +5658,12 @@ private fun MobilePlayer(
         },
         label = "player-swipe-settle",
     )
-    val displayOffset = if (isDragging) dragOffset.coerceAtLeast(0f) else animatedOffset
+    val displayOffset = if (isDraggingDismiss) dragOffset.coerceAtLeast(0f) else animatedOffset
     val hasTrack = track != null
     Column(
         modifier = Modifier
             .fillMaxSize()
             .offset { IntOffset(0, displayOffset.roundToInt()) }
-            .pointerInput(onBack, dismissThresholdPx, offScreenPx) {
-                detectVerticalDragGestures(
-                    onDragStart = { isDragging = true },
-                    onDragEnd = {
-                        isDragging = false
-                        if (dragOffset > dismissThresholdPx) {
-                            dismissing = true
-                        } else {
-                            dragOffset = 0f
-                        }
-                    },
-                    onDragCancel = {
-                        isDragging = false
-                        dragOffset = 0f
-                    },
-                    onVerticalDrag = { _, dragAmount ->
-                        if (!dismissing && (dragAmount > 0f || dragOffset > 0f)) {
-                            dragOffset = (dragOffset + dragAmount).coerceAtLeast(0f)
-                        }
-                    },
-                )
-            }
             .background(
                 Brush.radialGradient(
                     listOf(PhoebeUi.shellRadialTint, Color.Transparent),
@@ -5278,82 +5672,219 @@ private fun MobilePlayer(
                 ),
             )
             .background(Brush.verticalGradient(listOf(PhoebeUi.shellTop, PhoebeUi.canvasBackground)))
-            .navigationBarsPadding()
-            .padding(horizontal = 20.dp),
+            .navigationBarsPadding(),
     ) {
-        Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                modifier = Modifier.size(44.dp).clickable(onClick = onBack).semantics { contentDescription = "Back" },
-                contentAlignment = Alignment.Center,
-            ) {
-                PhoebeIconView(PhoebeIcon.ChevronDown, tint = PhoebeUi.primaryText, modifier = Modifier.size(24.dp))
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val collapsedSheetHeightPx = with(density) { 84.dp.toPx() }
+            val expandedSheetHeightPx = with(density) {
+                val controlsPx = 130.dp.toPx()
+                val headerPx = 56.dp.toPx()
+                (maxHeight.toPx() - controlsPx - headerPx)
+                    .coerceAtLeast(collapsedSheetHeightPx + 80.dp.toPx())
             }
-            Spacer(Modifier.weight(1f))
-            SectionLabel("Now Playing", PhoebeUi.secondaryText)
-            Spacer(Modifier.weight(1f))
-            Box(Modifier.width(44.dp), contentAlignment = Alignment.Center) {
-                PhoebeIconView(PhoebeIcon.More, tint = PhoebeUi.primaryText, modifier = Modifier.size(22.dp))
+            val sheetHeight = remember(expandedSheetHeightPx, initialQueueSheetExpanded) {
+                Animatable(
+                    if (initialQueueSheetExpanded) expandedSheetHeightPx else collapsedSheetHeightPx,
+                )
             }
-        }
+            var isDraggingSheet by remember { mutableStateOf(false) }
+            var dragSheetHeightPx by remember { mutableFloatStateOf(collapsedSheetHeightPx) }
+            val displayedSheetHeightPx = if (isDraggingSheet) dragSheetHeightPx else sheetHeight.value
+            val sheetRangePx = (expandedSheetHeightPx - collapsedSheetHeightPx).coerceAtLeast(1f)
+            val sheetProgress = ((displayedSheetHeightPx - collapsedSheetHeightPx) / sheetRangePx)
+                .coerceIn(0f, 1f)
+            val sheetExpanded = sheetProgress > 0.35f
 
-        Spacer(Modifier.height(24.dp))
-        if (track != null) {
-            ArtworkImage(track.album, track.thumbUrl, Modifier.fillMaxWidth().aspectRatio(1f))
-            Spacer(Modifier.height(20.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(track.title, color = PhoebeUi.primaryText, fontSize = 22.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(track.artist, color = PhoebeUi.secondaryText, fontSize = 15.sp)
+            fun snapSheetHeight(currentPx: Float, velocityPxPerSec: Float) {
+                val progress = ((currentPx - collapsedSheetHeightPx) / sheetRangePx).coerceIn(0f, 1f)
+                val target = when {
+                    velocityPxPerSec < -250f -> expandedSheetHeightPx
+                    velocityPxPerSec > 250f -> collapsedSheetHeightPx
+                    progress >= 0.35f -> expandedSheetHeightPx
+                    else -> collapsedSheetHeightPx
                 }
-                PhoebeIconView(PhoebeIcon.Heart, tint = PhoebeUi.accentLight, modifier = Modifier.size(31.dp), filled = true)
-            }
-        } else {
-            Box(Modifier.fillMaxWidth().aspectRatio(1f), contentAlignment = Alignment.Center) {
-                EmptyNowPlayingArtworkSlot(Modifier.fillMaxSize(), glyphSp = 64.sp)
-            }
-            Spacer(Modifier.height(20.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("Nothing playing", color = PhoebeUi.primaryText, fontSize = 22.sp, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Text(
-                        "Choose a song from your library or search.",
-                        color = PhoebeUi.secondaryText,
-                        fontSize = 15.sp,
-                        lineHeight = 21.sp,
+                scope.launch {
+                    sheetHeight.snapTo(currentPx)
+                    isDraggingSheet = false
+                    sheetHeight.animateTo(
+                        target,
+                        animationSpec = spring(
+                            stiffness = Spring.StiffnessMedium,
+                            dampingRatio = Spring.DampingRatioNoBouncy,
+                        ),
                     )
                 }
-                PhoebeIconView(PhoebeIcon.Heart, tint = PhoebeUi.mutedText.copy(alpha = 0.35f), modifier = Modifier.size(31.dp))
+            }
+
+            fun snapSheet(expanded: Boolean) {
+                val target = if (expanded) expandedSheetHeightPx else collapsedSheetHeightPx
+                scope.launch {
+                    if (isDraggingSheet) {
+                        sheetHeight.snapTo(dragSheetHeightPx)
+                        isDraggingSheet = false
+                    }
+                    sheetHeight.animateTo(
+                        target,
+                        animationSpec = spring(
+                            stiffness = Spring.StiffnessMedium,
+                            dampingRatio = Spring.DampingRatioNoBouncy,
+                        ),
+                    )
+                }
+            }
+
+            Column(Modifier.fillMaxSize()) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(56.dp)
+                        .padding(horizontal = 20.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier.size(44.dp).clickable(onClick = onBack).semantics { contentDescription = "Back" },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        PhoebeIconView(PhoebeIcon.ChevronDown, tint = PhoebeUi.primaryText, modifier = Modifier.size(24.dp))
+                    }
+                    Spacer(Modifier.weight(1f))
+                    SectionLabel("Now Playing", PhoebeUi.secondaryText)
+                    Spacer(Modifier.weight(1f))
+                    CastIcon(
+                        active = castState.isConnected,
+                        loading = castState.isBuffering,
+                        enabled = castState.isAvailable || castState.isConnected,
+                        onClick = onCast,
+                    )
+                }
+
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .pointerInput(onBack, dismissThresholdPx, offScreenPx) {
+                            detectVerticalDragGestures(
+                                onDragStart = { isDraggingDismiss = true },
+                                onDragEnd = {
+                                    isDraggingDismiss = false
+                                    if (dragOffset > dismissThresholdPx) {
+                                        dismissing = true
+                                    } else {
+                                        dragOffset = 0f
+                                    }
+                                },
+                                onDragCancel = {
+                                    isDraggingDismiss = false
+                                    dragOffset = 0f
+                                },
+                                onVerticalDrag = { _, dragAmount ->
+                                    if (!dismissing && (dragAmount > 0f || dragOffset > 0f)) {
+                                        dragOffset = (dragOffset + dragAmount).coerceAtLeast(0f)
+                                    }
+                                },
+                            )
+                        },
+                ) {
+                    Spacer(Modifier.height(24.dp))
+                    if (track != null) {
+                        Box(
+                            Modifier
+                                .weight(1f, fill = true)
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(0.dp)),
+                        ) {
+                            Column(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .align(Alignment.TopCenter)
+                                    .graphicsLayer {
+                                        translationY = -size.height * sheetProgress
+                                        alpha = 1f - sheetProgress
+                                    },
+                            ) {
+                                SwipeableMobileArtwork(
+                                    trackId = track.id,
+                                    album = track.album,
+                                    thumbUrl = track.thumbUrl,
+                                    nextTrack = upNext.firstOrNull(),
+                                    previousTrack = previousTrack,
+                                    onSkipQueueBy = onSkipQueueBy,
+                                    modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+                                )
+                                Spacer(Modifier.height(20.dp))
+                                Text(track.title, color = PhoebeUi.primaryText, fontSize = 22.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(track.artist, color = PhoebeUi.secondaryText, fontSize = 15.sp)
+                            }
+                        }
+                    } else {
+                        Box(Modifier.fillMaxWidth().weight(1f, fill = false).aspectRatio(1f), contentAlignment = Alignment.Center) {
+                            EmptyNowPlayingArtworkSlot(Modifier.fillMaxSize(), glyphSp = 64.sp)
+                        }
+                        Spacer(Modifier.height(20.dp))
+                        Column {
+                            Text("Nothing playing", color = PhoebeUi.primaryText, fontSize = 22.sp, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(
+                                "Choose a song from your library or search.",
+                                color = PhoebeUi.secondaryText,
+                                fontSize = 15.sp,
+                                lineHeight = 21.sp,
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(18.dp))
+                ProgressLine(
+                    positionMs,
+                    track?.durationMs ?: 0L,
+                    waveformSeed = track?.let(::trackWaveformSeed) ?: "",
+                    Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                    onSeek = if (hasTrack) onSeek else null,
+                )
+                Spacer(Modifier.height(22.dp))
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    ShuffleIcon(active = shuffle, onClick = onShuffle)
+                    TransportIcon(PhoebeIcon.Previous, "Previous Track", onPrevious)
+                    PlayButton(isPlaying, isBuffering, 58.dp, onToggle, enabled = hasTrack)
+                    TransportIcon(PhoebeIcon.Next, "Next Track", onNext)
+                    RepeatIcon(mode = repeat, onClick = onRepeat)
+                }
+                Spacer(Modifier.height(12.dp))
+
+                MobileQueueSheet(
+                    currentTrack = track,
+                    upNext = upNext,
+                    repeat = repeat,
+                    sheetProgress = sheetProgress,
+                    expanded = sheetExpanded,
+                    isDragging = isDraggingSheet,
+                    onToggleExpanded = { snapSheet(!sheetExpanded) },
+                    onSheetDrag = { dragAmountPx ->
+                        dragSheetHeightPx = (dragSheetHeightPx - dragAmountPx)
+                            .coerceIn(collapsedSheetHeightPx, expandedSheetHeightPx)
+                    },
+                    onSheetDragStart = {
+                        isDraggingSheet = true
+                        dragSheetHeightPx = sheetHeight.value
+                        scope.launch { sheetHeight.stop() }
+                    },
+                    onSheetDragEnd = { velocityPxPerSec ->
+                        snapSheetHeight(dragSheetHeightPx, velocityPxPerSec)
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(with(density) { displayedSheetHeightPx.toDp() }),
+                    onPlayQueue = onPlayQueue,
+                    onMoveUpNext = onMoveUpNext,
+                    onRemoveUpNext = onRemoveUpNext,
+                )
             }
         }
-        Spacer(Modifier.height(18.dp))
-        ProgressLine(
-            positionMs,
-            track?.durationMs ?: 0L,
-            waveformSeed = track?.let(::trackWaveformSeed) ?: "",
-            Modifier.fillMaxWidth(),
-            onSeek = if (hasTrack) onSeek else null,
-        )
-        Spacer(Modifier.height(22.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            ShuffleIcon(active = shuffle, onClick = onShuffle)
-            TransportIcon(PhoebeIcon.Previous, "Previous Track", onPrevious)
-            PlayButton(isPlaying, 58.dp, onToggle, enabled = hasTrack)
-            TransportIcon(PhoebeIcon.Next, "Next Track", onNext)
-            RepeatIcon(mode = repeat, onClick = onRepeat)
-        }
-        Spacer(Modifier.height(18.dp))
-        val queueModifier = if (mobileUpNextExpanded) Modifier.weight(1f).fillMaxWidth() else Modifier.fillMaxWidth()
-        MobileQueueSheet(
-            currentTrack = track,
-            upNext = upNext,
-            repeat = repeat,
-            expanded = mobileUpNextExpanded,
-            onExpandedChange = { mobileUpNextExpanded = it },
-            modifier = queueModifier,
-            onPlayQueue = onPlayQueue,
-            onMoveUpNext = onMoveUpNext,
-            onRemoveUpNext = onRemoveUpNext,
-        )
     }
 }
 
@@ -5362,52 +5893,139 @@ private fun MobileQueueSheet(
     currentTrack: Track?,
     upNext: List<Track>,
     repeat: RepeatMode,
+    sheetProgress: Float,
     expanded: Boolean,
-    onExpandedChange: (Boolean) -> Unit,
+    isDragging: Boolean,
+    onToggleExpanded: () -> Unit,
+    onSheetDrag: (Float) -> Unit,
+    onSheetDragStart: () -> Unit,
+    onSheetDragEnd: (velocityPxPerSec: Float) -> Unit,
     modifier: Modifier,
     onPlayQueue: (Int) -> Unit,
     onMoveUpNext: (Int, Int) -> Unit,
     onRemoveUpNext: (Int) -> Unit,
 ) {
+    val handleWidth by animateFloatAsState(
+        targetValue = when {
+            isDragging -> 52f
+            expanded -> 44f
+            else -> 36f
+        },
+        animationSpec = spring(stiffness = Spring.StiffnessMedium, dampingRatio = Spring.DampingRatioMediumBouncy),
+        label = "queue-sheet-handle-width",
+    )
+    val sheetElevation by animateFloatAsState(
+        targetValue = 8f + sheetProgress * 18f,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy),
+        label = "queue-sheet-elevation",
+    )
+    val sheetCorner by animateFloatAsState(
+        targetValue = 22f + sheetProgress * 4f,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy),
+        label = "queue-sheet-corner",
+    )
+    val sheetShape = RoundedCornerShape(topStart = sheetCorner.dp, topEnd = sheetCorner.dp)
+    val onSheetDragUpdated = rememberUpdatedState(onSheetDrag)
+    val onSheetDragStartUpdated = rememberUpdatedState(onSheetDragStart)
+    val onSheetDragEndUpdated = rememberUpdatedState(onSheetDragEnd)
+    val draggableState = rememberDraggableState { delta ->
+        onSheetDragUpdated.value(delta)
+    }
+
     Column(
         modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
-            .background(PhoebeUi.glass)
-            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
-            .padding(horizontal = 18.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+            .shadow(sheetElevation.dp, sheetShape, clip = false)
+            .clip(sheetShape)
+            .background(PhoebeUi.glass.copy(alpha = 0.94f + sheetProgress * 0.04f)),
     ) {
-        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-            Box(Modifier.width(36.dp).height(4.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.18f)))
-        }
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            SectionLabel("Up Next", PhoebeUi.primaryText)
-            if (repeat != RepeatMode.Off) {
-                Spacer(Modifier.width(8.dp))
-                RepeatBadge(mode = repeat)
-            }
-            Spacer(Modifier.weight(1f))
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 72.dp)
+                .draggable(
+                    state = draggableState,
+                    orientation = Orientation.Vertical,
+                    onDragStarted = { onSheetDragStartUpdated.value() },
+                    onDragStopped = { velocity -> onSheetDragEndUpdated.value(velocity) },
+                )
+                .padding(horizontal = 18.dp)
+                .padding(top = 8.dp, bottom = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable { onExpandedChange(!expanded) }
-                    .padding(horizontal = 10.dp, vertical = 4.dp)
-                    .semantics {
-                        contentDescription = if (expanded) "Collapse Up Next" else "Expand Up Next"
-                    },
+                Modifier
+                    .fillMaxWidth()
+                    .height(20.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                PhoebeIconView(
-                    if (expanded) PhoebeIcon.ChevronUp else PhoebeIcon.ChevronDown,
-                    tint = PhoebeUi.mutedText,
-                    modifier = Modifier.size(22.dp),
+                Box(
+                    Modifier
+                        .width(handleWidth.dp)
+                        .height(4.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.14f + sheetProgress * 0.12f)),
                 )
             }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 32.dp)
+                    .padding(vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                SectionLabel("Up Next", PhoebeUi.primaryText)
+                if (repeat != RepeatMode.Off) {
+                    Spacer(Modifier.width(8.dp))
+                    RepeatBadge(mode = repeat)
+                }
+                Spacer(Modifier.weight(1f))
+                val queueCount = upNext.size + if (currentTrack != null) 1 else 0
+                Text(
+                    when (queueCount) {
+                        0 -> "Empty"
+                        1 -> "1 track"
+                        else -> "$queueCount tracks"
+                    },
+                    color = PhoebeUi.mutedText.copy(alpha = 0.75f + sheetProgress * 0.25f),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+                Spacer(Modifier.width(6.dp))
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(onClick = onToggleExpanded)
+                        .padding(horizontal = 6.dp, vertical = 4.dp)
+                        .semantics {
+                            contentDescription = if (expanded) "Collapse Up Next" else "Expand Up Next"
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    PhoebeIconView(
+                        PhoebeIcon.ChevronUp,
+                        tint = PhoebeUi.mutedText.copy(alpha = 0.65f + sheetProgress * 0.35f),
+                        modifier = Modifier
+                            .size(20.dp)
+                            .graphicsLayer { rotationZ = sheetProgress * 180f },
+                    )
+                }
+            }
         }
-        if (expanded) {
+
+        val showQueueContent = sheetProgress > 0.06f || isDragging
+        if (showQueueContent) {
             if (currentTrack == null && upNext.isEmpty()) {
-                Text("Pick a song to start a queue.", color = PhoebeUi.mutedText, fontSize = 12.sp)
+                Text(
+                    "Pick a song to start a queue.",
+                    color = PhoebeUi.mutedText,
+                    fontSize = 12.sp,
+                    modifier = Modifier
+                        .padding(horizontal = 18.dp)
+                        .padding(bottom = 14.dp)
+                        .graphicsLayer {
+                            alpha = ((sheetProgress - 0.06f) / 0.2f).coerceIn(0f, 1f)
+                        },
+                )
             } else {
                 UpNextList(
                     currentTrack = currentTrack,
@@ -5416,49 +6034,19 @@ private fun MobileQueueSheet(
                     onPlayQueue = onPlayQueue,
                     onMoveUpNext = onMoveUpNext,
                     onRemoveUpNext = onRemoveUpNext,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp)
+                        .padding(bottom = 12.dp)
+                        .graphicsLayer {
+                            alpha = ((sheetProgress - 0.06f) / 0.2f).coerceIn(0f, 1f)
+                        },
                     thumbnail = 40.dp,
                     rowHeight = 56.dp,
+                    reorderGesture = UpNextReorderGesture.LongPressRow,
+                    removeOnLongPress = false,
                 )
-            }
-        } else {
-            val peek = upNext.firstOrNull()
-            if (peek == null) {
-                Text(
-                    if (currentTrack == null) "Pick a song to start a queue." else "Nothing queued after this track.",
-                    color = PhoebeUi.mutedText,
-                    fontSize = 12.sp,
-                    modifier = Modifier.padding(vertical = 6.dp),
-                )
-            } else {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable { onPlayQueue(0) }
-                        .padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    ArtworkImage(peek.album, peek.thumbUrl, Modifier.size(40.dp), radius = 6.dp)
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            "Next: ${peek.title}",
-                            color = PhoebeUi.primaryText,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            peek.artist,
-                            color = PhoebeUi.secondaryText,
-                            fontSize = 12.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
             }
         }
     }
@@ -5561,12 +6149,29 @@ private fun TransportIcon(icon: PhoebeIcon, description: String, onClick: () -> 
 }
 
 @Composable
-private fun PlayButton(isPlaying: Boolean, size: Dp, onClick: () -> Unit, enabled: Boolean = true) {
-    val scale by animateFloatAsState(if (isPlaying && enabled) 1f else 0.98f, spring(), label = "play-button-scale")
+private fun PlayButton(
+    isPlaying: Boolean,
+    isBuffering: Boolean,
+    size: Dp,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+) {
+    val scale by animateFloatAsState(
+        if ((isPlaying || isBuffering) && enabled) 1f else 0.98f,
+        spring(),
+        label = "play-button-scale",
+    )
     val gradient = if (enabled) {
         Brush.linearGradient(listOf(PhoebeUi.accentLight, PhoebeUi.accent))
     } else {
         Brush.linearGradient(listOf(PhoebeUi.mutedText.copy(alpha = 0.28f), PhoebeUi.mutedText.copy(alpha = 0.38f)))
+    }
+    val iconSize = if (size > 52.dp) 24.dp else 21.dp
+    val spinnerSize = iconSize + 2.dp
+    val contentDescription = when {
+        isBuffering -> "Loading"
+        isPlaying -> "Pause"
+        else -> "Play"
     }
     Box(
         Modifier
@@ -5580,16 +6185,47 @@ private fun PlayButton(isPlaying: Boolean, size: Dp, onClick: () -> Unit, enable
             )
             .clip(CircleShape)
             .background(gradient)
-            .clickable(enabled = enabled, onClick = onClick)
-            .semantics { contentDescription = if (isPlaying) "Pause" else "Play" },
+            .clickable(enabled = enabled && !isBuffering, onClick = onClick)
+            .semantics { this.contentDescription = contentDescription },
         contentAlignment = Alignment.Center,
     ) {
-        PhoebeIconView(
-            if (isPlaying) PhoebeIcon.Pause else PhoebeIcon.Play,
-            tint = if (enabled) PhoebeUi.primaryText else PhoebeUi.mutedText.copy(alpha = 0.55f),
-            modifier = Modifier.size(if (size > 52.dp) 24.dp else 21.dp),
-        )
+        AnimatedContent(
+            targetState = when {
+                isBuffering -> PlayButtonVisual.Loading
+                isPlaying -> PlayButtonVisual.Pause
+                else -> PlayButtonVisual.Play
+            },
+            transitionSpec = {
+                fadeIn(tween(160)) togetherWith fadeOut(tween(120))
+            },
+            label = "play-button-icon",
+        ) { visual ->
+            when (visual) {
+                PlayButtonVisual.Loading -> CircularProgressIndicator(
+                    modifier = Modifier.size(spinnerSize),
+                    color = PhoebeUi.primaryText,
+                    strokeWidth = 2.dp,
+                    trackColor = PhoebeUi.primaryText.copy(alpha = 0.22f),
+                )
+                PlayButtonVisual.Pause -> PhoebeIconView(
+                    PhoebeIcon.Pause,
+                    tint = if (enabled) PhoebeUi.primaryText else PhoebeUi.mutedText.copy(alpha = 0.55f),
+                    modifier = Modifier.size(iconSize),
+                )
+                PlayButtonVisual.Play -> PhoebeIconView(
+                    PhoebeIcon.Play,
+                    tint = if (enabled) PhoebeUi.primaryText else PhoebeUi.mutedText.copy(alpha = 0.55f),
+                    modifier = Modifier.size(iconSize),
+                )
+            }
+        }
     }
+}
+
+private enum class PlayButtonVisual {
+    Loading,
+    Pause,
+    Play,
 }
 
 /** Stable per-track seed so wave shape differs across library even when ids are opaque or similar. */
@@ -5726,10 +6362,13 @@ private fun VolumeSlider(volume: Float, onVolume: (Float) -> Unit, modifier: Mod
  */
 internal val LocalCatalogHasContent = compositionLocalOf { false }
 
+private const val FETCHING_PLAYLIST_TRACKS_MESSAGE = "Fetching playlists…"
+
 /** Current playback state, exposed implicitly so any track row can show a "now playing" badge. */
 internal data class NowPlayingIndicatorState(
     val trackId: String? = null,
     val isPlaying: Boolean = false,
+    val isBuffering: Boolean = false,
 )
 
 internal val LocalNowPlaying = compositionLocalOf { NowPlayingIndicatorState() }
@@ -5912,6 +6551,7 @@ internal enum class PhoebeScreenshotScenario {
     Album,
     Search,
     Player,
+    PlayerUpNextExpanded,
     Settings,
     SignIn,
 }
@@ -5991,6 +6631,7 @@ private fun PhoebeDesktopScreenshotScenario(
         track = fixture.currentTrack,
         upNext = fixture.upNext,
         isPlaying = true,
+        isBuffering = false,
         positionMs = 96_000L,
         currentIndex = 0,
         section = section,
@@ -6003,6 +6644,7 @@ private fun PhoebeDesktopScreenshotScenario(
         shuffle = true,
         repeat = RepeatMode.All,
         volume = 0.72f,
+        castState = CastState(),
         showQueue = true,
         compact = false,
         busy = false,
@@ -6020,6 +6662,7 @@ private fun PhoebeDesktopScreenshotScenario(
         onRepeat = {},
         onVolume = {},
         onSeek = {},
+        onCast = {},
         onPlayQueue = {},
         onClearQueue = {},
         onMoveUpNext = { _, _ -> },
@@ -6104,25 +6747,33 @@ private fun PhoebeMobileScreenshotScenario(
                 onDownload = {},
                 onLibraryColumns = {},
             )
-            PhoebeScreenshotScenario.Player -> MobilePlayer(
+            PhoebeScreenshotScenario.Player,
+            PhoebeScreenshotScenario.PlayerUpNextExpanded,
+            -> MobilePlayer(
                 track = fixture.currentTrack,
                 upNext = fixture.upNext,
+                previousTrack = null,
                 isPlaying = true,
+                isBuffering = false,
                 shuffle = true,
                 repeat = RepeatMode.All,
                 positionMs = 96_000L,
                 currentIndex = 0,
+                castState = CastState(),
                 onToggle = {},
                 onPrevious = {},
                 onNext = {},
+                onSkipQueueBy = {},
                 onShuffle = {},
                 onRepeat = {},
                 onSeek = {},
                 onPlayQueue = {},
                 onMoveUpNext = { _, _ -> },
                 onRemoveUpNext = {},
+                onCast = {},
                 onBack = {},
                 onSwipeDismiss = {},
+                initialQueueSheetExpanded = scenario == PhoebeScreenshotScenario.PlayerUpNextExpanded,
             )
             else -> MobileBrowseShell(
                 catalog = fixture.catalog,
@@ -6140,6 +6791,7 @@ private fun PhoebeMobileScreenshotScenario(
                 libraryUi = fixture.libraryUi,
                 currentTrack = fixture.currentTrack,
                 isPlaying = true,
+                isBuffering = false,
                 onNavigate = {},
                 onSearchQuery = {},
                 onLibraryFilter = {},
@@ -6342,13 +6994,19 @@ internal fun DragGhost() {
 @Composable
 internal fun NowPlayingIndicator(
     isPlaying: Boolean,
+    isBuffering: Boolean = false,
     modifier: Modifier = Modifier,
     barColor: Color = PhoebeUi.accentLight,
 ) {
-    if (isPlaying) {
-        AnimatedNowPlayingIndicator(modifier = modifier, barColor = barColor)
-    } else {
-        NowPlayingIndicatorBars(
+    when {
+        isBuffering -> CircularProgressIndicator(
+            modifier = modifier,
+            color = barColor,
+            strokeWidth = 2.dp,
+            trackColor = barColor.copy(alpha = 0.22f),
+        )
+        isPlaying -> AnimatedNowPlayingIndicator(modifier = modifier, barColor = barColor)
+        else -> NowPlayingIndicatorBars(
             heights = listOf(0.3f, 0.3f, 0.3f),
             modifier = modifier,
             barColor = barColor,
@@ -6422,7 +7080,10 @@ private fun NowPlayingIndicatorBars(
 }
 
 @Composable
-private fun CatalogLoadingStrip(modifier: Modifier = Modifier) {
+private fun CatalogLoadingStrip(
+    modifier: Modifier = Modifier,
+    message: String? = null,
+) {
     val hasContent = LocalCatalogHasContent.current
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         LinearProgressIndicator(
@@ -6434,7 +7095,7 @@ private fun CatalogLoadingStrip(modifier: Modifier = Modifier) {
             trackColor = Color.White.copy(alpha = 0.08f),
         )
         Text(
-            if (hasContent) "Syncing library…" else "Loading your library…",
+            message ?: if (hasContent) "Syncing library…" else "Loading your library…",
             color = PhoebeUi.mutedText,
             fontSize = 11.sp,
             fontWeight = FontWeight.SemiBold,
