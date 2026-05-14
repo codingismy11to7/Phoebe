@@ -12,10 +12,13 @@ import com.phoebe.app.domain.DownloadState
 import com.phoebe.app.domain.MusicLibrary
 import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.PlexSession
+import com.phoebe.app.domain.LOCAL_PLAYLIST_ID_PREFIX
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.TrackMetadataUpdate
+import com.phoebe.app.domain.canAddToLocalPlaylist
 import com.phoebe.app.domain.isLocalMediaPlayback
+import com.phoebe.app.domain.isLocalPlaylist
 import com.phoebe.app.domain.isPlexLibraryTrack
 import com.phoebe.app.domain.serverAuthToken
 import com.phoebe.app.domain.supportsPlexPlaylists
@@ -37,6 +40,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
+import kotlin.random.Random
 
 class CatalogRepository(
     private val plexClient: PlexClient,
@@ -298,9 +302,11 @@ class CatalogRepository(
         val knownParents =
             (merged.albums.asSequence().map { it.id } +
                 merged.playlists.asSequence().map { it.id }).toSet()
+        val localPlaylists = previous.playlists.filter { it.isLocalPlaylist() }
+        val localPlaylistIds = localPlaylists.map { it.id }.toSet()
         val currentToken = session.serverAuthToken()
         val preservedTracks = previous.tracksByParent
-            .filterKeys { it in knownParents }
+            .filterKeys { it in knownParents || it in localPlaylistIds }
             .filterValues { tracks ->
                 tracks.all { it.shouldPreserveAcrossPlexRefresh(currentToken) }
             }
@@ -323,7 +329,7 @@ class CatalogRepository(
 
         return ReconciledSnapshot(
             snapshot = merged.copy(
-                playlists = reconciledPlaylists,
+                playlists = reconciledPlaylists + localPlaylists,
                 tracksByParent = preservedTracks + merged.tracksByParent,
                 downloads = previous.downloads,
             ),
@@ -420,6 +426,9 @@ class CatalogRepository(
     }
 
     suspend fun tracksForPlaylist(session: PlexSession?, playlist: Playlist): List<Track> {
+        if (playlist.isLocalPlaylist()) {
+            return mutableCatalog.value.tracksByParent[playlist.id].orEmpty()
+        }
         val snapshot = mutableCatalog.value
         val playlistMeta = snapshot.playlists.find { it.id == playlist.id } ?: playlist
         val existing = snapshot.tracksByParent[playlist.id]
@@ -449,6 +458,34 @@ class CatalogRepository(
         val library = s.selectedLibrary ?: return null
         val token = s.serverAuthToken() ?: return null
         return createPlexPlaylist(server, library, token, cleanTitle, initialTracks)
+    }
+
+    /**
+     * Create a playlist stored only in Phoebe. Only local audio files ([Track.isLocalMediaPlayback])
+     * may be added as seeds.
+     */
+    suspend fun createLocalPlaylist(
+        title: String,
+        initialTracks: List<Track> = emptyList(),
+    ): Playlist? {
+        val cleanTitle = title.trim()
+        if (cleanTitle.isEmpty()) return null
+        if (initialTracks.any { !it.canAddToLocalPlaylist() }) return null
+        val id = "$LOCAL_PLAYLIST_ID_PREFIX${(Random.nextLong() and Long.MAX_VALUE).toString(16)}"
+        val playlist = Playlist(id = id, title = cleanTitle, trackCount = initialTracks.size)
+        val snapshot = mutableCatalog.value
+        publish(
+            snapshot.copy(
+                playlists = snapshot.playlists + playlist,
+                tracksByParent = if (initialTracks.isEmpty()) {
+                    snapshot.tracksByParent
+                } else {
+                    snapshot.tracksByParent + (id to initialTracks)
+                },
+            ),
+            persist = true,
+        )
+        return playlist
     }
 
     private suspend fun createPlexPlaylist(
@@ -496,6 +533,10 @@ class CatalogRepository(
     ) {
         println("[CatalogRepository] addTracksToPlaylist entry → playlist='${playlist.title}' (${playlist.id}), tracks=${tracks.map { it.id }}")
         if (tracks.isEmpty()) return
+        if (playlist.isLocalPlaylist()) {
+            addTracksToLocalPlaylist(playlist, tracks)
+            return
+        }
         if (!playlist.id.startsWith("plex:")) {
             println("[CatalogRepository] addTracksToPlaylist: ignoring non-Plex playlist ${playlist.id}")
             return
@@ -563,6 +604,26 @@ class CatalogRepository(
             snapshot.copy(playlists = updatedPlaylists)
         }
         publish(nextSnapshot, persist = true)
+    }
+
+    private suspend fun addTracksToLocalPlaylist(playlist: Playlist, tracks: List<Track>) {
+        val snapshot = mutableCatalog.value
+        val existing = snapshot.tracksByParent[playlist.id].orEmpty()
+        val existingIds = existing.map { it.id }.toHashSet()
+        val toAdd = tracks
+            .filterNot { it.id in existingIds }
+            .filter { it.canAddToLocalPlaylist() }
+        if (toAdd.isEmpty()) return
+        val updated = existing + toAdd
+        publish(
+            snapshot.copy(
+                playlists = snapshot.playlists.map {
+                    if (it.id == playlist.id) it.copy(trackCount = updated.size) else it
+                },
+                tracksByParent = snapshot.tracksByParent + (playlist.id to updated),
+            ),
+            persist = true,
+        )
     }
 
     suspend fun updateTrackMetadata(

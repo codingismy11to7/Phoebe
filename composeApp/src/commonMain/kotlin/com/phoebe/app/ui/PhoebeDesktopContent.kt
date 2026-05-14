@@ -412,6 +412,7 @@ internal fun DesktopContent(
                         columns = libraryUi.columns,
                         onColumns = onLibraryColumns,
                     )
+                    PlaylistExportMenu(playlist = selectedPlaylist)
                     TrackList(
                         tracks = filteredPlaylistTracks,
                         empty = if (searchQuery.isNotBlank()) {
@@ -488,7 +489,7 @@ internal fun DesktopContent(
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (!playlistActions.playlistsEnabled) {
                         Text(
-                            "Sign in to Plex to browse playlists.",
+                            "Sign in to Plex or add a local music folder to use playlists.",
                             color = PhoebeUi.mutedText,
                             fontSize = 14.sp,
                         )

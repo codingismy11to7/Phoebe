@@ -149,7 +149,10 @@ import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
+import com.phoebe.app.domain.canAddToLocalPlaylist
+import com.phoebe.app.domain.canAddToPlexPlaylist
 import com.phoebe.app.domain.isLocalMediaPlayback
+import com.phoebe.app.domain.isLocalPlaylist
 import com.phoebe.app.domain.isPlexLibraryTrack
 import com.phoebe.app.domain.supportsPlexPlaylists
 import com.phoebe.app.platform.createPlatformHttpClient
@@ -407,9 +410,8 @@ internal fun TrackActionMenu(
 }
 
 /**
- * Reusable group of [DropdownMenuItem]s for **Plex** playlists: "New playlist…" plus existing
- * playlists. No-ops (emits nothing) when [PlaylistActions.playlistsEnabled] is false or [track]
- * is not a Plex library row / is a local file.
+ * Reusable group of [DropdownMenuItem]s for playlists: "New playlist…" plus existing playlists.
+ * Local tracks target local playlists; Plex tracks target Plex playlists.
  */
 @Composable
 internal fun AddToPlaylistMenuItems(
@@ -418,7 +420,16 @@ internal fun AddToPlaylistMenuItems(
     onAfter: () -> Unit = {},
 ) {
     if (!actions.playlistsEnabled) return
-    if (!track.isPlexLibraryTrack() || track.isLocalMediaPlayback()) return
+    val isLocal = track.canAddToLocalPlaylist()
+    val isPlex = track.canAddToPlexPlaylist()
+    if (!isLocal && !isPlex) return
+    val eligiblePlaylists = actions.playlists.filter { playlist ->
+        when {
+            isLocal -> playlist.isLocalPlaylist()
+            isPlex -> playlist.id.startsWith("plex:")
+            else -> false
+        }
+    }
     var submenuExpanded by remember { mutableStateOf(false) }
     DropdownMenuItem(
         text = {
@@ -438,8 +449,8 @@ internal fun AddToPlaylistMenuItems(
                 onAfter()
             },
         )
-        if (actions.playlists.isNotEmpty()) {
-            actions.playlists.forEach { playlist ->
+        if (eligiblePlaylists.isNotEmpty()) {
+            eligiblePlaylists.forEach { playlist ->
                 DropdownMenuItem(
                     text = {
                         Column {

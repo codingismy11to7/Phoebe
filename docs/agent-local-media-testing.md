@@ -49,10 +49,9 @@ From the repo root:
 - **`./gradlew :composeApp:desktopTest`** — JVM/desktop tests: in-memory SQLDelight, `MediaSourcesRepository`, `CatalogRepository.refreshAggregated` (no Plex session), `PlexClient` with Ktor `MockEngine`, `LocalFolderCatalogBuilder` against a temp folder, and shared `commonTest` cases (e.g. `CatalogMerge`, player state, Plex JSON).
 - **`./gradlew :composeApp:connectedDebugAndroidTest`** — Android **instrumented** tests on a device or emulator (Compose UI smoke for fake playback, `MediaSourcesRepository` against an app-context SQLite DB). Requires a connected device or running AVD.
 - **`./gradlew :composeApp:wasmJsTest`** — Runs **common** tests plus wasm test sources in the JS/Wasm test runner (logic that compiles on Wasm; no SQLDelight web worker in these tests).
+- **`npm run web:e2e`** — Playwright browser test against `/?e2e=localLibrary` (indexes wasm test-folder MP3s and verifies playback starts). Requires the wasm dev server (Playwright config starts it automatically).
 
 Hermetic JVM/desktop and Android tests can redirect lightweight file prefs via **`System.setProperty("phoebe.storage.root", "/path/to/temp")`** so `PlatformStorage` does not touch the real user home (desktop) or default app files dir (Android).
-
-**Web UI E2E** (full app in a browser, Playwright, etc.) is not part of the Gradle tasks above; use the manual validation steps in this doc for end-to-end wasm behavior until a browser harness is added.
 
 ## Definition of done
 

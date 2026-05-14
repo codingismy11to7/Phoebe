@@ -161,7 +161,10 @@ import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
+import com.phoebe.app.domain.canAddToLocalPlaylist
+import com.phoebe.app.domain.canAddToPlexPlaylist
 import com.phoebe.app.domain.isLocalMediaPlayback
+import com.phoebe.app.domain.isLocalPlaylist
 import com.phoebe.app.domain.isPlexLibraryTrack
 import com.phoebe.app.domain.supportsPlexPlaylists
 import com.phoebe.app.player.CastState
@@ -319,21 +322,28 @@ fun PhoebeRoot(
 
     var createPlaylistFor by remember { mutableStateOf<List<Track>?>(null) }
     var metadataEditorTrack by remember { mutableStateOf<Track?>(null) }
-    val playlistActions = remember(catalog.playlists, session) {
+    val playlistActions = remember(catalog.playlists, session, mediaSources.localFolders) {
         val plexReady = session.supportsPlexPlaylists()
-        val list = if (plexReady) catalog.playlists.filter { it.id.startsWith("plex:") } else emptyList()
+        val localReady = mediaSources.localFolders.any { it.enabled }
+        val list = catalog.playlists.filter { playlist ->
+            playlist.isLocalPlaylist() || (plexReady && playlist.id.startsWith("plex:"))
+        }
         PlaylistActions(
             playlists = list,
-            playlistsEnabled = plexReady,
+            playlistsEnabled = plexReady || localReady,
             onAddTrackToPlaylist = { playlist, track -> state.addToPlaylist(playlist, track) },
             onCreatePlaylist = { title, initialTracks -> state.createPlaylist(title, initialTracks) },
             onRequestCreatePlaylist = { initialTracks ->
-                if (session?.supportsPlexPlaylists() == true &&
-                    initialTracks.none { it.isLocalMediaPlayback() || !it.isPlexLibraryTrack() }
-                ) {
+                val canCreate = when {
+                    initialTracks.any { it.canAddToLocalPlaylist() } -> localReady
+                    initialTracks.any { it.canAddToPlexPlaylist() } -> plexReady
+                    else -> plexReady || localReady
+                }
+                if (canCreate) {
                     createPlaylistFor = initialTracks
                 }
             },
+            onExportLocalPlaylist = { playlist, format -> state.exportLocalPlaylist(playlist, format) },
         )
     }
     val metadataEditorActions = remember {

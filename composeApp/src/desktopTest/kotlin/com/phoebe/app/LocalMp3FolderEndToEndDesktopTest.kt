@@ -5,6 +5,7 @@ import com.phoebe.app.data.CatalogRepository
 import com.phoebe.app.data.MediaSourcesRepository
 import com.phoebe.app.data.PlexClient
 import com.phoebe.app.platform.PlatformStorage
+import com.phoebe.app.testing.minimalMp3Bytes
 import com.phoebe.app.testing.newInMemoryPhoebeDatabase
 import com.phoebe.app.testing.testHttpClient
 import io.ktor.client.engine.mock.MockEngine
@@ -65,8 +66,36 @@ class LocalMp3FolderEndToEndDesktopTest {
         assertTrue(tracks.all { it.localUri?.endsWith(".mp3") == true })
         assertEquals(listOf("Test MP3s"), mediaSources.state.value.localFolders.map { it.label })
     }
+
+    @Test
+    fun localTrackFromCatalogPlaysUsingFileUri() = runTest {
+        val music = temp.newFolder("music")
+        val mp3 = File(music, "alpha.mp3")
+        mp3.writeBytes(minimalMp3Bytes())
+
+        val (db, sqlDriver) = newInMemoryPhoebeDatabase()
+        driver = sqlDriver
+        val http = testHttpClient(MockEngine { respond("", HttpStatusCode.NotFound) })
+        val mediaSources = MediaSourcesRepository(db, PlatformStorage())
+        val catalog = CatalogRepository(
+            plexClient = PlexClient(http),
+            database = db,
+            storage = PlatformStorage(),
+            httpClient = http,
+            mediaSourcesRepository = mediaSources,
+        )
+        mediaSources.addLocalFolder(music.toURI().toString(), "Playback MP3s")
+        catalog.refreshAggregated(session = null)
+
+        val track = catalog.catalog.value.tracksByParent.values.flatten().single { it.title == "alpha" }
+        val player = RecordingAudioPlayer()
+        player.play(listOf(track), 0)
+
+        assertEquals(track.localUri, player.lastUri)
+        assertTrue(player.state.value.isPlaying)
+    }
 }
 
 private fun File.writeMinimalMp3Bytes() {
-    writeBytes(byteArrayOf(0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00))
+    writeBytes(minimalMp3Bytes())
 }

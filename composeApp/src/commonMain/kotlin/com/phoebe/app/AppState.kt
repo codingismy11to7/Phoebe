@@ -11,9 +11,12 @@ import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.TrackMetadataUpdate
-import com.phoebe.app.domain.isLocalMediaPlayback
-import com.phoebe.app.domain.isPlexLibraryTrack
+import com.phoebe.app.domain.canAddToLocalPlaylist
+import com.phoebe.app.domain.canAddToPlexPlaylist
+import com.phoebe.app.domain.isLocalPlaylist
 import com.phoebe.app.domain.supportsPlexPlaylists
+import com.phoebe.app.playlists.PlaylistExportFormat
+import com.phoebe.app.playlists.PlaylistExporter
 import com.phoebe.app.player.asPlayerState
 import com.phoebe.app.player.isChromecastPlayableQueue
 import com.phoebe.app.platform.currentTimeMs
@@ -494,23 +497,44 @@ class AppState(
     }
 
     /**
-     * Create a new Plex playlist. Requires Plex with a selected music library; only Plex library
-     * tracks may be used as seeds.
+     * Create a new playlist. Plex playlists require a signed-in Plex session with a music library;
+     * local playlists require at least one enabled local folder and only accept local audio files.
      */
     fun createPlaylist(
         title: String,
         initialTracks: List<Track> = emptyList(),
         onCreated: ((com.phoebe.app.domain.Playlist) -> Unit)? = null,
     ) = scope.launch {
-        if (!session.value.supportsPlexPlaylists()) {
-            mutableMessage.value = "Sign in to Plex and select a music library to use playlists."
+        val wantsLocal = initialTracks.any { it.canAddToLocalPlaylist() }
+        val wantsPlex = initialTracks.any { it.canAddToPlexPlaylist() }
+        if (wantsLocal && wantsPlex) {
+            mutableMessage.value = "Can't mix local files and Plex songs in one playlist."
             return@launch
         }
-        if (initialTracks.any { it.isLocalMediaPlayback() || !it.isPlexLibraryTrack() }) {
-            mutableMessage.value = "Only Plex library songs can be added to playlists."
-            return@launch
+        val playlist = when {
+            wantsLocal || (!wantsPlex && !session.value.supportsPlexPlaylists() && hasEnabledLocalFolders()) -> {
+                if (!hasEnabledLocalFolders()) {
+                    mutableMessage.value = "Add a local music folder to create playlists."
+                    return@launch
+                }
+                if (initialTracks.any { !it.canAddToLocalPlaylist() }) {
+                    mutableMessage.value = "Only local audio files can be added to local playlists."
+                    return@launch
+                }
+                dependencies.catalogRepository.createLocalPlaylist(title, initialTracks)
+            }
+            session.value.supportsPlexPlaylists() -> {
+                if (initialTracks.any { !it.canAddToPlexPlaylist() }) {
+                    mutableMessage.value = "Only Plex library songs can be added to Plex playlists."
+                    return@launch
+                }
+                dependencies.catalogRepository.createPlaylist(session.value, title, initialTracks)
+            }
+            else -> {
+                mutableMessage.value = "Sign in to Plex or add a local music folder to use playlists."
+                return@launch
+            }
         }
-        val playlist = dependencies.catalogRepository.createPlaylist(session.value, title, initialTracks)
         if (playlist != null) {
             onCreated?.invoke(playlist)
         } else {
@@ -518,23 +542,58 @@ class AppState(
         }
     }
 
-    /** Append [track] to [playlist] on Plex when the session and track are eligible. */
+    /** Append [track] to [playlist] when the session, playlist type, and track are eligible. */
     fun addToPlaylist(playlist: com.phoebe.app.domain.Playlist, track: Track) = scope.launch {
+        if (playlist.isLocalPlaylist()) {
+            if (!track.canAddToLocalPlaylist()) {
+                mutableMessage.value = "Only local audio files can be added to local playlists."
+                return@launch
+            }
+            dependencies.catalogRepository.addTracksToPlaylist(session.value, playlist, listOf(track))
+            return@launch
+        }
         if (!session.value.supportsPlexPlaylists()) {
-            mutableMessage.value = "Sign in to Plex and select a music library to use playlists."
+            mutableMessage.value = "Sign in to Plex and select a music library to use Plex playlists."
             return@launch
         }
         if (!playlist.id.startsWith("plex:")) {
             mutableMessage.value = "This playlist can't be edited in Phoebe."
             return@launch
         }
-        if (track.isLocalMediaPlayback() || !track.isPlexLibraryTrack()) {
-            mutableMessage.value = "Only Plex library songs can be added to playlists."
+        if (!track.canAddToPlexPlaylist()) {
+            mutableMessage.value = "Only Plex library songs can be added to Plex playlists."
             return@launch
         }
         println("[AppState] addToPlaylist invoked → playlist='${playlist.title}' (${playlist.id}), track='${track.title}' (${track.id})")
         dependencies.catalogRepository.addTracksToPlaylist(session.value, playlist, listOf(track))
     }
+
+    fun exportLocalPlaylist(
+        playlist: com.phoebe.app.domain.Playlist,
+        format: PlaylistExportFormat,
+    ) = scope.launch {
+        if (!playlist.isLocalPlaylist()) {
+            mutableMessage.value = "Only local playlists can be exported."
+            return@launch
+        }
+        val tracks = dependencies.catalogRepository.tracksForPlaylist(session.value, playlist)
+        if (tracks.isEmpty()) {
+            mutableMessage.value = "Nothing to export — playlist is empty."
+            return@launch
+        }
+        val content = PlaylistExporter.export(tracks, format)
+        val fileName = PlaylistExporter.suggestedFileName(playlist.title, format)
+        runCatching {
+            dependencies.platformStorage.writeText("exports/$fileName", content)
+        }.onSuccess {
+            mutableMessage.value = "Exported ${tracks.size} songs to $fileName."
+        }.onFailure {
+            mutableMessage.value = it.message ?: "Couldn't export playlist."
+        }
+    }
+
+    private fun hasEnabledLocalFolders(): Boolean =
+        mediaSources.value.localFolders.any { it.enabled }
 
     fun updateTrackMetadata(update: TrackMetadataUpdate) = scope.launch {
         val result = dependencies.catalogRepository.updateTrackMetadata(session.value, update)

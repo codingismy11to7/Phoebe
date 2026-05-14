@@ -113,6 +113,9 @@ jobs:
       - name: Verify web screenshots
         run: npm run web:screenshots
 
+      - name: Run web E2E checks
+        run: npm run web:e2e
+
       - name: Upload web screenshot artifacts
         if: failure()
         uses: actions/upload-artifact@v4

@@ -2,6 +2,7 @@ package com.phoebe.app
 
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.window.ComposeViewport
+import com.phoebe.app.e2e.PhoebeWasmE2eApp
 import com.phoebe.app.ui.PhoebeScreenshotApp
 import com.phoebe.app.ui.PhoebeScreenshotScenario
 import kotlinx.browser.window
@@ -20,14 +21,17 @@ fun main() {
     val screenshotScenario = queryParams["screenshot"]
         ?.let { raw -> PhoebeScreenshotScenario.entries.firstOrNull { it.name.equals(raw, ignoreCase = true) } }
     val useLightAppearance = queryParams["theme"] == "light"
+    val e2eMode = queryParams["e2e"]
     ComposeViewport(viewportContainerId = "composeApp") {
-        if (screenshotScenario != null) {
-            PhoebeScreenshotApp(
-                scenario = screenshotScenario,
-                useLightAppearance = useLightAppearance,
-            )
-        } else {
-            App()
+        when {
+            e2eMode != null -> PhoebeWasmE2eApp(e2eMode = e2eMode)
+            screenshotScenario != null -> {
+                PhoebeScreenshotApp(
+                    scenario = screenshotScenario,
+                    useLightAppearance = useLightAppearance,
+                )
+            }
+            else -> App()
         }
     }
 }

@@ -7,6 +7,8 @@ import com.phoebe.app.domain.Track
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
@@ -25,7 +27,8 @@ import kotlinx.coroutines.withContext
 class PlayHistoryRepository(
     private val database: PhoebeDatabase,
 ) {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val job = SupervisorJob()
+    private val scope = CoroutineScope(job + Dispatchers.Default)
 
     val lastPlayedByArtist: StateFlow<Map<String, Long>> = database.playHistoryQueries
         .selectLastPlayedByArtist()
@@ -85,5 +88,15 @@ class PlayHistoryRepository(
                 played_at_ms = atMs,
             )
         }
+    }
+
+    /** Cancel background aggregate collectors. Call before closing the backing [SqlDriver] in tests. */
+    fun close() {
+        job.cancel()
+    }
+
+    /** Like [close], but waits until eager collectors have stopped. */
+    suspend fun closeAndJoin() {
+        job.cancelAndJoin()
     }
 }

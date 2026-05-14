@@ -149,7 +149,10 @@ import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
+import com.phoebe.app.domain.canAddToLocalPlaylist
+import com.phoebe.app.domain.canAddToPlexPlaylist
 import com.phoebe.app.domain.isLocalMediaPlayback
+import com.phoebe.app.domain.isLocalPlaylist
 import com.phoebe.app.domain.isPlexLibraryTrack
 import com.phoebe.app.domain.supportsPlexPlaylists
 import com.phoebe.app.platform.createPlatformHttpClient
@@ -175,7 +178,8 @@ internal fun Modifier.draggableSong(
     val controller = LocalDragDrop.current ?: return@composed this
     if (!LocalPlaylistDragEnabled.current) return@composed this
     val actions = LocalPlaylistActions.current
-    val allowDrag = enabled && actions.playlistsEnabled && !track.isLocalMediaPlayback() && track.isPlexLibraryTrack()
+    val allowDrag = enabled && actions.playlistsEnabled &&
+        (track.canAddToLocalPlaylist() || track.canAddToPlexPlaylist())
     if (!allowDrag) return@composed this
     var origin by remember { mutableStateOf(Offset.Zero) }
     this

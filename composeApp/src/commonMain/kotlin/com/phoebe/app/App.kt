@@ -52,6 +52,10 @@ fun App(dependencies: AppDependencies? = null) {
         useLightAppearance = stored == "light" || stored == "true"
     }
 
+    LaunchedEffect(state) {
+        bindCarPlayPlayback(state)
+    }
+
     PhoebeTheme(useLightAppearance = useLightAppearance) {
         GlobalMediaKeysEffect(
             player = player,
