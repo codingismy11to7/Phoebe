@@ -1,6 +1,6 @@
 package com.phoebe.app.player
 
-internal object BrowseMediaIds {
+object BrowseMediaIds {
     const val ROOT = "phoebe:root"
     const val ARTISTS = "phoebe:artists"
     const val ALBUMS = "phoebe:albums"

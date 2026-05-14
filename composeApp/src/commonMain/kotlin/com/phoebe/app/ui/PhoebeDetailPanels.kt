@@ -150,8 +150,10 @@ import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.isLocalMediaPlayback
+import com.phoebe.app.domain.isLocalPlaylist
 import com.phoebe.app.domain.isPlexLibraryTrack
 import com.phoebe.app.domain.supportsPlexPlaylists
+import com.phoebe.app.playlists.PlaylistExportFormat
 import com.phoebe.app.platform.createPlatformHttpClient
 import com.phoebe.app.platform.currentTimeMs
 import com.phoebe.app.platform.prefersReducedArtworkEffects
@@ -579,6 +581,54 @@ internal fun AlbumDetailPanel(
     }
 }
 
+@Composable
+internal fun PlaylistExportMenu(
+    playlist: Playlist,
+    modifier: Modifier = Modifier,
+    actions: PlaylistActions = LocalPlaylistActions.current,
+) {
+    if (!playlist.isLocalPlaylist()) return
+    var expanded by remember { mutableStateOf(false) }
+    Box(modifier) {
+        Row(
+            Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .clickable { expanded = true }
+                .background(Color.White.copy(alpha = 0.04f))
+                .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(8.dp))
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            PhoebeIconView(PhoebeIcon.Library, tint = PhoebeUi.secondaryText, modifier = Modifier.size(13.dp))
+            Text("Export", color = PhoebeUi.primaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(
+                text = { Text("M3U8") },
+                onClick = {
+                    expanded = false
+                    actions.onExportLocalPlaylist(playlist, PlaylistExportFormat.M3U8)
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("Text") },
+                onClick = {
+                    expanded = false
+                    actions.onExportLocalPlaylist(playlist, PlaylistExportFormat.Text)
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("CSV") },
+                onClick = {
+                    expanded = false
+                    actions.onExportLocalPlaylist(playlist, PlaylistExportFormat.Csv)
+                },
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun PlaylistDetailPanel(
@@ -629,6 +679,7 @@ internal fun PlaylistDetailPanel(
                     modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                     placeholder = "Search songs and artists",
                 )
+                PlaylistExportMenu(playlist = playlist, modifier = Modifier.padding(top = 4.dp))
                 Spacer(Modifier.height(6.dp))
                 SectionLabel("Tracks", PhoebeUi.primaryText)
             }

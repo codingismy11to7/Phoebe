@@ -153,7 +153,7 @@ import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.isLocalMediaPlayback
 import com.phoebe.app.domain.isPlexLibraryTrack
 import com.phoebe.app.domain.supportsPlexPlaylists
-import com.phoebe.app.platform.createPlatformHttpClient
+import com.phoebe.app.playlists.PlaylistExportFormat
 import com.phoebe.app.platform.currentTimeMs
 import com.phoebe.app.platform.prefersReducedArtworkEffects
 import kotlinx.coroutines.delay
@@ -211,11 +211,12 @@ internal val LocalNowMs = compositionLocalOf { 0L }
  */
 internal data class PlaylistActions(
     val playlists: List<Playlist> = emptyList(),
-    /** Plex token + server + music library — required for any playlist UI or mutations. */
+    /** Plex session or enabled local folders — required for any playlist UI or mutations. */
     val playlistsEnabled: Boolean = false,
     val onAddTrackToPlaylist: (Playlist, Track) -> Unit = { _, _ -> },
     val onCreatePlaylist: (title: String, initialTracks: List<Track>) -> Unit = { _, _ -> },
     val onRequestCreatePlaylist: (initialTracks: List<Track>) -> Unit = {},
+    val onExportLocalPlaylist: (Playlist, PlaylistExportFormat) -> Unit = { _, _ -> },
 )
 
 internal val LocalPlaylistActions = compositionLocalOf { PlaylistActions() }

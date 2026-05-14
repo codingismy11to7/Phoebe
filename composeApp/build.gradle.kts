@@ -60,11 +60,14 @@ kotlin {
     }
 
     sourceSets {
+        val commonTest by getting
         val desktopMain by getting
         val desktopTest by getting
         val wasmJsMain by getting
         val androidUnitTest by getting
-        val androidInstrumentedTest by getting
+        val androidInstrumentedTest by getting {
+            dependsOn(commonTest)
+        }
         commonMain.dependencies {
             implementation(compose.runtime)
             implementation(compose.foundation)

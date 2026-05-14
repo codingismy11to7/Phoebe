@@ -250,3 +250,14 @@ fun Track.isLocalMediaPlayback(): Boolean = !localUri.isNullOrBlank()
 
 /** True when this row came from the Plex music library slice of the merged catalog. */
 fun Track.isPlexLibraryTrack(): Boolean = id.startsWith("plex:")
+
+const val LOCAL_PLAYLIST_ID_PREFIX = "local:playlist:"
+
+/** User-created playlist stored only in Phoebe (not synced to Plex). */
+fun Playlist.isLocalPlaylist(): Boolean = id.startsWith(LOCAL_PLAYLIST_ID_PREFIX)
+
+/** Local playlists accept on-device audio files only. */
+fun Track.canAddToLocalPlaylist(): Boolean = isLocalMediaPlayback()
+
+/** Plex playlists accept Plex library streams only (not local files). */
+fun Track.canAddToPlexPlaylist(): Boolean = isPlexLibraryTrack() && !isLocalMediaPlayback()

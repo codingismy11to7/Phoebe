@@ -12,9 +12,12 @@ import kotlin.test.assertEquals
 
 class PlayHistoryRepositoryDesktopTest {
     private var driver: SqlDriver? = null
+    private var repository: PlayHistoryRepository? = null
 
     @After
-    fun tearDown() {
+    fun tearDown() = runBlocking {
+        repository?.closeAndJoin()
+        repository = null
         driver?.close()
         driver = null
     }
@@ -24,6 +27,7 @@ class PlayHistoryRepositoryDesktopTest {
         val (db, d) = newInMemoryPhoebeDatabase()
         driver = d
         val repo = PlayHistoryRepository(db)
+        repository = repo
         val track = Track("tid", "Song", "Art", "Alb", 30_000L, "", "")
         repo.recordPlay(track, 12345L)
         val rows = db.playHistoryQueries.selectLastPlayedByTrack().awaitAsList()
