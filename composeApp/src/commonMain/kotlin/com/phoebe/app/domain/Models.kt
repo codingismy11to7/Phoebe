@@ -115,6 +115,8 @@ data class TrackMetadataUpdate(
 
 @Serializable
 enum class LibrarySortBy {
+    /** Preserve the source playlist's track order (e.g. Plex). */
+    PlaylistOrder,
     Name,
     Artist,
     Album,
@@ -201,6 +203,8 @@ data class PlayerState(
     val queue: List<Track> = emptyList(),
     val currentIndex: Int = -1,
     val isPlaying: Boolean = false,
+    /** True while the platform player is preparing the next track after a switch. */
+    val isBuffering: Boolean = false,
     val positionMs: Long = 0L,
     val durationMs: Long = 0L,
     val shuffle: Boolean = false,

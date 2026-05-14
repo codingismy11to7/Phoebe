@@ -2,7 +2,7 @@ package com.phoebe.app.player
 
 import android.app.PendingIntent
 import android.content.Intent
-import androidx.annotation.OptIn
+import android.os.Bundle
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -10,15 +10,16 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.DefaultMediaNotificationProvider
+import androidx.media3.session.MediaConstants
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSession.MediaItemsWithStartPosition
 import androidx.media3.session.SessionError
-import androidx.media3.session.SessionResult
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.ListenableFuture
 import com.phoebe.app.MainActivity
+import com.phoebe.app.R
 
 class PlaybackService : MediaLibraryService() {
 
@@ -28,6 +29,15 @@ class PlaybackService : MediaLibraryService() {
             if (playbackState == Player.STATE_ENDED) {
                 AndroidPlaybackBridge.onTrackEnded?.invoke()
             }
+        }
+
+        override fun onDeviceVolumeChanged(volume: Int, muted: Boolean) {
+            if (AndroidPlaybackBridge.isCastActive?.invoke() != true) return
+            val maxVolume = mediaLibrarySession?.player?.deviceInfo?.maxVolume ?: 0
+            if (maxVolume <= 0) return
+            AndroidPlaybackBridge.onCastVolume?.invoke(
+                if (muted) 0f else (volume.toFloat() / maxVolume.toFloat()).coerceIn(0f, 1f),
+            )
         }
     }
 
@@ -47,18 +57,40 @@ class PlaybackService : MediaLibraryService() {
             controller: MediaSession.ControllerInfo,
             playerCommand: Int,
         ): Int {
+            if (AndroidPlaybackBridge.isCastActive?.invoke() == true) {
+                val handled = when (playerCommand) {
+                    Player.COMMAND_PLAY_PAUSE -> {
+                        AndroidPlaybackBridge.onCastTogglePlayPause?.invoke()
+                        true
+                    }
+                    Player.COMMAND_SEEK_TO_NEXT,
+                    Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
+                    -> {
+                        AndroidPlaybackBridge.onCastSkipNext?.invoke()
+                        true
+                    }
+                    Player.COMMAND_SEEK_TO_PREVIOUS,
+                    Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
+                    -> {
+                        AndroidPlaybackBridge.onCastSkipPrevious?.invoke()
+                        true
+                    }
+                    else -> false
+                }
+                if (handled) return Player.COMMAND_INVALID
+            }
             return when (playerCommand) {
                 Player.COMMAND_SEEK_TO_NEXT,
                 Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
                 -> {
                     AndroidPlaybackBridge.onSkipNext?.invoke()
-                    SessionResult.RESULT_SUCCESS
+                    Player.COMMAND_INVALID
                 }
                 Player.COMMAND_SEEK_TO_PREVIOUS,
                 Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
                 -> {
                     AndroidPlaybackBridge.onSkipPrevious?.invoke()
-                    SessionResult.RESULT_SUCCESS
+                    Player.COMMAND_INVALID
                 }
                 else -> super.onPlayerCommandRequest(session, controller, playerCommand)
             }
@@ -69,17 +101,19 @@ class PlaybackService : MediaLibraryService() {
             browser: MediaSession.ControllerInfo,
             params: LibraryParams?,
         ): ListenableFuture<LibraryResult<MediaItem>> {
+            AndroidPlaybackRuntime.ensureInstalled()
+            val rootParams = androidAutoRootParams(params)
             val source = AndroidPlaybackRuntime.catalogBrowseSource
             return if (source == null) {
                 immediateFuture(
                     LibraryResult.ofItem(
                         browseFolderItem(BrowseMediaIds.ROOT, "Phoebe"),
-                        params,
+                        rootParams,
                     ),
                 )
             } else {
                 listenableFuture("onGetLibraryRoot") {
-                    LibraryResult.ofItem(source.getLibraryRoot(), params)
+                    LibraryResult.ofItem(source.getLibraryRoot(), rootParams)
                 }
             }
         }
@@ -111,6 +145,7 @@ class PlaybackService : MediaLibraryService() {
             pageSize: Int,
             params: LibraryParams?,
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
+            AndroidPlaybackRuntime.ensureInstalled()
             val source = AndroidPlaybackRuntime.catalogBrowseSource
             if (source == null) {
                 val children = when (parentId) {
@@ -123,18 +158,14 @@ class PlaybackService : MediaLibraryService() {
                     else -> emptyList()
                 }
                 return if (children.isEmpty()) {
-                    immediateFuture(LibraryResult.ofError(SessionError.ERROR_BAD_VALUE))
+                    immediateFuture(LibraryResult.ofItemList(ImmutableList.of(), params))
                 } else {
                     immediateFuture(LibraryResult.ofItemList(children, params))
                 }
             }
             return listenableFuture("onGetChildren") {
                 val children = source.getChildren(parentId)
-                if (children.isEmpty()) {
-                    LibraryResult.ofError(SessionError.ERROR_BAD_VALUE)
-                } else {
-                    LibraryResult.ofItemList(children, params)
-                }
+                LibraryResult.ofItemList(ImmutableList.copyOf(children), params)
             }
         }
 
@@ -143,6 +174,9 @@ class PlaybackService : MediaLibraryService() {
             controller: MediaSession.ControllerInfo,
             mediaItems: List<MediaItem>,
         ): ListenableFuture<List<MediaItem>> {
+            if (mediaItems.isInAppPlaybackQueue()) {
+                return immediateFuture(mediaItems)
+            }
             val source = AndroidPlaybackRuntime.catalogBrowseSource
                 ?: return immediateFuture(mediaItems)
             return listenableFuture("onAddMediaItems") {
@@ -162,6 +196,9 @@ class PlaybackService : MediaLibraryService() {
                 ?: return immediateFuture(
                     MediaItemsWithStartPosition(mediaItems, startIndex, startPositionMs),
                 )
+            if (mediaItems.isInAppPlaybackQueue()) {
+                return immediateFuture(MediaItemsWithStartPosition(mediaItems, startIndex, startPositionMs))
+            }
             return listenableFuture("onSetMediaItems") {
                 val expanded = expandMediaItems(source, mediaItems, startIndex)
                 if (expanded != null) {
@@ -193,11 +230,12 @@ class PlaybackService : MediaLibraryService() {
     @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
-        setMediaNotificationProvider(
-            DefaultMediaNotificationProvider.Builder(this)
-                .setNotificationId(NOTIFICATION_ID)
-                .build(),
-        )
+        AndroidPlaybackRuntime.ensureInstalled()
+        val notificationProvider = DefaultMediaNotificationProvider.Builder(this)
+            .setNotificationId(NOTIFICATION_ID)
+            .build()
+            .apply { setSmallIcon(R.drawable.ic_notification) }
+        setMediaNotificationProvider(notificationProvider)
         val player = ExoPlayer.Builder(this)
             .setAudioAttributes(AudioAttributes.DEFAULT, /* handleAudioFocus= */ true)
             .setWakeMode(C.WAKE_MODE_LOCAL)
@@ -246,7 +284,28 @@ class PlaybackService : MediaLibraryService() {
         return ExpandedItems(items, index)
     }
 
+    private fun List<MediaItem>.isInAppPlaybackQueue(): Boolean =
+        isNotEmpty() && all { it.requestMetadata.extras?.getBoolean(InAppPlaybackExtra, false) == true }
+
     private companion object {
         private const val NOTIFICATION_ID = 1001
+
+        private fun androidAutoRootParams(
+            @Suppress("UNUSED_PARAMETER") incoming: MediaLibraryService.LibraryParams?,
+        ): MediaLibraryService.LibraryParams {
+            val extras = Bundle().apply {
+                putInt(
+                    MediaConstants.EXTRAS_KEY_CONTENT_STYLE_BROWSABLE,
+                    MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_LIST_ITEM,
+                )
+                putInt(
+                    MediaConstants.EXTRAS_KEY_CONTENT_STYLE_PLAYABLE,
+                    MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_LIST_ITEM,
+                )
+            }
+            return MediaLibraryService.LibraryParams.Builder()
+                .setExtras(extras)
+                .build()
+        }
     }
 }

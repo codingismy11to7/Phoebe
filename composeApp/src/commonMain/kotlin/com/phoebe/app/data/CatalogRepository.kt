@@ -113,7 +113,12 @@ class CatalogRepository(
                 val knownParents =
                     (merged.albums.asSequence().map { it.id } +
                         merged.playlists.asSequence().map { it.id }).toSet()
-                val preservedTracks = previous.tracksByParent.filterKeys { it in knownParents }
+                val currentToken = session.serverAuthToken()
+                val preservedTracks = previous.tracksByParent
+                    .filterKeys { it in knownParents }
+                    .filterValues { tracks ->
+                        tracks.all { it.shouldPreserveAcrossPlexRefresh(currentToken) }
+                    }
 
                 // For each playlist, compare Plex's reported leafCount with our cached size:
                 //   - Plex grew → keep the stale cache visible so the detail view doesn't flash
@@ -635,6 +640,11 @@ class CatalogRepository(
      */
     private fun Track.withPlexPrefix(): Track =
         if (id.startsWith("plex:")) this else copy(id = "plex:$id")
+
+    private fun Track.shouldPreserveAcrossPlexRefresh(currentToken: String?): Boolean {
+        if (isLocalMediaPlayback() || !isPlexLibraryTrack()) return true
+        return currentToken != null && streamUrl.contains(currentToken)
+    }
 
     private companion object {
         const val LegacyCatalogFile = "catalog.json"

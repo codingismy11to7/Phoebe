@@ -14,13 +14,18 @@ import com.phoebe.app.domain.TrackMetadataUpdate
 import com.phoebe.app.domain.isLocalMediaPlayback
 import com.phoebe.app.domain.isPlexLibraryTrack
 import com.phoebe.app.domain.supportsPlexPlaylists
+import com.phoebe.app.player.asPlayerState
+import com.phoebe.app.player.isChromecastPlayableQueue
 import com.phoebe.app.platform.currentTimeMs
 import com.phoebe.app.platform.openExternalUrl
 import com.phoebe.app.sources.LocalLibraryIO
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.collections.ArrayDeque
@@ -33,13 +38,19 @@ class AppState(
     val catalog = dependencies.catalogRepository.catalog
     val catalogRefreshing: StateFlow<Boolean> = dependencies.catalogRepository.catalogRefreshing
     val mediaSources = dependencies.mediaSourcesRepository.state
-    val player = dependencies.audioPlayer.state
+    val cast = dependencies.castController.state
+    val player: StateFlow<com.phoebe.app.domain.PlayerState> = combine(
+        dependencies.audioPlayer.state,
+        dependencies.castController.state,
+    ) { audio, castState ->
+        if (castState.isConnected && castState.queue.isNotEmpty()) castState.asPlayerState(audio) else audio
+    }.stateIn(scope, SharingStarted.Eagerly, dependencies.audioPlayer.state.value)
     val libraryUi = dependencies.libraryUiRepository.preferences
     val lastPlayedByArtist = dependencies.playHistoryRepository.lastPlayedByArtist
     val lastPlayedByAlbum = dependencies.playHistoryRepository.lastPlayedByAlbum
     val lastPlayedByTrack = dependencies.playHistoryRepository.lastPlayedByTrack
 
-    private val mutableScreen = MutableStateFlow<AppScreen>(AppScreen.SignIn)
+    private val mutableScreen = MutableStateFlow(defaultBrowseScreen())
     val screen: StateFlow<AppScreen> = mutableScreen
 
     private val mutableTab = MutableStateFlow(LibraryTab.Albums)
@@ -61,14 +72,16 @@ class AppState(
     val message: StateFlow<String> = mutableMessage
 
     private val detailStack = ArrayDeque<AppScreen>()
+    private var playRequestGeneration = 0
 
     init {
         scope.launch {
+            // Session and local folders are restored in [AppDependencies.create] so the first frame
+            // can skip Sign-in; repeat here for callers that inject dependencies without that path.
             dependencies.sessionRepository.restore()
             dependencies.mediaSourcesRepository.restore()
             dependencies.libraryUiRepository.restore()
             dependencies.playHistoryRepository.restore()
-            // Navigate before any suspending catalog work so we never paint Sign-in while session is already restored.
             mutableScreen.value = defaultBrowseScreen(session.value)
             dependencies.catalogRepository.restoreCachedCatalog()
             refreshCatalogSuspended(catalogMessage = null)
@@ -232,7 +245,11 @@ class AppState(
                 mutableScreen.value = screen
             }
             AppScreen.Player -> {
-                mutableScreen.value = screen
+                val cur = mutableScreen.value
+                if (cur != AppScreen.Player) {
+                    detailStack.addLast(cur)
+                    mutableScreen.value = screen
+                }
             }
             is AppScreen.ArtistDetail, is AppScreen.AlbumDetail, is AppScreen.PlaylistDetail -> {
                 val cur = mutableScreen.value
@@ -249,10 +266,12 @@ class AppState(
                     is AppScreen.AlbumDetail -> scope.launchBusy(loadingMessage = "Fetching data…") {
                         dependencies.catalogRepository.tracksForAlbum(session.value, screen.album)
                     }
-                    is AppScreen.PlaylistDetail -> scope.launchBusy(
-                        loadingMessage = "Fetching playlist data… This only happens the first time you open each playlist.",
-                    ) {
-                        dependencies.catalogRepository.tracksForPlaylist(session.value, screen.playlist)
+                    is AppScreen.PlaylistDetail -> scope.launch {
+                        runCatching {
+                            dependencies.catalogRepository.tracksForPlaylist(session.value, screen.playlist)
+                        }.onFailure {
+                            mutableMessage.value = it.message ?: "Couldn't load playlist tracks."
+                        }
                     }
                     else -> Unit
                 }
@@ -274,7 +293,7 @@ class AppState(
     fun handleBack() {
         when (mutableScreen.value) {
             AppScreen.SignIn, AppScreen.Home -> Unit
-            AppScreen.Player -> mutableScreen.value = defaultBrowseScreen()
+            AppScreen.Player -> popDetail()
             AppScreen.ServerPicker -> {
                 detailStack.clear()
                 mutableScreen.value = AppScreen.SignIn
@@ -294,7 +313,19 @@ class AppState(
     }
 
     fun playTracks(tracks: List<Track>, index: Int = 0) {
+        val requestGeneration = ++playRequestGeneration
         val track = tracks.getOrNull(index)
+        if (dependencies.castController.state.value.isConnected) {
+            if (!tracks.isChromecastPlayableQueue()) {
+                mutableMessage.value = "Chromecast can play Plex streaming songs only."
+                return
+            }
+            if (dependencies.audioPlayer.state.value.isPlaying) {
+                dependencies.audioPlayer.togglePlayPause()
+            }
+            dependencies.castController.loadQueue(tracks, index)
+            return
+        }
         if (track?.localUri.isNullOrBlank()) {
             dependencies.audioPlayer.play(tracks, index)
             return
@@ -304,6 +335,7 @@ class AppState(
             val ok = runCatching {
                 LocalLibraryIO.fileExists(track.localUri!!)
             }.getOrDefault(false)
+            if (requestGeneration != playRequestGeneration) return@launch
             if (ok) {
                 dependencies.audioPlayer.play(tracks, index)
             } else {
@@ -312,42 +344,80 @@ class AppState(
         }
     }
 
-    fun togglePlayPause() = dependencies.audioPlayer.togglePlayPause()
+    fun togglePlayPause() {
+        if (dependencies.castController.state.value.isConnected) {
+            dependencies.castController.togglePlayPause()
+        } else {
+            dependencies.audioPlayer.togglePlayPause()
+        }
+    }
 
     /** Play / pause / toggle keys: no-op when no track is loaded. */
     fun mediaKeyTogglePlayPause() {
         if (player.value.currentTrack != null) {
-            dependencies.audioPlayer.togglePlayPause()
+            togglePlayPause()
         }
     }
 
     fun mediaKeyPlay() {
         val s = player.value
         if (s.currentTrack != null && !s.isPlaying) {
-            dependencies.audioPlayer.togglePlayPause()
+            togglePlayPause()
         }
     }
 
     fun mediaKeyPause() {
         if (player.value.isPlaying) {
-            dependencies.audioPlayer.togglePlayPause()
+            togglePlayPause()
         }
     }
 
-    fun clearQueue() = dependencies.audioPlayer.clearQueue()
+    fun clearQueue() {
+        if (dependencies.castController.state.value.isConnected) {
+            dependencies.castController.disconnect()
+        } else {
+            dependencies.audioPlayer.clearQueue()
+        }
+    }
     fun addToUpNext(track: Track) = dependencies.audioPlayer.addToUpNext(track)
     fun moveUpNext(fromIndex: Int, toIndex: Int) = dependencies.audioPlayer.moveUpNext(fromIndex, toIndex)
     fun removeUpNext(index: Int) = dependencies.audioPlayer.removeUpNext(index)
     fun playUpNext(index: Int) {
-        val current = dependencies.audioPlayer.state.value
+        val current = player.value
         val target = current.currentIndex + 1 + index
         if (target in current.queue.indices) {
-            dependencies.audioPlayer.play(current.queue, target)
+            playTracks(current.queue, target)
         }
     }
-    fun next() = dependencies.audioPlayer.next()
-    fun previous() = dependencies.audioPlayer.previous()
-    fun seekTo(positionMs: Long) = dependencies.audioPlayer.seekTo(positionMs)
+    fun next() {
+        if (dependencies.castController.state.value.isConnected) {
+            dependencies.castController.next()
+        } else {
+            dependencies.audioPlayer.next()
+        }
+    }
+    fun previous() {
+        if (dependencies.castController.state.value.isConnected) {
+            dependencies.castController.previous()
+        } else {
+            dependencies.audioPlayer.previous()
+        }
+    }
+    fun skipQueueBy(delta: Int) {
+        if (delta == 0) return
+        val current = player.value
+        if (current.currentIndex < 0 || current.queue.isEmpty()) return
+        val target = (current.currentIndex + delta).coerceIn(0, current.queue.lastIndex)
+        if (target == current.currentIndex) return
+        playTracks(current.queue, target)
+    }
+    fun seekTo(positionMs: Long) {
+        if (dependencies.castController.state.value.isConnected) {
+            dependencies.castController.seekTo(positionMs)
+        } else {
+            dependencies.audioPlayer.seekTo(positionMs)
+        }
+    }
     fun toggleShuffle() = dependencies.audioPlayer.setShuffle(!player.value.shuffle)
     fun cycleRepeat() {
         val next = when (player.value.repeat) {
@@ -363,6 +433,15 @@ class AppState(
             controller.setVolume(volume)
         } else {
             dependencies.audioPlayer.setVolume(volume)
+        }
+    }
+
+    fun showCastPicker() {
+        if (dependencies.castController.state.value.isAvailable) {
+            dependencies.castController.showDevicePicker()
+        } else {
+            mutableMessage.value = dependencies.castController.state.value.message
+                ?: "Chromecast is available on Android, iOS, and Chrome web."
         }
     }
 
@@ -469,6 +548,7 @@ class AppState(
     }
 
     fun signOut() {
+        dependencies.castController.disconnect()
         dependencies.audioPlayer.clearQueue()
         mutableBusy.value = true
         detailStack.clear()

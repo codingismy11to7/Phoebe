@@ -67,6 +67,6 @@ actual fun currentTimeMs(): Long = System.currentTimeMillis()
 
 actual fun prefersReducedArtworkEffects(): Boolean = false
 
-actual fun catalogTrackPrefetchAlbumCount(): Int = 24
+actual fun catalogTrackPrefetchAlbumCount(): Int = 0
 
-actual fun catalogTrackPrefetchParallelism(): Int = 6
+actual fun catalogTrackPrefetchParallelism(): Int = 1

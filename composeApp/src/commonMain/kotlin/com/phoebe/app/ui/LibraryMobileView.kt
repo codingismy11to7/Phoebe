@@ -339,24 +339,6 @@ private fun IconToggle(icon: PhoebeIcon, active: Boolean, onClick: () -> Unit) {
     }
 }
 
-@Composable
-private fun MobileFavoriteIcon(favorited: Boolean, onClick: () -> Unit) {
-    Box(
-        Modifier
-            .clip(CircleShape)
-            .clickable(onClick = onClick)
-            .padding(6.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        PhoebeIconView(
-            PhoebeIcon.Heart,
-            tint = if (favorited) PhoebeUi.accentLight else PhoebeUi.mutedText,
-            modifier = Modifier.size(17.dp),
-            filled = favorited,
-        )
-    }
-}
-
 // =====================================================================
 // Artists (mobile grid/list)
 // =====================================================================
@@ -375,31 +357,38 @@ private fun MobileArtistsContent(
         return
     }
     when (viewMode) {
-        LibraryViewMode.Grid -> LazyVerticalGrid(
-            columns = GridCells.Fixed(2),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-            modifier = Modifier.fillMaxSize(),
-        ) {
-            items(artists, key = { it.id }) { artist ->
-                MobileArtistCard(
-                    catalog = catalog,
-                    artist = artist,
-                    selected = artist.id == selectedArtistId,
-                    onSelect = { onSelect(artist) },
-                    onOpen = { onOpen(artist) },
-                )
+        LibraryViewMode.Grid -> {
+            val gridState = RetainedLazyGridStates.remember("library-artists-grid")
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                state = gridState,
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                items(artists, key = { it.id }) { artist ->
+                    MobileArtistCard(
+                        catalog = catalog,
+                        artist = artist,
+                        selected = artist.id == selectedArtistId,
+                        onSelect = { onSelect(artist) },
+                        onOpen = { onOpen(artist) },
+                    )
+                }
             }
         }
-        LibraryViewMode.List -> LazyColumn(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            items(artists, key = { it.id }) { artist ->
-                MobileArtistRow(
-                    catalog = catalog,
-                    artist = artist,
-                    selected = artist.id == selectedArtistId,
-                    onSelect = { onSelect(artist) },
-                    onOpen = { onOpen(artist) },
-                )
+        LibraryViewMode.List -> {
+            val listState = RetainedLazyListStates.remember("library-artists-list")
+            LazyColumn(state = listState, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                items(artists, key = { it.id }) { artist ->
+                    MobileArtistRow(
+                        catalog = catalog,
+                        artist = artist,
+                        selected = artist.id == selectedArtistId,
+                        onSelect = { onSelect(artist) },
+                        onOpen = { onOpen(artist) },
+                    )
+                }
             }
         }
     }
@@ -465,7 +454,6 @@ private fun MobileArtistRow(
     val albumCount = remember(catalog, artist.title) { catalogAlbumsForArtist(catalog, artist.title).size }
     val songCount = remember(catalog, artist.title) { catalogTracksForArtist(catalog, artist.title).size }
     val durationMs = remember(catalog, artist.title) { catalogArtistTotalDurationMs(catalog, artist.title) }
-    var favorited by remember(artist.id) { mutableStateOf(false) }
     Row(
         Modifier
             .fillMaxWidth()
@@ -484,7 +472,6 @@ private fun MobileArtistRow(
             Text("$genre • $albumCount albums", color = PhoebeUi.secondaryText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text("$songCount songs · ${formatHoursMinutes(durationMs)}", color = PhoebeUi.mutedText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        MobileFavoriteIcon(favorited = favorited) { favorited = !favorited }
         Box(
             Modifier.clip(CircleShape).clickable(onClick = onOpen).padding(horizontal = 6.dp),
             contentAlignment = Alignment.Center,
@@ -513,34 +500,42 @@ private fun MobileAlbumsContent(
     }
     Column(Modifier.fillMaxSize()) {
         when (viewMode) {
-            LibraryViewMode.Grid -> LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-            ) {
-                items(albums, key = { it.id }) { album ->
-                    MobileAlbumCard(
-                        catalog = catalog,
-                        album = album,
-                        selected = album.id == selectedAlbumId,
-                        onSelect = { onSelect(album) },
-                        onOpen = { onOpen(album) },
-                    )
+            LibraryViewMode.Grid -> {
+                val gridState = RetainedLazyGridStates.remember("library-albums-grid")
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(2),
+                    state = gridState,
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                ) {
+                    items(albums, key = { it.id }) { album ->
+                        MobileAlbumCard(
+                            catalog = catalog,
+                            album = album,
+                            selected = album.id == selectedAlbumId,
+                            onSelect = { onSelect(album) },
+                            onOpen = { onOpen(album) },
+                        )
+                    }
                 }
             }
-            LibraryViewMode.List -> LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-            ) {
-                items(albums, key = { it.id }) { album ->
-                    MobileAlbumListRow(
-                        catalog = catalog,
-                        album = album,
-                        selected = album.id == selectedAlbumId,
-                        onSelect = { onSelect(album) },
-                        onOpen = { onOpen(album) },
-                    )
+            LibraryViewMode.List -> {
+                val listState = RetainedLazyListStates.remember("library-albums-list")
+                LazyColumn(
+                    state = listState,
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                ) {
+                    items(albums, key = { it.id }) { album ->
+                        MobileAlbumListRow(
+                            catalog = catalog,
+                            album = album,
+                            selected = album.id == selectedAlbumId,
+                            onSelect = { onSelect(album) },
+                            onOpen = { onOpen(album) },
+                        )
+                    }
                 }
             }
         }
@@ -663,7 +658,6 @@ private fun MobileAlbumDetailSheet(
     val codec = remember(catalog, album.id) { catalogAlbumCodec(catalog, album.id) }
     val genre = remember(catalog, album.id) { catalogAlbumGenre(catalog, album.id) }
     val durationMs = remember(tracks) { tracks.sumOf { it.durationMs } }
-    var favorited by remember(album.id) { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -686,7 +680,6 @@ private fun MobileAlbumDetailSheet(
                 Text(album.title, color = PhoebeUi.primaryText, fontSize = 16.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(album.artist.uppercase(), color = PhoebeUi.secondaryText, fontSize = 11.sp, letterSpacing = 0.06.em, maxLines = 1)
             }
-            MobileFavoriteIcon(favorited = favorited) { favorited = !favorited }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             MobileMetaCell("Genre", genre ?: "—", Modifier.weight(1f))
@@ -741,7 +734,9 @@ private fun MobileSongsList(
         return
     }
     Column(Modifier.fillMaxSize()) {
+        val listState = RetainedLazyListStates.remember("library-songs")
         LazyColumn(
+            state = listState,
             verticalArrangement = Arrangement.spacedBy(2.dp),
             modifier = Modifier.weight(1f).fillMaxWidth(),
         ) {
@@ -818,6 +813,7 @@ private fun MobileSongRow(
                 ) {
                     NowPlayingIndicator(
                         isPlaying = nowPlaying.isPlaying,
+                        isBuffering = nowPlaying.isBuffering,
                         modifier = Modifier.size(20.dp),
                     )
                 }
@@ -894,7 +890,6 @@ private fun MobileSongDetailSheet(
     onAddToPlaylist: () -> Unit,
     onDownload: () -> Unit,
 ) {
-    var favorited by remember(track.id) { mutableStateOf(false) }
     var playlistMenuExpanded by remember(track.id) { mutableStateOf(false) }
     val metadataEditorActions = LocalMetadataEditorActions.current
     val playlistActions = LocalPlaylistActions.current
@@ -921,7 +916,6 @@ private fun MobileSongDetailSheet(
                 Text(track.title, color = PhoebeUi.primaryText, fontSize = 15.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(track.artist.uppercase(), color = PhoebeUi.secondaryText, fontSize = 11.sp, letterSpacing = 0.06.em, maxLines = 1)
             }
-            MobileFavoriteIcon(favorited = favorited) { favorited = !favorited }
             Text(
                 "✕",
                 color = PhoebeUi.mutedText,

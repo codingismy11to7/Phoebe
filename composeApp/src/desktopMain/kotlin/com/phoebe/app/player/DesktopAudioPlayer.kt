@@ -52,35 +52,70 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
         playUri(uri, preferredSampledExtension = sampledPlaybackExtensionFromTrack(track))
     }
 
+    override fun stopCurrentPlaybackImmediately() {
+        runCatching { sampledClip?.stop() }
+        JavaFxRuntime.runLater {
+            runCatching { player?.pause() }
+        }
+    }
+
     private fun playUri(uri: String, preferredSampledExtension: String?) {
-        if (uri.isBlank()) return
+        if (uri.isBlank()) {
+            markPlaybackFailed()
+            return
+        }
+        val generation = activePlayGeneration
         playbackExecutor.execute {
+            if (!isPlayRequestCurrent(generation)) return@execute
             runCatching {
                 disposeAllOnPlaybackThread()
+                if (!isPlayRequestCurrent(generation)) return@execute
                 val file = uriToLocalFile(uri)
                 if (file != null && preferSampledPlayback(file)) {
                     val clip = openAndStartSampledClip(file)
                     if (clip != null) {
+                        if (!isPlayRequestCurrent(generation)) {
+                            runCatching { clip.stop(); clip.close() }
+                            return@execute
+                        }
                         sampledClip = clip
                         applyVolumesFromState()
+                        markPlaybackReady(generation = generation)
                         return@execute
                     }
                 }
                 val remoteExtension = preferredSampledExtension ?: sampledPlaybackExtensionFromUri(uri)
                 if (file == null && remoteExtension != null) {
                     val downloaded = downloadRemoteAudio(uri, remoteExtension)
+                    if (!isPlayRequestCurrent(generation)) {
+                        runCatching { downloaded.delete() }
+                        return@execute
+                    }
                     remoteSampledFile = downloaded
                     val clip = openAndStartSampledClip(downloaded)
                     if (clip != null) {
+                        if (!isPlayRequestCurrent(generation)) {
+                            runCatching { clip.stop(); clip.close() }
+                            runCatching { downloaded.delete() }
+                            return@execute
+                        }
                         sampledClip = clip
                         applyVolumesFromState()
+                        markPlaybackReady(generation = generation)
                         return@execute
                     }
                     disposeSampled()
                 }
+                if (!isPlayRequestCurrent(generation)) return@execute
                 playJavaFxSync(uri)
+                if (!isPlayRequestCurrent(generation)) return@execute
                 applyVolumesFromState()
-            }.onFailure(::logPlaybackFailure)
+                markPlaybackReady(generation = generation)
+            }.onFailure { error ->
+                if (!isPlayRequestCurrent(generation)) return@execute
+                logPlaybackFailure(error)
+                markPlaybackFailed(generation = generation)
+            }
         }
     }
 
@@ -107,7 +142,9 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
     }
 
     override fun seek(positionMs: Long) {
+        val generation = activePlayGeneration
         playbackExecutor.execute {
+            if (!isPlayRequestCurrent(generation)) return@execute
             val clip = sampledClip
             if (clip != null) {
                 runCatching {
@@ -118,6 +155,7 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
                 }
             } else {
                 JavaFxRuntime.runLater {
+                    if (!isPlayRequestCurrent(generation)) return@runLater
                     player?.seek(javafx.util.Duration.millis(positionMs.toDouble()))
                 }
             }
