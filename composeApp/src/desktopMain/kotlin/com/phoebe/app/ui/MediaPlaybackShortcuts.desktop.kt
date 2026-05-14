@@ -10,6 +10,7 @@ import androidx.compose.ui.input.key.type
 /**
  * Global media keys are handled by [GlobalMediaKeysEffect] when jnativehook registers.
  * If that fails (e.g. blocked by OS policy), handle keys for the focused window here.
+ * Space toggles play/pause via window-level [DesktopKeyboardShortcuts] on desktop.
  */
 actual fun Modifier.mediaPlaybackShortcuts(
     onTogglePlayPause: () -> Unit,

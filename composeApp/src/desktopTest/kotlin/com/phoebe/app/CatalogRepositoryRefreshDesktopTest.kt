@@ -4,12 +4,21 @@ import app.cash.sqldelight.db.SqlDriver
 import com.phoebe.app.data.CatalogRepository
 import com.phoebe.app.data.MediaSourcesRepository
 import com.phoebe.app.data.PlexClient
+import com.phoebe.app.domain.CatalogSyncPhase
+import com.phoebe.app.domain.MusicLibrary
+import com.phoebe.app.domain.PlexServer
+import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.platform.PlatformStorage
 import com.phoebe.app.testing.newInMemoryPhoebeDatabase
 import com.phoebe.app.testing.testHttpClient
 import io.ktor.client.engine.mock.MockEngine
+import io.ktor.client.engine.mock.MockRequestHandleScope
 import io.ktor.client.engine.mock.respond
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.headersOf
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Before
@@ -18,6 +27,7 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class CatalogRepositoryRefreshDesktopTest {
     @get:Rule
@@ -56,4 +66,173 @@ class CatalogRepositoryRefreshDesktopTest {
         assertEquals(0, repo.catalog.value.artists.size)
         assertEquals(0, repo.catalog.value.albums.size)
     }
+
+    @Test
+    fun refreshPublishesPlexMetadataBeforeAlbumTracksFinish() = runTest {
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        val childrenStarted = CompletableDeferred<Unit>()
+        val releaseChildren = CompletableDeferred<Unit>()
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/library/sections/1/all" -> respondJson(artistsJson())
+                "/library/sections/1/albums" -> respondJson(albumsJson())
+                "/playlists" -> respondJson(playlistsJson(trackCount = 1))
+                "/library/metadata/a1/children" -> {
+                    childrenStarted.complete(Unit)
+                    releaseChildren.await()
+                    respondJson(albumTracksJson())
+                }
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val media = MediaSourcesRepository(db, PlatformStorage())
+        val repo = CatalogRepository(
+            plexClient = PlexClient(testHttpClient(engine)),
+            database = db,
+            storage = PlatformStorage(),
+            httpClient = testHttpClient(engine),
+            mediaSourcesRepository = media,
+        )
+
+        val refresh = async { repo.refreshAggregated(testSession()) }
+        childrenStarted.await()
+
+        assertTrue(repo.catalogRefreshing.value)
+        assertEquals(CatalogSyncPhase.LoadingSongs, repo.catalogSyncState.value.phase)
+        assertEquals(listOf("plex:artist1"), repo.catalog.value.artists.map { it.id })
+        assertEquals(listOf("plex:a1"), repo.catalog.value.albums.map { it.id })
+        assertEquals(listOf("plex:p1"), repo.catalog.value.playlists.map { it.id })
+        assertEquals(emptyMap(), repo.catalog.value.tracksByParent)
+
+        releaseChildren.complete(Unit)
+        refresh.await()
+
+        assertFalse(repo.catalogRefreshing.value)
+        assertEquals(CatalogSyncPhase.Complete, repo.catalogSyncState.value.phase)
+        assertEquals(listOf("plex:t1"), repo.catalog.value.tracksByParent["plex:a1"].orEmpty().map { it.id })
+    }
+
+    @Test
+    fun metadataPublishPreservesCachedTracksUntilFreshTracksArrive() = runTest {
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        db.transaction {
+            db.catalogQueries.upsertArtist("plex:artist1", "Artist One", null, 1, 0, 0)
+            db.catalogQueries.upsertAlbum("plex:a1", "Album One", "Artist One", null, null, 0)
+            db.catalogQueries.upsertTrack(
+                id = "plex:old",
+                title = "Cached Song",
+                artist = "Artist One",
+                album = "Album One",
+                durationMs = 10,
+                streamUrl = "https://plex.example/old?X-Plex-Token=token",
+                downloadUrl = "https://plex.example/old?X-Plex-Token=token&download=1",
+                thumbUrl = null,
+                localUri = null,
+                year = null,
+                genre = null,
+                filepath = null,
+                audioCodec = null,
+                bitrateKbps = null,
+            )
+            db.catalogQueries.upsertTrackParent("plex:a1", "plex:old", 0)
+        }
+
+        val childrenStarted = CompletableDeferred<Unit>()
+        val releaseChildren = CompletableDeferred<Unit>()
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/library/sections/1/all" -> respondJson(artistsJson())
+                "/library/sections/1/albums" -> respondJson(albumsJson())
+                "/playlists" -> respondJson(playlistsJson(trackCount = 0))
+                "/library/metadata/a1/children" -> {
+                    childrenStarted.complete(Unit)
+                    releaseChildren.await()
+                    respondJson(albumTracksJson())
+                }
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val media = MediaSourcesRepository(db, PlatformStorage())
+        val repo = CatalogRepository(
+            plexClient = PlexClient(testHttpClient(engine)),
+            database = db,
+            storage = PlatformStorage(),
+            httpClient = testHttpClient(engine),
+            mediaSourcesRepository = media,
+        )
+        repo.restoreCachedCatalog()
+
+        val refresh = async { repo.refreshAggregated(testSession()) }
+        childrenStarted.await()
+
+        assertEquals(listOf("plex:old"), repo.catalog.value.tracksByParent["plex:a1"].orEmpty().map { it.id })
+
+        releaseChildren.complete(Unit)
+        refresh.await()
+
+        assertEquals(listOf("plex:t1"), repo.catalog.value.tracksByParent["plex:a1"].orEmpty().map { it.id })
+    }
+
+    private fun MockRequestHandleScope.respondJson(content: String) = respond(
+        content = content,
+        status = HttpStatusCode.OK,
+        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+    )
+
+    private fun testSession(): PlexSession = PlexSession(
+        token = "token",
+        selectedServer = PlexServer("server", "Plex", "https://plex.example:32400", owned = true),
+        selectedLibrary = MusicLibrary("1", "Music"),
+    )
+
+    private fun artistsJson(): String = """
+        {
+          "MediaContainer": {
+            "Metadata": [
+              { "ratingKey": "artist1", "type": "artist", "title": "Artist One", "leafCount": 1 }
+            ]
+          }
+        }
+    """.trimIndent()
+
+    private fun albumsJson(): String = """
+        {
+          "MediaContainer": {
+            "Metadata": [
+              { "ratingKey": "a1", "title": "Album One", "parentTitle": "Artist One" }
+            ]
+          }
+        }
+    """.trimIndent()
+
+    private fun playlistsJson(trackCount: Int): String = """
+        {
+          "MediaContainer": {
+            "Metadata": [
+              { "ratingKey": "p1", "title": "Playlist One", "leafCount": $trackCount, "key": "/playlists/p1/items" }
+            ]
+          }
+        }
+    """.trimIndent()
+
+    private fun albumTracksJson(): String = """
+        {
+          "MediaContainer": {
+            "Metadata": [
+              {
+                "ratingKey": "t1",
+                "title": "Fresh Song",
+                "grandparentTitle": "Artist One",
+                "parentTitle": "Album One",
+                "duration": 1000,
+                "Media": [
+                  { "Part": [ { "key": "/library/parts/t1/file.mp3", "file": "file.mp3" } ] }
+                ]
+              }
+            ]
+          }
+        }
+    """.trimIndent()
 }

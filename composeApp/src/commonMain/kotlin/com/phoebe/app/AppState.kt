@@ -37,6 +37,7 @@ class AppState(
     val session = dependencies.sessionRepository.session
     val catalog = dependencies.catalogRepository.catalog
     val catalogRefreshing: StateFlow<Boolean> = dependencies.catalogRepository.catalogRefreshing
+    val catalogSyncState = dependencies.catalogRepository.catalogSyncState
     val mediaSources = dependencies.mediaSourcesRepository.state
     val cast = dependencies.castController.state
     val player: StateFlow<com.phoebe.app.domain.PlayerState> = combine(

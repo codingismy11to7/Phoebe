@@ -34,6 +34,40 @@ class PlexCatalogBuilder(
     private val httpClient: HttpClient,
 ) {
     suspend fun buildCatalog(server: PlexServer, library: MusicLibrary, token: String): CatalogSnapshot = coroutineScope {
+        val metadata = buildMetadataCatalog(server, library, token)
+
+        val tracksByParent = prefetchAlbumTracks(server, metadata.albums, token)
+
+        yield()
+        val albumsEnriched = enrichAlbumArtwork(metadata.albums, tracksByParent)
+        yield()
+        val playlistsEnriched = enrichPlaylistArtwork(metadata.playlists, tracksByParent)
+        yield()
+        val artistsFinal = enrichArtistAlbumCountsOnly(
+            enrichArtistArtwork(metadata.artists, albumsEnriched).ifEmpty {
+                albumsEnriched.groupBy { it.artist }.values.map { list ->
+                    val first = list.first()
+                    Artist(
+                        id = "album-artist-${first.id}",
+                        title = first.artist,
+                        thumbUrl = first.thumbUrl,
+                        albumCount = list.size,
+                    )
+                }
+            },
+            albumsEnriched,
+        )
+
+        CatalogSnapshot(
+            artists = artistsFinal,
+            albums = albumsEnriched,
+            playlists = playlistsEnriched,
+            tracksByParent = tracksByParent,
+            downloads = emptyList(),
+        )
+    }
+
+    suspend fun buildMetadataCatalog(server: PlexServer, library: MusicLibrary, token: String): CatalogSnapshot = coroutineScope {
         val artistsDeferred = async { plexClient.artists(server, library, token) }
         val albumsDeferred = async { plexClient.albums(server, library, token) }
         val playlistsDeferred = async { plexClient.playlists(server, token) }
@@ -61,7 +95,22 @@ class PlexCatalogBuilder(
             rawAlbums,
         )
 
-        val albumsSlice = rawAlbums.take(catalogTrackPrefetchAlbumCount())
+        CatalogSnapshot(
+            artists = artistsResolved,
+            albums = rawAlbums,
+            playlists = playlistsRaw,
+            tracksByParent = emptyMap(),
+            downloads = emptyList(),
+        )
+    }
+
+    suspend fun prefetchAlbumTracks(
+        server: PlexServer,
+        albums: List<Album>,
+        token: String,
+        onAlbumTracks: suspend (Album, List<Track>) -> Unit = { _, _ -> },
+    ): Map<String, List<Track>> = coroutineScope {
+        val albumsSlice = albums.take(catalogTrackPrefetchAlbumCount())
         val mutex = Mutex()
         val tracksAccum = mutableMapOf<String, List<Track>>()
 
@@ -74,19 +123,27 @@ class PlexCatalogBuilder(
                         mutex.withLock {
                             tracksAccum[album.id] = tracks
                         }
+                        onAlbumTracks(album, tracks)
                     }
                 }.awaitAll()
                 yield()
             }
 
-        val tracksByParent = tracksAccum.toMap()
-        yield()
-        val albumsEnriched = enrichAlbumArtwork(rawAlbums, tracksByParent)
-        yield()
-        val playlistsEnriched = enrichPlaylistArtwork(playlistsRaw, tracksByParent)
-        yield()
+        tracksAccum.toMap()
+    }
+
+    fun enrichWithTrackArtwork(snapshot: CatalogSnapshot): CatalogSnapshot {
+        val tracksByParent = snapshot.tracksByParent
+        val albumsEnriched = snapshot.albums.map { album ->
+            if (!album.thumbUrl.isNullOrBlank()) {
+                album
+            } else {
+                album.copy(thumbUrl = tracksByParent[album.id].orEmpty().firstNotNullOfOrNull { it.thumbUrl })
+            }
+        }
+        val playlistsEnriched = enrichPlaylistArtwork(snapshot.playlists, tracksByParent)
         val artistsFinal = enrichArtistAlbumCountsOnly(
-            enrichArtistArtwork(artists, albumsEnriched).ifEmpty {
+            enrichArtistArtwork(snapshot.artists, albumsEnriched).ifEmpty {
                 albumsEnriched.groupBy { it.artist }.values.map { list ->
                     val first = list.first()
                     Artist(
@@ -99,13 +156,10 @@ class PlexCatalogBuilder(
             },
             albumsEnriched,
         )
-
-        CatalogSnapshot(
+        return snapshot.copy(
             artists = artistsFinal,
             albums = albumsEnriched,
             playlists = playlistsEnriched,
-            tracksByParent = tracksByParent,
-            downloads = emptyList(),
         )
     }
 

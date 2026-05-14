@@ -1,0 +1,678 @@
+package com.phoebe.app.ui
+
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
+import phoebe.composeapp.generated.resources.Res
+import phoebe.composeapp.generated.resources.phoebe_bird
+import phoebe.composeapp.generated.resources.phoebe_icon_rounded
+import org.jetbrains.compose.resources.painterResource
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.composed
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.zIndex
+import kotlin.math.roundToInt
+import com.phoebe.app.AppState
+import com.phoebe.app.data.catalogAlbumsForArtist
+import com.phoebe.app.data.catalogTracksForArtist
+import com.phoebe.app.domain.Album
+import com.phoebe.app.domain.AppScreen
+import com.phoebe.app.domain.Artist
+import com.phoebe.app.domain.LibraryColumnVisibility
+import com.phoebe.app.domain.LibrarySortBy
+import com.phoebe.app.domain.LibraryUiPreferences
+import com.phoebe.app.domain.CatalogSnapshot
+import com.phoebe.app.domain.LocalFolderMediaSourceConfig
+import com.phoebe.app.domain.MediaSourcesState
+import com.phoebe.app.domain.MusicLibrary
+import com.phoebe.app.domain.PlexServer
+import com.phoebe.app.domain.PlexSession
+import com.phoebe.app.domain.Playlist
+import com.phoebe.app.domain.RepeatMode
+import com.phoebe.app.domain.Track
+import com.phoebe.app.domain.isLocalMediaPlayback
+import com.phoebe.app.domain.isPlexLibraryTrack
+import com.phoebe.app.domain.supportsPlexPlaylists
+import com.phoebe.app.platform.createPlatformHttpClient
+import com.phoebe.app.platform.currentTimeMs
+import com.phoebe.app.platform.prefersReducedArtworkEffects
+import kotlinx.coroutines.delay
+import com.phoebe.app.sources.rememberPickLocalFolder
+import io.ktor.client.HttpClient
+import io.ktor.client.call.body
+import io.ktor.client.request.get
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.yield
+import kotlin.math.max
+
+@Composable
+internal fun DetailBackButton(onBack: () -> Unit, enabled: Boolean = true) {
+    Box(
+        Modifier
+            .size(44.dp)
+            .clip(CircleShape)
+            .clickable(enabled = enabled, onClick = onBack),
+        contentAlignment = Alignment.Center,
+    ) {
+        PhoebeIconView(PhoebeIcon.Back, tint = PhoebeUi.primaryText, modifier = Modifier.size(24.dp))
+    }
+}
+
+@Composable
+internal fun DetailSectionIntro(
+    onBack: () -> Unit,
+    label: String,
+    labelColor: Color = PhoebeUi.accentLight,
+    enabled: Boolean = true,
+) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        DetailBackButton(onBack = onBack, enabled = enabled)
+        SectionLabel(label, labelColor)
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+internal fun ArtistDetailPanel(
+    artist: Artist,
+    catalog: CatalogSnapshot,
+    libraryUi: LibraryUiPreferences,
+    modifier: Modifier = Modifier,
+    searchQuery: String = "",
+    onBack: () -> Unit,
+    onAlbum: (Album) -> Unit,
+    onPlayTracks: (List<Track>, Int) -> Unit,
+    onAddToUpNext: (Track) -> Unit,
+    onDownload: (Track) -> Unit,
+    onLibraryColumns: (LibraryColumnVisibility) -> Unit,
+) {
+    val albums = remember(catalog.albums, artist.title) { catalogAlbumsForArtist(catalog, artist.title) }
+    val tracks = remember(catalog.tracksByParent, artist.title) { catalogTracksForArtist(catalog, artist.title) }
+    val albumWord = if (albums.size == 1) "album" else "albums"
+    val songWord = if (tracks.size == 1) "song" else "songs"
+
+    var albumSortBy by remember(artist.id) { mutableStateOf(LibrarySortBy.Name) }
+    var albumAscending by remember(artist.id) { mutableStateOf(true) }
+    var albumViewMode by remember(artist.id) { mutableStateOf(LibraryViewMode.List) }
+
+    var songSortBy by remember(artist.id) { mutableStateOf(LibrarySortBy.Album) }
+    var songAscending by remember(artist.id) { mutableStateOf(true) }
+
+    val sortedAlbums = remember(albums, albumSortBy, albumAscending) {
+        sortAlbumsForLibrary(albums, albumSortBy, albumAscending)
+    }
+    val sortedTracks = remember(tracks, songSortBy, songAscending) {
+        sortTracksForLibrary(tracks, songSortBy, songAscending)
+    }
+    val visibleAlbums = remember(sortedAlbums, searchQuery) {
+        filterAlbumsByQuery(sortedAlbums, searchQuery)
+    }
+    val visibleTracks = remember(sortedTracks, searchQuery) {
+        filterTracksByQuery(sortedTracks, searchQuery)
+    }
+    val nowPlaying = LocalNowPlaying.current
+
+    BoxWithConstraints(modifier.fillMaxSize()) {
+        val useTable = maxWidth >= 640.dp
+        val edgePadding = if (maxWidth < 640.dp) 20.dp else 36.dp
+        val topPadding = if (maxWidth < 640.dp) 16.dp else 36.dp
+        val albumGridColumns = remember(maxWidth) {
+            val minCardWidth = 160.dp
+            val gap = 14.dp
+            ((maxWidth + gap) / (minCardWidth + gap)).toInt().coerceAtLeast(1)
+        }
+        val albumGridRows = remember(visibleAlbums, albumGridColumns) {
+            visibleAlbums.chunked(albumGridColumns)
+        }
+        val listState = RetainedLazyListStates.remember("artist-detail:${artist.id}")
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize().padding(start = edgePadding, end = edgePadding, top = topPadding, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        item(contentType = "artist-header") {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                DetailSectionIntro(onBack = onBack, label = "Artist")
+                Text(artist.title, color = PhoebeUi.primaryText, fontSize = 30.sp, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text("${albums.size} $albumWord · ${tracks.size} $songWord", color = PhoebeUi.secondaryText, fontSize = 14.sp)
+                Spacer(Modifier.height(6.dp))
+                ArtworkImage(artist.title, artist.thumbUrl, Modifier.size(120.dp), elevated = useTable)
+                Spacer(Modifier.height(10.dp))
+                SectionLabel("Albums", PhoebeUi.primaryText)
+            }
+        }
+        item(contentType = "artist-album-toolbar") {
+            DetailSectionToolbar(
+                sortBy = albumSortBy,
+                sortKeys = listOf(LibrarySortBy.Name, LibrarySortBy.Year),
+                sortLabel = { key ->
+                    when (key) {
+                        LibrarySortBy.Year -> "Release date"
+                        else -> "Album name"
+                    }
+                },
+                onSortBy = { albumSortBy = it },
+                ascending = albumAscending,
+                onAscending = { albumAscending = it },
+                viewMode = albumViewMode,
+                onViewMode = { albumViewMode = it },
+            )
+        }
+        if (albumViewMode == LibraryViewMode.Grid) {
+            items(
+                albumGridRows.size,
+                key = { rowIndex -> "album-grid-row:${albumGridRows[rowIndex].first().id}" },
+                contentType = { "artist-album-grid-row" },
+            ) { rowIndex ->
+                val row = albumGridRows[rowIndex]
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    row.forEach { album ->
+                        Column(
+                            Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { onAlbum(album) }
+                                .padding(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Box(Modifier.fillMaxWidth().aspectRatio(1f)) {
+                                ArtworkImage(
+                                    album.title,
+                                    album.thumbUrl,
+                                    Modifier.fillMaxSize(),
+                                    elevated = useTable,
+                                )
+                            }
+                            Text(album.title, color = PhoebeUi.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(
+                                album.year?.toString() ?: "Album",
+                                color = PhoebeUi.mutedText,
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                    repeat(albumGridColumns - row.size) {
+                        Spacer(Modifier.weight(1f))
+                    }
+                }
+            }
+        } else {
+            items(visibleAlbums, key = { it.id }, contentType = { "artist-album" }) { album ->
+                LibraryRow(
+                    title = album.title,
+                    subtitle = "${album.artist} • ${album.year ?: "Album"}",
+                    seed = album.title,
+                    thumbUrl = album.thumbUrl,
+                    elevatedArtwork = useTable,
+                    onClick = { onAlbum(album) },
+                )
+            }
+        }
+        item(contentType = "artist-songs-label") {
+            Spacer(Modifier.height(8.dp))
+            SectionLabel("Songs", PhoebeUi.primaryText)
+        }
+        item(contentType = "artist-song-toolbar") {
+            DetailSectionToolbar(
+                sortBy = songSortBy,
+                sortKeys = listOf(LibrarySortBy.Name, LibrarySortBy.Album, LibrarySortBy.Year),
+                sortLabel = { key ->
+                    when (key) {
+                        LibrarySortBy.Album -> "Album name"
+                        LibrarySortBy.Year -> "Release date"
+                        else -> "Song name"
+                    }
+                },
+                onSortBy = { songSortBy = it },
+                ascending = songAscending,
+                onAscending = { songAscending = it },
+                columns = libraryUi.columns,
+                onColumns = onLibraryColumns,
+            )
+        }
+        if (visibleTracks.isEmpty() && searchQuery.isNotBlank()) {
+            item(contentType = "artist-song-empty") {
+                Text("No songs by ${artist.title} match \"$searchQuery\".", color = PhoebeUi.mutedText, fontSize = 14.sp)
+            }
+        } else if (useTable) {
+            item(contentType = "artist-song-header") {
+                SongsTableHeader(libraryUi.columns)
+            }
+            itemsIndexed(visibleTracks, key = { _, t -> t.id }, contentType = { _, _ -> "artist-song" }) { index, track ->
+                SongRow(
+                    track = track,
+                    selected = false,
+                    columns = libraryUi.columns,
+                    onSelect = { onPlayTracks(visibleTracks, index) },
+                    onPlay = { onPlayTracks(visibleTracks, index) },
+                    onAddToUpNext = { onAddToUpNext(track) },
+                    onDownload = { onDownload(track) },
+                )
+            }
+        } else {
+            itemsIndexed(visibleTracks, key = { _, t -> t.id }, contentType = { _, _ -> "artist-song" }) { index, track ->
+                val isNowPlaying = track.id == nowPlaying.trackId
+                ContentTrackRow(
+                    track = track,
+                    libraryColumns = libraryUi.columns,
+                    onPlay = { onPlayTracks(visibleTracks, index) },
+                    onAddToUpNext = { onAddToUpNext(track) },
+                    onDownload = { onDownload(track) },
+                    compactLayout = true,
+                    isNowPlaying = isNowPlaying,
+                    nowPlayingIsPlaying = nowPlaying.isPlaying,
+                    nowPlayingIsBuffering = nowPlaying.isBuffering,
+                )
+            }
+        }
+    }
+    }
+}
+
+@Composable
+internal fun ArtistAlbumGrid(albums: List<Album>, onAlbum: (Album) -> Unit, modifier: Modifier = Modifier) {
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        val minCardWidth = 160.dp
+        val gap = 14.dp
+        val available = maxWidth
+        val columns = ((available + gap) / (minCardWidth + gap)).toInt().coerceAtLeast(1)
+        Column(verticalArrangement = Arrangement.spacedBy(gap)) {
+            albums.chunked(columns).forEach { row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
+                    row.forEach { album ->
+                        Column(
+                            Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { onAlbum(album) }
+                                .padding(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Box(Modifier.fillMaxWidth().aspectRatio(1f)) {
+                                ArtworkImage(album.title, album.thumbUrl, Modifier.fillMaxSize())
+                            }
+                            Text(album.title, color = PhoebeUi.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(
+                                album.year?.toString() ?: "Album",
+                                color = PhoebeUi.mutedText,
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                    repeat(columns - row.size) {
+                        Spacer(Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+internal fun AlbumDetailPanel(
+    album: Album,
+    catalog: CatalogSnapshot,
+    libraryUi: LibraryUiPreferences,
+    modifier: Modifier = Modifier,
+    searchQuery: String = "",
+    onBack: () -> Unit,
+    onPlayTracks: (List<Track>, Int) -> Unit,
+    onAddToUpNext: (Track) -> Unit,
+    onDownload: (Track) -> Unit,
+    onLibraryColumns: (LibraryColumnVisibility) -> Unit,
+) {
+    val tracks = remember(catalog.tracksByParent, album.id) {
+        catalog.tracksByParent[album.id].orEmpty()
+    }
+
+    var sortBy by remember(album.id) { mutableStateOf(LibrarySortBy.Name) }
+    var ascending by remember(album.id) { mutableStateOf(true) }
+
+    val sortedTracks = remember(tracks, sortBy, ascending) {
+        sortTracksForLibrary(tracks, sortBy, ascending)
+    }
+    val visibleTracks = remember(sortedTracks, searchQuery) {
+        filterTracksByQuery(sortedTracks, searchQuery)
+    }
+    val nowPlaying = LocalNowPlaying.current
+
+    BoxWithConstraints(modifier.fillMaxSize()) {
+        val useTable = maxWidth >= 640.dp
+        val edgePadding = if (maxWidth < 640.dp) 20.dp else 36.dp
+        val topPadding = if (maxWidth < 640.dp) 16.dp else 36.dp
+        val listState = RetainedLazyListStates.remember("album-detail:${album.id}")
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize().padding(start = edgePadding, end = edgePadding, top = topPadding, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        item(contentType = "album-header") {
+            Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
+                DetailSectionIntro(onBack = onBack, label = "Album")
+                Row(horizontalArrangement = Arrangement.spacedBy(22.dp), verticalAlignment = Alignment.CenterVertically) {
+                    ArtworkImage(album.title, album.thumbUrl, Modifier.size(160.dp), elevated = useTable)
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(album.title, color = PhoebeUi.primaryText, fontSize = 26.sp, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(album.artist.uppercase(), color = PhoebeUi.secondaryText, fontSize = 14.sp, letterSpacing = 0.05.em)
+                        album.year?.let { y ->
+                            Text("$y", color = PhoebeUi.mutedText, fontSize = 13.sp)
+                        }
+                    }
+                }
+                SectionLabel("Tracks", PhoebeUi.primaryText)
+            }
+        }
+        item(contentType = "album-track-toolbar") {
+            DetailSectionToolbar(
+                sortBy = sortBy,
+                sortKeys = listOf(LibrarySortBy.Name, LibrarySortBy.Year),
+                sortLabel = { key ->
+                    when (key) {
+                        LibrarySortBy.Year -> "Release date"
+                        else -> "Song name"
+                    }
+                },
+                onSortBy = { sortBy = it },
+                ascending = ascending,
+                onAscending = { ascending = it },
+                columns = libraryUi.columns,
+                onColumns = onLibraryColumns,
+            )
+        }
+        if (visibleTracks.isEmpty()) {
+            item(contentType = "album-empty") {
+                Text(
+                    if (searchQuery.isNotBlank()) {
+                        "No tracks on ${album.title} match \"$searchQuery\"."
+                    } else {
+                        "No tracks loaded yet."
+                    },
+                    color = PhoebeUi.mutedText,
+                    fontSize = 15.sp,
+                )
+            }
+        } else if (useTable) {
+            item(contentType = "album-track-header") {
+                SongsTableHeader(libraryUi.columns)
+            }
+            itemsIndexed(visibleTracks, key = { _, t -> t.id }, contentType = { _, _ -> "album-track" }) { index, track ->
+                SongRow(
+                    track = track,
+                    selected = false,
+                    columns = libraryUi.columns,
+                    onSelect = { onPlayTracks(visibleTracks, index) },
+                    onPlay = { onPlayTracks(visibleTracks, index) },
+                    onAddToUpNext = { onAddToUpNext(track) },
+                    onDownload = { onDownload(track) },
+                )
+            }
+        } else {
+            itemsIndexed(visibleTracks, key = { _, t -> t.id }, contentType = { _, _ -> "album-track" }) { index, track ->
+                val isNowPlaying = track.id == nowPlaying.trackId
+                ContentTrackRow(
+                    track = track,
+                    libraryColumns = libraryUi.columns,
+                    onPlay = { onPlayTracks(visibleTracks, index) },
+                    onAddToUpNext = { onAddToUpNext(track) },
+                    onDownload = { onDownload(track) },
+                    compactLayout = true,
+                    isNowPlaying = isNowPlaying,
+                    nowPlayingIsPlaying = nowPlaying.isPlaying,
+                    nowPlayingIsBuffering = nowPlaying.isBuffering,
+                )
+            }
+        }
+    }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+internal fun PlaylistDetailPanel(
+    playlist: Playlist,
+    catalog: CatalogSnapshot,
+    catalogRefreshing: Boolean,
+    libraryUi: LibraryUiPreferences,
+    modifier: Modifier = Modifier,
+    searchQuery: String = "",
+    onSearchQuery: (String) -> Unit = {},
+    onBack: () -> Unit,
+    onPlayTracks: (List<Track>, Int) -> Unit,
+    onAddToUpNext: (Track) -> Unit,
+    onDownload: (Track) -> Unit,
+    onLibraryColumns: (LibraryColumnVisibility) -> Unit,
+) {
+    val tracks = remember(catalog.tracksByParent, playlist.id) {
+        catalog.tracksByParent[playlist.id].orEmpty()
+    }
+
+    var sortBy by remember(playlist.id) { mutableStateOf(LibrarySortBy.Name) }
+    var ascending by remember(playlist.id) { mutableStateOf(true) }
+    val sortedTracks = remember(tracks, sortBy, ascending) {
+        sortTracksForLibrary(tracks, sortBy, ascending)
+    }
+    val visibleTracks = remember(sortedTracks, searchQuery) {
+        filterTracksByQuery(sortedTracks, searchQuery)
+    }
+
+    BoxWithConstraints(modifier.fillMaxSize()) {
+        val useTable = maxWidth >= 640.dp
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        item(contentType = "playlist-header") {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                DetailSectionIntro(onBack = onBack, label = "Playlist")
+                Text(playlist.title, color = PhoebeUi.primaryText, fontSize = 24.sp, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                PlaylistTrackSummaryLine(
+                    totalCount = sortedTracks.size,
+                    visibleCount = visibleTracks.size,
+                    searchQuery = searchQuery,
+                )
+                SearchPill(
+                    query = searchQuery,
+                    onQueryChange = onSearchQuery,
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                    placeholder = "Search songs and artists",
+                )
+                Spacer(Modifier.height(6.dp))
+                SectionLabel("Tracks", PhoebeUi.primaryText)
+            }
+        }
+        item(contentType = "playlist-track-toolbar") {
+            DetailSectionToolbar(
+                sortBy = sortBy,
+                sortKeys = listOf(LibrarySortBy.Name, LibrarySortBy.Album, LibrarySortBy.Year),
+                sortLabel = { key ->
+                    when (key) {
+                        LibrarySortBy.Album -> "Album name"
+                        LibrarySortBy.Year -> "Release date"
+                        else -> "Song name"
+                    }
+                },
+                onSortBy = { sortBy = it },
+                ascending = ascending,
+                onAscending = { ascending = it },
+                columns = libraryUi.columns,
+                onColumns = onLibraryColumns,
+            )
+        }
+        if (visibleTracks.isEmpty()) {
+            item(contentType = "playlist-empty") {
+                if (catalogRefreshing && searchQuery.isBlank()) CatalogLoadingStrip()
+                Text(
+                    if (searchQuery.isNotBlank()) {
+                        "No tracks / artists in this playlist match \"$searchQuery\"."
+                    } else {
+                        "No tracks loaded for this playlist yet."
+                    },
+                    color = PhoebeUi.mutedText,
+                    fontSize = 15.sp,
+                )
+            }
+        } else if (useTable) {
+            item(contentType = "playlist-track-header") {
+                SongsTableHeader(libraryUi.columns)
+            }
+            itemsIndexed(visibleTracks, key = { _, t -> t.id }, contentType = { _, _ -> "playlist-track" }) { index, track ->
+                SongRow(
+                    track = track,
+                    selected = false,
+                    columns = libraryUi.columns,
+                    onSelect = { onPlayTracks(visibleTracks, index) },
+                    onPlay = { onPlayTracks(visibleTracks, index) },
+                    onAddToUpNext = { onAddToUpNext(track) },
+                    onDownload = { onDownload(track) },
+                    modifier = Modifier.animateItem(),
+                )
+            }
+        } else {
+            itemsIndexed(visibleTracks, key = { _, t -> t.id }, contentType = { _, _ -> "playlist-track" }) { index, track ->
+                ContentTrackRow(
+                    track = track,
+                    libraryColumns = libraryUi.columns,
+                    onPlay = { onPlayTracks(visibleTracks, index) },
+                    onAddToUpNext = { onAddToUpNext(track) },
+                    onDownload = { onDownload(track) },
+                    modifier = Modifier.animateItem(),
+                )
+            }
+        }
+    }
+    }
+}
+

@@ -152,6 +152,29 @@ data class CatalogSnapshot(
     val downloads: List<DownloadItem> = emptyList(),
 )
 
+enum class CatalogSyncPhase {
+    Idle,
+    RestoringCache,
+    LoadingLibrary,
+    LoadingSongs,
+    RefreshingPlaylists,
+    FinishingArtwork,
+    Complete,
+    Failed,
+}
+
+data class CatalogSyncState(
+    val phase: CatalogSyncPhase = CatalogSyncPhase.Idle,
+    val message: String? = null,
+    val loadedAlbums: Int = 0,
+    val loadedTracks: Int = 0,
+) {
+    val isActive: Boolean
+        get() = phase != CatalogSyncPhase.Idle &&
+            phase != CatalogSyncPhase.Complete &&
+            phase != CatalogSyncPhase.Failed
+}
+
 @Serializable
 data class DownloadItem(
     val trackId: String,

@@ -237,6 +237,7 @@ private fun MetadataTextField(
             cursorBrush = SolidColor(PhoebeUi.primaryText),
             modifier = Modifier
                 .fillMaxWidth()
+                .trackDesktopTextInputFocus()
                 .clip(RoundedCornerShape(9.dp))
                 .background(Color.White.copy(alpha = 0.035f))
                 .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(9.dp))

@@ -12,6 +12,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import com.phoebe.app.ui.DesktopKeyboardShortcutsEffect
 import com.phoebe.app.ui.GlobalMediaKeysEffect
 import com.phoebe.app.ui.PhoebeTheme
 import com.phoebe.app.ui.PhoebeRoot
@@ -60,6 +61,7 @@ fun App(dependencies: AppDependencies? = null) {
             onNext = { state.next() },
             onPrevious = { state.previous() },
         )
+        DesktopKeyboardShortcutsEffect(onTogglePlayPause = { state.mediaKeyTogglePlayPause() })
         Box(
             Modifier
                 .fillMaxSize()
