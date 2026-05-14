@@ -8,6 +8,8 @@ import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.platform.PlatformStorage
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
@@ -59,6 +61,22 @@ class SessionRepository(
         val session = PlexSession(token = token, userName = plexClient.userName(token))
         save(session)
         return true
+    }
+
+    /**
+     * Exchanges an approved Plex pin for a session token, then loads the account's servers in
+     * parallel with resolving the Plex username so sign-in does not wait on three serial calls.
+     */
+    suspend fun completePinAndListServers(pin: PlexPin): List<PlexServer>? {
+        val token = plexClient.pollPin(pin.id) ?: return null
+        return coroutineScope {
+            val userNameDeferred = async {
+                runCatching { plexClient.userName(token) }.getOrNull() ?: "Plex listener"
+            }
+            val serversDeferred = async { plexClient.servers(token) }
+            save(PlexSession(token = token, userName = userNameDeferred.await()))
+            serversDeferred.await()
+        }
     }
 
     suspend fun servers(): List<PlexServer> {

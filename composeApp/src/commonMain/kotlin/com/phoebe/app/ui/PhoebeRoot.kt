@@ -201,6 +201,7 @@ fun PhoebeRoot(
     val player by state.player.collectAsState()
     val cast by state.cast.collectAsState()
     val busy by state.busy.collectAsState()
+    val serversLoading by state.serversLoading.collectAsState()
     val message by state.message.collectAsState()
     val pin by state.pin.collectAsState()
     val servers by state.servers.collectAsState()
@@ -418,6 +419,7 @@ fun PhoebeRoot(
                     is AppScreen.ServerPicker -> PlexServerPickerPanel(
                         servers = servers,
                         busy = busy,
+                        serversLoading = serversLoading,
                         onSelectServer = state::selectServer,
                         onCancel = state::signOut,
                         onRetry = state::loadServers,
@@ -444,6 +446,7 @@ fun PhoebeRoot(
                         artist = scr.artist,
                         catalog = catalog,
                         libraryUi = libraryUi,
+                        catalogRefreshing = catalogRefreshing,
                         modifier = Modifier.fillMaxSize(),
                         searchQuery = searchQuery,
                         onBack = state::popDetail,
@@ -460,6 +463,7 @@ fun PhoebeRoot(
                         album = scr.album,
                         catalog = catalog,
                         libraryUi = libraryUi,
+                        catalogRefreshing = catalogRefreshing,
                         modifier = Modifier.fillMaxSize(),
                         searchQuery = searchQuery,
                         onBack = state::popDetail,
@@ -601,6 +605,7 @@ fun PhoebeRoot(
                     showQueue = wideDesktop,
                     compact = !wideDesktop,
                     busy = busy,
+                    serversLoading = serversLoading,
                     onNavigate = {
                         state.dismissDetailsToHome()
                         browseSection = it

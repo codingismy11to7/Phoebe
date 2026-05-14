@@ -69,6 +69,9 @@ class AppState(
     private val mutableBusy = MutableStateFlow(false)
     val busy: StateFlow<Boolean> = mutableBusy
 
+    private val mutableServersLoading = MutableStateFlow(false)
+    val serversLoading: StateFlow<Boolean> = mutableServersLoading
+
     private val mutableMessage = MutableStateFlow("Sign in to Plex or add a local music folder to get started.")
     val message: StateFlow<String> = mutableMessage
 
@@ -84,6 +87,9 @@ class AppState(
             dependencies.libraryUiRepository.restore()
             dependencies.playHistoryRepository.restore()
             mutableScreen.value = defaultBrowseScreen(session.value)
+            if (session.value?.token?.isNotBlank() == true && session.value?.selectedServer == null) {
+                refreshServers()
+            }
             dependencies.catalogRepository.restoreCachedCatalog()
             refreshCatalogSuspended(catalogMessage = null)
         }
@@ -165,28 +171,46 @@ class AppState(
         mutableMessage.value = "Plex opened in your browser. Approve code ${newPin.code}, then finish sign-in."
     }
 
-    fun finishPlexSignIn() = scope.launchBusy {
-        val currentPin = mutablePin.value ?: return@launchBusy
-        if (dependencies.sessionRepository.completePin(currentPin)) {
-            mutableServers.value = dependencies.sessionRepository.servers()
-            detailStack.clear()
-            mutableScreen.value = AppScreen.ServerPicker
-            mutableMessage.value = "Signed in. Pick the Plex server that hosts your music."
-        } else {
+    fun finishPlexSignIn() = scope.launch {
+        val currentPin = mutablePin.value ?: return@launch
+        mutableBusy.value = true
+        mutableMessage.value = "Signing in with Plex…"
+        val servers = runCatching {
+            dependencies.sessionRepository.completePinAndListServers(currentPin)
+        }.getOrNull()
+        mutableBusy.value = false
+        if (servers == null) {
             mutableMessage.value = "That Plex code is not approved yet."
+            return@launch
         }
-    }
-
-    fun loadServers() = scope.launchBusy {
-        mutableServers.value = dependencies.sessionRepository.servers()
         detailStack.clear()
         mutableScreen.value = AppScreen.ServerPicker
+        mutableServers.value = servers
+        mutableMessage.value = "Signed in. Pick the Plex server that hosts your music."
+    }
+
+    fun loadServers() = scope.launch {
+        detailStack.clear()
+        mutableScreen.value = AppScreen.ServerPicker
+        refreshServers()
     }
 
     fun returnToServerPicker() = scope.launch {
-        mutableServers.value = dependencies.sessionRepository.servers()
         detailStack.clear()
         mutableScreen.value = AppScreen.ServerPicker
+        refreshServers()
+    }
+
+    private fun refreshServers() = scope.launch {
+        if (session.value?.token.isNullOrBlank()) {
+            mutableServers.value = emptyList()
+            return@launch
+        }
+        mutableServersLoading.value = true
+        runCatching {
+            mutableServers.value = dependencies.sessionRepository.servers()
+        }.onFailure { mutableMessage.value = it.message ?: "Couldn't load Plex servers." }
+        mutableServersLoading.value = false
     }
 
     fun selectServer(server: PlexServer) = scope.launchBusy {
@@ -264,8 +288,12 @@ class AppState(
                             dependencies.catalogRepository.ensureTracksForArtistAlbums(session.value, screen.artist.title)
                         }
                     }
-                    is AppScreen.AlbumDetail -> scope.launchBusy(loadingMessage = "Fetching data…") {
-                        dependencies.catalogRepository.tracksForAlbum(session.value, screen.album)
+                    is AppScreen.AlbumDetail -> scope.launch {
+                        runCatching {
+                            dependencies.catalogRepository.tracksForAlbum(session.value, screen.album)
+                        }.onFailure {
+                            mutableMessage.value = it.message ?: "Couldn't load album tracks."
+                        }
                     }
                     is AppScreen.PlaylistDetail -> scope.launch {
                         runCatching {

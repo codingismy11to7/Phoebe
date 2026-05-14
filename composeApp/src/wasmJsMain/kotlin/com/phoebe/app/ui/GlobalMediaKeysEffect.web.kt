@@ -11,5 +11,6 @@ actual fun GlobalMediaKeysEffect(
     onPause: () -> Unit,
     onNext: () -> Unit,
     onPrevious: () -> Unit,
+    onSeek: (Long) -> Unit,
 ) {
 }

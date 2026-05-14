@@ -53,6 +53,28 @@ class CatalogRepository(
 
     private val mutableCatalogRefreshing = MutableStateFlow(false)
     val catalogRefreshing: StateFlow<Boolean> = mutableCatalogRefreshing
+    private var catalogRefreshingDepth = 0
+
+    private fun pushCatalogRefreshing() {
+        catalogRefreshingDepth++
+        mutableCatalogRefreshing.value = true
+    }
+
+    private fun popCatalogRefreshing() {
+        catalogRefreshingDepth = (catalogRefreshingDepth - 1).coerceAtLeast(0)
+        if (catalogRefreshingDepth == 0) {
+            mutableCatalogRefreshing.value = false
+        }
+    }
+
+    private suspend inline fun <T> withCatalogRefreshing(crossinline block: suspend () -> T): T {
+        pushCatalogRefreshing()
+        return try {
+            block()
+        } finally {
+            popCatalogRefreshing()
+        }
+    }
 
     private val mutableCatalogSyncState = MutableStateFlow(CatalogSyncState())
     val catalogSyncState: StateFlow<CatalogSyncState> = mutableCatalogSyncState
@@ -131,7 +153,7 @@ class CatalogRepository(
     suspend fun refreshAggregated(session: PlexSession?) {
         var stalePlaylists: List<Playlist> = emptyList()
         val snapshot = refreshMutex.withLock {
-            mutableCatalogRefreshing.value = true
+            pushCatalogRefreshing()
             mutableCatalogSyncState.value = CatalogSyncState(
                 phase = CatalogSyncPhase.LoadingLibrary,
                 message = if (mutableCatalog.value.isNotEmpty()) "Refreshing library…" else "Loading your library…",
@@ -218,12 +240,10 @@ class CatalogRepository(
                     phase = CatalogSyncPhase.Failed,
                     message = error.message ?: "Sync failed.",
                 )
-                mutableCatalogRefreshing.value = false
                 throw error
             }
         }
         try {
-            mutableCatalogRefreshing.value = false
             mutableCatalogSyncState.value = CatalogSyncState(
                 phase = CatalogSyncPhase.Complete,
                 message = "Library refreshed.",
@@ -258,7 +278,7 @@ class CatalogRepository(
             )
             throw error
         } finally {
-            mutableCatalogRefreshing.value = false
+            popCatalogRefreshing()
         }
     }
 
@@ -317,25 +337,27 @@ class CatalogRepository(
      * externally, and by [tracksForPlaylist] when the cache is empty.
      */
     private suspend fun refetchPlaylistTracksFromPlex(session: PlexSession?, playlist: Playlist) {
-        val rating = plexRatingKey(playlist.id) ?: return
-        val server = session?.selectedServer ?: return
-        val token = session.serverAuthToken() ?: return
-        val tracks = plexClient.playlistTracks(server, playlist.copy(id = rating), token)
-            .map { it.withPlexPrefix() }
-        publish(
-            mutableCatalog.value.copy(
-                tracksByParent = mutableCatalog.value.tracksByParent + (playlist.id to tracks),
-                playlists = mutableCatalog.value.playlists.map { p ->
-                    if (p.id == playlist.id) {
-                        p.copy(
-                            trackCount = tracks.size,
-                            thumbUrl = p.thumbUrl ?: tracks.firstNotNullOfOrNull { it.thumbUrl },
-                        )
-                    } else p
-                },
-            ),
-            persist = true,
-        )
+        withCatalogRefreshing {
+            val rating = plexRatingKey(playlist.id) ?: return@withCatalogRefreshing
+            val server = session?.selectedServer ?: return@withCatalogRefreshing
+            val token = session.serverAuthToken() ?: return@withCatalogRefreshing
+            val tracks = plexClient.playlistTracks(server, playlist.copy(id = rating), token)
+                .map { it.withPlexPrefix() }
+            publish(
+                mutableCatalog.value.copy(
+                    tracksByParent = mutableCatalog.value.tracksByParent + (playlist.id to tracks),
+                    playlists = mutableCatalog.value.playlists.map { p ->
+                        if (p.id == playlist.id) {
+                            p.copy(
+                                trackCount = tracks.size,
+                                thumbUrl = p.thumbUrl ?: tracks.firstNotNullOfOrNull { it.thumbUrl },
+                            )
+                        } else p
+                    },
+                ),
+                persist = true,
+            )
+        }
     }
 
     suspend fun tracksForAlbum(session: PlexSession?, album: Album): List<Track> {
@@ -344,14 +366,16 @@ class CatalogRepository(
         val rating = plexRatingKey(album.id) ?: return mutableCatalog.value.tracksByParent[album.id].orEmpty()
         val server = session?.selectedServer ?: return emptyList()
         session.selectedLibrary ?: return emptyList()
-        val tracks = plexClient.children(server, rating, session.serverAuthToken()!!).map { it.withPlexPrefix() }
-        publish(
-            mutableCatalog.value.copy(
-                tracksByParent = mutableCatalog.value.tracksByParent + (album.id to tracks),
-            ),
-            persist = true,
-        )
-        return mutableCatalog.value.tracksByParent[album.id].orEmpty()
+        return withCatalogRefreshing {
+            val tracks = plexClient.children(server, rating, session.serverAuthToken()!!).map { it.withPlexPrefix() }
+            publish(
+                mutableCatalog.value.copy(
+                    tracksByParent = mutableCatalog.value.tracksByParent + (album.id to tracks),
+                ),
+                persist = true,
+            )
+            mutableCatalog.value.tracksByParent[album.id].orEmpty()
+        }
     }
 
     /**
@@ -363,37 +387,44 @@ class CatalogRepository(
         val token = session.serverAuthToken() ?: return
         val albums = catalogAlbumsForArtist(mutableCatalog.value, artistTitle)
             .filter { plexRatingKey(it.id) != null }
-        if (albums.isEmpty()) return
-
-        coroutineScope {
-            albums.map { album ->
-                async {
-                    runCatching {
-                        val rating = plexRatingKey(album.id) ?: return@runCatching
-                        val snap = mutableCatalog.value
-                        val existing = snap.tracksByParent[album.id]
-                        if (!existing.isNullOrEmpty()) return@runCatching
-                        val tracks = plexClient.children(server, rating, token).map { it.withPlexPrefix() }
-                        catalogMergeMutex.withLock {
-                            val cur = mutableCatalog.value
-                            publish(
-                                cur.copy(tracksByParent = cur.tracksByParent + (album.id to tracks)),
-                                persist = false,
-                            )
-                        }
-                    }.onFailure { e ->
-                        println("[CatalogRepository] album track fetch failed for '${album.title}': ${e.message}")
-                    }
-                }
-            }.awaitAll()
+        val albumsToFetch = albums.filter { album ->
+            mutableCatalog.value.tracksByParent[album.id].isNullOrEmpty()
         }
-        publish(mutableCatalog.value, persist = true)
+        if (albumsToFetch.isEmpty()) return
+
+        withCatalogRefreshing {
+            coroutineScope {
+                albumsToFetch.map { album ->
+                    async {
+                        runCatching {
+                            val rating = plexRatingKey(album.id) ?: return@runCatching
+                            val snap = mutableCatalog.value
+                            val existing = snap.tracksByParent[album.id]
+                            if (!existing.isNullOrEmpty()) return@runCatching
+                            val tracks = plexClient.children(server, rating, token).map { it.withPlexPrefix() }
+                            catalogMergeMutex.withLock {
+                                val cur = mutableCatalog.value
+                                publish(
+                                    cur.copy(tracksByParent = cur.tracksByParent + (album.id to tracks)),
+                                    persist = false,
+                                )
+                            }
+                        }.onFailure { e ->
+                            println("[CatalogRepository] album track fetch failed for '${album.title}': ${e.message}")
+                        }
+                    }
+                }.awaitAll()
+            }
+            publish(mutableCatalog.value, persist = true)
+        }
     }
 
     suspend fun tracksForPlaylist(session: PlexSession?, playlist: Playlist): List<Track> {
-        val existing = mutableCatalog.value.tracksByParent[playlist.id]
-        if (!existing.isNullOrEmpty()) return existing
-        refetchPlaylistTracksFromPlex(session, playlist)
+        val snapshot = mutableCatalog.value
+        val playlistMeta = snapshot.playlists.find { it.id == playlist.id } ?: playlist
+        val existing = snapshot.tracksByParent[playlist.id]
+        if (!existing.isNullOrEmpty() && existing.size >= playlistMeta.trackCount) return existing
+        refetchPlaylistTracksFromPlex(session, playlistMeta)
         return mutableCatalog.value.tracksByParent[playlist.id].orEmpty()
     }
 
@@ -474,8 +505,18 @@ class CatalogRepository(
             return
         }
         val s = session!!
-        val snapshot = mutableCatalog.value
-        val existing = snapshot.tracksByParent[playlist.id].orEmpty()
+        var snapshot = mutableCatalog.value
+        val playlistMeta = snapshot.playlists.find { it.id == playlist.id } ?: playlist
+        var existing = snapshot.tracksByParent[playlist.id].orEmpty()
+        // Playlist rows only carry trackCount from Plex metadata until the user opens the
+        // playlist (or we refetch). Without this, appending onto an empty cache would
+        // replace the whole list locally with just the dragged track.
+        if (existing.size < playlistMeta.trackCount) {
+            runCatching { refetchPlaylistTracksFromPlex(s, playlistMeta) }
+            snapshot = mutableCatalog.value
+            existing = snapshot.tracksByParent[playlist.id].orEmpty()
+        }
+
         val existingIds = existing.map { it.id }.toHashSet()
         val toAdd = tracks
             .filterNot { it.id in existingIds }
@@ -504,17 +545,24 @@ class CatalogRepository(
             println("[CatalogRepository] skipping Plex sync — missing one of server/token/playlistRating/ratingKeys")
         }
 
-        val updatedTracks = existing + toAdd
-        val updatedPlaylists = snapshot.playlists.map {
-            if (it.id == playlist.id) it.copy(trackCount = updatedTracks.size) else it
+        val canUpdateTrackList = existing.isNotEmpty() || playlistMeta.trackCount == 0
+        val newTrackCount = if (canUpdateTrackList) {
+            existing.size + toAdd.size
+        } else {
+            playlistMeta.trackCount + toAdd.size
         }
-        publish(
+        val updatedPlaylists = snapshot.playlists.map {
+            if (it.id == playlist.id) it.copy(trackCount = newTrackCount) else it
+        }
+        val nextSnapshot = if (canUpdateTrackList) {
             snapshot.copy(
-                tracksByParent = snapshot.tracksByParent + (playlist.id to updatedTracks),
+                tracksByParent = snapshot.tracksByParent + (playlist.id to (existing + toAdd)),
                 playlists = updatedPlaylists,
-            ),
-            persist = true,
-        )
+            )
+        } else {
+            snapshot.copy(playlists = updatedPlaylists)
+        }
+        publish(nextSnapshot, persist = true)
     }
 
     suspend fun updateTrackMetadata(

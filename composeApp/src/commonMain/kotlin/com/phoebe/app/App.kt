@@ -60,6 +60,7 @@ fun App(dependencies: AppDependencies? = null) {
             onPause = { state.mediaKeyPause() },
             onNext = { state.next() },
             onPrevious = { state.previous() },
+            onSeek = state::seekTo,
         )
         DesktopKeyboardShortcutsEffect(onTogglePlayPause = { state.mediaKeyTogglePlayPause() })
         Box(

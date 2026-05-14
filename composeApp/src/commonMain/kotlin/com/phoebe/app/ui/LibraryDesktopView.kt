@@ -770,11 +770,11 @@ private fun ArtistRow(
             color = if (lastPlayed != null) PhoebeUi.secondaryText else PhoebeUi.mutedText,
         )
         Row(modifier = Modifier.width(40.dp), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "⋯",
-                color = PhoebeUi.secondaryText,
-                fontSize = 18.sp,
+            PhoebeIconView(
+                PhoebeIcon.More,
+                tint = PhoebeUi.secondaryText,
                 modifier = Modifier
+                    .size(18.dp)
                     .clip(CircleShape)
                     .clickable(onClick = onOpen)
                     .padding(horizontal = 6.dp, vertical = 2.dp),
@@ -1038,14 +1038,14 @@ internal fun SongRow(
             if (playlistDragEnabled) {
                 // Immediate-drag handle. Visible target so users discover that songs can be
                 // dragged onto sidebar playlists without having to long-press the row.
-                Text(
-                    "⠿",
-                    color = PhoebeUi.mutedText,
-                    fontSize = 15.sp,
-                    modifier = Modifier
+                Box(
+                    Modifier
                         .draggableSong(track, immediate = true)
                         .padding(horizontal = 4.dp, vertical = 6.dp),
-                )
+                    contentAlignment = Alignment.Center,
+                ) {
+                    PhoebeIconView(PhoebeIcon.Drag, tint = PhoebeUi.mutedText, modifier = Modifier.size(15.dp))
+                }
             }
             Box(Modifier.size(42.dp).clickable(onClick = onPlay), contentAlignment = Alignment.Center) {
                 ArtworkImage(track.album, track.thumbUrl, Modifier.fillMaxSize(), radius = 6.dp)
@@ -1088,15 +1088,14 @@ internal fun SongRow(
         if (columns.dateAdded) TableCellText("—", modifier = Modifier.width(96.dp), color = PhoebeUi.mutedText)
         if (columns.filepath) TableCellText(track.filepath?.let(::shortenFilepath) ?: "—", modifier = Modifier.weight(1.4f), color = PhoebeUi.mutedText)
         Box(Modifier.width(36.dp), contentAlignment = Alignment.Center) {
-            Text(
-                "⋯",
-                color = PhoebeUi.secondaryText,
-                fontSize = 17.sp,
+            PhoebeIconView(
+                PhoebeIcon.More,
+                tint = PhoebeUi.secondaryText,
                 modifier = Modifier
+                    .size(17.dp)
                     .clip(CircleShape)
                     .clickable(onClick = { if (hasMenu) menuExpanded = true else onPlay() })
                     .padding(horizontal = 6.dp),
-                textAlign = TextAlign.Center,
             )
             if (hasMenu) {
                 DropdownMenu(
