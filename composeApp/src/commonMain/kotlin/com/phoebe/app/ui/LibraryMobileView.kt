@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -25,15 +24,12 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,13 +43,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
-import com.phoebe.app.data.catalogAlbumCodec
-import com.phoebe.app.data.catalogAlbumGenre
-import com.phoebe.app.data.catalogAlbumsForArtist
-import com.phoebe.app.data.catalogArtistGenre
-import com.phoebe.app.data.catalogArtistTotalDurationMs
 import com.phoebe.app.data.catalogTracksForAlbum
-import com.phoebe.app.data.catalogTracksForArtist
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.CatalogSnapshot
@@ -82,15 +72,12 @@ internal fun LibraryMobileView(
     onDownload: (Track) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var selectedArtistId by remember { mutableStateOf<String?>(null) }
-    var selectedAlbumId by remember { mutableStateOf<String?>(null) }
-    var selectedTrackId by remember { mutableStateOf<String?>(null) }
     var libraryViewMode by remember { mutableStateOf(LibraryViewMode.Grid) }
 
     val ascending = libraryUi.ascending
     val sortBy = libraryUi.sortBy
 
-    val sortedArtists = remember(catalog.artists, catalog.albums, sortBy, ascending) {
+    val sortedArtists = remember(catalog.artists, sortBy, ascending) {
         sortArtistsForLibrary(catalog, sortBy, ascending)
     }
     val sortedAlbums = remember(catalog.albums, sortBy, ascending) {
@@ -101,15 +88,6 @@ internal fun LibraryMobileView(
     }
     val sortedTracks = remember(allTracks, sortBy, ascending) {
         sortTracksForLibrary(allTracks, sortBy, ascending)
-    }
-
-    LaunchedEffect(filter) {
-        // Clear stale selections when switching tabs.
-        when (filter) {
-            LibraryFilterTab.Artists -> { selectedAlbumId = null; selectedTrackId = null }
-            LibraryFilterTab.Albums -> { selectedArtistId = null; selectedTrackId = null }
-            LibraryFilterTab.Songs -> { selectedArtistId = null; selectedAlbumId = null }
-        }
     }
 
     Column(modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp)) {
@@ -131,25 +109,18 @@ internal fun LibraryMobileView(
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (filter) {
                 LibraryFilterTab.Artists -> MobileArtistsContent(
-                    catalog = catalog,
                     artists = sortedArtists,
-                    selectedArtistId = selectedArtistId,
                     viewMode = libraryViewMode,
-                    onSelect = { selectedArtistId = if (selectedArtistId == it.id) null else it.id },
-                    onOpen = onArtist,
+                    onArtist = onArtist,
                 )
                 LibraryFilterTab.Albums -> MobileAlbumsContent(
                     catalog = catalog,
                     albums = sortedAlbums,
                     viewMode = libraryViewMode,
-                    selectedAlbumId = selectedAlbumId,
-                    onSelect = { selectedAlbumId = if (selectedAlbumId == it.id) null else it.id },
-                    onOpen = onAlbum,
+                    onAlbum = onAlbum,
                 )
                 LibraryFilterTab.Songs -> MobileSongsList(
                     tracks = sortedTracks,
-                    selectedTrackId = selectedTrackId,
-                    onSelect = { selectedTrackId = if (selectedTrackId == it.id) null else it.id },
                     onPlay = { index -> onPlayTracks(sortedTracks, index) },
                     onAddToUpNext = onAddToUpNext,
                     onDownload = onDownload,
@@ -345,12 +316,9 @@ private fun IconToggle(icon: PhoebeIcon, active: Boolean, onClick: () -> Unit) {
 
 @Composable
 private fun MobileArtistsContent(
-    catalog: CatalogSnapshot,
     artists: List<Artist>,
-    selectedArtistId: String?,
     viewMode: LibraryViewMode,
-    onSelect: (Artist) -> Unit,
-    onOpen: (Artist) -> Unit,
+    onArtist: (Artist) -> Unit,
 ) {
     if (artists.isEmpty()) {
         Text("No artists yet.", color = PhoebeUi.mutedText, fontSize = 13.sp)
@@ -366,28 +334,20 @@ private fun MobileArtistsContent(
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
                 modifier = Modifier.fillMaxSize(),
             ) {
-                items(artists, key = { it.id }) { artist ->
-                    MobileArtistCard(
-                        catalog = catalog,
-                        artist = artist,
-                        selected = artist.id == selectedArtistId,
-                        onSelect = { onSelect(artist) },
-                        onOpen = { onOpen(artist) },
-                    )
+                items(artists, key = { it.id }, contentType = { "artist-card" }) { artist ->
+                    MobileArtistCard(artist = artist, onArtist = onArtist)
                 }
             }
         }
         LibraryViewMode.List -> {
             val listState = RetainedLazyListStates.remember("library-artists-list")
-            LazyColumn(state = listState, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                items(artists, key = { it.id }) { artist ->
-                    MobileArtistRow(
-                        catalog = catalog,
-                        artist = artist,
-                        selected = artist.id == selectedArtistId,
-                        onSelect = { onSelect(artist) },
-                        onOpen = { onOpen(artist) },
-                    )
+            LazyColumn(
+                state = listState,
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                items(artists, key = { it.id }, contentType = { "artist-row" }) { artist ->
+                    MobileArtistRow(artist = artist, onArtist = onArtist)
                 }
             }
         }
@@ -396,28 +356,27 @@ private fun MobileArtistsContent(
 
 @Composable
 private fun MobileArtistCard(
-    catalog: CatalogSnapshot,
     artist: Artist,
-    selected: Boolean,
-    onSelect: () -> Unit,
-    onOpen: () -> Unit,
+    onArtist: (Artist) -> Unit,
 ) {
-    val genre = remember(catalog, artist.title) { catalogArtistGenre(catalog, artist.title) }
-    val albumCount = remember(catalog, artist.title) { catalogAlbumsForArtist(catalog, artist.title).size }
-    val borderColor = if (selected) PhoebeUi.accent else Color.Transparent
+    val subtitle = remember(artist.albumCount) {
+        val albumCount = artist.albumCount
+        if (albumCount > 0) {
+            "$albumCount ${if (albumCount == 1) "album" else "albums"}"
+        } else {
+            "Artist"
+        }
+    }
     Column(
         Modifier
+            .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
-            .border(BorderStroke(1.dp, borderColor), RoundedCornerShape(14.dp))
-            .background(if (selected) PhoebeUi.accent.copy(alpha = 0.06f) else Color.Transparent)
-            .clickable(onClick = onSelect)
+            .clickable { onArtist(artist) }
             .padding(horizontal = 8.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Box(Modifier.size(112.dp).clip(CircleShape).clickable(onClick = onOpen)) {
-            ArtworkImage(artist.title, artist.thumbUrl, Modifier.fillMaxSize(), radius = 56.dp)
-        }
+        ArtworkImage(artist.title, artist.thumbUrl, Modifier.size(112.dp).clip(CircleShape), radius = 56.dp, elevated = false)
         Text(
             artist.title,
             color = PhoebeUi.primaryText,
@@ -427,13 +386,7 @@ private fun MobileArtistCard(
             overflow = TextOverflow.Ellipsis,
         )
         Text(
-            buildString {
-                genre?.let { append(it) }
-                if (albumCount > 0) {
-                    if (length > 0) append(" • ")
-                    append("$albumCount ${if (albumCount == 1) "album" else "albums"}")
-                }
-            }.ifBlank { "Artist" },
+            subtitle,
             color = PhoebeUi.mutedText,
             fontSize = 11.sp,
             maxLines = 1,
@@ -444,40 +397,41 @@ private fun MobileArtistCard(
 
 @Composable
 private fun MobileArtistRow(
-    catalog: CatalogSnapshot,
     artist: Artist,
-    selected: Boolean,
-    onSelect: () -> Unit,
-    onOpen: () -> Unit,
+    onArtist: (Artist) -> Unit,
 ) {
-    val genre = remember(catalog, artist.title) { catalogArtistGenre(catalog, artist.title) ?: "—" }
-    val albumCount = remember(catalog, artist.title) { catalogAlbumsForArtist(catalog, artist.title).size }
-    val songCount = remember(catalog, artist.title) { catalogTracksForArtist(catalog, artist.title).size }
-    val durationMs = remember(catalog, artist.title) { catalogArtistTotalDurationMs(catalog, artist.title) }
+    val subtitle = remember(artist.albumCount, artist.songCount) {
+        buildString {
+            if (artist.albumCount > 0) {
+                append("${artist.albumCount} ${if (artist.albumCount == 1) "album" else "albums"}")
+            }
+            if (artist.songCount > 0) {
+                if (length > 0) append(" • ")
+                append("${artist.songCount} ${if (artist.songCount == 1) "song" else "songs"}")
+            }
+        }.ifBlank { "Artist" }
+    }
     Row(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .clickable(onClick = onSelect)
-            .background(if (selected) PhoebeUi.librarySelectedRow else Color.Transparent)
+            .clickable { onArtist(artist) }
             .padding(horizontal = 6.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Box(Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onOpen)) {
-            ArtworkImage(artist.title, artist.thumbUrl, Modifier.fillMaxSize(), radius = 22.dp)
-        }
+        ArtworkImage(artist.title, artist.thumbUrl, Modifier.size(44.dp).clip(CircleShape), radius = 22.dp, elevated = false)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(artist.title, color = PhoebeUi.primaryText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text("$genre • $albumCount albums", color = PhoebeUi.secondaryText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text("$songCount songs · ${formatHoursMinutes(durationMs)}", color = PhoebeUi.mutedText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                subtitle,
+                color = PhoebeUi.secondaryText,
+                fontSize = 11.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
-        Box(
-            Modifier.clip(CircleShape).clickable(onClick = onOpen).padding(horizontal = 6.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            PhoebeIconView(PhoebeIcon.Forward, tint = PhoebeUi.mutedText, modifier = Modifier.size(18.dp))
-        }
+        PhoebeIconView(PhoebeIcon.Forward, tint = PhoebeUi.mutedText, modifier = Modifier.size(18.dp))
     }
 }
 
@@ -490,58 +444,38 @@ private fun MobileAlbumsContent(
     catalog: CatalogSnapshot,
     albums: List<Album>,
     viewMode: LibraryViewMode,
-    selectedAlbumId: String?,
-    onSelect: (Album) -> Unit,
-    onOpen: (Album) -> Unit,
+    onAlbum: (Album) -> Unit,
 ) {
     if (albums.isEmpty()) {
         Text("No albums yet.", color = PhoebeUi.mutedText, fontSize = 13.sp)
         return
     }
-    Column(Modifier.fillMaxSize()) {
-        when (viewMode) {
-            LibraryViewMode.Grid -> {
-                val gridState = RetainedLazyGridStates.remember("library-albums-grid")
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(2),
-                    state = gridState,
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
-                ) {
-                    items(albums, key = { it.id }) { album ->
-                        MobileAlbumCard(
-                            catalog = catalog,
-                            album = album,
-                            selected = album.id == selectedAlbumId,
-                            onSelect = { onSelect(album) },
-                            onOpen = { onOpen(album) },
-                        )
-                    }
-                }
-            }
-            LibraryViewMode.List -> {
-                val listState = RetainedLazyListStates.remember("library-albums-list")
-                LazyColumn(
-                    state = listState,
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
-                ) {
-                    items(albums, key = { it.id }) { album ->
-                        MobileAlbumListRow(
-                            catalog = catalog,
-                            album = album,
-                            selected = album.id == selectedAlbumId,
-                            onSelect = { onSelect(album) },
-                            onOpen = { onOpen(album) },
-                        )
-                    }
+    when (viewMode) {
+        LibraryViewMode.Grid -> {
+            val gridState = RetainedLazyGridStates.remember("library-albums-grid")
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                state = gridState,
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                items(albums, key = { it.id }, contentType = { "album-card" }) { album ->
+                    MobileAlbumCard(catalog = catalog, album = album, onAlbum = onAlbum)
                 }
             }
         }
-        val selected = albums.firstOrNull { it.id == selectedAlbumId }
-        if (selected != null) {
-            MobileAlbumDetailSheet(catalog = catalog, album = selected, onClose = { onSelect(selected) }, onOpen = { onOpen(selected) })
+        LibraryViewMode.List -> {
+            val listState = RetainedLazyListStates.remember("library-albums-list")
+            LazyColumn(
+                state = listState,
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                items(albums, key = { it.id }, contentType = { "album-row" }) { album ->
+                    MobileAlbumListRow(catalog = catalog, album = album, onAlbum = onAlbum)
+                }
+            }
         }
     }
 }
@@ -550,38 +484,18 @@ private fun MobileAlbumsContent(
 private fun MobileAlbumCard(
     catalog: CatalogSnapshot,
     album: Album,
-    selected: Boolean,
-    onSelect: () -> Unit,
-    onOpen: () -> Unit,
+    onAlbum: (Album) -> Unit,
 ) {
     val tracks = remember(catalog, album.id) { catalogTracksForAlbum(catalog, album.id) }
     val durationMs = remember(tracks) { tracks.sumOf { it.durationMs } }
-    val borderColor = if (selected) PhoebeUi.accent else Color.Transparent
     Column(
         Modifier
             .clip(RoundedCornerShape(12.dp))
-            .border(BorderStroke(1.dp, borderColor), RoundedCornerShape(12.dp))
-            .background(if (selected) PhoebeUi.accent.copy(alpha = 0.06f) else Color.Transparent)
-            .clickable(onClick = onSelect)
+            .clickable(onClick = { onAlbum(album) })
             .padding(6.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Box(Modifier.fillMaxWidth().aspectRatio(1f).clickable(onClick = onOpen)) {
-            ArtworkImage(album.title, album.thumbUrl, Modifier.fillMaxSize(), radius = 10.dp)
-            if (selected) {
-                Box(
-                    Modifier
-                        .padding(6.dp)
-                        .size(22.dp)
-                        .clip(CircleShape)
-                        .background(Color.Black.copy(alpha = 0.55f))
-                        .clickable(onClick = onSelect),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    PhoebeIconView(PhoebeIcon.Close, tint = PhoebeUi.primaryText, modifier = Modifier.size(11.dp))
-                }
-            }
-        }
+        ArtworkImage(album.title, album.thumbUrl, Modifier.fillMaxWidth().aspectRatio(1f), radius = 10.dp, elevated = false)
         Column(verticalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.padding(horizontal = 2.dp)) {
             Text(album.title, color = PhoebeUi.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(album.artist, color = PhoebeUi.secondaryText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -604,9 +518,7 @@ private fun MobileAlbumCard(
 private fun MobileAlbumListRow(
     catalog: CatalogSnapshot,
     album: Album,
-    selected: Boolean,
-    onSelect: () -> Unit,
-    onOpen: () -> Unit,
+    onAlbum: (Album) -> Unit,
 ) {
     val tracks = remember(catalog, album.id) { catalogTracksForAlbum(catalog, album.id) }
     val durationMs = remember(tracks) { tracks.sumOf { it.durationMs } }
@@ -614,15 +526,12 @@ private fun MobileAlbumListRow(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .clickable(onClick = onSelect)
-            .background(if (selected) PhoebeUi.librarySelectedRow else Color.Transparent)
+            .clickable(onClick = { onAlbum(album) })
             .padding(horizontal = 6.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Box(Modifier.size(48.dp).clickable(onClick = onOpen)) {
-            ArtworkImage(album.title, album.thumbUrl, Modifier.fillMaxSize(), radius = 8.dp)
-        }
+        ArtworkImage(album.title, album.thumbUrl, Modifier.size(48.dp), radius = 8.dp, elevated = false)
         Column(Modifier.weight(1f)) {
             Text(album.title, color = PhoebeUi.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(album.artist, color = PhoebeUi.secondaryText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -644,75 +553,7 @@ private fun MobileAlbumListRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-    }
-}
-
-@Composable
-private fun MobileAlbumDetailSheet(
-    catalog: CatalogSnapshot,
-    album: Album,
-    onClose: () -> Unit,
-    onOpen: () -> Unit,
-) {
-    val tracks = remember(catalog, album.id) { catalogTracksForAlbum(catalog, album.id) }
-    val codec = remember(catalog, album.id) { catalogAlbumCodec(catalog, album.id) }
-    val genre = remember(catalog, album.id) { catalogAlbumGenre(catalog, album.id) }
-    val durationMs = remember(tracks) { tracks.sumOf { it.durationMs } }
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = 200.dp, max = 280.dp)
-            .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
-            .background(PhoebeUi.panel)
-            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
-            .padding(horizontal = 16.dp, vertical = 12.dp)
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-            Box(Modifier.width(36.dp).height(4.dp).clip(RoundedCornerShape(2.dp)).background(Color.White.copy(alpha = 0.18f)))
-        }
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Box(Modifier.size(58.dp).clickable(onClick = onOpen)) {
-                ArtworkImage(album.title, album.thumbUrl, Modifier.fillMaxSize(), radius = 8.dp)
-            }
-            Column(Modifier.weight(1f)) {
-                Text(album.title, color = PhoebeUi.primaryText, fontSize = 16.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(album.artist.uppercase(), color = PhoebeUi.secondaryText, fontSize = 11.sp, letterSpacing = 0.06.em, maxLines = 1)
-            }
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            MobileMetaCell("Genre", genre ?: "—", Modifier.weight(1f))
-            MobileMetaCell("Tracks", tracks.size.toString(), Modifier.weight(1f))
-            MobileMetaCell("Duration", formatMinutesLabel(durationMs), Modifier.weight(1f))
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            MobileMetaCell("Codec", codec ?: "—", Modifier.weight(1f))
-            MobileMetaCell("Quality", if (codec.equals("FLAC", true) || codec.equals("ALAC", true)) "Lossless" else "—", Modifier.weight(1f))
-            MobileMetaCell("Sample Rate", tracks.firstOrNull()?.let { displaySampleRateLabel(it) } ?: "—", Modifier.weight(1f))
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            MobileMetaCell("Location", "Local Library", Modifier.weight(1f))
-            MobileMetaCell("Path", tracks.firstOrNull()?.filepath?.let(::shortenFilepath)?.let { "/$it" } ?: "—", Modifier.weight(2f))
-        }
-        Spacer(Modifier.height(2.dp))
-        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-            Text(
-                "Close",
-                color = PhoebeUi.accentLight,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onClose).padding(horizontal = 12.dp, vertical = 6.dp),
-            )
-        }
-    }
-}
-
-@Composable
-private fun MobileMetaCell(label: String, value: String, modifier: Modifier = Modifier) {
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(label, color = PhoebeUi.mutedText, fontSize = 10.sp)
-        Text(value, color = PhoebeUi.primaryText, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        PhoebeIconView(PhoebeIcon.Forward, tint = PhoebeUi.mutedText, modifier = Modifier.size(16.dp))
     }
 }
 
@@ -723,8 +564,6 @@ private fun MobileMetaCell(label: String, value: String, modifier: Modifier = Mo
 @Composable
 private fun MobileSongsList(
     tracks: List<Track>,
-    selectedTrackId: String?,
-    onSelect: (Track) -> Unit,
     onPlay: (Int) -> Unit,
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
@@ -733,36 +572,23 @@ private fun MobileSongsList(
         Text("No songs yet.", color = PhoebeUi.mutedText, fontSize = 13.sp)
         return
     }
-    Column(Modifier.fillMaxSize()) {
-        val listState = RetainedLazyListStates.remember("library-songs")
-        LazyColumn(
-            state = listState,
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-        ) {
-            items(tracks.size, key = { tracks[it].id }) { index ->
-                val track = tracks[index]
-                MobileSongRow(
-                    track = track,
-                    selected = track.id == selectedTrackId,
-                    onSelect = { onSelect(track) },
-                    onPlay = { onPlay(index) },
-                    onAddToUpNext = { onAddToUpNext(track) },
-                    onDownload = { onDownload(track) },
-                )
-            }
-        }
-        val selected = tracks.firstOrNull { it.id == selectedTrackId }
-        if (selected != null) {
-            MobileSongDetailSheet(
-                track = selected,
-                onClose = { onSelect(selected) },
-                onPlay = {
-                    val idx = tracks.indexOfFirst { it.id == selected.id }
-                    if (idx >= 0) onPlay(idx)
-                },
-                onAddToPlaylist = { onAddToUpNext(selected) },
-                onDownload = { onDownload(selected) },
+    val listState = RetainedLazyListStates.remember("library-songs")
+    val nowPlaying = LocalNowPlaying.current
+    LazyColumn(
+        state = listState,
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        items(tracks.size, key = { tracks[it].id }, contentType = { "song-row" }) { index ->
+            val track = tracks[index]
+            MobileSongRow(
+                track = track,
+                isNowPlaying = track.id == nowPlaying.trackId,
+                nowPlayingIsPlaying = nowPlaying.isPlaying,
+                nowPlayingIsBuffering = nowPlaying.isBuffering,
+                onPlay = { onPlay(index) },
+                onAddToUpNext = { onAddToUpNext(track) },
+                onDownload = { onDownload(track) },
             )
         }
     }
@@ -772,38 +598,33 @@ private fun MobileSongsList(
 @Composable
 private fun MobileSongRow(
     track: Track,
-    selected: Boolean,
-    onSelect: () -> Unit,
+    isNowPlaying: Boolean,
+    nowPlayingIsPlaying: Boolean,
+    nowPlayingIsBuffering: Boolean,
     onPlay: () -> Unit,
     onAddToUpNext: () -> Unit,
     onDownload: () -> Unit,
 ) {
     var menuExpanded by remember(track.id) { mutableStateOf(false) }
     val metadataEditorActions = LocalMetadataEditorActions.current
-    val nowPlaying = LocalNowPlaying.current
-    val isCurrent = nowPlaying.trackId == track.id
     Row(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .combinedClickable(
-                onClick = onSelect,
+                onClick = onPlay,
                 onLongClick = { menuExpanded = true },
             )
             .background(
-                when {
-                    isCurrent -> PhoebeUi.accent.copy(alpha = 0.14f)
-                    selected -> PhoebeUi.librarySelectedRow
-                    else -> Color.Transparent
-                },
+                if (isNowPlaying) PhoebeUi.accent.copy(alpha = 0.14f) else Color.Transparent,
             )
             .padding(horizontal = 6.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Box(Modifier.size(44.dp).clickable(onClick = onPlay), contentAlignment = Alignment.Center) {
-            ArtworkImage(track.album, track.thumbUrl, Modifier.fillMaxSize(), radius = 8.dp)
-            if (isCurrent) {
+        Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
+            ArtworkImage(track.album, track.thumbUrl, Modifier.fillMaxSize(), radius = 8.dp, elevated = false)
+            if (isNowPlaying) {
                 Box(
                     Modifier
                         .fillMaxSize()
@@ -812,8 +633,8 @@ private fun MobileSongRow(
                     contentAlignment = Alignment.Center,
                 ) {
                     NowPlayingIndicator(
-                        isPlaying = nowPlaying.isPlaying,
-                        isBuffering = nowPlaying.isBuffering,
+                        isPlaying = nowPlayingIsPlaying,
+                        isBuffering = nowPlayingIsBuffering,
                         modifier = Modifier.size(20.dp),
                     )
                 }
@@ -822,7 +643,7 @@ private fun MobileSongRow(
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
                 track.title,
-                color = if (isCurrent) PhoebeUi.accentLight else PhoebeUi.primaryText,
+                color = if (isNowPlaying) PhoebeUi.accentLight else PhoebeUi.primaryText,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
@@ -883,115 +704,26 @@ private fun MobileSongRow(
 }
 
 @Composable
-private fun MobileSongDetailSheet(
-    track: Track,
-    onClose: () -> Unit,
-    onPlay: () -> Unit,
-    onAddToPlaylist: () -> Unit,
-    onDownload: () -> Unit,
-) {
-    var playlistMenuExpanded by remember(track.id) { mutableStateOf(false) }
-    val metadataEditorActions = LocalMetadataEditorActions.current
-    val playlistActions = LocalPlaylistActions.current
-    val showPlaylistPill = playlistActions.playlistsEnabled &&
-        track.isPlexLibraryTrack() &&
-        !track.isLocalMediaPlayback()
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = 220.dp, max = 320.dp)
-            .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
-            .background(PhoebeUi.panel)
-            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
-            .padding(horizontal = 16.dp, vertical = 12.dp)
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(48.dp).clickable(onClick = onPlay)) {
-                ArtworkImage(track.album, track.thumbUrl, Modifier.fillMaxSize(), radius = 8.dp)
-            }
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(track.title, color = PhoebeUi.primaryText, fontSize = 15.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(track.artist.uppercase(), color = PhoebeUi.secondaryText, fontSize = 11.sp, letterSpacing = 0.06.em, maxLines = 1)
-            }
-            Text(
-                "✕",
-                color = PhoebeUi.mutedText,
-                fontSize = 14.sp,
-                modifier = Modifier.clip(CircleShape).clickable(onClick = onClose).padding(8.dp),
-            )
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            MobileMetaCell("Duration", formatMinutesSeconds(track.durationMs), Modifier.weight(1f))
-            MobileMetaCell("Channels", "2 (Stereo)", Modifier.weight(1f))
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            MobileMetaCell("Codec", track.audioCodec?.uppercase() ?: "—", Modifier.weight(1f))
-            MobileMetaCell("File Size", "—", Modifier.weight(1f))
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            MobileMetaCell("Bitrate", displayBitrateLabel(track), Modifier.weight(1f))
-            MobileMetaCell("Date Added", "—", Modifier.weight(1f))
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            MobileMetaCell("Sample Rate", displaySampleRateLabel(track), Modifier.weight(1f))
-            MobileMetaCell("Play Count", "—", Modifier.weight(1f))
-        }
-        MobileMetaCell("File Path", track.filepath?.let(::shortenFilepath)?.let { "/$it" } ?: "—")
-        Spacer(Modifier.height(2.dp))
-        MobileActionPill(
-            "Edit Metadata",
-            { metadataEditorActions.onRequestEdit(track) },
-            Modifier.fillMaxWidth(),
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (showPlaylistPill) {
-                Box(Modifier.weight(1f)) {
-                    MobileActionPill("Add to Playlist", { playlistMenuExpanded = true }, Modifier.fillMaxWidth())
-                    DropdownMenu(
-                        expanded = playlistMenuExpanded,
-                        onDismissRequest = { playlistMenuExpanded = false },
-                    ) {
-                        AddToPlaylistMenuItems(
-                            track = track,
-                            onAfter = { playlistMenuExpanded = false },
-                        )
-                    }
-                }
-                MobileActionPill("Download", onDownload, Modifier.weight(1f))
-            } else {
-                MobileActionPill("Download", onDownload, Modifier.fillMaxWidth())
-            }
-        }
-    }
-}
-
-@Composable
-private fun MobileActionPill(label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    Box(
-        modifier
-            .clip(RoundedCornerShape(999.dp))
-            .clickable(onClick = onClick)
-            .background(PhoebeUi.accent.copy(alpha = 0.18f))
-            .padding(vertical = 10.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(label, color = PhoebeUi.primaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-    }
-}
-
-@Composable
 internal fun PlaylistsMobileView(
     catalogRefreshing: Boolean,
+    searchQuery: String,
+    onSearchQuery: (String) -> Unit,
     onPlaylist: (Playlist) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val playlistActions = LocalPlaylistActions.current
     val playlists = playlistActions.playlists
+    val visiblePlaylists = remember(playlists, searchQuery) {
+        filterPlaylistsByQuery(playlists, searchQuery)
+    }
 
     Column(modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        SearchPill(
+            query = searchQuery,
+            onQueryChange = onSearchQuery,
+            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+            placeholder = "Search playlists",
+        )
         if (catalogRefreshing) {
             LibraryLoadingStrip(Modifier.padding(bottom = 6.dp))
         }
@@ -1042,8 +774,18 @@ internal fun PlaylistsMobileView(
                             modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
                         )
                     }
+                } else if (visiblePlaylists.isEmpty()) {
+                    item(contentType = "empty-filter") {
+                        Text(
+                            "No playlists match \"$searchQuery\".",
+                            color = PhoebeUi.mutedText,
+                            fontSize = 13.sp,
+                            lineHeight = 18.sp,
+                            modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
+                        )
+                    }
                 } else {
-                    items(playlists, key = { it.id }, contentType = { "playlist" }) { playlist ->
+                    items(visiblePlaylists, key = { it.id }, contentType = { "playlist" }) { playlist ->
                         val liked = playlist.title.contains("Liked", ignoreCase = true)
                         MobilePlaylistRow(
                             icon = if (liked) PhoebeIcon.Heart else null,

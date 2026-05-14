@@ -5,6 +5,8 @@ import com.phoebe.app.db.PhoebeDatabase
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.CatalogSnapshot
+import com.phoebe.app.domain.CatalogSyncPhase
+import com.phoebe.app.domain.CatalogSyncState
 import com.phoebe.app.domain.DownloadItem
 import com.phoebe.app.domain.DownloadState
 import com.phoebe.app.domain.MusicLibrary
@@ -20,7 +22,7 @@ import com.phoebe.app.domain.supportsPlexPlaylists
 import com.phoebe.app.platform.PlatformStorage
 import com.phoebe.app.sources.CatalogMerge
 import com.phoebe.app.sources.LocalFolderMusicSourcePlugin
-import com.phoebe.app.sources.PlexMusicSourcePlugin
+import com.phoebe.app.sources.PlexCatalogBuilder
 import com.phoebe.app.sources.SourceBuildContext
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
@@ -52,6 +54,9 @@ class CatalogRepository(
     private val mutableCatalogRefreshing = MutableStateFlow(false)
     val catalogRefreshing: StateFlow<Boolean> = mutableCatalogRefreshing
 
+    private val mutableCatalogSyncState = MutableStateFlow(CatalogSyncState())
+    val catalogSyncState: StateFlow<CatalogSyncState> = mutableCatalogSyncState
+
     /**
      * Cached canonical machine identifier per session token. Plex's `server://X/…` URIs
      * require the value reported by the server's own `/identity` endpoint, which can differ
@@ -75,24 +80,62 @@ class CatalogRepository(
         }
 
     suspend fun restoreCachedCatalog() {
-        val fromDb = withContext(Dispatchers.Default) { readFromDatabase() }
-        if (fromDb.isNotEmpty()) {
-            mutableCatalog.value = fromDb
+        mutableCatalogSyncState.value = CatalogSyncState(
+            phase = CatalogSyncPhase.RestoringCache,
+            message = "Restoring your library…",
+        )
+        val cachedShell = withContext(Dispatchers.Default) { readCatalogShellFromDatabase() }
+        if (cachedShell.isNotEmpty()) {
+            mutableCatalog.value = cachedShell
+            mutableCatalogSyncState.value = CatalogSyncState(
+                phase = CatalogSyncPhase.LoadingSongs,
+                message = "Restored albums, loading songs…",
+                loadedAlbums = cachedShell.albums.size,
+                loadedTracks = 0,
+            )
+            val cachedTracks = withContext(Dispatchers.Default) { readTracksFromDatabase() }
+            if (cachedTracks.isNotEmpty()) {
+                val hydrated = mutableCatalog.value.copy(
+                    tracksByParent = cachedTracks.tracksByParent,
+                    downloads = cachedTracks.downloads,
+                )
+                mutableCatalog.value = hydrated
+            }
+            mutableCatalogSyncState.value = CatalogSyncState(
+                phase = CatalogSyncPhase.Complete,
+                message = "Library restored.",
+                loadedAlbums = mutableCatalog.value.albums.size,
+                loadedTracks = mutableCatalog.value.tracksByParent.values.sumOf { it.size },
+            )
             return
         }
-        val legacy = storage.readText(LegacyCatalogFile) ?: return
+        val legacy = storage.readText(LegacyCatalogFile) ?: run {
+            mutableCatalogSyncState.value = CatalogSyncState()
+            return
+        }
         val parsed = runCatching {
             json.decodeFromString<CatalogSnapshot>(legacy)
-        }.getOrNull() ?: return
+        }.getOrNull() ?: run {
+            mutableCatalogSyncState.value = CatalogSyncState()
+            return
+        }
         withContext(Dispatchers.Default) { persist(parsed) }
         mutableCatalog.value = parsed
         storage.delete(LegacyCatalogFile)
+        mutableCatalogSyncState.value = CatalogSyncState(
+            phase = CatalogSyncPhase.Complete,
+            message = "Library restored.",
+        )
     }
 
     suspend fun refreshAggregated(session: PlexSession?) {
         var stalePlaylists: List<Playlist> = emptyList()
         val snapshot = refreshMutex.withLock {
             mutableCatalogRefreshing.value = true
+            mutableCatalogSyncState.value = CatalogSyncState(
+                phase = CatalogSyncPhase.LoadingLibrary,
+                message = if (mutableCatalog.value.isNotEmpty()) "Refreshing library…" else "Loading your library…",
+            )
             try {
                 val ctx = SourceBuildContext(
                     session = session,
@@ -100,72 +143,172 @@ class CatalogRepository(
                     httpClient = httpClient,
                     localFolders = mediaSourcesRepository.state.value.localFolders,
                 )
-                val plexRaw = PlexMusicSourcePlugin.buildCatalog(ctx)
-                val localRaw = LocalFolderMusicSourcePlugin.buildCatalog(ctx)
-                val plexPrefixed = CatalogMerge.withPrefix("plex", plexRaw)
-                val merged = CatalogMerge.merge(CatalogSnapshot(), plexPrefixed, localRaw)
-                // The Plex builder only prefetches tracks for the first N albums. To avoid
-                // wiping the lazily-loaded `tracksByParent` entries that the user has accumulated
-                // by opening artist/album/playlist detail screens, keep the previous entries for
-                // any parent that still exists in the new merge and let the freshly-built merge
-                // overlay them where it has new data.
                 val previous = mutableCatalog.value
-                val knownParents =
-                    (merged.albums.asSequence().map { it.id } +
-                        merged.playlists.asSequence().map { it.id }).toSet()
-                val currentToken = session.serverAuthToken()
-                val preservedTracks = previous.tracksByParent
-                    .filterKeys { it in knownParents }
-                    .filterValues { tracks ->
-                        tracks.all { it.shouldPreserveAcrossPlexRefresh(currentToken) }
-                    }
 
-                // For each playlist, compare Plex's reported leafCount with our cached size:
-                //   - Plex grew → keep the stale cache visible so the detail view doesn't flash
-                //                 empty, but schedule a background refetch (see staleForRefetch).
-                //   - Cache larger than Plex → either Plex just deleted, or we just added a song
-                //                              locally that the playlists listing hasn't caught up
-                //                              to. We trust the local size so the sidebar doesn't
-                //                              snap back to 0 mid-add.
-                //   - Equal → no change.
-                val staleForRefetch = mutableListOf<Playlist>()
-                val reconciledPlaylists = merged.playlists.map { p ->
-                    val cached = preservedTracks[p.id]
-                    val cachedSize = cached?.size ?: 0
-                    when {
-                        cached != null && p.trackCount > cachedSize -> {
-                            staleForRefetch += p
-                            p
+                val server = session?.selectedServer
+                val library = session?.selectedLibrary
+                val token = session.serverAuthToken()
+                val plexBuilder = PlexCatalogBuilder(plexClient, httpClient)
+
+                val (plexRawMetadata, localRaw) = coroutineScope {
+                    val plexDeferred = async {
+                        if (server != null && library != null && token != null) {
+                            plexBuilder.buildMetadataCatalog(server, library, token)
+                        } else {
+                            CatalogSnapshot()
                         }
-                        cachedSize > p.trackCount -> p.copy(trackCount = cachedSize)
-                        else -> p
+                    }
+                    val localDeferred = async { LocalFolderMusicSourcePlugin.buildCatalog(ctx) }
+                    plexDeferred.await() to localDeferred.await()
+                }
+
+                val metadataMerged = CatalogMerge.merge(
+                    CatalogSnapshot(),
+                    CatalogMerge.withPrefix("plex", plexRawMetadata),
+                    localRaw,
+                )
+                val reconciled = reconcileMergedSnapshot(
+                    merged = metadataMerged,
+                    previous = previous,
+                    session = session,
+                )
+                stalePlaylists = reconciled.stalePlaylists
+                mutableCatalog.value = reconciled.snapshot
+                mutableCatalogSyncState.value = CatalogSyncState(
+                    phase = CatalogSyncPhase.LoadingSongs,
+                    message = "Loaded albums, fetching songs…",
+                    loadedAlbums = metadataMerged.albums.size,
+                    loadedTracks = reconciled.snapshot.tracksByParent.values.sumOf { it.size },
+                )
+                yield()
+
+                if (server != null && token != null && plexRawMetadata.albums.isNotEmpty()) {
+                    plexBuilder.prefetchAlbumTracks(server, plexRawMetadata.albums, token) { album, tracks ->
+                        val parentId = "plex:${album.id}"
+                        val prefixedTracks = tracks.map { it.withPlexPrefix() }
+                        catalogMergeMutex.withLock {
+                            val cur = mutableCatalog.value
+                            mutableCatalog.value = cur.copy(
+                                tracksByParent = cur.tracksByParent + (parentId to prefixedTracks),
+                            )
+                            mutableCatalogSyncState.value = CatalogSyncState(
+                                phase = CatalogSyncPhase.LoadingSongs,
+                                message = "Loaded albums, fetching songs…",
+                                loadedAlbums = cur.albums.size,
+                                loadedTracks = mutableCatalog.value.tracksByParent.values.sumOf { it.size },
+                            )
+                        }
                     }
                 }
-                stalePlaylists = staleForRefetch
-                val mergedTracks = preservedTracks + merged.tracksByParent
-                merged.copy(
-                    playlists = reconciledPlaylists,
-                    tracksByParent = mergedTracks,
-                    downloads = previous.downloads,
-                ).also { next ->
-                    yield()
-                    mutableCatalog.value = next
-                }
-            } finally {
+
+                mutableCatalogSyncState.value = CatalogSyncState(
+                    phase = CatalogSyncPhase.FinishingArtwork,
+                    message = "Finishing artwork…",
+                    loadedAlbums = mutableCatalog.value.albums.size,
+                    loadedTracks = mutableCatalog.value.tracksByParent.values.sumOf { it.size },
+                )
+                plexBuilder.enrichWithTrackArtwork(mutableCatalog.value)
+                    .copy(downloads = previous.downloads)
+                    .also { next ->
+                        yield()
+                        mutableCatalog.value = next
+                    }
+            } catch (error: Throwable) {
+                mutableCatalogSyncState.value = CatalogSyncState(
+                    phase = CatalogSyncPhase.Failed,
+                    message = error.message ?: "Sync failed.",
+                )
                 mutableCatalogRefreshing.value = false
+                throw error
             }
         }
-        persistAsync(snapshot)
-        // Refetch each playlist that grew externally so the detail view updates in place. We
-        // do this *after* publishing the rest of the snapshot so the sidebar's new trackCount
-        // is visible immediately and the detail flips from stale → fresh as each fetch returns,
-        // rather than blocking the whole refresh on N round-trips.
-        for (playlist in stalePlaylists) {
-            runCatching { refetchPlaylistTracksFromPlex(session, playlist) }
-                .onFailure { error ->
-                    println("[CatalogRepository] background refetch failed for '${playlist.title}': ${error.message}")
-                }
+        try {
+            mutableCatalogRefreshing.value = false
+            mutableCatalogSyncState.value = CatalogSyncState(
+                phase = CatalogSyncPhase.Complete,
+                message = "Library refreshed.",
+                loadedAlbums = mutableCatalog.value.albums.size,
+                loadedTracks = mutableCatalog.value.tracksByParent.values.sumOf { it.size },
+            )
+            persistAsync(snapshot)
+            // Refetch each playlist that grew externally after the main catalog is visible. Each
+            // refetch persists its own update, so the full-snapshot write above must happen first.
+            for (playlist in stalePlaylists) {
+                mutableCatalogSyncState.value = CatalogSyncState(
+                    phase = CatalogSyncPhase.RefreshingPlaylists,
+                    message = "Refreshing playlists…",
+                    loadedAlbums = mutableCatalog.value.albums.size,
+                    loadedTracks = mutableCatalog.value.tracksByParent.values.sumOf { it.size },
+                )
+                runCatching { refetchPlaylistTracksFromPlex(session, playlist) }
+                    .onFailure { error ->
+                        println("[CatalogRepository] background refetch failed for '${playlist.title}': ${error.message}")
+                    }
+            }
+            mutableCatalogSyncState.value = CatalogSyncState(
+                phase = CatalogSyncPhase.Complete,
+                message = "Library refreshed.",
+                loadedAlbums = mutableCatalog.value.albums.size,
+                loadedTracks = mutableCatalog.value.tracksByParent.values.sumOf { it.size },
+            )
+        } catch (error: Throwable) {
+            mutableCatalogSyncState.value = CatalogSyncState(
+                phase = CatalogSyncPhase.Failed,
+                message = error.message ?: "Sync failed.",
+            )
+            throw error
+        } finally {
+            mutableCatalogRefreshing.value = false
         }
+    }
+
+    private data class ReconciledSnapshot(
+        val snapshot: CatalogSnapshot,
+        val stalePlaylists: List<Playlist>,
+    )
+
+    private fun reconcileMergedSnapshot(
+        merged: CatalogSnapshot,
+        previous: CatalogSnapshot,
+        session: PlexSession?,
+    ): ReconciledSnapshot {
+        // The Plex builder prefetches tracks after the first metadata publish. To avoid wiping
+        // lazily-loaded entries that the user has accumulated, keep previous entries for any
+        // parent that still exists and let newly-fetched data overlay them later.
+        val knownParents =
+            (merged.albums.asSequence().map { it.id } +
+                merged.playlists.asSequence().map { it.id }).toSet()
+        val currentToken = session.serverAuthToken()
+        val preservedTracks = previous.tracksByParent
+            .filterKeys { it in knownParents }
+            .filterValues { tracks ->
+                tracks.all { it.shouldPreserveAcrossPlexRefresh(currentToken) }
+            }
+
+        // If Plex reports a playlist grew, keep the stale tracks visible and refetch after the
+        // main catalog is published so the detail panel updates in place.
+        val staleForRefetch = mutableListOf<Playlist>()
+        val reconciledPlaylists = merged.playlists.map { p ->
+            val cached = preservedTracks[p.id]
+            val cachedSize = cached?.size ?: 0
+            when {
+                cached != null && p.trackCount > cachedSize -> {
+                    staleForRefetch += p
+                    p
+                }
+                cachedSize > p.trackCount -> p.copy(trackCount = cachedSize)
+                else -> p
+            }
+        }
+
+        return ReconciledSnapshot(
+            snapshot = merged.copy(
+                playlists = reconciledPlaylists,
+                tracksByParent = preservedTracks + merged.tracksByParent,
+                downloads = previous.downloads,
+            ),
+            stalePlaylists = staleForRefetch,
+        )
     }
 
     /**
@@ -546,6 +689,15 @@ class CatalogRepository(
     }
 
     private suspend fun readFromDatabase(): CatalogSnapshot {
+        val shell = readCatalogShellFromDatabase()
+        val tracks = readTracksFromDatabase()
+        return shell.copy(
+            tracksByParent = tracks.tracksByParent,
+            downloads = tracks.downloads,
+        )
+    }
+
+    private suspend fun readCatalogShellFromDatabase(): CatalogSnapshot {
         val artists = database.catalogQueries.selectArtists().awaitAsList().map {
             Artist(
                 id = it.id,
@@ -573,7 +725,14 @@ class CatalogRepository(
                 thumbUrl = it.thumbUrl,
             )
         }
-        yield()
+        return CatalogSnapshot(
+            artists = artists,
+            albums = albums,
+            playlists = playlists,
+        )
+    }
+
+    private suspend fun readTracksFromDatabase(): CatalogSnapshot {
         val trackRows = database.catalogQueries.selectAllTracks().awaitAsList()
         yield()
         val tracksById: Map<String, Track> = trackRows.associate { row ->
@@ -613,9 +772,6 @@ class CatalogRepository(
             )
         }
         return CatalogSnapshot(
-            artists = artists,
-            albums = albums,
-            playlists = playlists,
             tracksByParent = tracksByParent,
             downloads = downloads,
         )

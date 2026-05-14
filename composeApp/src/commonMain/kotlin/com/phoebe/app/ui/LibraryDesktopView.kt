@@ -115,7 +115,7 @@ internal fun LibraryDesktopView(
         if (normalized != sortBy) onLibrarySortBy(normalized)
     }
 
-    val sortedArtists = remember(catalog.artists, catalog.albums, sortBy, ascending) {
+    val sortedArtists = remember(catalog.artists, sortBy, ascending) {
         sortArtistsForLibrary(catalog, sortBy, ascending)
     }
     val sortedAlbums = remember(catalog.albums, sortBy, ascending) {
@@ -1016,10 +1016,11 @@ internal fun SongRow(
     val hasMenu = true
     val nowPlaying = LocalNowPlaying.current
     val isCurrent = nowPlaying.trackId == track.id
+    val playlistDragEnabled = LocalPlaylistDragEnabled.current
     Row(
         modifier
             .fillMaxWidth()
-            .draggableSong(track)
+            .then(if (playlistDragEnabled) Modifier.draggableSong(track) else Modifier)
             .openContextMenuOnSecondaryClick(enabled = hasMenu) { menuExpanded = true }
             .clip(RoundedCornerShape(10.dp))
             .clickable(onClick = onSelect)
@@ -1034,16 +1035,18 @@ internal fun SongRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(modifier = Modifier.weight(2.2f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            // Immediate-drag handle. Visible target so users discover that songs can be
-            // dragged onto sidebar playlists without having to long-press the row.
-            Text(
-                "⠿",
-                color = PhoebeUi.mutedText,
-                fontSize = 15.sp,
-                modifier = Modifier
-                    .draggableSong(track, immediate = true)
-                    .padding(horizontal = 4.dp, vertical = 6.dp),
-            )
+            if (playlistDragEnabled) {
+                // Immediate-drag handle. Visible target so users discover that songs can be
+                // dragged onto sidebar playlists without having to long-press the row.
+                Text(
+                    "⠿",
+                    color = PhoebeUi.mutedText,
+                    fontSize = 15.sp,
+                    modifier = Modifier
+                        .draggableSong(track, immediate = true)
+                        .padding(horizontal = 4.dp, vertical = 6.dp),
+                )
+            }
             Box(Modifier.size(42.dp).clickable(onClick = onPlay), contentAlignment = Alignment.Center) {
                 ArtworkImage(track.album, track.thumbUrl, Modifier.fillMaxSize(), radius = 6.dp)
                 if (isCurrent) {

@@ -1,20 +1,13 @@
-flush out settings page
+settings page
 
-android 
--playlists
--animations when expanding
--better back button
-- better background / system service handling
-
-cast support
+tv
 
 sync takes awhile
 
-testing infra
-
 clean up logs
 
-signed distribution binaries across mac / android / linux / ios / windows
 mac / windows toolbar icon for controlling media?
+
 web target - continue to iterate on perf
+
 ios

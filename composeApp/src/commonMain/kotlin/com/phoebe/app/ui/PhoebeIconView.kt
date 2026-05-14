@@ -1,0 +1,378 @@
+package com.phoebe.app.ui
+
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
+import phoebe.composeapp.generated.resources.Res
+import phoebe.composeapp.generated.resources.phoebe_bird
+import phoebe.composeapp.generated.resources.phoebe_icon_rounded
+import org.jetbrains.compose.resources.painterResource
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.composed
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.zIndex
+import kotlin.math.roundToInt
+import com.phoebe.app.AppState
+import com.phoebe.app.data.catalogAlbumsForArtist
+import com.phoebe.app.data.catalogTracksForArtist
+import com.phoebe.app.domain.Album
+import com.phoebe.app.domain.AppScreen
+import com.phoebe.app.domain.Artist
+import com.phoebe.app.domain.LibraryColumnVisibility
+import com.phoebe.app.domain.LibrarySortBy
+import com.phoebe.app.domain.LibraryUiPreferences
+import com.phoebe.app.domain.CatalogSnapshot
+import com.phoebe.app.domain.LocalFolderMediaSourceConfig
+import com.phoebe.app.domain.MediaSourcesState
+import com.phoebe.app.domain.MusicLibrary
+import com.phoebe.app.domain.PlexServer
+import com.phoebe.app.domain.PlexSession
+import com.phoebe.app.domain.Playlist
+import com.phoebe.app.domain.RepeatMode
+import com.phoebe.app.domain.Track
+import com.phoebe.app.domain.isLocalMediaPlayback
+import com.phoebe.app.domain.isPlexLibraryTrack
+import com.phoebe.app.domain.supportsPlexPlaylists
+import com.phoebe.app.platform.createPlatformHttpClient
+import com.phoebe.app.platform.currentTimeMs
+import com.phoebe.app.platform.prefersReducedArtworkEffects
+import kotlinx.coroutines.delay
+import com.phoebe.app.sources.rememberPickLocalFolder
+import io.ktor.client.HttpClient
+import io.ktor.client.call.body
+import io.ktor.client.request.get
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.yield
+import kotlin.math.max
+
+@Composable
+internal fun PhoebeIconView(
+    icon: PhoebeIcon,
+    tint: Color,
+    modifier: Modifier = Modifier,
+    filled: Boolean = false,
+) {
+    Canvas(modifier) {
+        val s = size.minDimension
+        val strokeWidth = (s * 0.105f).coerceAtLeast(1.35f)
+        val stroke = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+        fun p(x: Float, y: Float) = Offset(s * x, s * y)
+        fun line(x1: Float, y1: Float, x2: Float, y2: Float) =
+            drawLine(tint, p(x1, y1), p(x2, y2), strokeWidth = strokeWidth, cap = StrokeCap.Round)
+
+        when (icon) {
+            PhoebeIcon.Home -> {
+                val roof = Path().apply {
+                    moveTo(s * 0.16f, s * 0.52f)
+                    lineTo(s * 0.5f, s * 0.20f)
+                    lineTo(s * 0.84f, s * 0.52f)
+                }
+                drawPath(roof, tint, style = stroke)
+                line(0.25f, 0.48f, 0.25f, 0.82f)
+                line(0.75f, 0.48f, 0.75f, 0.82f)
+                line(0.25f, 0.82f, 0.75f, 0.82f)
+                line(0.47f, 0.82f, 0.47f, 0.62f)
+                line(0.57f, 0.82f, 0.57f, 0.62f)
+            }
+            PhoebeIcon.Search -> {
+                drawCircle(tint, radius = s * 0.25f, center = p(0.43f, 0.42f), style = stroke)
+                line(0.61f, 0.61f, 0.82f, 0.82f)
+            }
+            PhoebeIcon.Library -> {
+                line(0.22f, 0.30f, 0.78f, 0.30f)
+                line(0.22f, 0.50f, 0.78f, 0.50f)
+                line(0.22f, 0.70f, 0.78f, 0.70f)
+            }
+            PhoebeIcon.Queue -> {
+                val play = Path().apply {
+                    moveTo(s * 0.18f, s * 0.26f)
+                    lineTo(s * 0.18f, s * 0.74f)
+                    lineTo(s * 0.44f, s * 0.50f)
+                    close()
+                }
+                drawPath(play, tint, style = androidx.compose.ui.graphics.drawscope.Fill)
+                line(0.54f, 0.30f, 0.82f, 0.30f)
+                line(0.54f, 0.50f, 0.82f, 0.50f)
+                line(0.54f, 0.70f, 0.82f, 0.70f)
+            }
+            PhoebeIcon.Plus -> {
+                line(0.50f, 0.20f, 0.50f, 0.80f)
+                line(0.20f, 0.50f, 0.80f, 0.50f)
+            }
+            PhoebeIcon.Heart -> {
+                val path = Path().apply {
+                    moveTo(s * 0.50f, s * 0.82f)
+                    cubicTo(s * 0.18f, s * 0.58f, s * 0.12f, s * 0.38f, s * 0.28f, s * 0.27f)
+                    cubicTo(s * 0.39f, s * 0.19f, s * 0.48f, s * 0.25f, s * 0.50f, s * 0.35f)
+                    cubicTo(s * 0.52f, s * 0.25f, s * 0.61f, s * 0.19f, s * 0.72f, s * 0.27f)
+                    cubicTo(s * 0.88f, s * 0.38f, s * 0.82f, s * 0.58f, s * 0.50f, s * 0.82f)
+                }
+                drawPath(path, tint, style = if (filled) androidx.compose.ui.graphics.drawscope.Fill else stroke)
+            }
+            PhoebeIcon.ChevronUp -> {
+                line(0.25f, 0.62f, 0.50f, 0.38f)
+                line(0.50f, 0.38f, 0.75f, 0.62f)
+            }
+            PhoebeIcon.ChevronDown -> {
+                line(0.25f, 0.38f, 0.50f, 0.62f)
+                line(0.50f, 0.62f, 0.75f, 0.38f)
+            }
+            PhoebeIcon.Bell -> {
+                line(0.30f, 0.72f, 0.70f, 0.72f)
+                line(0.36f, 0.72f, 0.32f, 0.40f)
+                line(0.68f, 0.72f, 0.64f, 0.40f)
+                drawCircle(tint, radius = s * 0.18f, center = p(0.50f, 0.40f), style = stroke)
+                line(0.46f, 0.84f, 0.54f, 0.84f)
+            }
+            PhoebeIcon.Back -> {
+                line(0.62f, 0.22f, 0.34f, 0.50f)
+                line(0.34f, 0.50f, 0.62f, 0.78f)
+            }
+            PhoebeIcon.Forward -> {
+                line(0.38f, 0.22f, 0.66f, 0.50f)
+                line(0.66f, 0.50f, 0.38f, 0.78f)
+            }
+            PhoebeIcon.Music -> {
+                line(0.62f, 0.20f, 0.62f, 0.68f)
+                line(0.62f, 0.20f, 0.80f, 0.26f)
+                drawCircle(tint, radius = s * 0.12f, center = p(0.46f, 0.72f), style = stroke)
+                line(0.50f, 0.70f, 0.62f, 0.66f)
+            }
+            PhoebeIcon.Previous -> {
+                line(0.22f, 0.24f, 0.22f, 0.76f)
+                val path = Path().apply {
+                    moveTo(s * 0.78f, s * 0.24f)
+                    lineTo(s * 0.34f, s * 0.50f)
+                    lineTo(s * 0.78f, s * 0.76f)
+                    close()
+                }
+                drawPath(path, tint)
+            }
+            PhoebeIcon.Next -> {
+                line(0.78f, 0.24f, 0.78f, 0.76f)
+                val path = Path().apply {
+                    moveTo(s * 0.22f, s * 0.24f)
+                    lineTo(s * 0.66f, s * 0.50f)
+                    lineTo(s * 0.22f, s * 0.76f)
+                    close()
+                }
+                drawPath(path, tint)
+            }
+            PhoebeIcon.Play -> {
+                val path = Path().apply {
+                    moveTo(s * 0.34f, s * 0.22f)
+                    lineTo(s * 0.76f, s * 0.50f)
+                    lineTo(s * 0.34f, s * 0.78f)
+                    close()
+                }
+                drawPath(path, tint)
+            }
+            PhoebeIcon.Pause -> {
+                drawRoundRect(tint, topLeft = Offset(s * 0.32f, s * 0.22f), size = Size(s * 0.12f, s * 0.56f), cornerRadius = CornerRadius(s * 0.04f, s * 0.04f))
+                drawRoundRect(tint, topLeft = Offset(s * 0.56f, s * 0.22f), size = Size(s * 0.12f, s * 0.56f), cornerRadius = CornerRadius(s * 0.04f, s * 0.04f))
+            }
+            PhoebeIcon.Volume -> {
+                val speaker = Path().apply {
+                    moveTo(s * 0.18f, s * 0.42f)
+                    lineTo(s * 0.34f, s * 0.42f)
+                    lineTo(s * 0.54f, s * 0.26f)
+                    lineTo(s * 0.54f, s * 0.74f)
+                    lineTo(s * 0.34f, s * 0.58f)
+                    lineTo(s * 0.18f, s * 0.58f)
+                    close()
+                }
+                drawPath(speaker, tint, style = stroke)
+                line(0.66f, 0.38f, 0.74f, 0.50f)
+                line(0.74f, 0.50f, 0.66f, 0.62f)
+            }
+            PhoebeIcon.Cast -> {
+                line(0.20f, 0.28f, 0.80f, 0.28f)
+                line(0.80f, 0.28f, 0.80f, 0.70f)
+                line(0.20f, 0.70f, 0.80f, 0.70f)
+                drawCircle(tint, radius = s * 0.025f, center = p(0.22f, 0.78f))
+                drawArc(tint, startAngle = -90f, sweepAngle = 90f, useCenter = false, topLeft = Offset(s * 0.12f, s * 0.58f), size = Size(s * 0.28f, s * 0.28f), style = stroke)
+                drawArc(tint, startAngle = -90f, sweepAngle = 90f, useCenter = false, topLeft = Offset(s * 0.02f, s * 0.48f), size = Size(s * 0.48f, s * 0.48f), style = stroke)
+            }
+            PhoebeIcon.Repeat -> {
+                line(0.28f, 0.34f, 0.72f, 0.34f)
+                line(0.72f, 0.34f, 0.62f, 0.24f)
+                line(0.72f, 0.34f, 0.62f, 0.44f)
+                line(0.72f, 0.66f, 0.28f, 0.66f)
+                line(0.28f, 0.66f, 0.38f, 0.56f)
+                line(0.28f, 0.66f, 0.38f, 0.76f)
+            }
+            PhoebeIcon.Drag -> {
+                repeat(3) { row ->
+                    drawCircle(tint, radius = s * 0.035f, center = p(0.42f, 0.32f + row * 0.18f))
+                    drawCircle(tint, radius = s * 0.035f, center = p(0.58f, 0.32f + row * 0.18f))
+                }
+            }
+            PhoebeIcon.More -> {
+                drawCircle(tint, radius = s * 0.045f, center = p(0.28f, 0.50f))
+                drawCircle(tint, radius = s * 0.045f, center = p(0.50f, 0.50f))
+                drawCircle(tint, radius = s * 0.045f, center = p(0.72f, 0.50f))
+            }
+            PhoebeIcon.ActiveDot -> {
+                drawCircle(tint, radius = s * 0.22f, center = p(0.50f, 0.50f))
+            }
+            PhoebeIcon.Grid -> {
+                val cell = s * 0.22f
+                listOf(0.24f to 0.24f, 0.54f to 0.24f, 0.24f to 0.54f, 0.54f to 0.54f).forEach { (x, y) ->
+                    drawRoundRect(
+                        tint,
+                        topLeft = Offset(s * x, s * y),
+                        size = Size(cell, cell),
+                        cornerRadius = CornerRadius(s * 0.045f, s * 0.045f),
+                        style = stroke,
+                    )
+                }
+            }
+            PhoebeIcon.Close -> {
+                line(0.30f, 0.30f, 0.70f, 0.70f)
+                line(0.70f, 0.30f, 0.30f, 0.70f)
+            }
+            PhoebeIcon.Settings -> {
+                val center = p(0.5f, 0.5f)
+                drawCircle(tint, radius = s * 0.14f, center = center, style = stroke)
+                drawCircle(tint, radius = s * 0.30f, center = center, style = stroke)
+                val r1 = s * 0.28f
+                val r2 = s * 0.40f
+                repeat(8) { i ->
+                    val a = (kotlin.math.PI.toFloat() / 4f) * i - kotlin.math.PI.toFloat() / 8f
+                    val ca = kotlin.math.cos(a.toDouble()).toFloat()
+                    val sa = kotlin.math.sin(a.toDouble()).toFloat()
+                    drawLine(
+                        tint,
+                        Offset(center.x + r1 * ca, center.y + r1 * sa),
+                        Offset(center.x + r2 * ca, center.y + r2 * sa),
+                        strokeWidth = strokeWidth,
+                        cap = StrokeCap.Round,
+                    )
+                }
+            }
+        }
+    }
+}
+
