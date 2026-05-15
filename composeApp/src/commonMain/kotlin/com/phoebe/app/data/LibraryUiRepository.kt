@@ -82,6 +82,8 @@ class LibraryUiRepository(
             colSampleRate = c.sampleRate.toDb(),
             colFileType = c.fileType.toDb(),
             colDateAdded = c.dateAdded.toDb(),
+            colRating = c.rating.toDb(),
+            colFavorite = c.favorite.toDb(),
         )
     }
 
@@ -99,6 +101,8 @@ class LibraryUiRepository(
                 sampleRate = colSampleRate.toBool(),
                 fileType = colFileType.toBool(),
                 dateAdded = colDateAdded.toBool(),
+                rating = colRating.toBool(),
+                favorite = colFavorite.toBool(),
             ),
         )
 

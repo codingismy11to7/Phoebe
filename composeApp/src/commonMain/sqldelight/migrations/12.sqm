@@ -1,0 +1,7 @@
+CREATE TABLE LyricsRow (
+    trackFingerprint TEXT NOT NULL PRIMARY KEY,
+    source TEXT NOT NULL,
+    syncedLyrics TEXT,
+    plainLyrics TEXT,
+    instrumental INTEGER NOT NULL DEFAULT 0
+);

@@ -4,9 +4,15 @@ import app.cash.sqldelight.async.coroutines.awaitAsList
 import com.phoebe.app.db.PhoebeDatabase
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.Artist
+import com.phoebe.app.domain.CatalogCollectionValue
+import com.phoebe.app.domain.CatalogCollectionValueLoad
+import com.phoebe.app.domain.CatalogCollectionTag
 import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.CatalogSyncPhase
 import com.phoebe.app.domain.CatalogSyncState
+import com.phoebe.app.domain.CollectionEntry
+import com.phoebe.app.domain.CollectionFacet
+import com.phoebe.app.domain.CollectionTarget
 import com.phoebe.app.domain.DownloadItem
 import com.phoebe.app.domain.DownloadState
 import com.phoebe.app.domain.MusicLibrary
@@ -27,6 +33,7 @@ import com.phoebe.app.domain.isLikedSongsPlaylist
 import com.phoebe.app.domain.isPlexLibraryTrack
 import com.phoebe.app.domain.serverAuthToken
 import com.phoebe.app.domain.supportsPlexPlaylists
+import com.phoebe.app.domain.supportsPlexRatings
 import com.phoebe.app.platform.PlatformStorage
 import com.phoebe.app.platform.PhoebeLog
 import com.phoebe.app.platform.catalogTrackPrefetchParallelism
@@ -58,6 +65,12 @@ data class DownloadBatchResult(
     val skipped: Int
         get() = (total - completed - failed).coerceAtLeast(0)
 }
+
+data class RatingSyncResult(
+    val savedLocally: Boolean,
+    val plexAttempted: Boolean,
+    val plexSynced: Boolean,
+)
 
 class CatalogRepository(
     private val plexClient: PlexClient,
@@ -198,52 +211,20 @@ class CatalogRepository(
                     if (server == null || library == null || token == null) {
                         CatalogSnapshot() to localDeferred.await()
                     } else {
-                        val albumsDeferred = async { plexClient.albums(server, library, token) }
-                        val artistsDeferred = async { plexClient.artists(server, library, token) }
-                        val playlistsDeferred = async { plexClient.playlists(server, token) }
-
-                        val rawAlbums = albumsDeferred.await()
-                        if (rawAlbums.isNotEmpty()) {
+                        val metadata = plexBuilder.buildMetadataCatalog(server, library, token)
+                        PhoebeLog.d("PlexCollections") {
+                            "refresh metadata skipped collection discovery"
+                        }
+                        if (metadata.isNotEmpty()) {
                             publishPlexMetadataPartial(
-                                raw = CatalogSnapshot(albums = rawAlbums),
+                                raw = metadata,
                                 previous = previous,
                                 session = session,
-                                message = "Found albums…",
+                                message = "Loaded Plex metadata…",
                             )
                             yield()
                         }
-
-                        val rawPlaylists = playlistsDeferred.await()
-                        if (rawPlaylists.isNotEmpty()) {
-                            publishPlexMetadataPartial(
-                                raw = CatalogSnapshot(albums = rawAlbums, playlists = rawPlaylists),
-                                previous = previous,
-                                session = session,
-                                message = "Found playlists…",
-                            )
-                            yield()
-                        }
-
-                        val rawArtists = artistsDeferred.await()
-                        val artistsResolved = enrichArtistAlbumCountsOnly(
-                            enrichArtistArtwork(rawArtists, rawAlbums).ifEmpty {
-                                rawAlbums.groupBy { it.artist }.values.map { list ->
-                                    val first = list.first()
-                                    Artist(
-                                        id = "album-artist-${first.id}",
-                                        title = first.artist,
-                                        thumbUrl = first.thumbUrl,
-                                        albumCount = list.size,
-                                    )
-                                }
-                            },
-                            rawAlbums,
-                        )
-                        CatalogSnapshot(
-                            artists = artistsResolved,
-                            albums = rawAlbums,
-                            playlists = rawPlaylists,
-                        ) to localDeferred.await()
+                        metadata to localDeferred.await()
                     }
                 }
 
@@ -374,6 +355,307 @@ class CatalogRepository(
         }
     }
 
+    suspend fun ensureCollectionItems(session: PlexSession?, entry: CollectionEntry, value: String) {
+        val server = session?.selectedServer ?: return
+        val library = session.selectedLibrary ?: return
+        val token = session.serverAuthToken() ?: return
+        ensureCollectionValues(session, entry)
+        val current = mutableCatalog.value
+        val normalizedValue = value.trim()
+        val matchingTags = current.collectionTags.filter {
+            it.target == entry.target.name &&
+                it.facet == entry.facet.name &&
+                it.value.equals(normalizedValue, ignoreCase = true)
+        }
+        val existingTargetIds = current.collectionTargetIds(entry.target)
+        val alreadyLoaded = matchingTags.any { it.itemId.toPlexCatalogId() in existingTargetIds }
+        PhoebeLog.d("PlexCollections") {
+            "lazy item state target=${entry.target.name} facet=${entry.facet.name} value='$normalizedValue' tags=${matchingTags.size} usable=$alreadyLoaded targetIds=${existingTargetIds.size} sample=${matchingTags.take(10).map { it.itemId }}"
+        }
+        if (alreadyLoaded) {
+            markCollectionValueItemsLoaded(entry, normalizedValue)
+            return
+        }
+        val collectionValue = current.collectionValues.firstOrNull {
+            it.target == entry.target.name &&
+                it.facet == entry.facet.name &&
+                it.value.equals(normalizedValue, ignoreCase = true)
+        } ?: return
+        if (collectionValue.itemsLoaded) {
+            markCollectionValueItemsLoading(entry, normalizedValue)
+        }
+        val target = entry.target.toPlexCollectionTarget()
+        val facet = entry.facet.toPlexCollectionFacet()
+        PhoebeLog.d("PlexCollections") {
+            "lazy load target=${entry.target.name} facet=${entry.facet.name} value='${collectionValue.value}'"
+        }
+        val cachedChoice = PlexFilterChoice(
+            key = collectionValue.key,
+            title = collectionValue.value,
+            fastKey = collectionValue.fastKey,
+            filterField = collectionValue.filterField,
+        )
+        var resolvedChoice = cachedChoice
+        var plexItemIds = plexClient.collectionFilterItems(
+            server = server,
+            library = library,
+            target = target,
+            facet = facet,
+            choice = cachedChoice,
+            token = token,
+        )
+        if (plexItemIds.isEmpty()) {
+            val refreshedChoice = plexClient.collectionFilterChoices(
+                server = server,
+                library = library,
+                target = target,
+                facet = facet,
+                token = token,
+            ).firstOrNull { it.title.equals(collectionValue.value, ignoreCase = true) }
+            if (refreshedChoice != null && refreshedChoice != cachedChoice) {
+                PhoebeLog.d("PlexCollections") {
+                    "lazy choice refreshed target=${entry.target.name} facet=${entry.facet.name} value='${collectionValue.value}' oldKey='${cachedChoice.key}' newKey='${refreshedChoice.key}' oldField='${cachedChoice.filterField}' newField='${refreshedChoice.filterField}'"
+                }
+                resolvedChoice = refreshedChoice
+                plexItemIds = plexClient.collectionFilterItems(
+                    server = server,
+                    library = library,
+                    target = target,
+                    facet = facet,
+                    choice = refreshedChoice,
+                    token = token,
+                )
+            }
+        }
+        val itemIds = plexItemIds.ifEmpty {
+            current.collectionItemIdsFromIndexedMetadata(entry, collectionValue.value)
+        }
+        val loadedTags = itemIds.map { itemId ->
+            CatalogCollectionTag(
+                target = entry.target.name,
+                facet = entry.facet.name,
+                itemId = itemId.toPlexCatalogId(),
+                value = collectionValue.value,
+            )
+        }
+        catalogMergeMutex.withLock {
+            val latest = mutableCatalog.value
+            val retained = latest.collectionTags.filterNot {
+                it.target == entry.target.name &&
+                    it.facet == entry.facet.name &&
+                    it.value.equals(collectionValue.value, ignoreCase = true)
+            }
+            val values = latest.collectionValues.map {
+                if (it.target == entry.target.name &&
+                    it.facet == entry.facet.name &&
+                    it.value.equals(collectionValue.value, ignoreCase = true)
+                ) {
+                    it.copy(
+                        key = resolvedChoice.key,
+                        fastKey = resolvedChoice.fastKey,
+                        filterField = resolvedChoice.filterField,
+                        itemsLoaded = true,
+                    )
+                } else {
+                    it
+                }
+            }
+            val updated = latest.copy(
+                collectionValues = values,
+                collectionTags = (retained + loadedTags).distinct(),
+            )
+            mutableCatalog.value = updated
+            persistAsync(updated)
+        }
+        PhoebeLog.d("PlexCollections") {
+            "lazy loaded target=${entry.target.name} facet=${entry.facet.name} value='${collectionValue.value}' plexItems=${plexItemIds.size} items=${loadedTags.size}"
+        }
+    }
+
+    private fun CatalogSnapshot.collectionItemIdsFromIndexedMetadata(
+        entry: CollectionEntry,
+        value: String,
+    ): List<String> {
+        val normalized = value.trim()
+        if (normalized.isBlank()) return emptyList()
+        val ids = when (entry.target) {
+            CollectionTarget.Albums -> {
+                val directAlbumIds = albums.asSequence()
+                    .filter { it.collectionLabel(entry.facet).matchesCollectionValue(normalized) }
+                    .map { it.id }
+                val trackAlbumIds = tracksByParent.asSequence()
+                    .filter { (_, tracks) ->
+                        tracks.any { it.collectionLabel(entry.facet).matchesCollectionValue(normalized) }
+                    }
+                    .map { (albumId, _) -> albumId }
+                (directAlbumIds + trackAlbumIds).toList()
+            }
+            CollectionTarget.Artists -> {
+                val directArtistIds = artists.asSequence()
+                    .filter { it.collectionLabel(entry.facet).matchesCollectionValue(normalized) }
+                    .map { it.id }
+                val artistIdsByTitle = artists.associateBy { it.title.lowercase() }
+                val trackArtistIds = tracksByParent.values.asSequence()
+                    .flatten()
+                    .filter { it.collectionLabel(entry.facet).matchesCollectionValue(normalized) }
+                    .mapNotNull { artistIdsByTitle[it.artist.lowercase()]?.id }
+                (directArtistIds + trackArtistIds).toList()
+            }
+        }
+        val distinct = ids.map { it.removePrefix("plex:") }.filter { it.isNotBlank() }.distinct()
+        PhoebeLog.d("PlexCollections") {
+            "indexed fallback target=${entry.target.name} facet=${entry.facet.name} value='$value' items=${distinct.size}"
+        }
+        return distinct
+    }
+
+    private fun CatalogSnapshot.collectionTargetIds(target: CollectionTarget): Set<String> =
+        when (target) {
+            CollectionTarget.Albums -> albums.map { it.id }.toSet()
+            CollectionTarget.Artists -> artists.map { it.id }.toSet()
+        }
+
+    private fun Album.collectionLabel(facet: CollectionFacet): String? = when (facet) {
+        CollectionFacet.Genre -> genre
+        CollectionFacet.Mood -> mood
+        CollectionFacet.Style -> style
+    }
+
+    private fun Artist.collectionLabel(facet: CollectionFacet): String? = when (facet) {
+        CollectionFacet.Genre -> genre
+        CollectionFacet.Mood -> mood
+        CollectionFacet.Style -> style
+    }
+
+    private fun Track.collectionLabel(facet: CollectionFacet): String? = when (facet) {
+        CollectionFacet.Genre -> genre
+        CollectionFacet.Mood -> mood
+        CollectionFacet.Style -> style
+    }
+
+    private fun String.toPlexCatalogId(): String {
+        val raw = removePrefix("plex:").removePrefix("plex:")
+        return "plex:$raw"
+    }
+
+    private fun String?.matchesCollectionValue(value: String): Boolean =
+        this?.trim()?.equals(value, ignoreCase = true) == true
+
+    private suspend fun markCollectionValueItemsLoading(entry: CollectionEntry, value: String) {
+        catalogMergeMutex.withLock {
+            val latest = mutableCatalog.value
+            val values = latest.collectionValues.map {
+                if (it.target == entry.target.name &&
+                    it.facet == entry.facet.name &&
+                    it.value.equals(value, ignoreCase = true) &&
+                    it.itemsLoaded
+                ) {
+                    it.copy(itemsLoaded = false)
+                } else {
+                    it
+                }
+            }
+            if (values != latest.collectionValues) {
+                mutableCatalog.value = latest.copy(collectionValues = values)
+            }
+        }
+    }
+
+    private suspend fun markCollectionValueItemsLoaded(entry: CollectionEntry, value: String) {
+        catalogMergeMutex.withLock {
+            val latest = mutableCatalog.value
+            val values = latest.collectionValues.map {
+                if (it.target == entry.target.name &&
+                    it.facet == entry.facet.name &&
+                    it.value.equals(value, ignoreCase = true) &&
+                    !it.itemsLoaded
+                ) {
+                    it.copy(itemsLoaded = true)
+                } else {
+                    it
+                }
+            }
+            if (values != latest.collectionValues) {
+                val updated = latest.copy(collectionValues = values)
+                mutableCatalog.value = updated
+                persistAsync(updated)
+            }
+        }
+    }
+
+    suspend fun ensureCollectionValues(session: PlexSession?, entry: CollectionEntry) {
+        val server = session?.selectedServer
+        if (server == null) {
+            PhoebeLog.d("PlexCollections") { "lazy values skipped target=${entry.target.name} facet=${entry.facet.name}: no selected server" }
+            return
+        }
+        val library = session.selectedLibrary
+        if (library == null) {
+            PhoebeLog.d("PlexCollections") { "lazy values skipped target=${entry.target.name} facet=${entry.facet.name}: no selected library" }
+            return
+        }
+        val token = session.serverAuthToken()
+        if (token == null) {
+            PhoebeLog.d("PlexCollections") { "lazy values skipped target=${entry.target.name} facet=${entry.facet.name}: no auth token" }
+            return
+        }
+        val current = mutableCatalog.value
+        val alreadyLoaded = current.collectionValues.any {
+            it.target == entry.target.name && it.facet == entry.facet.name
+        }
+        PhoebeLog.d("PlexCollections") {
+            val matchingValues = current.collectionValues.filter {
+                it.target == entry.target.name && it.facet == entry.facet.name
+            }
+            val loadMarkers = current.collectionValueLoads.count {
+                it.target == entry.target.name && it.facet == entry.facet.name
+            }
+            "lazy values state target=${entry.target.name} facet=${entry.facet.name} alreadyLoaded=$alreadyLoaded values=${matchingValues.size} loadMarkers=$loadMarkers sample=${matchingValues.take(10).map { "${it.value}:${it.key}:${it.filterField}" }}"
+        }
+        if (alreadyLoaded) return
+
+        val target = entry.target.toPlexCollectionTarget()
+        val facet = entry.facet.toPlexCollectionFacet()
+        PhoebeLog.d("PlexCollections") {
+            "lazy values target=${entry.target.name} facet=${entry.facet.name}"
+        }
+        val loadedValues = plexClient.collectionFilterChoices(
+            server = server,
+            library = library,
+            target = target,
+            facet = facet,
+            token = token,
+        ).map { choice ->
+            CatalogCollectionValue(
+                target = entry.target.name,
+                facet = entry.facet.name,
+                value = choice.title,
+                key = choice.key,
+                fastKey = choice.fastKey,
+                filterField = choice.filterField,
+                itemsLoaded = false,
+            )
+        }
+        catalogMergeMutex.withLock {
+            val latest = mutableCatalog.value
+            val retained = latest.collectionValues.filterNot {
+                it.target == entry.target.name && it.facet == entry.facet.name
+            }
+            val updated = latest.copy(
+                collectionValues = (retained + loadedValues).distinct(),
+                collectionValueLoads = (
+                    latest.collectionValueLoads +
+                        CatalogCollectionValueLoad(target = entry.target.name, facet = entry.facet.name)
+                    ).distinct(),
+            )
+            mutableCatalog.value = updated
+            persistAsync(updated)
+        }
+        PhoebeLog.d("PlexCollections") {
+            "lazy values loaded target=${entry.target.name} facet=${entry.facet.name} count=${loadedValues.size}"
+        }
+    }
+
     private data class ReconciledSnapshot(
         val snapshot: CatalogSnapshot,
         val stalePlaylists: List<Playlist>,
@@ -446,10 +728,13 @@ class CatalogRepository(
         }
 
         val reconciled = merged.copy(
-                playlists = reconciledPlaylists + localPlaylists,
-                tracksByParent = preservedTracks + merged.tracksByParent,
-                downloads = previous.downloads,
-            )
+            playlists = reconciledPlaylists + localPlaylists,
+            tracksByParent = preservedTracks + merged.tracksByParent,
+            collectionValues = previous.collectionValues,
+            collectionValueLoads = previous.collectionValueLoads,
+            collectionTags = previous.collectionTags,
+            downloads = previous.downloads,
+        )
         return ReconciledSnapshot(
             snapshot = preserveDateAdded(previous, reconciled),
             stalePlaylists = staleForRefetch,
@@ -473,7 +758,13 @@ class CatalogRepository(
                     .filter { it.album.equals(album.title, ignoreCase = true) && it.artist.equals(album.artist, ignoreCase = true) }
                     .mapNotNull { it.dateAddedMs }
                     .maxOrNull()
-            album.copy(dateAddedMs = added)
+            album.copy(
+                dateAddedMs = added,
+                genre = album.genre ?: previousAlbums[album.id]?.genre,
+                mood = album.mood ?: previousAlbums[album.id]?.mood,
+                style = album.style ?: previousAlbums[album.id]?.style,
+                rating = album.rating ?: previousAlbums[album.id]?.rating,
+            )
         }
         val previousArtists = previous.artists.associateBy { it.id }
         val artists = next.artists.map { artist ->
@@ -483,9 +774,19 @@ class CatalogRepository(
                     .filter { it.artist.equals(artist.title, ignoreCase = true) }
                     .mapNotNull { it.dateAddedMs }
                     .maxOrNull()
-            artist.copy(dateAddedMs = added)
+            artist.copy(
+                dateAddedMs = added,
+                genre = artist.genre ?: previousArtists[artist.id]?.genre,
+                mood = artist.mood ?: previousArtists[artist.id]?.mood,
+                style = artist.style ?: previousArtists[artist.id]?.style,
+                rating = artist.rating ?: previousArtists[artist.id]?.rating,
+            )
         }
-        return next.copy(artists = artists, albums = albums, tracksByParent = tracksByParent)
+        val previousPlaylists = previous.playlists.associateBy { it.id }
+        val playlists = next.playlists.map { playlist ->
+            playlist.copy(rating = playlist.rating ?: previousPlaylists[playlist.id]?.rating)
+        }
+        return next.copy(artists = artists, albums = albums, playlists = playlists, tracksByParent = tracksByParent)
     }
 
     private fun preserveTrackDateAdded(existing: List<Track>, incoming: List<Track>): List<Track> {
@@ -498,6 +799,7 @@ class CatalogRepository(
                 localUri = previous.localUri ?: track.localUri,
                 localArtworkUri = previous.localArtworkUri ?: track.localArtworkUri,
                 thumbUrl = track.thumbUrl ?: previous.thumbUrl?.takeUnless { it.isLocalArtworkUrl() },
+                rating = track.rating ?: previous.rating,
             )
         }
     }
@@ -1407,6 +1709,96 @@ class CatalogRepository(
         return MetadataUpdateResult(savedLocally = true, plexAttempted = plexAttempted, plexSynced = plexSynced)
     }
 
+    suspend fun rateTrack(session: PlexSession?, track: Track, rating: Float?): RatingSyncResult {
+        val normalized = rating.normalizedRating()
+        val snapshot = mutableCatalog.value
+        var changed = false
+        val updatedTracks = snapshot.tracksByParent.mapValues { (_, tracks) ->
+            tracks.map { existing ->
+                if (existing.hasSamePlexIdentity(track.id)) {
+                    changed = true
+                    existing.copy(rating = normalized)
+                } else {
+                    existing
+                }
+            }
+        }
+        if (!changed) return RatingSyncResult(savedLocally = false, plexAttempted = false, plexSynced = false)
+        publish(snapshot.copy(tracksByParent = updatedTracks), persist = true)
+        return syncPlexRating(session, track.id, normalized, "track '${track.title}'").copy(savedLocally = true)
+    }
+
+    suspend fun rateArtist(session: PlexSession?, artist: Artist, rating: Float?): RatingSyncResult {
+        val normalized = rating.normalizedRating()
+        val snapshot = mutableCatalog.value
+        var changed = false
+        val artists = snapshot.artists.map {
+            if (it.id == artist.id) {
+                changed = true
+                it.copy(rating = normalized)
+            } else {
+                it
+            }
+        }
+        if (!changed) return RatingSyncResult(savedLocally = false, plexAttempted = false, plexSynced = false)
+        publish(snapshot.copy(artists = artists), persist = true)
+        return syncPlexRating(session, artist.id, normalized, "artist '${artist.title}'").copy(savedLocally = true)
+    }
+
+    suspend fun rateAlbum(session: PlexSession?, album: Album, rating: Float?): RatingSyncResult {
+        val normalized = rating.normalizedRating()
+        val snapshot = mutableCatalog.value
+        var changed = false
+        val albums = snapshot.albums.map {
+            if (it.id == album.id) {
+                changed = true
+                it.copy(rating = normalized)
+            } else {
+                it
+            }
+        }
+        if (!changed) return RatingSyncResult(savedLocally = false, plexAttempted = false, plexSynced = false)
+        publish(snapshot.copy(albums = albums), persist = true)
+        return syncPlexRating(session, album.id, normalized, "album '${album.title}'").copy(savedLocally = true)
+    }
+
+    suspend fun ratePlaylist(session: PlexSession?, playlist: Playlist, rating: Float?): RatingSyncResult {
+        val normalized = rating.normalizedRating()
+        val snapshot = mutableCatalog.value
+        var changed = false
+        val playlists = snapshot.playlists.map {
+            if (it.id == playlist.id) {
+                changed = true
+                it.copy(rating = normalized)
+            } else {
+                it
+            }
+        }
+        if (!changed) return RatingSyncResult(savedLocally = false, plexAttempted = false, plexSynced = false)
+        publish(snapshot.copy(playlists = playlists), persist = true)
+        return syncPlexRating(session, playlist.id, normalized, "playlist '${playlist.title}'").copy(savedLocally = true)
+    }
+
+    private suspend fun syncPlexRating(
+        session: PlexSession?,
+        id: String,
+        rating: Float?,
+        label: String,
+    ): RatingSyncResult {
+        val ratingKey = plexRatingKey(id)
+        val server = session?.selectedServer
+        val token = session?.serverAuthToken()
+        if (!session.supportsPlexRatings() || ratingKey == null || server == null || token == null) {
+            return RatingSyncResult(savedLocally = false, plexAttempted = false, plexSynced = false)
+        }
+        val synced = runCatching {
+            plexClient.rateItem(server, token, ratingKey, rating)
+        }.onFailure { error ->
+            PhoebeLog.d("CatalogRepository") { "rateItem Plex sync failed for $label: ${error.message}" }
+        }.isSuccess
+        return RatingSyncResult(savedLocally = false, plexAttempted = true, plexSynced = synced)
+    }
+
     suspend fun download(track: Track): DownloadBatchResult =
         downloadTracks(listOf(track))
 
@@ -1758,6 +2150,9 @@ class CatalogRepository(
         database.transaction {
             database.catalogQueries.clearTrackParents()
             database.catalogQueries.clearTracks()
+            database.catalogQueries.clearCollectionTags()
+            database.catalogQueries.clearCollectionValues()
+            database.catalogQueries.clearCollectionValueLoads()
             database.catalogQueries.clearArtists()
             database.catalogQueries.clearAlbums()
             database.catalogQueries.clearPlaylists()
@@ -1770,6 +2165,10 @@ class CatalogRepository(
                     songCount = artist.songCount.toLong(),
                     sortKey = index.toLong(),
                     dateAddedMs = artist.dateAddedMs,
+                    genre = artist.genre,
+                    mood = artist.mood,
+                    style = artist.style,
+                    rating = artist.rating?.toDouble(),
                 )
             }
             snapshot.albums.forEachIndexed { index, album ->
@@ -1781,6 +2180,10 @@ class CatalogRepository(
                     thumbUrl = album.thumbUrl,
                     sortKey = index.toLong(),
                     dateAddedMs = album.dateAddedMs,
+                    genre = album.genre,
+                    mood = album.mood,
+                    style = album.style,
+                    rating = album.rating?.toDouble(),
                 )
             }
             snapshot.playlists.forEachIndexed { index, playlist ->
@@ -1791,6 +2194,7 @@ class CatalogRepository(
                     plKey = playlist.key,
                     thumbUrl = playlist.thumbUrl,
                     sortKey = index.toLong(),
+                    rating = playlist.rating?.toDouble(),
                 )
             }
             val uniqueTracks = snapshot.tracksByParent.values.flatten().distinctBy { it.id }
@@ -1808,10 +2212,13 @@ class CatalogRepository(
                     localUri = track.localUri,
                     year = track.year?.toLong(),
                     genre = track.genre,
+                    mood = track.mood,
+                    style = track.style,
                     filepath = track.filepath,
                     audioCodec = track.audioCodec,
                     bitrateKbps = track.bitrateKbps?.toLong(),
                     dateAddedMs = track.dateAddedMs,
+                    rating = track.rating?.toDouble(),
                     parentAlbumId = track.parentAlbumId,
                 )
             }
@@ -1823,6 +2230,34 @@ class CatalogRepository(
                         position = index.toLong(),
                     )
                 }
+            }
+            snapshot.collectionTags.forEach { tag ->
+                database.catalogQueries.upsertCollectionTag(
+                    target = tag.target,
+                    facet = tag.facet,
+                    itemId = tag.itemId,
+                    value_ = tag.value,
+                )
+            }
+            snapshot.collectionValues.forEach { value ->
+                database.catalogQueries.upsertCollectionValue(
+                    target = value.target,
+                    facet = value.facet,
+                    value_ = value.value,
+                    key = value.key,
+                    fastKey = value.fastKey,
+                    filterField = value.filterField,
+                    itemsLoaded = if (value.itemsLoaded) 1L else 0L,
+                )
+            }
+            snapshot.collectionValueLoads.forEach { load ->
+                database.catalogQueries.upsertCollectionValueLoad(
+                    target = load.target,
+                    facet = load.facet,
+                )
+            }
+            PhoebeLog.d("PlexCollections") {
+                "persist collectionValues count=${snapshot.collectionValues.size} collectionTags count=${snapshot.collectionTags.size} tagsByEntry=${snapshot.collectionTags.groupingBy { "${it.target}/${it.facet}" }.eachCount()}"
             }
         }
         yield()
@@ -1859,6 +2294,10 @@ class CatalogRepository(
                 albumCount = it.albumCount.toInt(),
                 songCount = it.songCount.toInt(),
                 dateAddedMs = it.dateAddedMs,
+                genre = it.genre,
+                mood = it.mood,
+                style = it.style,
+                rating = it.rating?.toFloat(),
             )
         }
         val albums = database.catalogQueries.selectAlbums().awaitAsList().map {
@@ -1869,6 +2308,10 @@ class CatalogRepository(
                 year = it.year?.toInt(),
                 thumbUrl = it.thumbUrl,
                 dateAddedMs = it.dateAddedMs,
+                genre = it.genre,
+                mood = it.mood,
+                style = it.style,
+                rating = it.rating?.toFloat(),
             )
         }
         val playlists = database.catalogQueries.selectPlaylists().awaitAsList().map {
@@ -1878,12 +2321,38 @@ class CatalogRepository(
                 trackCount = it.trackCount.toInt(),
                 key = it.plKey,
                 thumbUrl = it.thumbUrl,
+                rating = it.rating?.toFloat(),
             )
         }
         return CatalogSnapshot(
             artists = artists,
             albums = albums,
             playlists = playlists,
+            collectionValueLoads = database.catalogQueries.selectCollectionValueLoads().awaitAsList().map {
+                CatalogCollectionValueLoad(
+                    target = it.target,
+                    facet = it.facet,
+                )
+            },
+            collectionValues = database.catalogQueries.selectCollectionValues().awaitAsList().map {
+                CatalogCollectionValue(
+                    target = it.target,
+                    facet = it.facet,
+                    value = it.value_,
+                    key = it.key,
+                    fastKey = it.fastKey,
+                    filterField = it.filterField,
+                    itemsLoaded = it.itemsLoaded != 0L,
+                )
+            },
+            collectionTags = database.catalogQueries.selectCollectionTags().awaitAsList().map {
+                CatalogCollectionTag(
+                    target = it.target,
+                    facet = it.facet,
+                    itemId = it.itemId,
+                    value = it.value_,
+                )
+            },
         )
     }
 
@@ -1904,10 +2373,13 @@ class CatalogRepository(
                     localUri = row.localUri,
                     year = row.year?.toInt(),
                     genre = row.genre,
+                    mood = row.mood,
+                    style = row.style,
                     filepath = row.filepath,
                     audioCodec = row.audioCodec,
                     bitrateKbps = row.bitrateKbps?.toInt(),
                     dateAddedMs = row.dateAddedMs,
+                    rating = row.rating?.toFloat(),
                     parentAlbumId = row.parentAlbumId,
                 )
             }
@@ -1940,7 +2412,26 @@ class CatalogRepository(
             albums.isNotEmpty() ||
             playlists.isNotEmpty() ||
             tracksByParent.isNotEmpty() ||
+            collectionValues.isNotEmpty() ||
+            collectionValueLoads.isNotEmpty() ||
+            collectionTags.isNotEmpty() ||
             downloads.isNotEmpty()
+
+    private fun CatalogSnapshot.hasCollectionValueLoad(entry: CollectionEntry): Boolean =
+        collectionValueLoads.any { it.target == entry.target.name && it.facet == entry.facet.name }
+
+    private fun CollectionTarget.toPlexCollectionTarget(): PlexCollectionTarget =
+        when (this) {
+            CollectionTarget.Artists -> PlexCollectionTarget.Artists
+            CollectionTarget.Albums -> PlexCollectionTarget.Albums
+        }
+
+    private fun CollectionFacet.toPlexCollectionFacet(): PlexCollectionFacet =
+        when (this) {
+            CollectionFacet.Mood -> PlexCollectionFacet.Mood
+            CollectionFacet.Style -> PlexCollectionFacet.Style
+            CollectionFacet.Genre -> PlexCollectionFacet.Genre
+        }
 
     private fun plexRatingKey(id: String): String? =
         if (id.startsWith("plex:")) id.removePrefix("plex:") else null
@@ -1987,3 +2478,8 @@ data class MetadataUpdateResult(
     val plexAttempted: Boolean,
     val plexSynced: Boolean,
 )
+
+private fun Float?.normalizedRating(): Float? =
+    this?.coerceIn(0f, 5f)
+        ?.let { kotlin.math.round(it * 2f) / 2f }
+        ?.takeIf { it > 0f }

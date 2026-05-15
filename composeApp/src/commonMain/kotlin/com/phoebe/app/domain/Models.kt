@@ -16,6 +16,12 @@ fun PlexSession?.supportsPlexPlaylists(): Boolean {
     return s.token.isNotBlank() && s.selectedServer != null && s.selectedLibrary != null
 }
 
+/** Plex ratings require token and a selected server; they apply to metadata rating keys. */
+fun PlexSession?.supportsPlexRatings(): Boolean {
+    val s = this ?: return false
+    return s.token.isNotBlank() && s.selectedServer != null
+}
+
 @Serializable
 data class PlexPin(
     val id: Long,
@@ -65,6 +71,11 @@ data class Artist(
     /** Tracks currently loaded in [CatalogSnapshot.tracksByParent] for this artist (subset until fully fetched). */
     val songCount: Int = 0,
     val dateAddedMs: Long? = null,
+    val genre: String? = null,
+    val mood: String? = null,
+    val style: String? = null,
+    /** User rating normalized to 0..5 stars. Plex stores this as 0..10. */
+    val rating: Float? = null,
 )
 
 @Serializable
@@ -75,6 +86,11 @@ data class Album(
     val year: Int? = null,
     val thumbUrl: String? = null,
     val dateAddedMs: Long? = null,
+    val genre: String? = null,
+    val mood: String? = null,
+    val style: String? = null,
+    /** User rating normalized to 0..5 stars. Plex stores this as 0..10. */
+    val rating: Float? = null,
 )
 
 @Serializable
@@ -84,6 +100,8 @@ data class Playlist(
     val trackCount: Int,
     val key: String? = null,
     val thumbUrl: String? = null,
+    /** User rating normalized to 0..5 stars. Plex stores this as 0..10. */
+    val rating: Float? = null,
 )
 
 @Serializable
@@ -100,12 +118,16 @@ data class Track(
     val localUri: String? = null,
     val year: Int? = null,
     val genre: String? = null,
+    val mood: String? = null,
+    val style: String? = null,
     /** Display path: server file path or local URI tail. */
     val filepath: String? = null,
     val audioCodec: String? = null,
     /** Kilobits per second when known. */
     val bitrateKbps: Int? = null,
     val dateAddedMs: Long? = null,
+    /** User rating normalized to 0..5 stars. Plex stores this as 0..10. */
+    val rating: Float? = null,
     /** Plex playlist entry id, present when this track was loaded from a playlist. */
     val playlistItemId: Long? = null,
     /** Plex album rating key for flat track index responses, if known. */
@@ -145,6 +167,8 @@ data class LibraryColumnVisibility(
     val sampleRate: Boolean = true,
     val fileType: Boolean = true,
     val dateAdded: Boolean = true,
+    val rating: Boolean = true,
+    val favorite: Boolean = true,
 )
 
 @Serializable
@@ -160,7 +184,35 @@ data class CatalogSnapshot(
     val albums: List<Album> = emptyList(),
     val playlists: List<Playlist> = emptyList(),
     val tracksByParent: Map<String, List<Track>> = emptyMap(),
+    val collectionValues: List<CatalogCollectionValue> = emptyList(),
+    val collectionValueLoads: List<CatalogCollectionValueLoad> = emptyList(),
+    val collectionTags: List<CatalogCollectionTag> = emptyList(),
     val downloads: List<DownloadItem> = emptyList(),
+)
+
+@Serializable
+data class CatalogCollectionValueLoad(
+    val target: String,
+    val facet: String,
+)
+
+@Serializable
+data class CatalogCollectionValue(
+    val target: String,
+    val facet: String,
+    val value: String,
+    val key: String,
+    val fastKey: String? = null,
+    val filterField: String? = null,
+    val itemsLoaded: Boolean = false,
+)
+
+@Serializable
+data class CatalogCollectionTag(
+    val target: String,
+    val facet: String,
+    val itemId: String,
+    val value: String,
 )
 
 enum class CatalogSyncPhase {
@@ -222,13 +274,66 @@ sealed interface AppScreen {
     data object ServerPicker : AppScreen
     data object LibraryPicker : AppScreen
     data object Home : AppScreen
+    data class Collections(val entry: CollectionEntry = CollectionEntry(CollectionTarget.Artists, CollectionFacet.Genre)) : AppScreen
+    data class CollectionItems(val entry: CollectionEntry, val value: String) : AppScreen
     data class AlbumDetail(val album: Album) : AppScreen
     data class ArtistDetail(val artist: Artist) : AppScreen
     data class SongDetail(val track: Track) : AppScreen
+    data class Lyrics(val track: Track? = null) : AppScreen
     data class RecentlyAdded(val kind: RecentlyAddedKind) : AppScreen
     data class PlayHistory(val kind: PlayHistoryKind) : AppScreen
     data class PlaylistDetail(val playlist: Playlist) : AppScreen
     data object Player : AppScreen
+}
+
+data class LyricsLine(
+    val startMs: Long?,
+    val text: String,
+)
+
+enum class LyricsSource {
+    LocalEmbedded,
+    LocalSidecar,
+    Lrclib,
+    Cache,
+}
+
+data class LyricsDocument(
+    val trackFingerprint: String,
+    val lines: List<LyricsLine>,
+    val source: LyricsSource,
+    val synced: Boolean,
+    val instrumental: Boolean = false,
+) {
+    val hasText: Boolean
+        get() = lines.any { it.text.isNotBlank() }
+}
+
+sealed interface LyricsLoadState {
+    data object Idle : LyricsLoadState
+    data object Loading : LyricsLoadState
+    data class Loaded(val document: LyricsDocument) : LyricsLoadState
+    data object NotFound : LyricsLoadState
+    data class Failed(val message: String) : LyricsLoadState
+}
+
+@Serializable
+data class CollectionEntry(
+    val target: CollectionTarget,
+    val facet: CollectionFacet,
+)
+
+@Serializable
+enum class CollectionTarget {
+    Artists,
+    Albums,
+}
+
+@Serializable
+enum class CollectionFacet {
+    Mood,
+    Style,
+    Genre,
 }
 
 @Serializable

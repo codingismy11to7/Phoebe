@@ -6,6 +6,7 @@ import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryTab
+import com.phoebe.app.domain.LyricsLoadState
 import com.phoebe.app.domain.MusicLibrary
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.PlexPin
@@ -19,6 +20,7 @@ import com.phoebe.app.domain.canAddToPlexPlaylist
 import com.phoebe.app.domain.canTogglePlexLike
 import com.phoebe.app.domain.isLocalPlaylist
 import com.phoebe.app.domain.supportsPlexPlaylists
+import com.phoebe.app.domain.supportsPlexRatings
 import com.phoebe.app.data.DownloadBatchResult
 import com.phoebe.app.data.PlexPlayHistorySyncResult
 import com.phoebe.app.playlists.PlaylistExportFormat
@@ -408,6 +410,9 @@ class AppState(
             is AppScreen.ArtistDetail,
             is AppScreen.AlbumDetail,
             is AppScreen.SongDetail,
+            is AppScreen.Lyrics,
+            is AppScreen.Collections,
+            is AppScreen.CollectionItems,
             is AppScreen.RecentlyAdded,
             is AppScreen.PlayHistory,
             is AppScreen.PlaylistDetail,
@@ -435,6 +440,20 @@ class AppState(
                             dependencies.catalogRepository.tracksForPlaylist(session.value, screen.playlist)
                         }.onFailure {
                             mutableMessage.value = it.message ?: "Couldn't load playlist tracks."
+                        }
+                    }
+                    is AppScreen.Collections -> scope.launch {
+                        runCatching {
+                            dependencies.catalogRepository.ensureCollectionValues(session.value, screen.entry)
+                        }.onFailure {
+                            mutableMessage.value = it.message ?: "Couldn't load collections."
+                        }
+                    }
+                    is AppScreen.CollectionItems -> scope.launch {
+                        runCatching {
+                            dependencies.catalogRepository.ensureCollectionItems(session.value, screen.entry, screen.value)
+                        }.onFailure {
+                            mutableMessage.value = it.message ?: "Couldn't load collection."
                         }
                     }
                     else -> Unit
@@ -530,6 +549,9 @@ class AppState(
             is AppScreen.ArtistDetail,
             is AppScreen.AlbumDetail,
             is AppScreen.SongDetail,
+            is AppScreen.Lyrics,
+            is AppScreen.Collections,
+            is AppScreen.CollectionItems,
             is AppScreen.RecentlyAdded,
             is AppScreen.PlayHistory,
             is AppScreen.PlaylistDetail,
@@ -548,6 +570,9 @@ class AppState(
             is AppScreen.ArtistDetail,
             is AppScreen.AlbumDetail,
             is AppScreen.SongDetail,
+            is AppScreen.Lyrics,
+            is AppScreen.Collections,
+            is AppScreen.CollectionItems,
             is AppScreen.RecentlyAdded,
             is AppScreen.PlayHistory,
             is AppScreen.PlaylistDetail,
@@ -671,6 +696,9 @@ class AppState(
             dependencies.audioPlayer.seekTo(positionMs)
         }
     }
+    suspend fun loadLyrics(track: Track, forceRefresh: Boolean = false): LyricsLoadState =
+        dependencies.lyricsRepository.lyricsFor(track, forceRefresh)
+
     fun toggleShuffle() = dependencies.audioPlayer.setShuffle(!player.value.shuffle)
     fun cycleRepeat() {
         val next = when (player.value.repeat) {
@@ -942,6 +970,35 @@ class AppState(
             else -> "Metadata saved."
         }
     }
+
+    fun rateTrack(track: Track, rating: Float?) = scope.launch {
+        val result = dependencies.catalogRepository.rateTrack(session.value, track, rating)
+        mutableMessage.value = ratingMessage(result.savedLocally, result.plexAttempted, result.plexSynced)
+    }
+
+    fun rateArtist(artist: Artist, rating: Float?) = scope.launch {
+        val result = dependencies.catalogRepository.rateArtist(session.value, artist, rating)
+        mutableMessage.value = ratingMessage(result.savedLocally, result.plexAttempted, result.plexSynced)
+    }
+
+    fun rateAlbum(album: Album, rating: Float?) = scope.launch {
+        val result = dependencies.catalogRepository.rateAlbum(session.value, album, rating)
+        mutableMessage.value = ratingMessage(result.savedLocally, result.plexAttempted, result.plexSynced)
+    }
+
+    fun ratePlaylist(playlist: Playlist, rating: Float?) = scope.launch {
+        val result = dependencies.catalogRepository.ratePlaylist(session.value, playlist, rating)
+        mutableMessage.value = ratingMessage(result.savedLocally, result.plexAttempted, result.plexSynced)
+    }
+
+    private fun ratingMessage(savedLocally: Boolean, plexAttempted: Boolean, plexSynced: Boolean): String =
+        when {
+            !savedLocally -> "Couldn't find that item in the library."
+            plexAttempted && plexSynced -> "Rating saved and synced to Plex."
+            plexAttempted -> "Rating saved locally, but Plex sync failed."
+            session.value.supportsPlexRatings() -> "Rating saved."
+            else -> "Rating saved locally."
+        }
 
     fun addLocalFolderFromUri(rootUri: String?) = scope.launch {
         if (rootUri.isNullOrBlank()) return@launch

@@ -151,6 +151,7 @@ import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryUiPreferences
 import com.phoebe.app.domain.CatalogSnapshot
+import com.phoebe.app.domain.CollectionEntry
 import com.phoebe.app.domain.LocalFolderMediaSourceConfig
 import com.phoebe.app.domain.MediaSourcesState
 import com.phoebe.app.domain.MusicLibrary
@@ -366,6 +367,7 @@ internal fun mobileSectionTitle(section: DesktopSection): String = when (section
     DesktopSection.Home -> "Home"
     DesktopSection.Search -> "Search"
     DesktopSection.Library -> "Library"
+    DesktopSection.Lyrics -> "Lyrics"
     DesktopSection.Playlists -> "Playlists"
     DesktopSection.Settings -> "Settings"
 }
@@ -396,6 +398,7 @@ internal fun MobileBrowseShell(
     onRecentAlbums: () -> Unit,
     onRecentlyPlayed: () -> Unit,
     onMostPlayed: () -> Unit,
+    onCollections: (CollectionEntry) -> Unit,
     onRefreshRandomArtists: () -> Unit,
     onRefreshRandomAlbums: () -> Unit,
     onPrefetchHomeArtist: (Artist) -> Unit = {},
@@ -526,6 +529,7 @@ internal fun MobileBrowseShell(
                     onRecentSongs = onRecentSongs,
                     onRecentArtists = onRecentArtists,
                     onRecentAlbums = onRecentAlbums,
+                    onCollections = onCollections,
                     onRecentlyPlayed = onRecentlyPlayed,
                     onMostPlayed = onMostPlayed,
                     onRefreshArtists = onRefreshRandomArtists,
@@ -825,6 +829,7 @@ internal fun MobilePlayer(
     onMoveUpNext: (Int, Int) -> Unit,
     onRemoveUpNext: (Int) -> Unit,
     onCast: () -> Unit = {},
+    onLyrics: () -> Unit = {},
     onBack: () -> Unit,
     onSwipeDismiss: () -> Unit,
     initialUpNextExpanded: Boolean = false,
@@ -937,21 +942,26 @@ internal fun MobilePlayer(
                         .padding(horizontal = 20.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Box(
-                        modifier = Modifier.size(44.dp).clickable(onClick = onBack).semantics { contentDescription = "Back" },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        PhoebeIconView(PhoebeIcon.ChevronDown, tint = PhoebeUi.primaryText, modifier = Modifier.size(24.dp))
+                    Row(Modifier.width(88.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier.size(44.dp).clickable(onClick = onBack).semantics { contentDescription = "Back" },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            PhoebeIconView(PhoebeIcon.ChevronDown, tint = PhoebeUi.primaryText, modifier = Modifier.size(24.dp))
+                        }
                     }
                     Spacer(Modifier.weight(1f))
                     SectionLabel("Now Playing", PhoebeUi.secondaryText)
                     Spacer(Modifier.weight(1f))
-                    CastIcon(
-                        active = castState.isConnected,
-                        loading = castState.isBuffering,
-                        enabled = castState.isAvailable || castState.isConnected,
-                        onClick = onCast,
-                    )
+                    Row(Modifier.width(88.dp), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+                        TransportIcon(PhoebeIcon.Lyrics, "Lyrics", onLyrics)
+                        CastIcon(
+                            active = castState.isConnected,
+                            loading = castState.isBuffering,
+                            enabled = castState.isAvailable || castState.isConnected,
+                            onClick = onCast,
+                        )
+                    }
                 }
 
                 Column(
@@ -992,7 +1002,7 @@ internal fun MobilePlayer(
                         ) {
                             val artworkSize = minOf(
                                 maxWidth,
-                                (maxHeight - 112.dp).coerceAtLeast(220.dp),
+                                (maxHeight - 64.dp).coerceAtLeast(260.dp),
                             )
                             Column(
                                 Modifier
@@ -1010,7 +1020,7 @@ internal fun MobilePlayer(
                                     onSkipQueueBy = onSkipQueueBy,
                                     modifier = Modifier
                                         .size(artworkSize)
-                                        .align(Alignment.CenterHorizontally),
+                                        .align(Alignment.Start),
                                 )
                                 Spacer(Modifier.height(20.dp))
                                 AutoScrollingText(track.title, color = PhoebeUi.primaryText, fontSize = 22.sp, fontWeight = FontWeight.Black)

@@ -171,6 +171,7 @@ internal enum class DesktopSection {
     Home,
     Search,
     Library,
+    Lyrics,
     Playlists,
     Settings,
 }
@@ -188,6 +189,7 @@ internal enum class PhoebeIcon {
     Back,
     Forward,
     Music,
+    Lyrics,
     Previous,
     Next,
     Play,
@@ -213,6 +215,8 @@ internal val FullTrackMetadataColumns = LibraryColumnVisibility(
     audioCodec = true,
     bitrate = true,
     duration = true,
+    rating = true,
+    favorite = true,
 )
 
 /** Compact song rows that only show title, artist, and album text. */
@@ -226,6 +230,8 @@ internal val SongIdentityColumns = LibraryColumnVisibility(
     sampleRate = false,
     fileType = false,
     dateAdded = false,
+    rating = false,
+    favorite = false,
 )
 
 internal data class SearchHistoryState(

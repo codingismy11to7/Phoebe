@@ -118,4 +118,37 @@ class PlexClientPlaylistEndToEndTest {
         assertEquals(listOf("t1", "t2"), tracks.map { it.id })
         assertEquals(listOf("Playlist Song One", "Playlist Song Two"), tracks.map { it.title })
     }
+
+    @Test
+    fun rateItemUsesPutWithDoubledRating() = runTest {
+        var capturedMethod: String? = null
+        var capturedIdentifier: String? = null
+        var capturedKey: String? = null
+        var capturedRating: String? = null
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/:/rate" -> {
+                    capturedMethod = request.method.value
+                    capturedIdentifier = request.url.parameters["identifier"]
+                    capturedKey = request.url.parameters["key"]
+                    capturedRating = request.url.parameters["rating"]
+                    respond(
+                        content = "",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "text/html"),
+                    )
+                }
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val client = PlexClient(testHttpClient(engine))
+        val server = PlexServer("server", "Plex", "https://plex.example:32400", owned = true)
+
+        client.rateItem(server, "token", "t1", 3.5f)
+
+        assertEquals(HttpMethod.Put.value, capturedMethod)
+        assertEquals("com.plexapp.plugins.library", capturedIdentifier)
+        assertEquals("t1", capturedKey)
+        assertEquals("7.0", capturedRating)
+    }
 }

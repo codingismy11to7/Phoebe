@@ -159,7 +159,17 @@ abstract class SimpleAudioPlayer : AudioPlayer {
             }
             RepeatMode.Off -> {
                 val target = state.currentIndex + 1
-                if (target <= state.queue.lastIndex) play(state.queue, target)
+                if (target <= state.queue.lastIndex) {
+                    play(state.queue, target)
+                } else {
+                    playWhenReady = false
+                    mutableState.value = state.copy(
+                        isPlaying = false,
+                        isBuffering = false,
+                        positionMs = state.durationMs.takeIf { it > 0L } ?: state.positionMs,
+                    )
+                    stopProgressTicker()
+                }
             }
         }
     }

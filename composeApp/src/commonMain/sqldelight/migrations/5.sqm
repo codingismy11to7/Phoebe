@@ -1,0 +1,4 @@
+ALTER TABLE TrackRow ADD COLUMN mood TEXT;
+ALTER TABLE TrackRow ADD COLUMN style TEXT;
+ALTER TABLE LocalFileMetadataCacheRow ADD COLUMN mood TEXT;
+ALTER TABLE LocalFileMetadataCacheRow ADD COLUMN style TEXT;

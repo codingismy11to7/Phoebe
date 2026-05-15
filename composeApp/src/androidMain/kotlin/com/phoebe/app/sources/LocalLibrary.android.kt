@@ -107,6 +107,8 @@ actual object LocalLibraryIO {
                 durationMs = durationMs,
                 year = year,
                 genre = genre,
+                mood = null,
+                style = null,
                 bitrateKbps = bitrateKbps,
                 audioCodec = null,
             )
@@ -115,6 +117,18 @@ actual object LocalLibraryIO {
         } finally {
             runCatching { retriever.release() }
         }
+    }
+
+    actual suspend fun readLyrics(uri: String): String? = withContext(Dispatchers.IO) {
+        val file = uri.toFileOrNull() ?: return@withContext null
+        if (!file.isFile) return@withContext null
+        val base = file.nameWithoutExtension
+        listOf("$base.lrc", "$base.txt")
+            .map { File(file.parentFile, it) }
+            .firstOrNull { it.isFile }
+            ?.readText()
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
     }
 
     private fun String.toFileOrNull(): File? {

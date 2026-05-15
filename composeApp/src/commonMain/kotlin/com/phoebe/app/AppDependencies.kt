@@ -2,6 +2,7 @@ package com.phoebe.app
 
 import com.phoebe.app.data.CatalogRepository
 import com.phoebe.app.data.LibraryUiRepository
+import com.phoebe.app.data.LyricsRepository
 import com.phoebe.app.data.MediaSourcesRepository
 import com.phoebe.app.data.PlayHistoryRepository
 import com.phoebe.app.data.PlexClient
@@ -25,6 +26,7 @@ class AppDependencies(
     val mediaSourcesRepository: MediaSourcesRepository,
     val catalogRepository: CatalogRepository,
     val libraryUiRepository: LibraryUiRepository,
+    val lyricsRepository: LyricsRepository,
     val playHistoryRepository: PlayHistoryRepository,
     val plexPlayHistorySyncer: PlexPlayHistorySyncer,
     val plexPlaybackReporter: PlexPlaybackReporter,
@@ -60,6 +62,7 @@ class AppDependencies(
                     mediaSourcesRepository = mediaSourcesRepository,
                 ),
                 libraryUiRepository = libraryUiRepository,
+                lyricsRepository = LyricsRepository(database, httpClient),
                 playHistoryRepository = playHistoryRepository,
                 plexPlayHistorySyncer = PlexPlayHistorySyncer(
                     plexClient = plexClient,

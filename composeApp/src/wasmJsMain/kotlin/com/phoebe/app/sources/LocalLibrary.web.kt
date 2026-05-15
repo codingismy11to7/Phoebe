@@ -48,6 +48,8 @@ actual object LocalLibraryIO {
         )
     }
 
+    actual suspend fun readLyrics(uri: String): String? = null
+
     private const val TestRootPrefix = "phoebe-test://"
     private val audioExt = setOf("mp3", "m4a", "flac", "wav", "aac", "ogg", "opus")
 }

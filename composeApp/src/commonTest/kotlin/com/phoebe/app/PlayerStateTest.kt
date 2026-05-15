@@ -138,6 +138,23 @@ class PlayerStateTest {
         assertEquals(1, player.fullLoads)
         assertEquals(1, player.queueSkips)
     }
+
+    @Test
+    fun endOfQueueStopsPlayback() {
+        val player = TestPlayer()
+        val tracks = listOf(
+            Track("t1", "One", "Artist", "Album", 60_000, "http://a", ""),
+        )
+
+        player.play(tracks, 0)
+        assertTrue(player.state.value.isPlaying)
+
+        player.next()
+
+        assertFalse(player.state.value.isPlaying)
+        assertFalse(player.state.value.isBuffering)
+        assertEquals(60_000, player.state.value.positionMs)
+    }
 }
 
 private class TestPlayer : SimpleAudioPlayer() {

@@ -18,6 +18,9 @@ object CatalogMerge {
             tracksByParent = snapshot.tracksByParent.mapKeys { (k, _) -> p + k }.mapValues { (_, tracks) ->
                 tracks.map { t -> t.copy(id = p + t.id) }
             },
+            collectionValues = snapshot.collectionValues,
+            collectionValueLoads = snapshot.collectionValueLoads,
+            collectionTags = snapshot.collectionTags.map { it.copy(itemId = p + it.itemId) },
             downloads = snapshot.downloads,
         )
     }
@@ -30,6 +33,9 @@ object CatalogMerge {
             albums = all.flatMap { it.albums },
             playlists = all.flatMap { it.playlists },
             tracksByParent = all.fold(emptyMap()) { acc, s -> acc + s.tracksByParent },
+            collectionValues = all.flatMap { it.collectionValues }.distinct(),
+            collectionValueLoads = all.flatMap { it.collectionValueLoads }.distinct(),
+            collectionTags = all.flatMap { it.collectionTags }.distinct(),
             downloads = all.flatMap { it.downloads }.distinctBy { it.trackId },
         )
     }

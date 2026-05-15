@@ -23,9 +23,16 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
 import io.ktor.http.URLBuilder
 import io.ktor.http.appendPathSegments
+import io.ktor.http.encodeURLParameter
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
@@ -134,11 +141,15 @@ class PlexClient(
         val response = plexGet<PlexMediaContainerResponse>(server, token, "/library/sections/${library.key}/all")
         val fromDirectories = response.mediaContainer.directories.map {
             Artist(
-                id = it.key,
+                id = it.ratingKey ?: it.key.ratingKeyFromMetadataPath() ?: it.key,
                 title = it.title,
                 thumbUrl = it.thumb?.let { thumb -> server.assetUrl(thumb, token) },
                 albumCount = it.leafCount ?: 0,
                 dateAddedMs = it.addedAt?.times(1000L),
+                genre = it.primaryGenreTag(),
+                mood = it.primaryMoodTag(),
+                style = it.primaryStyleTag(),
+                rating = it.userRating.toStarRating(),
             )
         }
         val meta = response.mediaContainer.metadata
@@ -153,6 +164,10 @@ class PlexClient(
                 thumbUrl = item.thumb?.let { thumb -> server.assetUrl(thumb, token) },
                 albumCount = item.leafCount ?: 0,
                 dateAddedMs = item.addedAt?.times(1000L),
+                genre = item.primaryGenreTag(),
+                mood = item.primaryMoodTag(),
+                style = item.primaryStyleTag(),
+                rating = item.userRating.toStarRating(),
             )
         }
         return (fromDirectories + fromMetadata).distinctBy { it.id }
@@ -160,7 +175,24 @@ class PlexClient(
 
     suspend fun albums(server: PlexServer, library: MusicLibrary, token: String): List<Album> {
         val response = plexGet<PlexMediaContainerResponse>(server, token, "/library/sections/${library.key}/albums")
-        return response.mediaContainer.metadata.map {
+        val fromDirectories = response.mediaContainer.directories.mapNotNull {
+            val id = it.ratingKey ?: it.key.ratingKeyFromMetadataPath()
+            id?.let { albumId ->
+                Album(
+                    id = albumId,
+                    title = it.title,
+                    artist = it.parentTitle ?: "Unknown artist",
+                    year = it.year,
+                    thumbUrl = it.thumb?.let { thumb -> server.assetUrl(thumb, token) },
+                    dateAddedMs = it.addedAt?.times(1000L),
+                    genre = it.primaryGenreTag(),
+                    mood = it.primaryMoodTag(),
+                    style = it.primaryStyleTag(),
+                    rating = it.userRating.toStarRating(),
+                )
+            }
+        }
+        val fromMetadata = response.mediaContainer.metadata.map {
             Album(
                 id = it.ratingKey,
                 title = it.title,
@@ -168,8 +200,13 @@ class PlexClient(
                 year = it.year,
                 thumbUrl = it.thumb?.let { thumb -> server.assetUrl(thumb, token) },
                 dateAddedMs = it.addedAt?.times(1000L),
+                genre = it.primaryGenreTag(),
+                mood = it.primaryMoodTag(),
+                style = it.primaryStyleTag(),
+                rating = it.userRating.toStarRating(),
             )
         }
+        return (fromDirectories + fromMetadata).distinctBy { it.id }
     }
 
     suspend fun playlists(server: PlexServer, token: String): List<Playlist> {
@@ -181,6 +218,7 @@ class PlexClient(
                 trackCount = it.leafCount ?: 0,
                 key = it.key,
                 thumbUrl = it.thumb?.let { thumb -> server.assetUrl(thumb, token) },
+                rating = it.userRating.toStarRating(),
             )
         }
     }
@@ -196,6 +234,158 @@ class PlexClient(
     suspend fun children(server: PlexServer, parentKey: String, token: String): List<Track> {
         val response = plexGet<PlexMediaContainerResponse>(server, token, "/library/metadata/$parentKey/children")
         return response.mediaContainer.metadata.mapNotNull { it.toTrack(server, token) }
+    }
+
+    suspend fun artistDetails(server: PlexServer, ratingKey: String, token: String): Artist? {
+        val item = metadataDetails(server, ratingKey, token).firstOrNull() ?: return null
+        return Artist(
+            id = item.ratingKey,
+            title = item.title,
+            thumbUrl = item.thumb?.let { thumb -> server.assetUrl(thumb, token) },
+            albumCount = item.leafCount ?: 0,
+            dateAddedMs = item.addedAt?.times(1000L),
+            genre = item.primaryGenreTag(),
+            mood = item.primaryMoodTag(),
+            style = item.primaryStyleTag(),
+            rating = item.userRating.toStarRating(),
+        )
+    }
+
+    suspend fun albumDetails(server: PlexServer, ratingKey: String, token: String): Album? {
+        val item = metadataDetails(server, ratingKey, token).firstOrNull() ?: return null
+        return Album(
+            id = item.ratingKey,
+            title = item.title,
+            artist = item.parentTitle ?: "Unknown artist",
+            year = item.year,
+            thumbUrl = item.thumb?.let { thumb -> server.assetUrl(thumb, token) },
+            dateAddedMs = item.addedAt?.times(1000L),
+            genre = item.primaryGenreTag(),
+            mood = item.primaryMoodTag(),
+            style = item.primaryStyleTag(),
+            rating = item.userRating.toStarRating(),
+        )
+    }
+
+    suspend fun collectionFilterChoices(
+        server: PlexServer,
+        library: MusicLibrary,
+        target: PlexCollectionTarget,
+        facet: PlexCollectionFacet,
+        token: String,
+    ): List<PlexFilterChoice> {
+        val field = facet.filterField
+        val type = target.typeId
+        val discoveredPath = discoverCollectionFilterPath(server, library, target, facet, token)
+        val paths = listOfNotNull(
+            discoveredPath,
+            "/library/sections/${library.key}/${target.libtype}.$field?type=$type",
+            "/library/sections/${library.key}/$field?type=$type",
+            "/library/sections/${library.key}/$field",
+        ).distinct()
+        PhoebeLog.d("PlexCollections") {
+            "filter paths target=${target.name} facet=${facet.name} discovered=$discoveredPath candidates=$paths"
+        }
+        for (path in paths) {
+            val choiceField = path.filterFieldFromCollectionPath() ?: field
+            val choices = runCatching {
+                val body = plexGetRaw(server, token, path)
+                val response = PlexJson.decodeFromString(PlexMediaContainerResponse.serializer(), body)
+                PhoebeLog.d("PlexCollections") {
+                    "filter choices raw path=$path dirs=${response.mediaContainer.directories.size} meta=${response.mediaContainer.metadata.size} bodyPrefix=${body.take(360)}"
+                }
+                response.mediaContainer.directories.mapNotNull { it.toFilterChoice(choiceField, library.key, type) }
+            }.onFailure { error ->
+                PhoebeLog.d("PlexCollections") {
+                    "filter choices failed target=${target.name} facet=${facet.name} path=$path error=${error.message}"
+                }
+            }.getOrDefault(emptyList())
+            PhoebeLog.d("PlexCollections") {
+                "filter choices path=$path count=${choices.size} sample=${choices.take(5).map { "${it.title}:${it.key}:${it.fastKey}" }}"
+            }
+            if (choices.isNotEmpty()) return choices.distinctBy { it.key to it.title }
+        }
+        return emptyList()
+    }
+
+    suspend fun collectionFilterItems(
+        server: PlexServer,
+        library: MusicLibrary,
+        target: PlexCollectionTarget,
+        facet: PlexCollectionFacet,
+        choice: PlexFilterChoice,
+        token: String,
+    ): List<String> {
+        val field = choice.filterField?.takeIf { it.isNotBlank() } ?: facet.filterField
+        val scopedFields = when (target) {
+            PlexCollectionTarget.Artists -> listOf("artist.${facet.filterField}", "album.${facet.filterField}", "track.${facet.filterField}")
+            PlexCollectionTarget.Albums -> listOf("album.${facet.filterField}", "track.${facet.filterField}")
+        }
+        val fields = (listOf(field) + scopedFields + facet.filterField).distinct()
+        val normalizedKey = choice.key.filterChoiceValue()
+        val values = listOf(normalizedKey, choice.key, choice.title)
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+        val typedPaths = fields.flatMap { candidateField ->
+            values.flatMap { candidateValue ->
+                val encoded = candidateValue.encodeURLParameter()
+                buildList {
+                    add("/library/sections/${library.key}/all?type=${target.typeId}&$candidateField=$encoded")
+                    add("/library/sections/${library.key}/${target.libtype}s?$candidateField=$encoded")
+                    if (target == PlexCollectionTarget.Albums && candidateField.isTrackCollectionField(facet)) {
+                        add("/library/sections/${library.key}/all?type=10&$candidateField=$encoded")
+                        if (candidateField.startsWith("track.")) {
+                            add("/library/sections/${library.key}/all?type=10&${facet.filterField}=$encoded")
+                        }
+                    }
+                }
+            }
+        }
+        val paths = (
+            typedPaths +
+                listOfNotNull(choice.fastKey?.takeIf { it.isNotBlank() && it.isTypedCollectionFastKey(target) })
+            ).distinct()
+        for (path in paths) {
+            val items = collectionFilterItemsAtPath(server, target, facet, choice, token, path)
+            if (items.isNotEmpty()) return items
+        }
+        PhoebeLog.d("PlexCollections") {
+            "filter items exhausted target=${target.name} facet=${facet.name} choice='${choice.title}' paths=$paths"
+        }
+        return emptyList()
+    }
+
+    private suspend fun collectionFilterItemsAtPath(
+        server: PlexServer,
+        target: PlexCollectionTarget,
+        facet: PlexCollectionFacet,
+        choice: PlexFilterChoice,
+        token: String,
+        path: String,
+    ): List<String> {
+        val response = runCatching {
+            plexGet<PlexMediaContainerResponse>(server, token, path)
+        }.onFailure { error ->
+            PhoebeLog.d("PlexCollections") {
+                "filter items failed target=${target.name} facet=${facet.name} choice='${choice.title}' path=$path error=${error.message}"
+            }
+        }.getOrNull() ?: return emptyList()
+        val items = when (target) {
+            PlexCollectionTarget.Artists -> response.mediaContainer.directories.mapNotNull { it.ratingKey ?: it.key.ratingKeyFromMetadataPath() ?: it.key.takeIf { key -> key.isNotBlank() } } +
+                response.mediaContainer.metadata.mapNotNull { it.ratingKey.takeIf { key -> key.isNotBlank() } }
+            PlexCollectionTarget.Albums -> response.mediaContainer.directories.mapNotNull { it.ratingKey ?: it.key.ratingKeyFromMetadataPath() } +
+                response.mediaContainer.metadata.mapNotNull { item ->
+                    when (item.type) {
+                        "track" -> item.parentRatingKey
+                        else -> item.ratingKey
+                    }?.takeIf { key -> key.isNotBlank() }
+                }
+        }.distinct()
+        PhoebeLog.d("PlexCollections") {
+            "filter items path=$path target=${target.name} facet=${facet.name} choice='${choice.title}' dirs=${response.mediaContainer.directories.size} meta=${response.mediaContainer.metadata.size} items=${items.size} sample=$items"
+        }
+        return items
     }
 
     suspend fun playbackHistoryPage(
@@ -434,6 +624,30 @@ class PlexClient(
         }
     }
 
+    suspend fun rateItem(
+        server: PlexServer,
+        token: String,
+        ratingKey: String,
+        rating: Float?,
+    ) {
+        val plexRating = rating.toPlexRating()
+        val response = withReachableBase(server) { base ->
+            httpClient.put("$base/:/rate") {
+                plexServerAuth(token)
+                header(HttpHeaders.Accept, "application/json")
+                parameter("identifier", LibraryIdentifier)
+                parameter("key", ratingKey)
+                parameter("rating", plexRating)
+            }
+        }
+        val body = response.bodyAsText()
+        if (!response.status.isSuccess()) {
+            PhoebeLog.d("PlexClient") { "rateItem failed for '$ratingKey' → HTTP ${response.status.value}: $body" }
+            error("Plex rating sync failed (${response.status.value}): $body")
+        }
+        PhoebeLog.v("PlexClient") { "rateItem ok for '$ratingKey' (${response.status.value}): ${body.take(200)}" }
+    }
+
     /**
      * Report playback position to Plex so the server can mark items played and scrobble to
      * linked services (e.g. ListenBrainz). Clients must hit this on state changes and
@@ -635,11 +849,84 @@ class PlexClient(
             response.body()
         }
 
+    private suspend fun metadataDetails(server: PlexServer, ratingKey: String, token: String): List<PlexMetadataDto> {
+        val response = plexGet<PlexMediaContainerResponse>(server, token, "/library/metadata/$ratingKey")
+        return response.mediaContainer.metadata
+    }
+
+    private suspend fun discoverCollectionFilterPath(
+        server: PlexServer,
+        library: MusicLibrary,
+        target: PlexCollectionTarget,
+        facet: PlexCollectionFacet,
+        token: String,
+    ): String? {
+        val scopedField = "${target.libtype}.${facet.filterField}"
+        val wanted = setOf(scopedField, facet.filterField)
+        val paths = listOf(
+            "/library/sections/${library.key}/filters?type=${target.typeId}",
+            "/library/sections/${library.key}?includeDetails=1",
+            "/library/sections/${library.key}/all?includeMeta=1&includeAdvanced=1&X-Plex-Container-Start=0&X-Plex-Container-Size=0",
+        )
+        for (path in paths) {
+            val body = runCatching { plexGetRaw(server, token, path) }.getOrNull()
+            if (body == null) {
+                PhoebeLog.d("PlexCollections") {
+                    "discover target=${target.name} facet=${facet.name} path=$path failed"
+                }
+                continue
+            }
+            val root = runCatching { PlexJson.parseToJsonElement(body) }.getOrNull() ?: continue
+            val mediaContainer = root.jsonObjectOrNull()?.get("MediaContainer") ?: root
+            val typeObjects = mediaContainer.walkObjects().filter { obj ->
+                obj.stringValue("type") == target.libtype && obj.containsKey("Filter")
+            }.toList()
+            val candidates = typeObjects.ifEmpty { mediaContainer.walkObjects().toList() }
+            val filters = candidates
+                .asSequence()
+                .flatMap { it.walkObjects() }
+                .filter { obj ->
+                    obj.stringValue("filter") in wanted &&
+                        obj.stringValue("key")?.startsWith("/library/sections/${library.key}/") == true
+                }
+                .toList()
+            val discovered = (
+                filters.firstOrNull { it.stringValue("filter") == scopedField } ?: filters.firstOrNull()
+                )?.stringValue("key")
+            PhoebeLog.d("PlexCollections") {
+                val filters = candidates
+                    .asSequence()
+                    .flatMap { it.walkObjects() }
+                    .mapNotNull { obj -> obj.stringValue("filter")?.let { filter -> "$filter -> ${obj.stringValue("key")}" } }
+                    .take(24)
+                    .toList()
+                "discover target=${target.name} facet=${facet.name} path=$path typeObjects=${typeObjects.size} wanted=$wanted discovered=$discovered filters=$filters bodyPrefix=${body.take(240)}"
+            }
+            if (discovered != null) return discovered
+        }
+        return null
+    }
+
+    private suspend fun plexGetRaw(server: PlexServer, token: String, path: String): String =
+        withReachableBase(server) { base ->
+            val response = httpClient.get("$base$path") {
+                plexServerAuth(token)
+                header(HttpHeaders.Accept, "application/json")
+            }
+            val body = response.bodyAsText()
+            if (!response.status.isSuccess()) {
+                error("Plex GET $path failed (${response.status.value}) via $base: ${body.take(200)}")
+            }
+            body
+        }
+
     private fun PlexMetadataDto.toTrack(server: PlexServer, token: String): Track? {
         val mediaItem = media.firstOrNull() ?: return null
         val part = mediaItem.parts.firstOrNull() ?: return null
         val streamUrl = server.assetUrl(part.key, token)
-        val genre = genreTags?.firstOrNull()?.tag?.takeIf { it.isNotBlank() }
+        val genre = primaryGenreTag()
+        val mood = primaryMoodTag()
+        val style = primaryStyleTag()
         val bitrateRaw = mediaItem.bitrate
         val bitrateKbps = bitrateRaw?.let { raw ->
             when {
@@ -660,10 +947,13 @@ class PlexClient(
             thumbUrl = (thumb ?: parentThumb ?: grandparentThumb)?.let { server.assetUrl(it, token) },
             year = year ?: parentYear,
             genre = genre,
+            mood = mood,
+            style = style,
             filepath = part.file,
             audioCodec = mediaItem.audioCodec?.takeIf { it.isNotBlank() },
             bitrateKbps = bitrateKbps,
             dateAddedMs = addedAt?.times(1000L),
+            rating = userRating.toStarRating(),
             playlistItemId = playlistItemId,
             parentAlbumId = parentRatingKey,
         )
@@ -728,6 +1018,125 @@ class PlexClient(
         }
     }
 }
+
+private fun Double?.toStarRating(): Float? =
+    this?.div(2.0)
+        ?.toFloat()
+        ?.coerceIn(0f, 5f)
+        ?.let { (kotlin.math.round(it * 2f) / 2f).takeIf { rounded -> rounded > 0f } }
+
+private fun PlexMetadataDto.primaryGenreTag(): String? = genreTags.primaryTag()
+
+private fun PlexMetadataDto.primaryMoodTag(): String? = moodTags.primaryTag()
+
+private fun PlexMetadataDto.primaryStyleTag(): String? = styleTags.primaryTag()
+
+private fun PlexDirectoryDto.primaryGenreTag(): String? = genreTags.primaryTag()
+
+private fun PlexDirectoryDto.primaryMoodTag(): String? = moodTags.primaryTag()
+
+private fun PlexDirectoryDto.primaryStyleTag(): String? = styleTags.primaryTag()
+
+private fun List<PlexGenreTagDto>?.primaryTag(): String? =
+    this?.firstNotNullOfOrNull { tag ->
+        tag.tag?.trim()?.takeIf { it.isNotBlank() }
+    }
+
+private fun PlexDirectoryDto.toFilterChoice(field: String, libraryKey: String, typeId: Int): PlexFilterChoice? {
+    val cleanTitle = title.trim().takeIf { it.isNotBlank() } ?: return null
+    val cleanKey = key.trim().takeIf { it.isNotBlank() } ?: cleanTitle
+    val pathKey = cleanKey.takeIf { it.startsWith("/library/sections/") }
+    val choiceKey = (pathKey?.queryValueFor(field) ?: cleanKey).filterChoiceValue()
+    return PlexFilterChoice(
+        key = choiceKey,
+        title = cleanTitle,
+        fastKey = fastKey ?: pathKey ?: "/library/sections/$libraryKey/all?type=$typeId&$field=${choiceKey.encodeURLParameter()}",
+        filterField = field,
+    )
+}
+
+private fun String.queryValueFor(field: String): String? {
+    val query = substringAfter('?', missingDelimiterValue = "")
+    if (query.isBlank()) return null
+    val fieldSuffix = field.substringAfterLast('.')
+    return query
+        .split('&')
+        .firstNotNullOfOrNull { part ->
+            val name = part.substringBefore('=')
+            val value = part.substringAfter('=', missingDelimiterValue = "")
+            value.takeIf { it.isNotBlank() && (name == field || name == fieldSuffix) }
+        }
+}
+
+private fun String.filterChoiceValue(): String =
+    trim()
+        .substringAfterLast('=')
+        .substringBefore('&')
+        .trim()
+
+private fun String.filterFieldFromCollectionPath(): String? =
+    substringAfterLast('/')
+        .substringBefore('?')
+        .takeIf { it.isNotBlank() && it != "all" }
+
+private fun String.ratingKeyFromMetadataPath(): String? =
+    trim('/')
+        .split('/')
+        .dropWhile { it != "metadata" }
+        .drop(1)
+        .firstOrNull()
+        ?.takeIf { it.isNotBlank() }
+
+private fun JsonElement.walkObjects(): Sequence<JsonObject> = sequence {
+    when (val element = this@walkObjects) {
+        is JsonObject -> {
+            yield(element)
+            element.values.forEach { child ->
+                yieldAll(child.walkObjects())
+            }
+        }
+        is JsonArray -> element.forEach { child ->
+            yieldAll(child.walkObjects())
+        }
+        else -> Unit
+    }
+}
+
+private fun JsonElement.jsonObjectOrNull(): JsonObject? = this as? JsonObject
+
+private fun JsonObject.stringValue(key: String): String? =
+    (this[key] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+
+private fun String.isTrackCollectionField(facet: PlexCollectionFacet): Boolean =
+    this == facet.filterField || this == "track.${facet.filterField}"
+
+private fun String.isTypedCollectionFastKey(target: PlexCollectionTarget): Boolean =
+    contains("type=${target.typeId}") || contains("/${target.libtype}s?")
+
+enum class PlexCollectionTarget(val typeId: Int, val libtype: String) {
+    Artists(8, "artist"),
+    Albums(9, "album"),
+}
+
+enum class PlexCollectionFacet(val filterField: String) {
+    Mood("mood"),
+    Style("style"),
+    Genre("genre"),
+}
+
+data class PlexFilterChoice(
+    val key: String,
+    val title: String,
+    val fastKey: String?,
+    val filterField: String? = null,
+)
+
+private fun Float?.toPlexRating(): Double =
+    this?.coerceIn(0f, 5f)
+        ?.let { kotlin.math.round(it * 2f) / 2f }
+        ?.times(2f)
+        ?.toDouble()
+        ?: 0.0
 
 data class PlexTrackPage(
     val tracks: List<Track>,

@@ -19,6 +19,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import javax.sound.sampled.LineEvent
 import javax.sound.sampled.AudioFormat
 import javax.sound.sampled.AudioInputStream
 import javax.sound.sampled.AudioSystem
@@ -388,6 +389,16 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
                 throw e
             }
             applyVolumeToClip(clip, effectiveOutputVolume())
+            val generation = activePlayGeneration
+            clip.addLineListener { event ->
+                if (event.type == LineEvent.Type.STOP &&
+                    isPlayRequestCurrent(generation) &&
+                    clip.microsecondLength > 0L &&
+                    clip.microsecondPosition >= clip.microsecondLength
+                ) {
+                    next()
+                }
+            }
             clip.start()
             clip
         }.getOrElse { e ->
@@ -466,6 +477,12 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
                     mediaPlayer.volume = effectiveOutputVolume().toDouble().coerceIn(0.0, 1.0)
                     mediaPlayer.setOnError {
                         PhoebeLog.d("DesktopAudioPlayer") { "playback error: ${mediaPlayer.error?.message}" }
+                    }
+                    val generation = activePlayGeneration
+                    mediaPlayer.setOnEndOfMedia {
+                        if (isPlayRequestCurrent(generation)) {
+                            next()
+                        }
                     }
                     media.setOnError {
                         PhoebeLog.d("DesktopAudioPlayer") { "media error: ${media.error?.message}" }

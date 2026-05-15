@@ -1,9 +1,13 @@
 package com.phoebe.app
 
 import com.phoebe.app.data.PlexClient
+import com.phoebe.app.data.PlexCollectionFacet
+import com.phoebe.app.data.PlexCollectionTarget
 import com.phoebe.app.data.PlexDeviceDto
 import com.phoebe.app.data.PlexMediaContainerResponse
+import com.phoebe.app.domain.MusicLibrary
 import com.phoebe.app.domain.PlexServer
+import com.phoebe.app.sources.PlexCatalogBuilder
 import com.phoebe.app.testing.testHttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -148,5 +152,850 @@ class PlexMappingTest {
         val track = client.children(PlexServer("server", "Plex", "https://plex.example", owned = true), "a1", "token").single()
 
         assertEquals(1_700_000_200_000L, track.dateAddedMs)
+    }
+
+    @Test
+    fun mapsPlexUserRatingOntoTrackStars() = runTest {
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/library/metadata/a1/children" -> respond(
+                    content = """
+                        {
+                          "MediaContainer": {
+                            "Metadata": [
+                              {
+                                "ratingKey": "t1",
+                                "title": "Rated Song",
+                                "grandparentTitle": "Artist One",
+                                "parentTitle": "Album One",
+                                "duration": 1000,
+                                "userRating": 7.0,
+                                "Media": [
+                                  { "Part": [ { "key": "/library/parts/t1/file.mp3", "file": "file.mp3" } ] }
+                                ]
+                              }
+                            ]
+                          }
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val client = PlexClient(testHttpClient(engine))
+        val track = client.children(PlexServer("server", "Plex", "https://plex.example", owned = true), "a1", "token").single()
+
+        assertEquals(3.5f, track.rating)
+    }
+
+    @Test
+    fun mapsPlexMoodAndStyleOntoTracks() = runTest {
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/library/metadata/a1/children" -> respond(
+                    content = """
+                        {
+                          "MediaContainer": {
+                            "Metadata": [
+                              {
+                                "ratingKey": "t1",
+                                "title": "Tagged Song",
+                                "grandparentTitle": "Artist One",
+                                "parentTitle": "Album One",
+                                "duration": 1000,
+                                "Genre": [ { "tag": "Dream pop" } ],
+                                "Mood": [ { "tag": "Late night" } ],
+                                "Style": [ { "tag": "Shoegaze" } ],
+                                "Media": [
+                                  { "Part": [ { "key": "/library/parts/t1/file.mp3", "file": "file.mp3" } ] }
+                                ]
+                              }
+                            ]
+                          }
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val client = PlexClient(testHttpClient(engine))
+        val track = client.children(PlexServer("server", "Plex", "https://plex.example", owned = true), "a1", "token").single()
+
+        assertEquals("Dream pop", track.genre)
+        assertEquals("Late night", track.mood)
+        assertEquals("Shoegaze", track.style)
+    }
+
+    @Test
+    fun mapsPlexMoodAndStyleOntoAlbums() = runTest {
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/library/sections/1/albums" -> respond(
+                    content = """
+                        {
+                          "MediaContainer": {
+                            "Directory": [
+                              {
+                                "ratingKey": "a1",
+                                "key": "/library/metadata/a1/children",
+                                "title": "Tagged Album",
+                                "type": "album",
+                                "parentTitle": "Artist One",
+                                "Genre": [ { "tag": "Dream pop" } ],
+                                "Mood": [ { "tag": "Late night" } ],
+                                "Style": [ { "tag": "Shoegaze" } ]
+                              }
+                            ]
+                          }
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val client = PlexClient(testHttpClient(engine))
+        val album = client.albums(
+            PlexServer("server", "Plex", "https://plex.example", owned = true),
+            MusicLibrary("1", "Music"),
+            "token",
+        ).single()
+
+        assertEquals("Dream pop", album.genre)
+        assertEquals("Late night", album.mood)
+        assertEquals("Shoegaze", album.style)
+    }
+
+    @Test
+    fun mapsPlexMoodAndStyleOntoArtistsFromMetadata() = runTest {
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/library/sections/1/all" -> respond(
+                    content = """
+                        {
+                          "MediaContainer": {
+                            "Directory": [
+                              {
+                                "ratingKey": "ar1",
+                                "key": "/library/metadata/ar1/children",
+                                "title": "Artist One",
+                                "type": "artist",
+                                "Genre": [ { "tag": "Dream pop" } ],
+                                "Mood": [ { "tag": "Late night" } ],
+                                "Style": [ { "tag": "Shoegaze" } ]
+                              }
+                            ]
+                          }
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val client = PlexClient(testHttpClient(engine))
+        val artist = client.artists(
+            PlexServer("server", "Plex", "https://plex.example", owned = true),
+            MusicLibrary("1", "Music"),
+            "token",
+        ).single()
+
+        assertEquals("Dream pop", artist.genre)
+        assertEquals("Late night", artist.mood)
+        assertEquals("Shoegaze", artist.style)
+    }
+
+    @Test
+    fun mapsPlexMoodAndStyleFromArtistAndAlbumDetails() = runTest {
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/library/metadata/ar1" -> respond(
+                    content = """
+                        {
+                          "MediaContainer": {
+                            "Metadata": [
+                              {
+                                "ratingKey": "ar1",
+                                "title": "Artist One",
+                                "type": "artist",
+                                "Mood": [ { "tag": "Late night" } ],
+                                "Style": [ { "tag": "Shoegaze" } ]
+                              }
+                            ]
+                          }
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+                "/library/metadata/a1" -> respond(
+                    content = """
+                        {
+                          "MediaContainer": {
+                            "Metadata": [
+                              {
+                                "ratingKey": "a1",
+                                "title": "Album One",
+                                "parentTitle": "Artist One",
+                                "type": "album",
+                                "Mood": [ { "tag": "Reflective" } ],
+                                "Style": [ { "tag": "Acid Jazz" } ]
+                              }
+                            ]
+                          }
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val client = PlexClient(testHttpClient(engine))
+        val server = PlexServer("server", "Plex", "https://plex.example", owned = true)
+
+        val artist = client.artistDetails(server, "ar1", "token")
+        val album = client.albumDetails(server, "a1", "token")
+
+        assertEquals("Late night", artist?.mood)
+        assertEquals("Shoegaze", artist?.style)
+        assertEquals("Reflective", album?.mood)
+        assertEquals("Acid Jazz", album?.style)
+    }
+
+    @Test
+    fun mapsPlexCollectionFilterChoicesToItems() = runTest {
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/library/sections/1/style" -> respond(
+                    content = """
+                        {
+                          "MediaContainer": {
+                            "Directory": [
+                              {
+                                "key": "42",
+                                "title": "Acid Jazz",
+                                "fastKey": "/library/sections/1/all?type=9&style=42"
+                              }
+                            ]
+                          }
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+                "/library/sections/1/all" -> respond(
+                    content = """
+                        {
+                          "MediaContainer": {
+                            "Directory": [
+                              {
+                                "ratingKey": "a1",
+                                "key": "/library/metadata/a1/children",
+                                "title": "Tagged Album",
+                                "type": "album",
+                                "parentTitle": "Artist One"
+                              }
+                            ]
+                          }
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val client = PlexClient(testHttpClient(engine))
+        val server = PlexServer("server", "Plex", "https://plex.example", owned = true)
+        val library = MusicLibrary("1", "Music")
+
+        val choice = client.collectionFilterChoices(server, library, PlexCollectionTarget.Albums, PlexCollectionFacet.Style, "token").single()
+        val items = client.collectionFilterItems(server, library, PlexCollectionTarget.Albums, PlexCollectionFacet.Style, choice, "token")
+
+        assertEquals("Acid Jazz", choice.title)
+        assertEquals(listOf("a1"), items)
+    }
+
+    @Test
+    fun mapsPlexFilterChoicePathKeyToItems() = runTest {
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/library/sections/1/style" -> respond(
+                    content = """
+                        {
+                          "MediaContainer": {
+                            "Directory": [
+                              {
+                                "key": "/library/sections/1/all?type=9&style=42",
+                                "title": "Acid Jazz"
+                              }
+                            ]
+                          }
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+                "/library/sections/1/all" -> respond(
+                    content = """
+                        {
+                          "MediaContainer": {
+                            "Directory": [
+                              {
+                                "ratingKey": "a1",
+                                "key": "/library/metadata/a1/children",
+                                "title": "Tagged Album",
+                                "type": "album",
+                                "parentTitle": "Artist One"
+                              }
+                            ]
+                          }
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val client = PlexClient(testHttpClient(engine))
+        val server = PlexServer("server", "Plex", "https://plex.example", owned = true)
+        val library = MusicLibrary("1", "Music")
+
+        val choice = client.collectionFilterChoices(server, library, PlexCollectionTarget.Albums, PlexCollectionFacet.Style, "token").single()
+        val items = client.collectionFilterItems(server, library, PlexCollectionTarget.Albums, PlexCollectionFacet.Style, choice, "token")
+
+        assertEquals("42", choice.key)
+        assertEquals(listOf("a1"), items)
+    }
+
+    @Test
+    fun mapsPlexAlbumScopedFilterChoiceToItems() = runTest {
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/library/sections/1/album.style" -> respond(
+                    content = """
+                        {
+                          "MediaContainer": {
+                            "Directory": [
+                              {
+                                "key": "42",
+                                "title": "Acid Jazz"
+                              }
+                            ]
+                          }
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+                "/library/sections/1/all" -> {
+                    if (request.url.parameters["album.style"] == "42") {
+                        respond(
+                            content = """
+                                {
+                                  "MediaContainer": {
+                                    "Directory": [
+                                      {
+                                        "ratingKey": "a1",
+                                        "key": "/library/metadata/a1/children",
+                                        "title": "Tagged Album",
+                                        "type": "album",
+                                        "parentTitle": "Artist One"
+                                      }
+                                    ]
+                                  }
+                                }
+                            """.trimIndent(),
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    } else {
+                        respond("", HttpStatusCode.NotFound)
+                    }
+                }
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val client = PlexClient(testHttpClient(engine))
+        val server = PlexServer("server", "Plex", "https://plex.example", owned = true)
+        val library = MusicLibrary("1", "Music")
+
+        val choice = client.collectionFilterChoices(server, library, PlexCollectionTarget.Albums, PlexCollectionFacet.Style, "token").single()
+        val items = client.collectionFilterItems(server, library, PlexCollectionTarget.Albums, PlexCollectionFacet.Style, choice, "token")
+
+        assertEquals("42", choice.key)
+        assertEquals("album.style", choice.filterField)
+        assertEquals(listOf("a1"), items)
+    }
+
+    @Test
+    fun mapsPlexAlbumMoodFilterChoiceByTitleWhenKeyDoesNotResolve() = runTest {
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/library/sections/1/album.mood" -> respond(
+                    content = """
+                        {
+                          "MediaContainer": {
+                            "Directory": [
+                              {
+                                "key": "999",
+                                "title": "Angry"
+                              }
+                            ]
+                          }
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+                "/library/sections/1/all" -> {
+                    if (request.url.parameters["album.mood"] == "Angry") {
+                        respond(
+                            content = """
+                                {
+                                  "MediaContainer": {
+                                    "Metadata": [
+                                      {
+                                        "ratingKey": "a1",
+                                        "title": "Tagged Album",
+                                        "type": "album",
+                                        "parentTitle": "Artist One"
+                                      }
+                                    ]
+                                  }
+                                }
+                            """.trimIndent(),
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    } else {
+                        respond("""{ "MediaContainer": { "Metadata": [] } }""", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+                    }
+                }
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val client = PlexClient(testHttpClient(engine))
+        val server = PlexServer("server", "Plex", "https://plex.example", owned = true)
+        val library = MusicLibrary("1", "Music")
+
+        val choice = client.collectionFilterChoices(server, library, PlexCollectionTarget.Albums, PlexCollectionFacet.Mood, "token").single()
+        val items = client.collectionFilterItems(server, library, PlexCollectionTarget.Albums, PlexCollectionFacet.Mood, choice, "token")
+
+        assertEquals("999", choice.key)
+        assertEquals("album.mood", choice.filterField)
+        assertEquals(listOf("a1"), items)
+    }
+
+    @Test
+    fun normalizesPlexFilterExpressionChoiceKeys() = runTest {
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/library/sections/1/mood" -> respond(
+                    content = """
+                        {
+                          "MediaContainer": {
+                            "Directory": [
+                              {
+                                "key": "mood=999",
+                                "title": "Angry"
+                              }
+                            ]
+                          }
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+                "/library/sections/1/all" -> {
+                    if (request.url.parameters["mood"] == "999") {
+                        respond(
+                            content = """
+                                {
+                                  "MediaContainer": {
+                                    "Metadata": [
+                                      {
+                                        "ratingKey": "a1",
+                                        "title": "Tagged Album",
+                                        "type": "album"
+                                      }
+                                    ]
+                                  }
+                                }
+                            """.trimIndent(),
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    } else {
+                        respond("""{ "MediaContainer": { "Metadata": [] } }""", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+                    }
+                }
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val client = PlexClient(testHttpClient(engine))
+        val server = PlexServer("server", "Plex", "https://plex.example", owned = true)
+        val library = MusicLibrary("1", "Music")
+
+        val choice = client.collectionFilterChoices(server, library, PlexCollectionTarget.Albums, PlexCollectionFacet.Mood, "token").single()
+        val items = client.collectionFilterItems(server, library, PlexCollectionTarget.Albums, PlexCollectionFacet.Mood, choice, "token")
+
+        assertEquals("999", choice.key)
+        assertEquals(listOf("a1"), items)
+    }
+
+    @Test
+    fun mapsPlexAlbumMoodTrackResultsToParentAlbums() = runTest {
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/library/sections/1/album.mood" -> respond(
+                    content = """
+                        {
+                          "MediaContainer": {
+                            "Directory": [
+                              {
+                                "key": "999",
+                                "title": "Angry"
+                              }
+                            ]
+                          }
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+                "/library/sections/1/all" -> {
+                    if (request.url.parameters["album.mood"] == "Angry") {
+                        respond(
+                            content = """
+                                {
+                                  "MediaContainer": {
+                                    "Metadata": [
+                                      {
+                                        "ratingKey": "t1",
+                                        "type": "track",
+                                        "title": "Angry Song",
+                                        "parentRatingKey": "a1",
+                                        "parentTitle": "Tagged Album"
+                                      }
+                                    ]
+                                  }
+                                }
+                            """.trimIndent(),
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    } else {
+                        respond("""{ "MediaContainer": { "Metadata": [] } }""", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+                    }
+                }
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val client = PlexClient(testHttpClient(engine))
+        val server = PlexServer("server", "Plex", "https://plex.example", owned = true)
+        val library = MusicLibrary("1", "Music")
+
+        val choice = client.collectionFilterChoices(server, library, PlexCollectionTarget.Albums, PlexCollectionFacet.Mood, "token").single()
+        val items = client.collectionFilterItems(server, library, PlexCollectionTarget.Albums, PlexCollectionFacet.Mood, choice, "token")
+
+        assertEquals(listOf("a1"), items)
+    }
+
+    @Test
+    fun mapsPlexTrackMoodFilterChoiceToAlbums() = runTest {
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/library/sections/1/album.mood" -> respond(
+                    content = """
+                        {
+                          "MediaContainer": {
+                            "Directory": [
+                              {
+                                "key": "999",
+                                "title": "Angry"
+                              }
+                            ]
+                          }
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+                "/library/sections/1/all" -> {
+                    if (request.url.parameters["type"] == "10" && request.url.parameters["track.mood"] == "Angry") {
+                        respond(
+                            content = """
+                                {
+                                  "MediaContainer": {
+                                    "Metadata": [
+                                      {
+                                        "ratingKey": "t1",
+                                        "type": "track",
+                                        "title": "Angry Song",
+                                        "parentRatingKey": "a1",
+                                        "parentTitle": "Tagged Album"
+                                      }
+                                    ]
+                                  }
+                                }
+                            """.trimIndent(),
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    } else {
+                        respond("""{ "MediaContainer": { "Metadata": [] } }""", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+                    }
+                }
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val client = PlexClient(testHttpClient(engine))
+        val server = PlexServer("server", "Plex", "https://plex.example", owned = true)
+        val library = MusicLibrary("1", "Music")
+
+        val choice = client.collectionFilterChoices(server, library, PlexCollectionTarget.Albums, PlexCollectionFacet.Mood, "token").single()
+        val items = client.collectionFilterItems(server, library, PlexCollectionTarget.Albums, PlexCollectionFacet.Mood, choice, "token")
+
+        assertEquals(listOf("a1"), items)
+    }
+
+    @Test
+    fun ignoresUntypedPlexAlbumMoodFastKeyBeforeTypedAlbumQuery() = runTest {
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/library/sections/1/album.mood" -> respond(
+                    content = """
+                        {
+                          "MediaContainer": {
+                            "Directory": [
+                              {
+                                "key": "50157",
+                                "title": "Acerbic",
+                                "fastKey": "/library/sections/1/all?mood=50157"
+                              }
+                            ]
+                          }
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+                "/library/sections/1/all" -> {
+                    when {
+                        request.url.parameters["type"] == "9" && request.url.parameters["mood"] == "50157" -> respond(
+                            content = """
+                                {
+                                  "MediaContainer": {
+                                    "Metadata": [
+                                      {
+                                        "ratingKey": "a1",
+                                        "title": "Album One",
+                                        "type": "album"
+                                      }
+                                    ]
+                                  }
+                                }
+                            """.trimIndent(),
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                        request.url.parameters["mood"] == "50157" -> respond(
+                            content = """
+                                {
+                                  "MediaContainer": {
+                                    "Metadata": [
+                                      {
+                                        "ratingKey": "t1",
+                                        "title": "Track One",
+                                        "type": "track",
+                                        "parentRatingKey": "a1"
+                                      }
+                                    ]
+                                  }
+                                }
+                            """.trimIndent(),
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                        else -> respond("""{ "MediaContainer": { "Metadata": [] } }""", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+                    }
+                }
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val client = PlexClient(testHttpClient(engine))
+        val server = PlexServer("server", "Plex", "https://plex.example", owned = true)
+        val library = MusicLibrary("1", "Music")
+
+        val choice = client.collectionFilterChoices(server, library, PlexCollectionTarget.Albums, PlexCollectionFacet.Mood, "token").single()
+        val items = client.collectionFilterItems(server, library, PlexCollectionTarget.Albums, PlexCollectionFacet.Mood, choice, "token")
+
+        assertEquals(listOf("a1"), items)
+    }
+
+    @Test
+    fun plexCatalogSkipsCollectionFilterValuesDuringGeneralSync() = runTest {
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/library/sections/1/all" -> when {
+                    request.url.parameters["includeMeta"] == "1" -> respond(
+                        content = """
+                            {
+                              "MediaContainer": {
+                                "Meta": {
+                                  "Type": [
+                                    {
+                                      "type": "album",
+                                      "Filter": [
+                                        {
+                                          "filter": "style",
+                                          "key": "/library/sections/1/style?type=9",
+                                          "title": "Style",
+                                          "type": "filter"
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                    request.url.parameters["style"] == "42" -> respond(
+                        content = """
+                            {
+                              "MediaContainer": {
+                                "Directory": [
+                                  {
+                                    "ratingKey": "a1",
+                                    "key": "/library/metadata/a1/children",
+                                    "title": "Tagged Album",
+                                    "type": "album",
+                                    "parentTitle": "Artist One",
+                                    "thumb": "/library/metadata/a1/thumb"
+                                  }
+                                ]
+                              }
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                    else -> respond(
+                        content = """
+                            {
+                              "MediaContainer": {
+                                "Metadata": [
+                                  {
+                                    "ratingKey": "ar1",
+                                    "title": "Artist One",
+                                    "type": "artist",
+                                    "thumb": "/library/metadata/ar1/thumb"
+                                  }
+                                ]
+                              }
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+                "/library/sections/1/albums" -> respond(
+                    content = """
+                        {
+                          "MediaContainer": {
+                            "Directory": [
+                              {
+                                "ratingKey": "a1",
+                                "key": "/library/metadata/a1/children",
+                                "title": "Tagged Album",
+                                "type": "album",
+                                "parentTitle": "Artist One",
+                                "thumb": "/library/metadata/a1/thumb"
+                              }
+                            ]
+                          }
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+                "/library/sections/1/style" -> respond(
+                    content = """
+                        {
+                          "MediaContainer": {
+                            "Directory": [
+                              {
+                                "key": "42",
+                                "title": "Acid Jazz",
+                                "fastKey": "/library/sections/1/all?type=9&style=42"
+                              }
+                            ]
+                          }
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+                "/library/metadata/ar1" -> respond(
+                    content = """{ "MediaContainer": { "Metadata": [ { "ratingKey": "ar1", "title": "Artist One", "type": "artist" } ] } }""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+                "/library/metadata/a1" -> respond(
+                    content = """{ "MediaContainer": { "Metadata": [ { "ratingKey": "a1", "title": "Tagged Album", "parentTitle": "Artist One", "type": "album" } ] } }""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+                "/library/metadata/a1/children" -> respond(
+                    content = """
+                        {
+                          "MediaContainer": {
+                            "Metadata": [
+                              {
+                                "ratingKey": "t1",
+                                "title": "Song",
+                                "grandparentTitle": "Artist One",
+                                "parentTitle": "Tagged Album",
+                                "duration": 1000,
+                                "Media": [
+                                  { "Part": [ { "key": "/library/parts/t1/file.mp3", "file": "file.mp3" } ] }
+                                ]
+                              }
+                            ]
+                          }
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+                "/playlists" -> respond(
+                    content = """{ "MediaContainer": { "Metadata": [] } }""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val httpClient = testHttpClient(engine)
+        val catalog = PlexCatalogBuilder(PlexClient(httpClient), httpClient).buildCatalog(
+            PlexServer("server", "Plex", "https://plex.example", owned = true),
+            MusicLibrary("1", "Music"),
+            "token",
+        )
+
+        assertEquals(emptyList(), catalog.collectionValues)
+        assertEquals(emptyList(), catalog.collectionTags)
     }
 }

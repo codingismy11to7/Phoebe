@@ -102,6 +102,7 @@ import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -310,7 +311,11 @@ internal fun PlayButton(
     }
     Box(
         Modifier
-            .size(size * scale)
+            .size(size)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
             .then(
                 if (enabled) {
                     Modifier.shadow(18.dp, CircleShape, ambientColor = PhoebeUi.accent.copy(alpha = 0.4f), spotColor = PhoebeUi.accent.copy(alpha = 0.38f))
@@ -325,30 +330,22 @@ internal fun PlayButton(
         contentAlignment = Alignment.Center,
     ) {
         AnimatedContent(
-            targetState = when {
-                isBuffering -> PlayButtonVisual.Loading
-                isPlaying -> PlayButtonVisual.Pause
-                else -> PlayButtonVisual.Play
-            },
+            targetState = isBuffering,
             transitionSpec = {
                 fadeIn(tween(160)) togetherWith fadeOut(tween(120))
             },
             label = "play-button-icon",
-        ) { visual ->
-            when (visual) {
-                PlayButtonVisual.Loading -> CircularProgressIndicator(
+        ) { loading ->
+            if (loading) {
+                CircularProgressIndicator(
                     modifier = Modifier.size(spinnerSize),
                     color = PhoebeUi.primaryText,
                     strokeWidth = 2.dp,
                     trackColor = PhoebeUi.primaryText.copy(alpha = 0.22f),
                 )
-                PlayButtonVisual.Pause -> PhoebeIconView(
-                    PhoebeIcon.Pause,
-                    tint = if (enabled) PhoebeUi.primaryText else PhoebeUi.mutedText.copy(alpha = 0.55f),
-                    modifier = Modifier.size(iconSize),
-                )
-                PlayButtonVisual.Play -> PhoebeIconView(
-                    PhoebeIcon.Play,
+            } else {
+                MorphingPlayPauseIcon(
+                    isPlaying = isPlaying,
                     tint = if (enabled) PhoebeUi.primaryText else PhoebeUi.mutedText.copy(alpha = 0.55f),
                     modifier = Modifier.size(iconSize),
                 )
@@ -357,11 +354,76 @@ internal fun PlayButton(
     }
 }
 
-private enum class PlayButtonVisual {
-    Loading,
-    Pause,
-    Play,
+@Composable
+private fun MorphingPlayPauseIcon(
+    isPlaying: Boolean,
+    tint: Color,
+    modifier: Modifier = Modifier,
+) {
+    val morph by animateFloatAsState(
+        targetValue = if (isPlaying) 1f else 0f,
+        animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing),
+        label = "play-pause-morph",
+    )
+
+    Canvas(modifier) {
+        val s = size.minDimension
+        fun x(value: Float) = s * value
+        fun y(value: Float) = s * value
+        fun m(start: Float, end: Float) = start + (end - start) * morph
+
+        fun morphPath(play: List<Offset>, pause: List<Offset>) {
+            val path = Path().apply {
+                val first = play.first()
+                moveTo(x(m(first.x, pause.first().x)), y(m(first.y, pause.first().y)))
+                for (index in 1 until play.size) {
+                    val p = play[index]
+                    val target = pause[index]
+                    lineTo(x(m(p.x, target.x)), y(m(p.y, target.y)))
+                }
+                close()
+            }
+            drawPath(path, tint)
+        }
+
+        morphPath(
+            play = PlayButtonLeftPlayShape,
+            pause = PlayButtonLeftPauseShape,
+        )
+        morphPath(
+            play = PlayButtonRightPlayShape,
+            pause = PlayButtonRightPauseShape,
+        )
+    }
 }
+
+private val PlayButtonLeftPlayShape = listOf(
+    Offset(0.34f, 0.22f),
+    Offset(0.55f, 0.36f),
+    Offset(0.55f, 0.64f),
+    Offset(0.34f, 0.78f),
+)
+
+private val PlayButtonLeftPauseShape = listOf(
+    Offset(0.32f, 0.22f),
+    Offset(0.44f, 0.22f),
+    Offset(0.44f, 0.78f),
+    Offset(0.32f, 0.78f),
+)
+
+private val PlayButtonRightPlayShape = listOf(
+    Offset(0.55f, 0.36f),
+    Offset(0.76f, 0.50f),
+    Offset(0.76f, 0.50f),
+    Offset(0.55f, 0.64f),
+)
+
+private val PlayButtonRightPauseShape = listOf(
+    Offset(0.56f, 0.22f),
+    Offset(0.68f, 0.22f),
+    Offset(0.68f, 0.78f),
+    Offset(0.56f, 0.78f),
+)
 
 /** Stable per-track seed so wave shape differs across library even when ids are opaque or similar. */
 internal fun trackWaveformSeed(track: Track): String =

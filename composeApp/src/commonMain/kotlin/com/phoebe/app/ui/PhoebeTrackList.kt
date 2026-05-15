@@ -250,8 +250,12 @@ internal fun ContentTrackRow(
     var menuExpanded by remember { mutableStateOf(false) }
     val cols = libraryColumns
     val likeActions = LocalLikeActions.current
+    val ratingActions = LocalRatingActions.current
+    val downloads = LocalDownloadStatus.current
     val canLike = likeActions.likesEnabled && track.canTogglePlexLike()
     val liked = likeActions.isLiked(track)
+    val rating = ratingActions.ratingFor(track)
+    val downloaded = downloads.isComplete(track)
     val techParts = remember(track.id, cols) {
         buildList {
             if (cols.audioCodec && !track.audioCodec.isNullOrBlank()) add(track.audioCodec!!)
@@ -322,13 +326,25 @@ internal fun ContentTrackRow(
                 )
                 AutoScrollingText(track.artist, color = PhoebeUi.secondaryText, fontSize = 12.sp)
                 if (track.album.isNotBlank()) {
-                    AutoScrollingText(track.album, color = PhoebeUi.mutedText, fontSize = 11.sp)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        AutoScrollingText(
+                            track.album,
+                            color = PhoebeUi.mutedText,
+                            fontSize = 11.sp,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        TrackStateBadges(
+                            liked = !cols.favorite && canLike && liked,
+                            downloaded = downloaded,
+                            iconSize = 10.dp,
+                        )
+                    }
                 }
-                if (cols.year && track.year != null) {
-                    AutoScrollingText(track.year.toString(), color = PhoebeUi.mutedText, fontSize = 11.sp)
+                if (cols.year) {
+                    AutoScrollingText(track.year?.toString() ?: "Year —", color = PhoebeUi.mutedText, fontSize = 11.sp)
                 }
-                if (cols.genre && !track.genre.isNullOrBlank()) {
-                    AutoScrollingText(track.genre!!, color = PhoebeUi.mutedText, fontSize = 11.sp)
+                if (cols.genre) {
+                    AutoScrollingText(track.genre?.takeIf { it.isNotBlank() } ?: "Genre —", color = PhoebeUi.mutedText, fontSize = 11.sp)
                 }
                 if (cols.filepath && !track.filepath.isNullOrBlank()) {
                     Text(track.filepath!!, color = PhoebeUi.mutedText, fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -367,12 +383,24 @@ internal fun ContentTrackRow(
             } else {
                 Spacer(Modifier.width(8.dp))
             }
-            TrackDownloadIndicator(track, onDownload = onDownload)
-            LikeButton(
-                liked = liked,
-                enabled = canLike,
-                onClick = { likeActions.onToggleLiked(track) },
-            )
+            if (cols.rating && ratingActions.ratingsEnabled && track.isPlexLibraryTrack()) {
+                RatingStars(
+                    rating = rating,
+                    enabled = true,
+                    onRating = { ratingActions.onRateTrack(track, it) },
+                    starSize = 11.dp,
+                )
+            }
+            if (!compactLayout) {
+                TrackDownloadIndicator(track, onDownload = onDownload)
+            }
+            if (cols.favorite) {
+                LikeButton(
+                    liked = liked,
+                    enabled = canLike,
+                    onClick = { likeActions.onToggleLiked(track) },
+                )
+            }
             Box(
                 Modifier.size(40.dp).clip(CircleShape).clickable { menuExpanded = true },
                 contentAlignment = Alignment.Center,
@@ -464,10 +492,15 @@ internal fun TrackActionMenu(
 ) {
     val actions = LocalPlaylistActions.current
     val likeActions = LocalLikeActions.current
+    val ratingActions = LocalRatingActions.current
     val metadataEditorActions = LocalMetadataEditorActions.current
     val navigationActions = LocalTrackNavigationActions.current
     val downloads = LocalDownloadStatus.current
     val downloadActions = LocalDownloadActions.current
+    val downloadItem = track?.let { downloads.itemFor(it) }
+    val downloadActive = track?.let { downloads.isActive(it) } == true
+    val downloadComplete = track?.let { downloads.isComplete(it) } == true
+    val downloadProgress = downloadItem?.progress?.coerceIn(0f, 1f) ?: 0f
     var confirmDeleteDownload by remember(track?.id) { mutableStateOf(false) }
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
         if (track != null) {
@@ -520,30 +553,67 @@ internal fun TrackActionMenu(
                     },
                 )
             }
+            if (ratingActions.ratingsEnabled && track.isPlexLibraryTrack()) {
+                DropdownMenuItem(
+                    text = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Text("Rate")
+                            RatingStars(
+                                rating = ratingActions.ratingFor(track),
+                                enabled = true,
+                                onRating = {
+                                    ratingActions.onRateTrack(track, it)
+                                    onDismiss()
+                                },
+                                starSize = 16.dp,
+                                showClear = true,
+                            )
+                        }
+                    },
+                    onClick = {},
+                )
+            }
             AddToPlaylistMenuItems(
                 track = track,
                 actions = actions,
                 onAfter = onDismiss,
             )
         }
-        if (onDownload != null && track?.let { !downloads.isActive(it) } != false) {
+        if (onDownload != null && track != null) {
             DropdownMenuItem(
                 text = {
-                    Text(
-                        if (track?.let { downloads.isComplete(it) } == true) {
-                            "Delete Download"
-                        } else {
-                            "Download Song"
-                        },
-                    )
+                    if (downloadActive) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            CircularProgressIndicator(
+                                progress = { downloadProgress },
+                                modifier = Modifier.size(16.dp),
+                                color = PhoebeUi.accentLight,
+                                strokeWidth = 2.dp,
+                            )
+                            Text(
+                                if (downloadItem?.state?.name == "Queued") "Queued" else "Downloading",
+                            )
+                            Text("${(downloadProgress * 100).toInt()}%", color = PhoebeUi.mutedText)
+                        }
+                    } else {
+                        Text(if (downloadComplete) "Delete Download" else "Download Song")
+                    }
                 },
                 onClick = {
-                    if (track?.let { downloads.isComplete(it) } == true) {
-                        confirmDeleteDownload = true
-                    } else {
-                        onDownload()
+                    if (!downloadActive) {
+                        if (downloadComplete) {
+                            confirmDeleteDownload = true
+                        } else {
+                            onDownload()
+                        }
+                        onDismiss()
                     }
-                    onDismiss()
                 },
             )
         }
@@ -627,6 +697,37 @@ internal fun LikeButton(
             modifier = Modifier.size(17.dp),
             filled = liked,
         )
+    }
+}
+
+@Composable
+internal fun TrackStateBadges(
+    liked: Boolean,
+    downloaded: Boolean,
+    iconSize: Dp,
+    modifier: Modifier = Modifier,
+) {
+    if (!liked && !downloaded) return
+    Row(
+        modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        if (liked) {
+            PhoebeIconView(
+                PhoebeIcon.Heart,
+                tint = PhoebeUi.accentLight,
+                modifier = Modifier.size(iconSize),
+                filled = true,
+            )
+        }
+        if (downloaded) {
+            PhoebeIconView(
+                PhoebeIcon.Check,
+                tint = PhoebeUi.mutedText,
+                modifier = Modifier.size(iconSize),
+            )
+        }
     }
 }
 

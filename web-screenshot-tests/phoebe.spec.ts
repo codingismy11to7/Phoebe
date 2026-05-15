@@ -6,6 +6,8 @@ const coreScenarios = [
   'Playlist',
   'Artist',
   'Album',
+  'CollectionValues',
+  'CollectionItems',
   'Search',
   'Player',
   'Settings',

@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -71,6 +72,7 @@ import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryUiPreferences
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.canTogglePlexLike
+import com.phoebe.app.domain.isPlexLibraryTrack
 
 internal enum class LibraryFilterTab { Artists, Albums, Songs }
 
@@ -498,6 +500,7 @@ internal fun DetailSectionToolbar(
     columns: LibraryColumnVisibility? = null,
     onColumns: ((LibraryColumnVisibility) -> Unit)? = null,
     modifier: Modifier = Modifier,
+    actions: @Composable RowScope.() -> Unit = {},
 ) {
     Row(
         modifier = modifier
@@ -531,6 +534,40 @@ internal fun DetailSectionToolbar(
         if (columns != null && onColumns != null) {
             ColumnsPickerButton(columns, onColumns)
         }
+        actions()
+    }
+}
+
+@Composable
+internal fun LibraryToolbarButton(
+    icon: PhoebeIcon,
+    label: String,
+    modifier: Modifier = Modifier,
+    value: String? = null,
+    iconTint: Color = PhoebeUi.secondaryText,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+    leadingContent: (@Composable () -> Unit)? = null,
+) {
+    Row(
+        modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .background(Color.White.copy(alpha = 0.04f))
+            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(8.dp))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        if (leadingContent != null) {
+            leadingContent()
+        } else {
+            PhoebeIconView(icon, tint = iconTint, modifier = Modifier.size(13.dp))
+        }
+        Text(label, color = PhoebeUi.primaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        value?.let {
+            Text(it, color = PhoebeUi.mutedText, fontSize = 12.sp)
+        }
     }
 }
 
@@ -558,6 +595,8 @@ internal fun ColumnsPickerButton(columns: LibraryColumnVisibility, onColumns: (L
             ColumnsToggleRow("Sample rate", columns.sampleRate) { onColumns(columns.copy(sampleRate = !columns.sampleRate)) }
             ColumnsToggleRow("File type", columns.fileType) { onColumns(columns.copy(fileType = !columns.fileType)) }
             ColumnsToggleRow("Date added", columns.dateAdded) { onColumns(columns.copy(dateAdded = !columns.dateAdded)) }
+            ColumnsToggleRow("Rating", columns.rating) { onColumns(columns.copy(rating = !columns.rating)) }
+            ColumnsToggleRow("Favorite", columns.favorite) { onColumns(columns.copy(favorite = !columns.favorite)) }
             ColumnsToggleRow("File path", columns.filepath) { onColumns(columns.copy(filepath = !columns.filepath)) }
             ColumnsToggleRow("Year", columns.year) { onColumns(columns.copy(year = !columns.year)) }
             ColumnsToggleRow("Genre", columns.genre) { onColumns(columns.copy(genre = !columns.genre)) }
@@ -1070,7 +1109,9 @@ internal fun SongsTableHeader(columns: LibraryColumnVisibility) {
         if (columns.fileType) TableHeaderCell("File Type", modifier = Modifier.width(70.dp))
         if (columns.dateAdded) TableHeaderCell("Date Added", modifier = Modifier.width(96.dp))
         if (columns.filepath) TableHeaderCell("File Path", modifier = Modifier.weight(1.4f))
-        Spacer(Modifier.width(114.dp))
+        if (columns.rating) TableHeaderCell("Rating", modifier = Modifier.width(86.dp))
+        if (columns.favorite) TableHeaderCell("Fav", modifier = Modifier.width(44.dp))
+        Spacer(Modifier.width(78.dp))
     }
 }
 
@@ -1089,8 +1130,13 @@ internal fun SongRow(
     val hasMenu = true
     val nowPlaying = LocalNowPlaying.current
     val likeActions = LocalLikeActions.current
+    val ratingActions = LocalRatingActions.current
+    val downloads = LocalDownloadStatus.current
     val isCurrent = nowPlaying.trackId == track.id
     val playlistDragEnabled = LocalPlaylistDragEnabled.current
+    val canLike = likeActions.likesEnabled && track.canTogglePlexLike()
+    val liked = likeActions.isLiked(track)
+    val downloaded = downloads.isComplete(track)
     Row(
         modifier
             .fillMaxWidth()
@@ -1154,25 +1200,47 @@ internal fun SongRow(
             )
         }
         TableCellText(track.artist, modifier = Modifier.weight(1.4f), color = PhoebeUi.secondaryText)
-        TableCellText(track.album, modifier = Modifier.weight(1.6f), color = PhoebeUi.secondaryText)
+        TableAlbumCell(
+            album = track.album,
+            liked = !columns.favorite && canLike && liked,
+            downloaded = downloaded,
+            modifier = Modifier.weight(1.6f),
+        )
         if (columns.duration) TableCellText(formatMinutesSeconds(track.durationMs), modifier = Modifier.width(70.dp), color = PhoebeUi.secondaryText)
         if (columns.audioCodec) TableCellText(track.audioCodec?.uppercase() ?: "—", modifier = Modifier.width(60.dp), color = PhoebeUi.secondaryText)
         if (columns.bitrate) TableCellText(displayBitrateLabel(track), modifier = Modifier.width(70.dp), color = PhoebeUi.secondaryText)
         if (columns.sampleRate) TableCellText(displaySampleRateLabel(track), modifier = Modifier.width(86.dp), color = PhoebeUi.secondaryText)
         if (columns.fileType) TableCellText(displayFileTypeLabel(track), modifier = Modifier.width(70.dp), color = PhoebeUi.secondaryText)
-        if (columns.dateAdded) TableCellText("—", modifier = Modifier.width(96.dp), color = PhoebeUi.mutedText)
+        if (columns.dateAdded) {
+            TableCellText(
+                track.dateAddedMs?.let { formatLastPlayed(it, LocalNowMs.current) } ?: "—",
+                modifier = Modifier.width(96.dp),
+                color = PhoebeUi.mutedText,
+            )
+        }
         if (columns.filepath) TableCellText(track.filepath?.let(::shortenFilepath) ?: "—", modifier = Modifier.weight(1.4f), color = PhoebeUi.mutedText)
+        if (columns.rating) {
+            RatingStars(
+                rating = ratingActions.ratingFor(track),
+                enabled = ratingActions.ratingsEnabled && track.isPlexLibraryTrack(),
+                onRating = { ratingActions.onRateTrack(track, it) },
+                modifier = Modifier.width(86.dp),
+                starSize = 13.dp,
+            )
+        }
         TrackDownloadIndicator(
             track = track,
             modifier = Modifier.width(34.dp),
             onDownload = onDownload,
         )
-        LikeButton(
-            liked = likeActions.isLiked(track),
-            enabled = likeActions.likesEnabled && track.canTogglePlexLike(),
-            onClick = { likeActions.onToggleLiked(track) },
-            modifier = Modifier.width(36.dp),
-        )
+        if (columns.favorite) {
+            LikeButton(
+                liked = liked,
+                enabled = canLike,
+                onClick = { likeActions.onToggleLiked(track) },
+                modifier = Modifier.width(44.dp),
+            )
+        }
         Box(Modifier.width(44.dp), contentAlignment = Alignment.Center) {
             Box(
                 Modifier
@@ -1505,6 +1573,34 @@ internal fun TableHeaderCell(label: String, modifier: Modifier = Modifier) {
 @Composable
 internal fun TableCellText(text: String, modifier: Modifier = Modifier, color: Color = PhoebeUi.secondaryText) {
     Text(text, color = color, fontSize = 12.sp, modifier = modifier, maxLines = 1, overflow = TextOverflow.Ellipsis)
+}
+
+@Composable
+private fun TableAlbumCell(
+    album: String,
+    liked: Boolean,
+    downloaded: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Text(
+            album,
+            color = PhoebeUi.secondaryText,
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        TrackStateBadges(
+            liked = liked,
+            downloaded = downloaded,
+            iconSize = 11.dp,
+        )
+    }
 }
 
 internal fun formatHoursMinutes(ms: Long): String {

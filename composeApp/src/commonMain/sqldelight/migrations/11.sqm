@@ -1,0 +1,5 @@
+CREATE TABLE CollectionValueLoadRow (
+    target TEXT NOT NULL,
+    facet TEXT NOT NULL,
+    PRIMARY KEY (target, facet)
+);
