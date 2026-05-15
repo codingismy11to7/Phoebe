@@ -10,6 +10,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -71,6 +72,7 @@ import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.Track
+import com.phoebe.app.domain.canTogglePlexLike
 
 @Composable
 internal fun DesktopHomeScreen(
@@ -159,8 +161,8 @@ internal fun DesktopHomeScreen(
             BoxWithConstraints(Modifier.fillMaxWidth()) {
                 if (maxWidth < 820.dp) {
                     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                        MostPlayedPanel(state.mostPlayedTracks, onPlayTracks, onAddToUpNext, onDownload, onMostPlayed, Modifier.fillMaxWidth())
-                        RecentPlayedPanel(state, onPlayTracks, onAddToUpNext, onDownload, onRecentlyPlayed, Modifier.fillMaxWidth())
+                        MostPlayedPanel(state.mostPlayedTracks, onPlayTracks, onAddToUpNext, onDownload, onMostPlayed, Modifier.fillMaxWidth(), maxRows = 3)
+                        RecentPlayedPanel(state, onPlayTracks, onAddToUpNext, onDownload, onRecentlyPlayed, Modifier.fillMaxWidth(), maxRows = 3)
                         RandomArtistPanel(
                             artist = state.randomArtists.firstOrNull(),
                             catalog = catalog,
@@ -183,8 +185,8 @@ internal fun DesktopHomeScreen(
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                         Row(Modifier.fillMaxWidth().height(panelHeight), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                            MostPlayedPanel(state.mostPlayedTracks, onPlayTracks, onAddToUpNext, onDownload, onMostPlayed, Modifier.weight(1f).fillMaxHeight())
-                            RecentPlayedPanel(state, onPlayTracks, onAddToUpNext, onDownload, onRecentlyPlayed, Modifier.weight(1f).fillMaxHeight())
+                            MostPlayedPanel(state.mostPlayedTracks, onPlayTracks, onAddToUpNext, onDownload, onMostPlayed, Modifier.weight(1f).fillMaxHeight(), maxRows = 3)
+                            RecentPlayedPanel(state, onPlayTracks, onAddToUpNext, onDownload, onRecentlyPlayed, Modifier.weight(1f).fillMaxHeight(), maxRows = 3)
                         }
                         Row(Modifier.fillMaxWidth().height(randomPanelHeight), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                             RandomArtistPanel(
@@ -302,7 +304,8 @@ internal fun MobileHomeScreen(
                         HomeArtworkTile(
                             title = track.title,
                             subtitle = track.artist,
-                            thumbUrl = track.thumbUrl,
+                            thumbUrl = track.localArtworkUri,
+                            fallbackThumbUrl = track.thumbUrl,
                             modifier = Modifier.width(78.dp),
                             maxDecodeDimension = 160,
                             sharedKey = "song:${track.id}",
@@ -569,6 +572,7 @@ private fun RecentPlayedPanel(
     onDownload: (Track) -> Unit,
     onViewAll: () -> Unit,
     modifier: Modifier = Modifier,
+    maxRows: Int = 4,
 ) {
     HomePanel(modifier) {
         SectionHeader("RECENTLY PLAYED", "View all", onViewAll)
@@ -576,7 +580,7 @@ private fun RecentPlayedPanel(
             HomeEmptyState("Nothing here yet. Play something and your recent listening history will appear.")
         } else {
             val tracks = state.recentlyPlayedTracks.map { it.track }
-            state.recentlyPlayedTracks.take(4).forEachIndexed { index, row ->
+            state.recentlyPlayedTracks.take(maxRows).forEachIndexed { index, row ->
                 HomePlayedTrackRow(
                     track = row.track,
                     onPlay = { onPlayTracks(tracks, index) },
@@ -1009,6 +1013,7 @@ private fun MostPlayedPanel(
     onDownload: (Track) -> Unit,
     onViewAll: () -> Unit,
     modifier: Modifier = Modifier,
+    maxRows: Int = 4,
 ) {
     HomePanel(modifier) {
         SectionHeader("MOST PLAYED", "View all", onViewAll)
@@ -1016,7 +1021,7 @@ private fun MostPlayedPanel(
             HomeEmptyState("Your most-played tracks will appear here after you've listened for a while.")
         } else {
             val tracks = rows.map { it.track }
-            rows.take(4).forEachIndexed { index, row ->
+            rows.take(maxRows).forEachIndexed { index, row ->
                 HomePlayedTrackRow(
                     track = row.track,
                     playCount = row.playCount,
@@ -1051,20 +1056,113 @@ private fun HomePlayedTrackRow(
     onAddToUpNext: () -> Unit,
     onDownload: () -> Unit,
 ) {
+    var menuExpanded by remember(track.id) { mutableStateOf(false) }
     val nowPlaying = LocalNowPlaying.current
-    ContentTrackRow(
-        track = track,
-        libraryColumns = SongIdentityColumns,
-        onPlay = onPlay,
-        onAddToUpNext = onAddToUpNext,
-        onDownload = onDownload,
-        compactLayout = true,
-        isNowPlaying = track.id == nowPlaying.trackId,
-        nowPlayingIsPlaying = nowPlaying.isPlaying,
-        nowPlayingIsBuffering = nowPlaying.isBuffering,
-        playCount = playCount,
-        sharedKey = "song:${track.id}",
-    )
+    val likeActions = LocalLikeActions.current
+    val isNowPlaying = track.id == nowPlaying.trackId
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(72.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .combinedClickable(onClick = onPlay, onLongClick = { menuExpanded = true })
+            .background(
+                if (isNowPlaying) PhoebeUi.accent.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.045f),
+            )
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box(Modifier.size(46.dp), contentAlignment = Alignment.Center) {
+            TrackArtworkImage(
+                track,
+                Modifier.fillMaxSize().sharedArtworkTransition("song:${track.id}"),
+                elevated = false,
+            )
+            if (isNowPlaying) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color.Black.copy(alpha = 0.45f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    NowPlayingIndicator(
+                        isPlaying = nowPlaying.isPlaying,
+                        isBuffering = nowPlaying.isBuffering,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(
+                track.title,
+                color = if (isNowPlaying) PhoebeUi.accentLight else PhoebeUi.primaryText,
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.sharedBoundsTransition("song:${track.id}:title"),
+            )
+            Text(
+                track.artist,
+                color = PhoebeUi.secondaryText,
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (track.album.isNotBlank()) {
+                Text(
+                    track.album,
+                    color = PhoebeUi.mutedText,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        playCount?.let { count ->
+            Text(
+                formatHomePlayCount(count),
+                color = PhoebeUi.secondaryText,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                textAlign = TextAlign.End,
+                modifier = Modifier.width(56.dp),
+            )
+        }
+        LikeButton(
+            liked = likeActions.isLiked(track),
+            enabled = likeActions.likesEnabled && track.canTogglePlexLike(),
+            onClick = { likeActions.onToggleLiked(track) },
+            modifier = Modifier.size(34.dp),
+        )
+        Box {
+            Box(
+                Modifier
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .clickable { menuExpanded = true },
+                contentAlignment = Alignment.Center,
+            ) {
+                PhoebeIconView(PhoebeIcon.More, tint = PhoebeUi.secondaryText, modifier = Modifier.size(17.dp))
+            }
+            TrackActionMenu(
+                expanded = menuExpanded,
+                onDismiss = { menuExpanded = false },
+                onAddToUpNext = onAddToUpNext,
+                onDownload = onDownload,
+                track = track,
+            )
+        }
+    }
+}
+
+private fun formatHomePlayCount(playCount: Long): String {
+    val playWord = if (playCount == 1L) "play" else "plays"
+    return "$playCount $playWord"
 }
 
 @Composable
@@ -1072,6 +1170,7 @@ private fun HomeArtworkTile(
     title: String,
     subtitle: String,
     thumbUrl: String?,
+    fallbackThumbUrl: String? = null,
     modifier: Modifier = Modifier,
     maxDecodeDimension: Int = 256,
     sharedKey: String? = null,
@@ -1088,6 +1187,7 @@ private fun HomeArtworkTile(
             radius = 7.dp,
             elevated = false,
             maxDecodeDimension = maxDecodeDimension,
+            fallbackThumbUrl = fallbackThumbUrl,
         )
         AutoScrollingText(
             title,

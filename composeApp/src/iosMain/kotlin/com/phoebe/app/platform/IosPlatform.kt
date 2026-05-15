@@ -1,5 +1,7 @@
 package com.phoebe.app.platform
 
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import com.phoebe.app.data.PlexClient
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.darwin.Darwin
@@ -8,14 +10,22 @@ import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.cinterop.ExperimentalForeignApi
 import platform.Foundation.NSDate
+import platform.Foundation.NSData
+import platform.Foundation.NSDocumentDirectory
+import platform.Foundation.NSFileManager
+import platform.Foundation.NSSearchPathForDirectoriesInDomains
 import platform.Foundation.NSURL
 import platform.Foundation.NSUserDefaults
+import platform.Foundation.NSUserDomainMask
+import platform.Foundation.create
 import platform.Foundation.timeIntervalSince1970
 import platform.SafariServices.SFSafariViewController
 import platform.UIKit.UIApplication
 import platform.UIKit.UIViewController
 import platform.UIKit.UIWindow
 import platform.UIKit.UIWindowScene
+import kotlinx.cinterop.addressOf
+import kotlinx.cinterop.usePinned
 import kotlin.experimental.ExperimentalNativeApi
 import kotlin.native.Platform
 
@@ -46,10 +56,79 @@ actual class PlatformStorage actual constructor() {
         defaults.removeObjectForKey(name)
     }
 
-    actual suspend fun writeBytes(name: String, bytes: ByteArray): String {
-        defaults.setObject(bytes.size.toString(), forKey = name)
-        return "phoebe://offline/$name"
+    @OptIn(ExperimentalForeignApi::class)
+    actual suspend fun deleteUri(uri: String) {
+        val url = NSURL.URLWithString(uri) ?: return
+        NSFileManager.defaultManager.removeItemAtURL(url, error = null)
     }
+
+    actual suspend fun readUriBytes(uri: String): ByteArray? {
+        val url = NSURL.URLWithString(uri) ?: return null
+        return NSData.create(contentsOfURL = url)?.toByteArray()
+    }
+
+    actual suspend fun readBytes(name: String): ByteArray? {
+        val path = "${storageRootPath()}/$name"
+        return NSData.create(contentsOfFile = path)?.toByteArray()
+    }
+
+    @OptIn(ExperimentalForeignApi::class)
+    actual suspend fun writeBytes(name: String, bytes: ByteArray): String {
+        val root = storageRootPath()
+        val path = "$root/$name"
+        val directory = path.substringBeforeLast('/', root)
+        NSFileManager.defaultManager.createDirectoryAtPath(
+            path = directory,
+            withIntermediateDirectories = true,
+            attributes = null,
+            error = null,
+        )
+        NSFileManager.defaultManager.createFileAtPath(
+            path = path,
+            contents = bytes.toNSData(),
+            attributes = null,
+        )
+        return NSURL.fileURLWithPath(path).absoluteString ?: "file://$path"
+    }
+
+    actual suspend fun readDownloadDirectory(): String? =
+        defaults.stringForKey(DownloadDirectoryKey)?.takeIf { it.isNotBlank() }
+
+    actual suspend fun writeDownloadDirectory(uri: String?) {
+        if (uri.isNullOrBlank()) defaults.removeObjectForKey(DownloadDirectoryKey)
+        else defaults.setObject(uri, forKey = DownloadDirectoryKey)
+    }
+
+    actual fun defaultDownloadDirectoryLabel(): String = "App Documents/Phoebe"
+}
+
+@Composable
+actual fun rememberPickDownloadDirectory(onPicked: (String?) -> Unit): () -> Unit =
+    remember(onPicked) {
+        { onPicked(null) }
+    }
+
+private const val DownloadDirectoryKey = "download-location"
+
+@OptIn(ExperimentalForeignApi::class)
+private fun storageRootPath(): String {
+    val docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, true)
+        .firstOrNull() as? String
+    return if (docs != null) "$docs/phoebe" else "phoebe"
+}
+
+@OptIn(ExperimentalForeignApi::class)
+private fun ByteArray.toNSData(): NSData = usePinned { pinned ->
+    NSData.create(bytes = pinned.addressOf(0), length = size.toULong())
+}
+
+@OptIn(ExperimentalForeignApi::class)
+private fun NSData.toByteArray(): ByteArray {
+    val bytes = ByteArray(length.toInt())
+    bytes.usePinned { pinned ->
+        platform.posix.memcpy(pinned.addressOf(0), this.bytes, length)
+    }
+    return bytes
 }
 
 @OptIn(ExperimentalForeignApi::class)

@@ -16,8 +16,10 @@ import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.TrackMetadataUpdate
 import com.phoebe.app.domain.canAddToLocalPlaylist
 import com.phoebe.app.domain.canAddToPlexPlaylist
+import com.phoebe.app.domain.canTogglePlexLike
 import com.phoebe.app.domain.isLocalPlaylist
 import com.phoebe.app.domain.supportsPlexPlaylists
+import com.phoebe.app.data.DownloadBatchResult
 import com.phoebe.app.data.PlexPlayHistorySyncResult
 import com.phoebe.app.playlists.PlaylistExportFormat
 import com.phoebe.app.playlists.PlaylistExporter
@@ -61,6 +63,7 @@ class AppState(
     val lastPlayedByAlbum = dependencies.playHistoryRepository.lastPlayedByAlbum
     val lastPlayedByTrack = dependencies.playHistoryRepository.lastPlayedByTrack
     val playCountsByTrack = dependencies.playHistoryRepository.playCountsByTrack
+    val defaultDownloadDirectoryLabel: String = dependencies.platformStorage.defaultDownloadDirectoryLabel()
 
     private val mutableScreen = MutableStateFlow(defaultBrowseScreen())
     val screen: StateFlow<AppScreen> = mutableScreen
@@ -92,6 +95,9 @@ class AppState(
     private val mutableDecadeMixNotice = MutableStateFlow<String?>(null)
     val decadeMixNotice: StateFlow<String?> = mutableDecadeMixNotice
 
+    private val mutableDownloadDirectory = MutableStateFlow<String?>(null)
+    val downloadDirectory: StateFlow<String?> = mutableDownloadDirectory
+
     private val detailStack = ArrayDeque<AppScreen>()
     private var playRequestGeneration = 0
     private var recentAlbumWarmSignature: String? = null
@@ -106,11 +112,13 @@ class AppState(
             dependencies.mediaSourcesRepository.restore()
             dependencies.libraryUiRepository.restore()
             dependencies.playHistoryRepository.restore()
+            mutableDownloadDirectory.value = dependencies.platformStorage.readDownloadDirectory()
             mutableScreen.value = defaultBrowseScreen(session.value)
             if (session.value?.token?.isNotBlank() == true && session.value?.selectedServer == null) {
                 refreshServers()
             }
             dependencies.catalogRepository.restoreCachedCatalog()
+            cacheDownloadedArtworkInBackground()
             syncPlexPlayHistoryInBackground()
             ensureLikedSongsPlaylistIfPossible()
             if (session.value?.token?.isNotBlank() == true && session.value?.selectedServer != null) {
@@ -300,8 +308,23 @@ class AppState(
                 ensureLikedSongsPlaylistIfPossible()
             }
             syncPlexPlayHistoryInBackground()
+            cacheDownloadedArtworkInBackground()
             if (catalogMessage != null) mutableMessage.value = catalogMessage
         }.onFailure { mutableMessage.value = it.message ?: "Something went sideways." }
+    }
+
+    private fun cacheDownloadedArtworkInBackground() {
+        scope.launch {
+            runCatching {
+                dependencies.catalogRepository.cacheDownloadedArtwork()
+            }.onSuccess { cached ->
+                if (cached > 0) {
+                    PhoebeLog.d("AppState") { "cached artwork for $cached downloaded tracks" }
+                }
+            }.onFailure { error ->
+                PhoebeLog.d("AppState") { "downloaded artwork cache failed: ${error.message}" }
+            }
+        }
     }
 
     private suspend fun ensureLikedSongsPlaylistIfPossible(): Playlist? {
@@ -691,8 +714,68 @@ class AppState(
     }
 
     fun download(track: Track) = scope.launch {
-        dependencies.catalogRepository.download(track)
+        val result = dependencies.catalogRepository.download(track)
+        mutableMessage.value = downloadMessage(result, singular = "song", plural = "songs")
     }
+
+    fun download(album: Album) = scope.launch {
+        mutableMessage.value = "Downloading ${album.title}…"
+        val result = dependencies.catalogRepository.downloadAlbum(session.value, album)
+        mutableMessage.value = downloadMessage(result, singular = "song from ${album.title}", plural = "songs from ${album.title}")
+    }
+
+    fun download(artist: Artist) = scope.launch {
+        mutableMessage.value = "Downloading ${artist.title}…"
+        val result = dependencies.catalogRepository.downloadArtist(session.value, artist)
+        mutableMessage.value = downloadMessage(result, singular = "song by ${artist.title}", plural = "songs by ${artist.title}")
+    }
+
+    fun download(playlist: Playlist) = scope.launch {
+        mutableMessage.value = "Downloading ${playlist.title}…"
+        val result = dependencies.catalogRepository.downloadPlaylist(session.value, playlist)
+        mutableMessage.value = downloadMessage(result, singular = "song from ${playlist.title}", plural = "songs from ${playlist.title}")
+    }
+
+    fun setDownloadDirectory(uri: String?) = scope.launch {
+        dependencies.platformStorage.writeDownloadDirectory(uri)
+        mutableDownloadDirectory.value = dependencies.platformStorage.readDownloadDirectory()
+        mutableMessage.value = if (mutableDownloadDirectory.value == null) {
+            "Downloads will use ${dependencies.platformStorage.defaultDownloadDirectoryLabel()}."
+        } else {
+            "Download location updated."
+        }
+    }
+
+    fun resetDownloadDirectory() = setDownloadDirectory(null)
+
+    fun deleteAllDownloads() = scope.launch {
+        val deleted = dependencies.catalogRepository.deleteAllDownloads()
+        mutableMessage.value = if (deleted == 0) {
+            "No downloads to delete."
+        } else {
+            "Deleted $deleted downloaded ${if (deleted == 1) "song" else "songs"}."
+        }
+    }
+
+    fun deleteDownloads(tracks: List<Track>) = scope.launch {
+        val deleted = dependencies.catalogRepository.deleteDownloadsForTracks(tracks)
+        mutableMessage.value = if (deleted == 0) {
+            "No downloaded songs to delete."
+        } else {
+            "Deleted $deleted downloaded ${if (deleted == 1) "song" else "songs"}."
+        }
+    }
+
+    private fun downloadMessage(result: DownloadBatchResult, singular: String, plural: String): String =
+        when {
+            result.total == 0 -> "Nothing to download yet."
+            result.failed == 0 && result.completed == result.total -> {
+                val noun = if (result.completed == 1) singular else plural
+                "Downloaded ${result.completed} $noun."
+            }
+            result.completed > 0 -> "Downloaded ${result.completed} of ${result.total} songs. ${result.failed} failed."
+            else -> "Couldn't download those songs."
+        }
 
     /**
      * Create a new playlist. Plex playlists require a signed-in Plex session with a music library;
@@ -703,14 +786,23 @@ class AppState(
         initialTracks: List<Track> = emptyList(),
         onCreated: ((com.phoebe.app.domain.Playlist) -> Unit)? = null,
     ) = scope.launch {
-        val wantsLocal = initialTracks.any { it.canAddToLocalPlaylist() }
-        val wantsPlex = initialTracks.any { it.canAddToPlexPlaylist() }
-        if (wantsLocal && wantsPlex) {
+        val allLocalEligible = initialTracks.isNotEmpty() && initialTracks.all { it.canAddToLocalPlaylist() }
+        val allPlexEligible = initialTracks.isNotEmpty() && initialTracks.all { it.canAddToPlexPlaylist() }
+        val hasLocalOnlyTracks = initialTracks.any { it.canAddToLocalPlaylist() && !it.canAddToPlexPlaylist() }
+        val hasPlexTracks = initialTracks.any { it.canAddToPlexPlaylist() }
+        if (hasLocalOnlyTracks && hasPlexTracks) {
             mutableMessage.value = "Can't mix local files and Plex songs in one playlist."
             return@launch
         }
         val playlist = when {
-            wantsLocal || (!wantsPlex && !session.value.supportsPlexPlaylists() && hasEnabledLocalFolders()) -> {
+            allPlexEligible && session.value.supportsPlexPlaylists() -> {
+                if (initialTracks.any { !it.canAddToPlexPlaylist() }) {
+                    mutableMessage.value = "Only Plex library songs can be added to Plex playlists."
+                    return@launch
+                }
+                dependencies.catalogRepository.createPlaylist(session.value, title, initialTracks)
+            }
+            allLocalEligible || (initialTracks.isEmpty() && !session.value.supportsPlexPlaylists() && hasEnabledLocalFolders()) -> {
                 if (!hasEnabledLocalFolders()) {
                     mutableMessage.value = "Add a local music folder to create playlists."
                     return@launch
@@ -721,11 +813,7 @@ class AppState(
                 }
                 dependencies.catalogRepository.createLocalPlaylist(title, initialTracks)
             }
-            session.value.supportsPlexPlaylists() -> {
-                if (initialTracks.any { !it.canAddToPlexPlaylist() }) {
-                    mutableMessage.value = "Only Plex library songs can be added to Plex playlists."
-                    return@launch
-                }
+            initialTracks.isEmpty() && session.value.supportsPlexPlaylists() -> {
                 dependencies.catalogRepository.createPlaylist(session.value, title, initialTracks)
             }
             else -> {
@@ -767,7 +855,7 @@ class AppState(
     }
 
     fun toggleLikedTrack(track: Track) = scope.launch {
-        if (!track.canAddToPlexPlaylist()) {
+        if (!track.canTogglePlexLike()) {
             mutableMessage.value = "Liked Songs syncs Plex library songs only."
             return@launch
         }

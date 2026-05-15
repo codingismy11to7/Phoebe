@@ -145,6 +145,8 @@ import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryUiPreferences
 import com.phoebe.app.domain.CatalogSnapshot
+import com.phoebe.app.domain.DownloadItem
+import com.phoebe.app.domain.DownloadState
 import com.phoebe.app.domain.LocalFolderMediaSourceConfig
 import com.phoebe.app.domain.MediaSourcesState
 import com.phoebe.app.domain.MusicLibrary
@@ -174,6 +176,25 @@ import kotlin.math.max
 internal val LocalCatalogHasContent = compositionLocalOf { false }
 
 internal val LocalCatalogSyncState = compositionLocalOf { CatalogSyncState() }
+
+internal data class DownloadStatusSnapshot(
+    val itemsByTrackId: Map<String, DownloadItem> = emptyMap(),
+) {
+    fun itemFor(track: Track): DownloadItem? = itemsByTrackId[track.id]
+    fun isComplete(track: Track): Boolean =
+        track.localUri != null || itemFor(track)?.state == DownloadState.Complete
+
+    fun isActive(track: Track): Boolean =
+        itemFor(track)?.state in setOf(DownloadState.Queued, DownloadState.Downloading)
+}
+
+internal val LocalDownloadStatus = compositionLocalOf { DownloadStatusSnapshot() }
+
+internal data class DownloadActions(
+    val onDeleteDownloadedTracks: (List<Track>) -> Unit = {},
+)
+
+internal val LocalDownloadActions = compositionLocalOf { DownloadActions() }
 
 /** Current playback state, exposed implicitly so any track row can show a "now playing" badge. */
 internal data class NowPlayingIndicatorState(
@@ -237,6 +258,14 @@ internal data class LikeActions(
 }
 
 internal val LocalLikeActions = compositionLocalOf { LikeActions() }
+
+internal data class TrackNavigationActions(
+    val onOpenArtistForTrack: (Track) -> Boolean = { false },
+    val onOpenAlbumForTrack: (Track) -> Boolean = { false },
+    val onOpenSongDetail: (Track) -> Unit = {},
+)
+
+internal val LocalTrackNavigationActions = compositionLocalOf { TrackNavigationActions() }
 
 private fun equivalentTrackIds(id: String): Set<String> {
     if (id.isBlank()) return emptySet()

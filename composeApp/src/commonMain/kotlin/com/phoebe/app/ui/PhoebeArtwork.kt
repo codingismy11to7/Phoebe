@@ -144,13 +144,16 @@ import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
+import com.phoebe.app.data.cachedArtworkPathForUrl
 import com.phoebe.app.domain.isLocalMediaPlayback
 import com.phoebe.app.domain.isPlexLibraryTrack
 import com.phoebe.app.domain.supportsPlexPlaylists
 import com.phoebe.app.platform.createPlatformHttpClient
 import com.phoebe.app.platform.currentTimeMs
+import com.phoebe.app.platform.PlatformStorage
 import com.phoebe.app.platform.prefersReducedArtworkEffects
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import com.phoebe.app.sources.rememberPickLocalFolder
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
@@ -179,8 +182,9 @@ internal fun ArtworkImage(
     radius: Dp = 10.dp,
     elevated: Boolean = true,
     maxDecodeDimension: Int = 512,
+    fallbackThumbUrl: String? = null,
 ) {
-    val image = rememberRemoteImage(thumbUrl, maxDecodeDimension)
+    val image = rememberRemoteImage(thumbUrl, maxDecodeDimension, fallbackThumbUrl)
     val shape = RoundedCornerShape(radius)
     val imageModifier = when {
         !elevated || prefersReducedArtworkEffects() -> modifier.clip(shape)
@@ -201,16 +205,46 @@ internal fun ArtworkImage(
 }
 
 @Composable
-internal fun rememberRemoteImage(url: String?, maxDecodeDimension: Int = 512): ImageBitmap? {
-    val target = url?.takeIf { it.isNotBlank() } ?: return null
-    var image by remember(target) { mutableStateOf(RemoteArtworkCache.images[target]) }
+internal fun TrackArtworkImage(
+    track: Track,
+    modifier: Modifier = Modifier,
+    radius: Dp = 10.dp,
+    elevated: Boolean = true,
+    maxDecodeDimension: Int = 512,
+) {
+    ArtworkImage(
+        seed = track.album,
+        thumbUrl = track.localArtworkUri,
+        modifier = modifier,
+        radius = radius,
+        elevated = elevated,
+        maxDecodeDimension = maxDecodeDimension,
+        fallbackThumbUrl = track.thumbUrl,
+    )
+}
+
+@Composable
+internal fun rememberRemoteImage(url: String?, maxDecodeDimension: Int = 512, fallbackUrl: String? = null): ImageBitmap? {
+    val primary = url?.takeIf { it.isNotBlank() }
+    val fallbackSource = fallbackUrl?.takeIf { it.isNotBlank() }
+    val target = primary ?: fallbackSource ?: return null
+    val fallback = fallbackSource?.takeIf { it != target }
+    var image by remember(target, fallback) {
+        mutableStateOf(RemoteArtworkCache.images[target] ?: fallback?.let { RemoteArtworkCache.images[it] })
+    }
     // Stay subscribed to cache writes from any concurrent loader for this URL.
-    val cached = RemoteArtworkCache.images[target]
+    val cached = RemoteArtworkCache.images[target] ?: fallback?.let { RemoteArtworkCache.images[it] }
     if (cached != null) {
         image = cached
     }
-    LaunchedEffect(target, maxDecodeDimension) {
-        image = RemoteArtworkCache.awaitLoad(target, maxDecodeDimension) ?: RemoteArtworkCache.images[target]
+    LaunchedEffect(target, fallback, maxDecodeDimension) {
+        while (isActive && image == null) {
+            image = RemoteArtworkCache.awaitLoad(target, maxDecodeDimension)
+                ?: fallback?.let { RemoteArtworkCache.awaitLoad(it, maxDecodeDimension) }
+                ?: RemoteArtworkCache.images[target]
+                ?: fallback?.let { RemoteArtworkCache.images[it] }
+            if (image == null) delay(10_000L)
+        }
     }
     return image
 }
@@ -219,19 +253,17 @@ internal object RemoteArtworkCache {
     val images = mutableStateMapOf<String, ImageBitmap>()
 
     internal val httpClient: HttpClient by lazy { createPlatformHttpClient() }
+    private val storage: PlatformStorage by lazy { PlatformStorage() }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val gate = Semaphore(permits = 6)
     private val mutex = Mutex()
     private val inFlight = mutableMapOf<String, Deferred<ImageBitmap?>>()
-    private val failed = mutableSetOf<String>()
 
     suspend fun awaitLoad(url: String, maxDecodeDimension: Int = 512): ImageBitmap? {
         images[url]?.let { return it }
-        if (failed.contains(url)) return null
 
         val job = mutex.withLock {
             images[url]?.let { return it }
-            if (failed.contains(url)) return null
             inFlight[url] ?: scope.async {
                 try {
                     fetchAndDecode(url, maxDecodeDimension)
@@ -247,8 +279,16 @@ internal object RemoteArtworkCache {
         if (images.containsKey(url)) return images[url]
         return gate.withPermit {
             if (images.containsKey(url)) return@withPermit images[url]
+            val remote = url.startsWith("http://") || url.startsWith("https://")
             val decoded = runCatching {
-                val bytes: ByteArray = httpClient.get(url).body()
+                val bytes: ByteArray = if (remote) {
+                    runCatching { httpClient.get(url).body<ByteArray>() }
+                        .getOrElse {
+                            storage.readBytes(cachedArtworkPathForUrl(url)) ?: return@runCatching null
+                        }
+                } else {
+                    storage.readUriBytes(url) ?: return@runCatching null
+                }
                 yield()
                 decodeImageBitmap(bytes, maxDecodeDimension)
             }.getOrNull()
@@ -256,7 +296,6 @@ internal object RemoteArtworkCache {
                 images[url] = decoded
                 decoded
             } else {
-                mutex.withLock { failed += url }
                 null
             }
         }

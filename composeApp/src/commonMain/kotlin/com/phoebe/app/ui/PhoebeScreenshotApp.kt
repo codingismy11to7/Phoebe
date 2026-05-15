@@ -311,6 +311,9 @@ internal fun PhoebeDesktopScreenshotScenario(
         onPlayTracks = { _, _ -> },
         onAddToUpNext = {},
         onDownload = {},
+        onDownloadArtist = {},
+        onDownloadAlbum = {},
+        onDownloadPlaylist = {},
         onStartSignIn = {},
         onFinishSignIn = {},
         onSignOut = {},
@@ -328,6 +331,11 @@ internal fun PhoebeDesktopScreenshotScenario(
         onLibrarySortBy = {},
         onLibraryAscending = {},
         onLibraryColumns = {},
+        downloadDirectory = null,
+        downloadCount = fixture.catalog.downloads.size,
+        defaultDownloadDirectoryLabel = "App storage",
+        onDownloadDirectory = {},
+        onDeleteAllDownloads = {},
         useLightAppearance = useLightAppearance,
         onUseLightAppearanceChange = {},
     )
@@ -363,6 +371,7 @@ internal fun PhoebeMobileScreenshotScenario(
                 onPlayTracks = { _, _ -> },
                 onAddToUpNext = {},
                 onDownload = {},
+                onDownloadArtist = {},
                 onLibraryColumns = {},
             )
             PhoebeScreenshotScenario.Album -> AlbumDetailPanel(
@@ -374,6 +383,7 @@ internal fun PhoebeMobileScreenshotScenario(
                 onPlayTracks = { _, _ -> },
                 onAddToUpNext = {},
                 onDownload = {},
+                onDownloadAlbum = {},
                 onLibraryColumns = {},
             )
             PhoebeScreenshotScenario.Song -> SongDetailPanel(
@@ -394,6 +404,7 @@ internal fun PhoebeMobileScreenshotScenario(
                 onPlayTracks = { _, _ -> },
                 onAddToUpNext = {},
                 onDownload = {},
+                onDownloadPlaylist = {},
                 onLibraryColumns = {},
             )
             PhoebeScreenshotScenario.Player,
@@ -461,6 +472,11 @@ internal fun PhoebeMobileScreenshotScenario(
                 onLibrarySortBy = {},
                 onLibraryAscending = {},
                 onLibraryColumns = {},
+                downloadDirectory = null,
+                downloadCount = fixture.catalog.downloads.size,
+                defaultDownloadDirectoryLabel = "App storage",
+                onDownloadDirectory = {},
+                onDeleteAllDownloads = {},
                 useLightAppearance = false,
                 onUseLightAppearanceChange = {},
             )

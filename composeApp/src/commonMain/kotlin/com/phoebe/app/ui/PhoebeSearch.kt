@@ -71,8 +71,6 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
@@ -593,7 +591,7 @@ internal fun SearchTopTrackCard(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(if (compact) 12.dp else 18.dp),
     ) {
-        ArtworkImage(track.album, track.thumbUrl, Modifier.size(if (compact) 76.dp else 170.dp), radius = 10.dp)
+        TrackArtworkImage(track, Modifier.size(if (compact) 76.dp else 170.dp), radius = 10.dp)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(if (compact) 5.dp else 8.dp)) {
             if (compact) {
                 AutoScrollingText(track.title, color = PhoebeUi.primaryText, fontSize = 14.sp, fontWeight = FontWeight.Black)
@@ -776,7 +774,7 @@ internal fun SearchSongResultRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            ArtworkImage(track.album, track.thumbUrl, Modifier.size(38.dp), radius = 7.dp)
+            TrackArtworkImage(track, Modifier.size(38.dp), radius = 7.dp)
             Column(Modifier.weight(1f)) {
                 AutoScrollingText(track.title, color = if (index == 0) PhoebeUi.accentLight else PhoebeUi.primaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 AutoScrollingText(track.artist, color = PhoebeUi.secondaryText, fontSize = 10.sp)
@@ -798,7 +796,7 @@ internal fun SearchSongResultRow(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text((index + 1).toString(), color = PhoebeUi.mutedText, fontSize = 11.sp, modifier = Modifier.width(18.dp))
-            ArtworkImage(track.album, track.thumbUrl, Modifier.size(24.dp), radius = 5.dp)
+            TrackArtworkImage(track, Modifier.size(24.dp), radius = 5.dp)
             AutoScrollingText(track.title, color = if (index == 0) PhoebeUi.accentLight else PhoebeUi.primaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1.25f))
             AutoScrollingText(track.artist, color = PhoebeUi.secondaryText, fontSize = 11.sp, modifier = Modifier.weight(0.95f))
             AutoScrollingText(track.album, color = PhoebeUi.secondaryText, fontSize = 11.sp, modifier = Modifier.weight(0.95f))
@@ -1121,22 +1119,13 @@ internal fun SearchOverflowMenu(
         ) {
             PhoebeIconView(PhoebeIcon.More, tint = PhoebeUi.mutedText, modifier = Modifier.size(17.dp))
         }
-        DropdownMenu(expanded = expanded, onDismissRequest = { onExpandedChange(false) }) {
-            DropdownMenuItem(
-                text = { Text("Add to Up Next") },
-                onClick = {
-                    onAddToUpNext(track)
-                    onExpandedChange(false)
-                },
-            )
-            DropdownMenuItem(
-                text = { Text("Download") },
-                onClick = {
-                    onDownload(track)
-                    onExpandedChange(false)
-                },
-            )
-        }
+        TrackActionMenu(
+            expanded = expanded,
+            onDismiss = { onExpandedChange(false) },
+            onAddToUpNext = { onAddToUpNext(track) },
+            onDownload = { onDownload(track) },
+            track = track,
+        )
     }
 }
 

@@ -96,6 +96,7 @@ data class Track(
     val streamUrl: String,
     val downloadUrl: String,
     val thumbUrl: String? = null,
+    val localArtworkUri: String? = null,
     val localUri: String? = null,
     val year: Int? = null,
     val genre: String? = null,
@@ -122,6 +123,8 @@ data class TrackMetadataUpdate(
 
 @Serializable
 enum class LibrarySortBy {
+    /** Preserve the album's source track order. */
+    AlbumOrder,
     /** Preserve the source playlist's track order (e.g. Plex). */
     PlaylistOrder,
     Name,
@@ -293,5 +296,8 @@ fun Playlist.isLikedSongsPlaylist(): Boolean =
 /** Local playlists accept on-device audio files only. */
 fun Track.canAddToLocalPlaylist(): Boolean = isLocalMediaPlayback()
 
-/** Plex playlists accept Plex library streams only (not local files). */
-fun Track.canAddToPlexPlaylist(): Boolean = isPlexLibraryTrack() && !isLocalMediaPlayback()
+/** Plex playlists accept anything with a Plex identity, including downloaded Plex songs. */
+fun Track.canAddToPlexPlaylist(): Boolean = isPlexLibraryTrack()
+
+/** Liked Songs syncs by Plex identity, so downloaded Plex songs are still eligible. */
+fun Track.canTogglePlexLike(): Boolean = isPlexLibraryTrack()

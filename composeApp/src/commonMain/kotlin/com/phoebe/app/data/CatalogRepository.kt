@@ -20,6 +20,7 @@ import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.TrackMetadataUpdate
 import com.phoebe.app.domain.canAddToLocalPlaylist
 import com.phoebe.app.domain.canAddToPlexPlaylist
+import com.phoebe.app.domain.canTogglePlexLike
 import com.phoebe.app.domain.isLocalMediaPlayback
 import com.phoebe.app.domain.isLocalPlaylist
 import com.phoebe.app.domain.isLikedSongsPlaylist
@@ -49,6 +50,15 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.yield
 import kotlin.random.Random
 
+data class DownloadBatchResult(
+    val total: Int = 0,
+    val completed: Int = 0,
+    val failed: Int = 0,
+) {
+    val skipped: Int
+        get() = (total - completed - failed).coerceAtLeast(0)
+}
+
 class CatalogRepository(
     private val plexClient: PlexClient,
     private val database: PhoebeDatabase,
@@ -60,6 +70,7 @@ class CatalogRepository(
     private val mutableCatalog = MutableStateFlow(CatalogSnapshot())
     private val refreshMutex = Mutex()
     private val catalogMergeMutex = Mutex()
+    private val downloadMutex = Mutex()
     val catalog: StateFlow<CatalogSnapshot> = mutableCatalog
 
     private val mutableCatalogRefreshing = MutableStateFlow(false)
@@ -124,7 +135,7 @@ class CatalogRepository(
                     tracksByParent = cachedTracks.tracksByParent,
                     downloads = cachedTracks.downloads,
                 )
-                mutableCatalog.value = hydrated
+                mutableCatalog.value = removeMissingLocalArtworkReferences(hydrated)
             }
             PhoebeLog.d("CatalogRepository") {
                 "restoreCachedCatalog from DB → ${mutableCatalog.value.albums.size} albums, " +
@@ -142,8 +153,9 @@ class CatalogRepository(
             PhoebeLog.d("CatalogRepository") { "restoreCachedCatalog: legacy file unreadable" }
             return
         }
-        withContext(Dispatchers.Default) { persist(parsed) }
-        mutableCatalog.value = parsed
+        val repaired = removeMissingLocalArtworkReferences(parsed)
+        withContext(Dispatchers.Default) { persist(repaired) }
+        mutableCatalog.value = repaired
         storage.delete(LegacyCatalogFile)
         PhoebeLog.d("CatalogRepository") {
             "restoreCachedCatalog from legacy file → ${parsed.albums.size} albums"
@@ -421,7 +433,7 @@ class CatalogRepository(
             val cached = preservedTracks[p.id]
             val cachedSize = cached?.size ?: 0
             when {
-                p.isLikedSongsPlaylist() && p.id != PENDING_LIKED_SONGS_PLAYLIST_ID && p.trackCount > 0 && cached == null -> {
+                p.trackCount > 0 && cached == null && p.thumbUrl.isNullOrBlank() -> {
                     staleForRefetch += p
                     p
                 }
@@ -480,9 +492,52 @@ class CatalogRepository(
         if (existing.isEmpty()) return incoming
         val existingById = existing.associateBy { it.id }
         return incoming.map { track ->
-            val previousAdded = existingById[track.id]?.dateAddedMs
-            if (previousAdded != null) track.copy(dateAddedMs = previousAdded) else track
+            val previous = existingById[track.id] ?: return@map track
+            track.copy(
+                dateAddedMs = previous.dateAddedMs ?: track.dateAddedMs,
+                localUri = previous.localUri ?: track.localUri,
+                localArtworkUri = previous.localArtworkUri ?: track.localArtworkUri,
+                thumbUrl = track.thumbUrl ?: previous.thumbUrl?.takeUnless { it.isLocalArtworkUrl() },
+            )
         }
+    }
+
+    private suspend fun removeMissingLocalArtworkReferences(snapshot: CatalogSnapshot): CatalogSnapshot {
+        val checked = mutableMapOf<String, Boolean>()
+        suspend fun available(url: String?): Boolean {
+            if (url.isNullOrBlank() || !url.isLocalArtworkUrl()) return true
+            checked[url]?.let { return it }
+            val exists = storage.readUriBytes(url) != null
+            checked[url] = exists
+            return exists
+        }
+
+        suspend fun clean(url: String?): String? =
+            if (available(url)) url else null
+
+        val artists = snapshot.artists.map { artist ->
+            artist.copy(thumbUrl = clean(artist.thumbUrl))
+        }
+        val albums = snapshot.albums.map { album ->
+            album.copy(thumbUrl = clean(album.thumbUrl))
+        }
+        val playlists = snapshot.playlists.map { playlist ->
+            playlist.copy(thumbUrl = clean(playlist.thumbUrl))
+        }
+        val tracksByParent = snapshot.tracksByParent.mapValues { (_, tracks) ->
+            tracks.map { track ->
+                track.copy(
+                    thumbUrl = clean(track.thumbUrl),
+                    localArtworkUri = clean(track.localArtworkUri),
+                )
+            }
+        }
+        return snapshot.copy(
+            artists = artists,
+            albums = albums,
+            playlists = playlists,
+            tracksByParent = tracksByParent,
+        )
     }
 
     private suspend fun indexPlexTrackPages(
@@ -918,7 +973,7 @@ class CatalogRepository(
     }
 
     suspend fun toggleLikedTrackLocally(track: Track): Boolean {
-        if (!track.canAddToPlexPlaylist()) return false
+        if (!track.canTogglePlexLike()) return false
         val playlist = ensureLocalLikedSongsPlaylist()
         val snapshot = mutableCatalog.value
         val existing = snapshot.tracksByParent[playlist.id].orEmpty()
@@ -980,7 +1035,7 @@ class CatalogRepository(
         track: Track,
         liked: Boolean,
     ): Boolean {
-        if (session?.supportsPlexPlaylists() != true || !track.canAddToPlexPlaylist()) return false
+        if (session?.supportsPlexPlaylists() != true || !track.canTogglePlexLike()) return false
         val remotePlaylist = mutableCatalog.value.playlists.firstOrNull {
             it.isLikedSongsPlaylist() && it.id != PENDING_LIKED_SONGS_PLAYLIST_ID
         } ?: run {
@@ -1043,7 +1098,7 @@ class CatalogRepository(
     }
 
     suspend fun toggleLikedTrackRemote(session: PlexSession?, track: Track): Boolean {
-        if (!track.canAddToPlexPlaylist()) return false
+        if (!track.canTogglePlexLike()) return false
         val playlist = findOrCreateLikedSongsPlaylist(session) ?: return false
         val fresh = runCatching {
             refetchPlaylistTracksFromPlex(session, playlist)
@@ -1352,24 +1407,163 @@ class CatalogRepository(
         return MetadataUpdateResult(savedLocally = true, plexAttempted = plexAttempted, plexSynced = plexSynced)
     }
 
-    suspend fun download(track: Track) {
-        if (track.downloadUrl.isBlank()) {
-            updateDownload(track, DownloadState.Failed, progress = 0f)
-            return
+    suspend fun download(track: Track): DownloadBatchResult =
+        downloadTracks(listOf(track))
+
+    suspend fun downloadAlbum(session: PlexSession?, album: Album): DownloadBatchResult {
+        downloadArtworkForAlbum(album)
+        return downloadTracks(tracksForAlbum(session, album))
+    }
+
+    suspend fun downloadArtist(session: PlexSession?, artist: Artist): DownloadBatchResult {
+        ensureTracksForArtistAlbums(session, artist.title)
+        downloadArtworkForArtist(artist)
+        catalogAlbumsForArtist(mutableCatalog.value, artist.title).forEach { album ->
+            downloadArtworkForAlbum(album)
         }
-        updateDownload(track, DownloadState.Downloading, progress = 0.1f)
-        runCatching {
-            val bytes = httpClient.get(track.downloadUrl).body<ByteArray>()
-            val localUri = storage.writeBytes("downloads/${track.id}.audio", bytes)
-            val offlineTrack = track.copy(localUri = localUri)
-            val updatedTracks = mutableCatalog.value.tracksByParent.mapValues { (_, tracks) ->
-                tracks.map { if (it.id == track.id) offlineTrack else it }
+        return downloadTracks(catalogTracksForArtist(mutableCatalog.value, artist.title))
+    }
+
+    suspend fun downloadPlaylist(session: PlexSession?, playlist: Playlist): DownloadBatchResult {
+        val tracks = tracksForPlaylist(session, playlist)
+        val refreshedPlaylist = mutableCatalog.value.playlists.firstOrNull { it.id == playlist.id } ?: playlist
+        downloadArtworkForPlaylist(refreshedPlaylist)
+        return downloadTracks(tracks)
+    }
+
+    suspend fun deleteAllDownloads(): Int = downloadMutex.withLock {
+        val snapshot = mutableCatalog.value
+        if (snapshot.downloads.isEmpty()) return@withLock 0
+        deleteDownloadsForTrackIdsLocked(snapshot.downloads.map { it.trackId }.toSet())
+    }
+
+    suspend fun deleteDownloadsForTracks(tracks: List<Track>): Int = downloadMutex.withLock {
+        val trackIds = tracks.map { it.id }.toSet()
+        if (trackIds.isEmpty()) return@withLock 0
+        deleteDownloadsForTrackIdsLocked(trackIds)
+    }
+
+    private suspend fun deleteDownloadsForTrackIdsLocked(trackIds: Set<String>): Int {
+        val snapshot = mutableCatalog.value
+        if (snapshot.downloads.isEmpty()) return 0
+        val itemsToDelete = snapshot.downloads.filter { it.trackId in trackIds }
+        if (itemsToDelete.isEmpty()) return 0
+        val downloadedRemoteIds = itemsToDelete
+            .mapNotNull { item -> item.trackId.takeIf { !item.localUri.isNullOrBlank() } }
+            .toSet()
+        itemsToDelete.forEach { item ->
+            if (!item.localUri.isNullOrBlank()) {
+                runCatching { storage.deleteUri(item.localUri) }
+                    .onFailure { error ->
+                        PhoebeLog.d("CatalogRepository") { "download delete failed for '${item.title}': ${error.message}" }
+                }
             }
-            publish(mutableCatalog.value.copy(tracksByParent = updatedTracks), persist = true)
-            updateDownload(offlineTrack, DownloadState.Complete, progress = 1f)
-        }.onFailure {
+        }
+        val deletedIds = itemsToDelete.map { it.trackId }.toSet()
+        snapshot.tracksByParent.values
+            .asSequence()
+            .flatten()
+            .distinctBy { it.id }
+            .filter { it.id in deletedIds }
+            .mapNotNull { it.localArtworkUri }
+            .distinct()
+            .forEach { uri ->
+                runCatching { storage.deleteUri(uri) }
+                    .onFailure { error ->
+                        PhoebeLog.d("CatalogRepository") { "artwork delete failed: ${error.message}" }
+                    }
+            }
+        val updatedTracks = snapshot.tracksByParent.mapValues { (_, tracks) ->
+            tracks.map { track ->
+                if (track.id in downloadedRemoteIds) track.copy(localUri = null, localArtworkUri = null) else track
+            }
+        }
+        publish(
+            snapshot.copy(
+                tracksByParent = updatedTracks,
+                downloads = snapshot.downloads.filterNot { it.trackId in deletedIds },
+            ),
+            persist = true,
+        )
+        return itemsToDelete.size
+    }
+
+    suspend fun cacheDownloadedArtwork(): Int = downloadMutex.withLock {
+        val snapshot = mutableCatalog.value
+        val downloadedIds = snapshot.downloads
+            .asSequence()
+            .filter { it.state == DownloadState.Complete && !it.localUri.isNullOrBlank() }
+            .map { it.trackId }
+            .toSet()
+        if (downloadedIds.isEmpty()) return@withLock 0
+
+        val tracks = snapshot.tracksByParent.values
+            .asSequence()
+            .flatten()
+            .distinctBy { it.id }
+            .filter { it.id in downloadedIds && it.thumbUrl?.isRemoteArtworkUrl() == true && it.localArtworkUri == null }
+            .toList()
+        var cached = 0
+        tracks.forEach { track ->
+            val artworkUri = downloadArtworkForTrack(track) ?: return@forEach
+            updateTrackArtworkInfo(track.id, artworkUri)
+            cached++
+        }
+        val trackIds = tracks.map { it.id }.toSet()
+        val playlists = snapshot.playlists
+            .filter { playlist ->
+                playlist.thumbUrl?.isRemoteArtworkUrl() == true &&
+                    snapshot.tracksByParent[playlist.id].orEmpty().any { it.id in trackIds }
+            }
+        playlists.forEach { playlist ->
+            downloadArtworkForPlaylist(playlist) ?: return@forEach
+            cached++
+        }
+        cached
+    }
+
+    suspend fun downloadTracks(tracks: List<Track>): DownloadBatchResult = downloadMutex.withLock {
+        val uniqueTracks = tracks.distinctBy { it.id }
+        if (uniqueTracks.isEmpty()) return@withLock DownloadBatchResult()
+
+        uniqueTracks.filter { it.localUri != null }.forEach { track ->
+            val artworkUri = track.localArtworkUri ?: downloadArtworkForTrack(track)
+            updateTrackOfflineInfo(
+                offlineTrack = track.copy(localArtworkUri = artworkUri ?: track.localArtworkUri),
+            )
+            updateDownload(track, DownloadState.Complete, progress = 1f)
+        }
+        val downloadable = uniqueTracks.filter { it.localUri == null && it.downloadUrl.isNotBlank() }
+        val failedBeforeStart = uniqueTracks.filter { it.localUri == null && it.downloadUrl.isBlank() }
+        failedBeforeStart.forEach { track ->
             updateDownload(track, DownloadState.Failed, progress = 0f)
         }
+        downloadable.forEach { track ->
+            updateDownload(track, DownloadState.Queued, progress = 0f)
+        }
+
+        var completed = uniqueTracks.count { it.localUri != null }
+        var failed = failedBeforeStart.size
+        downloadable.forEach { track ->
+            updateDownload(track, DownloadState.Downloading, progress = 0.05f)
+            runCatching {
+                val bytes = httpClient.get(track.downloadUrl).body<ByteArray>()
+                val localUri = storage.writeBytes(downloadPathFor(track), bytes)
+                val artworkUri = downloadArtworkForTrack(track)
+                val offlineTrack = track.copy(localUri = localUri, localArtworkUri = artworkUri ?: track.localArtworkUri)
+                updateTrackOfflineInfo(
+                    offlineTrack = offlineTrack,
+                )
+                updateDownload(offlineTrack, DownloadState.Complete, progress = 1f)
+            }.onSuccess {
+                completed++
+            }.onFailure { error ->
+                PhoebeLog.d("CatalogRepository") { "download failed for '${track.title}': ${error.message}" }
+                failed++
+                updateDownload(track, DownloadState.Failed, progress = 0f)
+            }
+        }
+        DownloadBatchResult(total = uniqueTracks.size, completed = completed, failed = failed)
     }
 
     private suspend fun updateDownload(track: Track, state: DownloadState, progress: Float) {
@@ -1383,6 +1577,169 @@ class CatalogRepository(
         )
         val others = mutableCatalog.value.downloads.filterNot { it.trackId == track.id }
         publish(mutableCatalog.value.copy(downloads = others + item), persist = true)
+    }
+
+    private suspend fun downloadArtworkForTrack(track: Track): String? {
+        val thumbUrl = track.thumbUrl?.takeIf { it.isNotBlank() && it.isRemoteArtworkUrl() } ?: return null
+        return runCatching {
+            val bytes = httpClient.get(thumbUrl).body<ByteArray>()
+            storage.writeBytes(cachedArtworkPathForUrl(thumbUrl), bytes)
+        }.onFailure { error ->
+            PhoebeLog.d("CatalogRepository") { "artwork download failed for '${track.title}': ${error.message}" }
+        }.getOrNull()
+    }
+
+    private suspend fun downloadArtworkForArtist(artist: Artist): String? =
+        downloadArtworkForEntity(
+            owner = "artist",
+            id = artist.id,
+            title = artist.title,
+            thumbUrl = artist.thumbUrl,
+        )
+
+    private suspend fun downloadArtworkForAlbum(album: Album): String? =
+        downloadArtworkForEntity(
+            owner = "album",
+            id = album.id,
+            title = album.title,
+            thumbUrl = album.thumbUrl,
+        )
+
+    private suspend fun downloadArtworkForPlaylist(playlist: Playlist): String? =
+        downloadArtworkForEntity(
+            owner = "playlist",
+            id = playlist.id,
+            title = playlist.title,
+            thumbUrl = playlist.thumbUrl,
+        )
+
+    private suspend fun downloadArtworkForEntity(
+        owner: String,
+        id: String,
+        title: String,
+        thumbUrl: String?,
+    ): String? {
+        val remoteThumbUrl = thumbUrl?.takeIf { it.isNotBlank() && it.isRemoteArtworkUrl() } ?: return null
+        return runCatching {
+            val bytes = httpClient.get(remoteThumbUrl).body<ByteArray>()
+            storage.writeBytes(cachedArtworkPathForUrl(remoteThumbUrl), bytes)
+        }.onFailure { error ->
+            PhoebeLog.d("CatalogRepository") { "$owner artwork download failed for '$title': ${error.message}" }
+        }.getOrNull()
+    }
+
+    private suspend fun updateTrackOfflineInfo(offlineTrack: Track) {
+        val snapshot = mutableCatalog.value
+        val updatedTracks = snapshot.tracksByParent.mapValues { (_, tracks) ->
+            tracks.map { track ->
+                if (track.id == offlineTrack.id) {
+                    offlineTrack
+                } else {
+                    track
+                }
+            }
+        }
+        publish(
+            snapshot.copy(
+                tracksByParent = updatedTracks,
+            ),
+            persist = true,
+        )
+    }
+
+    private suspend fun updateTrackArtworkInfo(trackId: String, localArtworkUri: String) {
+        val snapshot = mutableCatalog.value
+        val updatedTracks = snapshot.tracksByParent.mapValues { (_, tracks) ->
+            tracks.map { track ->
+                if (track.id == trackId) {
+                    track.copy(localArtworkUri = localArtworkUri)
+                } else {
+                    track
+                }
+            }
+        }
+        publish(snapshot.copy(tracksByParent = updatedTracks), persist = true)
+    }
+
+    private fun downloadPathFor(track: Track): String {
+        val plexRelativePath = track.filepath
+            ?.takeIf { it.isNotBlank() }
+            ?.libraryRelativeDownloadPath(track)
+        if (plexRelativePath != null) return "downloads/$plexRelativePath"
+
+        val extension = track.filepath
+            ?.substringAfterLast('/', "")
+            ?.substringAfterLast('\\', "")
+            ?.substringAfterLast('.', "")
+            ?.takeIf { it.length in 2..5 && it.all { c -> c.isLetterOrDigit() } }
+            ?: track.downloadUrl.substringBefore('?')
+                .substringAfterLast('/', "")
+                .substringAfterLast('.', "")
+                .takeIf { it.length in 2..5 && it.all { c -> c.isLetterOrDigit() } }
+            ?: track.audioCodec?.lowercase()?.takeIf { it.isNotBlank() }
+            ?: "audio"
+        return "downloads/${track.id.safePathSegment()}.$extension"
+    }
+
+    private fun String.isRemoteArtworkUrl(): Boolean =
+        startsWith("http://") || startsWith("https://")
+
+    private fun String.isLocalArtworkUrl(): Boolean =
+        startsWith("file:") || startsWith("content:") || startsWith("web-storage://")
+
+    private fun String.safePathSegment(): String =
+        map { if (it.isLetterOrDigit() || it == '-' || it == '_') it else '-' }
+            .joinToString("")
+            .trim('-')
+            .ifBlank { "track" }
+
+    private fun String.libraryRelativeDownloadPath(track: Track): String? {
+        val normalized = replace('\\', '/').substringBefore('?').trim()
+        if (normalized.isBlank() || normalized.startsWith("file://")) return null
+        val rawSegments = normalized
+            .split('/')
+            .filter { it.isNotBlank() }
+            .map { it.trim() }
+        if (rawSegments.isEmpty()) return null
+        val fileName = rawSegments.last().safeFileName().takeIf { it.hasLikelyExtension() } ?: return null
+        val folders = rawSegments.dropLast(1)
+        val artistIndex = folders.indexOfFirst { it.samePathName(track.artist) }
+        val albumIndex = folders.indexOfFirst { it.samePathName(track.album) }
+        val startIndex = when {
+            artistIndex >= 0 -> artistIndex
+            albumIndex > 0 -> albumIndex - 1
+            folders.size > 1 && rawSegments.first().looksLikeFilesystemRoot() -> 1
+            else -> 0
+        }
+        val relativeFolders = folders.drop(startIndex).mapNotNull { segment ->
+            segment.safeFileName().takeIf { it.isNotBlank() && it != "." && it != ".." }
+        }
+        return (relativeFolders + fileName).joinToString("/").takeIf { it.isNotBlank() }
+    }
+
+    private fun String.safeFileName(): String =
+        map { c ->
+            when {
+                c.isLetterOrDigit() || c == ' ' || c == '-' || c == '_' || c == '.' || c == '(' || c == ')' || c == '[' || c == ']' -> c
+                else -> '-'
+            }
+        }
+            .joinToString("")
+            .trim(' ', '.', '-')
+            .ifBlank { "untitled" }
+
+    private fun String.samePathName(other: String): Boolean =
+        safeFileName().lowercase() == other.safeFileName().lowercase()
+
+    private fun String.hasLikelyExtension(): Boolean =
+        substringAfterLast('.', "")
+            .takeIf { it.length in 2..5 }
+            ?.all { it.isLetterOrDigit() } == true
+
+    private fun String.looksLikeFilesystemRoot(): Boolean {
+        val value = trimEnd(':').lowercase()
+        return value.length == 1 ||
+            value in setOf("music", "media", "audio", "library", "libraries", "mnt", "mount", "volume", "volumes", "storage")
     }
 
     private suspend fun publish(snapshot: CatalogSnapshot, persist: Boolean) {
@@ -1447,6 +1804,7 @@ class CatalogRepository(
                     streamUrl = track.streamUrl,
                     downloadUrl = track.downloadUrl,
                     thumbUrl = track.thumbUrl,
+                    localArtworkUri = track.localArtworkUri,
                     localUri = track.localUri,
                     year = track.year?.toLong(),
                     genre = track.genre,
@@ -1542,6 +1900,7 @@ class CatalogRepository(
                     streamUrl = row.streamUrl,
                     downloadUrl = row.downloadUrl,
                     thumbUrl = row.thumbUrl,
+                    localArtworkUri = row.localArtworkUri,
                     localUri = row.localUri,
                     year = row.year?.toInt(),
                     genre = row.genre,

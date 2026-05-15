@@ -221,7 +221,7 @@ internal fun MobileHomeHero(track: Track?, onOpenFullPlayer: () -> Unit) {
     } else {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             SectionLabel("Now Playing", PhoebeUi.accentLight)
-            ArtworkImage(track.album, track.thumbUrl, Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(14.dp)))
+            TrackArtworkImage(track, Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(14.dp)))
             AutoScrollingText(track.title, color = PhoebeUi.primaryText, fontSize = 22.sp, fontWeight = FontWeight.Black)
             AutoScrollingText(track.artist, color = PhoebeUi.secondaryText, fontSize = 15.sp)
             Text(
@@ -414,6 +414,11 @@ internal fun MobileBrowseShell(
     onLibrarySortBy: (LibrarySortBy) -> Unit,
     onLibraryAscending: (Boolean) -> Unit,
     onLibraryColumns: (LibraryColumnVisibility) -> Unit,
+    downloadDirectory: String?,
+    downloadCount: Int,
+    defaultDownloadDirectoryLabel: String,
+    onDownloadDirectory: (String?) -> Unit,
+    onDeleteAllDownloads: () -> Unit,
     useLightAppearance: Boolean,
     onUseLightAppearanceChange: (Boolean) -> Unit,
 ) {
@@ -500,6 +505,11 @@ internal fun MobileBrowseShell(
                 section == DesktopSection.Settings && selectedPlaylistId == null -> SettingsMobileView(
                     isLightMode = useLightAppearance,
                     onLightModeChange = onUseLightAppearanceChange,
+                    downloadDirectory = downloadDirectory,
+                    downloadCount = downloadCount,
+                    defaultDownloadDirectoryLabel = defaultDownloadDirectoryLabel,
+                    onDownloadDirectory = onDownloadDirectory,
+                    onDeleteAllDownloads = onDeleteAllDownloads,
                     modifier = Modifier.fillMaxSize(),
                 )
                 section == DesktopSection.Home && selectedPlaylistId == null -> {
@@ -612,7 +622,7 @@ internal fun MobileBrowseShell(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    ArtworkImage(currentTrack.album, currentTrack.thumbUrl, Modifier.size(44.dp))
+                    TrackArtworkImage(currentTrack, Modifier.size(44.dp))
                     Column(Modifier.weight(1f)) {
                         AutoScrollingText(
                             currentTrack.title,
@@ -757,9 +767,8 @@ internal fun SwipeableMobileArtwork(
                 },
         ) {
             if (displayOffset < 0f && nextTrack != null) {
-                ArtworkImage(
-                    nextTrack.album,
-                    nextTrack.thumbUrl,
+                TrackArtworkImage(
+                    nextTrack,
                     Modifier
                         .fillMaxSize()
                         .offset { IntOffset((widthPx + displayOffset).roundToInt(), 0) },
@@ -767,9 +776,8 @@ internal fun SwipeableMobileArtwork(
                 )
             }
             if (displayOffset > 0f && previousTrack != null) {
-                ArtworkImage(
-                    previousTrack.album,
-                    previousTrack.thumbUrl,
+                TrackArtworkImage(
+                    previousTrack,
                     Modifier
                         .fillMaxSize()
                         .offset { IntOffset((displayOffset - widthPx).roundToInt(), 0) },
@@ -847,6 +855,7 @@ internal fun MobilePlayer(
     )
     val displayOffset = if (isDraggingDismiss) dragOffset.coerceAtLeast(0f) else animatedOffset
     val hasTrack = track != null
+    val trackNavigationActions = LocalTrackNavigationActions.current
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -975,12 +984,16 @@ internal fun MobilePlayer(
                 ) {
                     Spacer(Modifier.height(24.dp))
                     if (track != null) {
-                        Box(
+                        BoxWithConstraints(
                             Modifier
                                 .weight(1f, fill = true)
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(0.dp)),
                         ) {
+                            val artworkSize = minOf(
+                                maxWidth,
+                                (maxHeight - 112.dp).coerceAtLeast(220.dp),
+                            )
                             Column(
                                 Modifier
                                     .fillMaxWidth()
@@ -995,11 +1008,30 @@ internal fun MobilePlayer(
                                     nextTrack = upNext.firstOrNull(),
                                     previousTrack = previousTrack,
                                     onSkipQueueBy = onSkipQueueBy,
-                                    modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+                                    modifier = Modifier
+                                        .size(artworkSize)
+                                        .align(Alignment.CenterHorizontally),
                                 )
                                 Spacer(Modifier.height(20.dp))
                                 AutoScrollingText(track.title, color = PhoebeUi.primaryText, fontSize = 22.sp, fontWeight = FontWeight.Black)
-                                AutoScrollingText(track.artist, color = PhoebeUi.secondaryText, fontSize = 15.sp)
+                                AutoScrollingText(
+                                    track.artist,
+                                    color = PhoebeUi.secondaryText,
+                                    fontSize = 15.sp,
+                                    modifier = Modifier.clickable(enabled = track.artist.isNotBlank()) {
+                                        trackNavigationActions.onOpenArtistForTrack(track)
+                                    },
+                                )
+                                if (track.album.isNotBlank()) {
+                                    AutoScrollingText(
+                                        track.album,
+                                        color = PhoebeUi.mutedText,
+                                        fontSize = 13.sp,
+                                        modifier = Modifier.clickable {
+                                            trackNavigationActions.onOpenAlbumForTrack(track)
+                                        },
+                                    )
+                                }
                             }
                         }
                     } else {

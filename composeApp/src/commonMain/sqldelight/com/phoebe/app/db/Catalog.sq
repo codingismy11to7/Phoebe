@@ -39,6 +39,7 @@ CREATE TABLE TrackRow (
     streamUrl TEXT NOT NULL,
     downloadUrl TEXT NOT NULL,
     thumbUrl TEXT,
+    localArtworkUri TEXT,
     localUri TEXT,
     year INTEGER,
     genre TEXT,
@@ -115,8 +116,8 @@ VALUES (?, ?, ?, ?, ?, ?);
 upsertTrack:
 INSERT OR REPLACE INTO TrackRow(
     id, title, artist, album, durationMs, streamUrl, downloadUrl,
-    thumbUrl, localUri, year, genre, filepath, audioCodec, bitrateKbps, dateAddedMs, parentAlbumId
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    thumbUrl, localArtworkUri, localUri, year, genre, filepath, audioCodec, bitrateKbps, dateAddedMs, parentAlbumId
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 upsertTrackParent:
 INSERT OR REPLACE INTO TrackParentRow(parentId, trackId, position) VALUES (?, ?, ?);

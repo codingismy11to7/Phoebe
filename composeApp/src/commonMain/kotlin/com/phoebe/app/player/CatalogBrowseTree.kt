@@ -129,6 +129,7 @@ class CatalogBrowseTree(
             streamUrl = streamUrl,
             downloadUrl = downloadUrl,
             thumbUrl = thumbUrl,
+            localArtworkUri = localArtworkUri,
             localUri = localUri,
             year = year?.toInt(),
             genre = genre,
@@ -136,6 +137,7 @@ class CatalogBrowseTree(
             audioCodec = audioCodec,
             bitrateKbps = bitrateKbps?.toInt(),
             dateAddedMs = dateAddedMs,
+            parentAlbumId = parentAlbumId,
         )
 
     private fun browseFolder(

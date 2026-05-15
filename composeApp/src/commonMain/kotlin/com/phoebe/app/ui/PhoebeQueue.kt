@@ -408,7 +408,7 @@ internal fun UpNextRow(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Box(Modifier.size(thumbnail), contentAlignment = Alignment.Center) {
-            ArtworkImage(track.album, track.thumbUrl, Modifier.fillMaxSize(), radius = 6.dp)
+            TrackArtworkImage(track, Modifier.fillMaxSize(), radius = 6.dp)
             if (active) {
                 Box(
                     Modifier

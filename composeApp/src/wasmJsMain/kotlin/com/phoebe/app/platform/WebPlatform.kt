@@ -1,5 +1,7 @@
 package com.phoebe.app.platform
 
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import com.phoebe.app.data.PlexClient
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.js.Js
@@ -31,14 +33,48 @@ actual class PlatformStorage actual constructor() {
         window.localStorage.removeItem(storageKey(name))
     }
 
+    actual suspend fun deleteUri(uri: String) {
+        if (!uri.startsWith("web-storage://")) return
+        window.localStorage.removeItem(storageKey(decodeURIComponent(uri.removePrefix("web-storage://"))))
+    }
+
+    actual suspend fun readUriBytes(uri: String): ByteArray? {
+        if (!uri.startsWith("web-storage://")) return null
+        val encoded = window.localStorage.getItem(storageKey(decodeURIComponent(uri.removePrefix("web-storage://")))) ?: return null
+        return window.atob(encoded).toByteArrayFromBinaryString()
+    }
+
+    actual suspend fun readBytes(name: String): ByteArray? {
+        val encoded = window.localStorage.getItem(storageKey(name)) ?: return null
+        return window.atob(encoded).toByteArrayFromBinaryString()
+    }
+
     actual suspend fun writeBytes(name: String, bytes: ByteArray): String {
         val encoded = window.btoa(bytes.toBinaryString())
         window.localStorage.setItem(storageKey(name), encoded)
         return "web-storage://${encodeURIComponent(name)}"
     }
 
+    actual suspend fun readDownloadDirectory(): String? =
+        window.localStorage.getItem(storageKey(DownloadDirectoryKey))
+
+    actual suspend fun writeDownloadDirectory(uri: String?) {
+        if (uri.isNullOrBlank()) window.localStorage.removeItem(storageKey(DownloadDirectoryKey))
+        else window.localStorage.setItem(storageKey(DownloadDirectoryKey), uri)
+    }
+
+    actual fun defaultDownloadDirectoryLabel(): String = "Browser storage"
+
     private fun storageKey(name: String): String = "phoebe:$name"
 }
+
+@Composable
+actual fun rememberPickDownloadDirectory(onPicked: (String?) -> Unit): () -> Unit =
+    remember(onPicked) {
+        { onPicked(null) }
+    }
+
+private const val DownloadDirectoryKey = "download-location"
 
 actual fun openExternalUrl(url: String) {
     window.open(url, target = "_blank")
@@ -76,6 +112,9 @@ internal actual fun platformLog(tag: String, message: String) {
 private fun ByteArray.toBinaryString(): String =
     joinToString(separator = "") { (it.toInt() and 0xff).toChar().toString() }
 
+private fun String.toByteArrayFromBinaryString(): ByteArray =
+    ByteArray(length) { index -> this[index].code.toByte() }
+
 @OptIn(ExperimentalWasmJsInterop::class)
 @JsFun("() => Date.now()")
 private external fun jsDateNow(): Double
@@ -83,3 +122,7 @@ private external fun jsDateNow(): Double
 @OptIn(ExperimentalWasmJsInterop::class)
 @JsFun("(value) => encodeURIComponent(value)")
 private external fun encodeURIComponent(value: String): String
+
+@OptIn(ExperimentalWasmJsInterop::class)
+@JsFun("(value) => decodeURIComponent(value)")
+private external fun decodeURIComponent(value: String): String

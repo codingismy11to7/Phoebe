@@ -142,6 +142,7 @@ import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryUiPreferences
 import com.phoebe.app.domain.CatalogSnapshot
+import com.phoebe.app.domain.DownloadState
 import com.phoebe.app.domain.LocalFolderMediaSourceConfig
 import com.phoebe.app.domain.MediaSourcesState
 import com.phoebe.app.domain.MusicLibrary
@@ -375,9 +376,8 @@ internal fun FlippableSongArtwork(
             .clip(shape),
     ) {
         if (rotation <= 90f) {
-            ArtworkImage(
-                track.album,
-                track.thumbUrl,
+            TrackArtworkImage(
+                track,
                 Modifier
                     .fillMaxSize()
                     .then(artworkModifier)
@@ -457,7 +457,7 @@ private fun SongActionRow(
         ) {
             item("play") { SongActionButton(PhoebeIcon.Play, "Play", onPlay) }
             item("up-next") { SongActionButton(PhoebeIcon.Queue, "Up Next") { onAddToUpNext(track) } }
-            item("download") { SongActionButton(PhoebeIcon.Cast, "Download") { onDownload(track) } }
+            item("download") { DownloadActionButton("Download", listOf(track)) { onDownload(track) } }
         }
     } else {
         Row(
@@ -466,13 +466,13 @@ private fun SongActionRow(
         ) {
             SongActionButton(PhoebeIcon.Play, "Play", onPlay)
             SongActionButton(PhoebeIcon.Queue, "Up Next") { onAddToUpNext(track) }
-            SongActionButton(PhoebeIcon.Cast, "Download") { onDownload(track) }
+            DownloadActionButton("Download", listOf(track)) { onDownload(track) }
         }
     }
 }
 
 @Composable
-private fun SongActionButton(icon: PhoebeIcon, label: String, onClick: () -> Unit) {
+internal fun SongActionButton(icon: PhoebeIcon, label: String, onClick: () -> Unit) {
     Row(
         Modifier
             .clip(RoundedCornerShape(999.dp))
@@ -485,6 +485,82 @@ private fun SongActionButton(icon: PhoebeIcon, label: String, onClick: () -> Uni
     ) {
         PhoebeIconView(icon, tint = PhoebeUi.accentLight, modifier = Modifier.size(15.dp))
         Text(label, color = PhoebeUi.primaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+internal fun DownloadActionButton(
+    label: String,
+    tracks: List<Track>,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val downloads = LocalDownloadStatus.current
+    val downloadActions = LocalDownloadActions.current
+    val uniqueTracks = remember(tracks) { tracks.distinctBy { it.id } }
+    val items = uniqueTracks.mapNotNull { downloads.itemFor(it) }
+    val complete = uniqueTracks.count { downloads.isComplete(it) }
+    val active = items.filter { it.state == DownloadState.Queued || it.state == DownloadState.Downloading }
+    val allComplete = uniqueTracks.isNotEmpty() && complete == uniqueTracks.size
+    var confirmDelete by remember(uniqueTracks.map { it.id }) { mutableStateOf(false) }
+    val progress = when {
+        active.isNotEmpty() -> {
+            val activeProgress = active.map { it.progress.coerceIn(0f, 1f) }.average().toFloat()
+            ((complete + activeProgress) / uniqueTracks.size.toFloat()).coerceIn(0f, 1f)
+        }
+        allComplete -> 1f
+        else -> null
+    }
+    Row(
+        modifier
+            .clip(RoundedCornerShape(999.dp))
+            .clickable {
+                if (allComplete) {
+                    confirmDelete = true
+                } else {
+                    onClick()
+                }
+            }
+            .background(PhoebeUi.elevatedFill)
+            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(999.dp))
+            .padding(horizontal = 14.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        when {
+            active.isNotEmpty() -> CircularProgressIndicator(
+                progress = { progress ?: 0f },
+                modifier = Modifier.size(15.dp),
+                color = PhoebeUi.accentLight,
+                strokeWidth = 2.dp,
+            )
+            allComplete -> PhoebeIconView(PhoebeIcon.Check, tint = PhoebeUi.accentLight, modifier = Modifier.size(15.dp))
+            else -> PhoebeIconView(PhoebeIcon.Download, tint = PhoebeUi.accentLight, modifier = Modifier.size(15.dp))
+        }
+        Text(
+            when {
+                active.isNotEmpty() && uniqueTracks.size > 1 -> "Downloading ${((progress ?: 0f) * 100).toInt()}%"
+                active.isNotEmpty() -> "Downloading"
+                allComplete -> "Downloaded"
+                else -> label
+            },
+            color = PhoebeUi.primaryText,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+    if (confirmDelete) {
+        val noun = if (uniqueTracks.size == 1) "song" else "songs"
+        ConfirmDeleteDownloadsDialog(
+            title = "Delete Downloads?",
+            body = "Remove ${uniqueTracks.size} downloaded $noun from this device? Empty folders from the download will be cleaned up too.",
+            confirmLabel = "Delete",
+            onDismiss = { confirmDelete = false },
+            onConfirm = {
+                downloadActions.onDeleteDownloadedTracks(uniqueTracks)
+                confirmDelete = false
+            },
+        )
     }
 }
 
@@ -512,6 +588,10 @@ private fun SongDetailMetadataRows(
     labelFontSize: TextUnit = 12.sp,
     valueFontSize: TextUnit = 13.sp,
 ) {
+    val downloads = LocalDownloadStatus.current
+    val downloadedFile = downloads.itemFor(track)
+        ?.takeIf { it.state == DownloadState.Complete && !it.localUri.isNullOrBlank() }
+        ?.localUri
     DetailMetaRow("Artist", track.artist, labelWidth, labelFontSize, valueFontSize)
     DetailMetaRow("Album", track.album, labelWidth, labelFontSize, valueFontSize)
     DetailMetaRow("Duration", formatDuration(track.durationMs), labelWidth, labelFontSize, valueFontSize)
@@ -522,8 +602,15 @@ private fun SongDetailMetadataRows(
     DetailMetaRow("Plays", playCount.toString(), labelWidth, labelFontSize, valueFontSize)
     track.audioCodec?.let { DetailMetaRow("Codec", it.uppercase(), labelWidth, labelFontSize, valueFontSize) }
     track.bitrateKbps?.let { DetailMetaRow("Bitrate", "$it kbps", labelWidth, labelFontSize, valueFontSize) }
+    downloadedFile?.let { DetailMetaRow("Downloaded File", displayFileUri(it), labelWidth, labelFontSize, valueFontSize) }
     track.filepath?.let { DetailMetaRow("File", it, labelWidth, labelFontSize, valueFontSize) }
 }
+
+private fun displayFileUri(uri: String): String =
+    uri.removePrefix("file:")
+        .removePrefix("//")
+        .replace("%20", " ")
+        .ifBlank { uri }
 
 @Composable
 private fun DetailMetaRow(
@@ -553,6 +640,7 @@ internal fun ArtistDetailPanel(
     onPlayTracks: (List<Track>, Int) -> Unit,
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
+    onDownloadArtist: (Artist) -> Unit,
     onLibraryColumns: (LibraryColumnVisibility) -> Unit,
 ) {
     val albums = remember(catalog.albums, artist.title) { catalogAlbumsForArtist(catalog, artist.title) }
@@ -619,6 +707,7 @@ internal fun ArtistDetailPanel(
                     modifier = Modifier.sharedBoundsTransition("artist:${artist.id}:title"),
                 )
                 Text("${albums.size} $albumWord · ${tracks.size} $songWord", color = PhoebeUi.secondaryText, fontSize = 14.sp)
+                DownloadActionButton("Download Artist", tracks) { onDownloadArtist(artist) }
                 Spacer(Modifier.height(6.dp))
                 ArtworkImage(
                     artist.title,
@@ -851,13 +940,14 @@ internal fun AlbumDetailPanel(
     onPlayTracks: (List<Track>, Int) -> Unit,
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
+    onDownloadAlbum: (Album) -> Unit,
     onLibraryColumns: (LibraryColumnVisibility) -> Unit,
 ) {
     val tracks = remember(catalog.tracksByParent, album.id) {
         catalog.tracksByParent[album.id].orEmpty()
     }
 
-    var sortBy by remember(album.id) { mutableStateOf(LibrarySortBy.Name) }
+    var sortBy by remember(album.id) { mutableStateOf(LibrarySortBy.AlbumOrder) }
     var ascending by remember(album.id) { mutableStateOf(true) }
 
     val sortedTracks = remember(tracks, sortBy, ascending) {
@@ -872,10 +962,12 @@ internal fun AlbumDetailPanel(
         val useTable = maxWidth >= 640.dp
         val edgePadding = if (maxWidth < 640.dp) 20.dp else 36.dp
         val topPadding = if (maxWidth < 640.dp) 16.dp else 36.dp
+        val bottomContentPadding = if (useTable) 24.dp else 144.dp
         val listState = RetainedLazyListStates.remember("album-detail:${album.id}")
     LazyColumn(
         state = listState,
-        modifier = Modifier.fillMaxSize().padding(start = edgePadding, end = edgePadding, top = topPadding, bottom = 24.dp),
+        modifier = Modifier.fillMaxSize().padding(start = edgePadding, end = edgePadding, top = topPadding),
+        contentPadding = PaddingValues(bottom = bottomContentPadding),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item(contentType = "album-header") {
@@ -885,33 +977,28 @@ internal fun AlbumDetailPanel(
                     label = "Album",
                     alignBackIconToContentStart = !useTable,
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(22.dp), verticalAlignment = Alignment.CenterVertically) {
-                    ArtworkImage(
-                        album.title,
-                        album.thumbUrl,
-                        Modifier.size(160.dp).sharedArtworkTransition("album:${album.id}"),
-                        elevated = useTable,
-                    )
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(
+                if (useTable) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(22.dp), verticalAlignment = Alignment.CenterVertically) {
+                        ArtworkImage(
                             album.title,
-                            color = PhoebeUi.primaryText,
-                            fontSize = 26.sp,
-                            fontWeight = FontWeight.Black,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.sharedBoundsTransition("album:${album.id}:title"),
+                            album.thumbUrl,
+                            Modifier.size(160.dp).sharedArtworkTransition("album:${album.id}"),
+                            elevated = true,
                         )
-                        Text(
-                            album.artist.uppercase(),
-                            color = PhoebeUi.secondaryText,
-                            fontSize = 14.sp,
-                            letterSpacing = 0.05.em,
-                            modifier = Modifier.sharedBoundsTransition("album:${album.id}:subtitle"),
+                        AlbumDetailHeaderText(album, tracks, onDownloadAlbum)
+                    }
+                } else {
+                    Column(
+                        Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        ArtworkImage(
+                            album.title,
+                            album.thumbUrl,
+                            Modifier.size(168.dp).sharedArtworkTransition("album:${album.id}"),
+                            elevated = false,
                         )
-                        album.year?.let { y ->
-                            Text("$y", color = PhoebeUi.mutedText, fontSize = 13.sp)
-                        }
+                        AlbumDetailHeaderText(album, tracks, onDownloadAlbum, compact = true)
                     }
                 }
                 SectionLabel("Tracks", PhoebeUi.primaryText)
@@ -921,9 +1008,10 @@ internal fun AlbumDetailPanel(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 DetailSectionToolbar(
                     sortBy = sortBy,
-                    sortKeys = listOf(LibrarySortBy.Name, LibrarySortBy.Year),
+                    sortKeys = listOf(LibrarySortBy.AlbumOrder, LibrarySortBy.Name, LibrarySortBy.Year),
                     sortLabel = { key ->
                         when (key) {
+                            LibrarySortBy.AlbumOrder -> "Album order"
                             LibrarySortBy.Year -> "Release date"
                             else -> "Song name"
                         }
@@ -983,6 +1071,46 @@ internal fun AlbumDetailPanel(
             }
         }
     }
+    }
+}
+
+@Composable
+private fun AlbumDetailHeaderText(
+    album: Album,
+    tracks: List<Track>,
+    onDownloadAlbum: (Album) -> Unit,
+    compact: Boolean = false,
+) {
+    Column(
+        modifier = if (compact) Modifier.fillMaxWidth() else Modifier,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            album.title,
+            color = PhoebeUi.primaryText,
+            fontSize = if (compact) 28.sp else 26.sp,
+            fontWeight = FontWeight.Black,
+            maxLines = if (compact) 3 else 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.sharedBoundsTransition("album:${album.id}:title"),
+        )
+        Text(
+            album.artist.uppercase(),
+            color = PhoebeUi.secondaryText,
+            fontSize = 14.sp,
+            letterSpacing = 0.05.em,
+            modifier = Modifier.sharedBoundsTransition("album:${album.id}:subtitle"),
+        )
+        album.year?.let { y ->
+            Text("$y", color = PhoebeUi.mutedText, fontSize = 13.sp)
+        }
+        DownloadActionButton(
+            label = "Download Album",
+            tracks = tracks,
+            modifier = Modifier.padding(top = 4.dp),
+        ) {
+            onDownloadAlbum(album)
+        }
     }
 }
 
@@ -1048,6 +1176,7 @@ internal fun PlaylistDetailPanel(
     onPlayTracks: (List<Track>, Int) -> Unit,
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
+    onDownloadPlaylist: (Playlist) -> Unit,
     onLibraryColumns: (LibraryColumnVisibility) -> Unit,
 ) {
     val tracks = remember(catalog.tracksByParent, playlist.id) {
@@ -1088,7 +1217,14 @@ internal fun PlaylistDetailPanel(
                     modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                     placeholder = "Search songs and artists",
                 )
-                PlaylistExportMenu(playlist = playlist, modifier = Modifier.padding(top = 4.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(top = 4.dp),
+                ) {
+                    DownloadActionButton("Download Playlist", tracks) { onDownloadPlaylist(playlist) }
+                    PlaylistExportMenu(playlist = playlist)
+                }
                 Spacer(Modifier.height(6.dp))
                 SectionLabel("Tracks", PhoebeUi.primaryText)
             }

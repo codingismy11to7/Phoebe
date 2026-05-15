@@ -90,7 +90,7 @@ class PlexPlaylistEndToEndDesktopTest {
     fun tracksForPlaylistLoadsFromMockPlexWhenCacheEmpty() = runTest {
         val (db, sqlDriver) = newInMemoryPhoebeDatabase()
         driver = sqlDriver
-        val http = testHttpClient(plexCatalogMockEngine())
+        val http = testHttpClient(plexCatalogMockEngine(playlistThumb = "/playlists/p1/art"))
         val repo = catalogRepository(db, http)
 
         repo.refreshAggregated(testPlexSession())

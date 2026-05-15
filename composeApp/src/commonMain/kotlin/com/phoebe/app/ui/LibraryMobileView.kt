@@ -688,7 +688,6 @@ private fun MobileSongRow(
     onDownload: () -> Unit,
 ) {
     var menuExpanded by remember(track.id) { mutableStateOf(false) }
-    val metadataEditorActions = LocalMetadataEditorActions.current
     Row(
         Modifier
             .fillMaxWidth()
@@ -705,9 +704,8 @@ private fun MobileSongRow(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
-            ArtworkImage(
-                track.album,
-                track.thumbUrl,
+            TrackArtworkImage(
+                track,
                 Modifier.fillMaxSize().sharedArtworkTransition("song:${track.id}"),
                 radius = 8.dp,
                 elevated = false,
@@ -747,46 +745,28 @@ private fun MobileSongRow(
             )
         }
         Text(formatMinutesSeconds(track.durationMs), color = PhoebeUi.mutedText, fontSize = 11.sp)
+        TrackDownloadIndicator(track)
         Box {
-            PhoebeIconView(
-                PhoebeIcon.More,
-                tint = PhoebeUi.secondaryText,
-                modifier = Modifier
-                    .size(17.dp)
+            Box(
+                Modifier
+                    .size(34.dp)
                     .clip(CircleShape)
-                    .clickable(onClick = { menuExpanded = true })
-                    .padding(horizontal = 4.dp),
-            )
-            DropdownMenu(
-                expanded = menuExpanded,
-                onDismissRequest = { menuExpanded = false },
+                    .clickable(onClick = { menuExpanded = true }),
+                contentAlignment = Alignment.Center,
             ) {
-                DropdownMenuItem(
-                    text = { Text("Edit Metadata") },
-                    onClick = {
-                        metadataEditorActions.onRequestEdit(track)
-                        menuExpanded = false
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text("Add to Up Next") },
-                    onClick = {
-                        onAddToUpNext()
-                        menuExpanded = false
-                    },
-                )
-                AddToPlaylistMenuItems(
-                    track = track,
-                    onAfter = { menuExpanded = false },
-                )
-                DropdownMenuItem(
-                    text = { Text("Download Song") },
-                    onClick = {
-                        onDownload()
-                        menuExpanded = false
-                    },
+                PhoebeIconView(
+                    PhoebeIcon.More,
+                    tint = PhoebeUi.secondaryText,
+                    modifier = Modifier.size(17.dp),
                 )
             }
+            TrackActionMenu(
+                expanded = menuExpanded,
+                onDismiss = { menuExpanded = false },
+                onAddToUpNext = onAddToUpNext,
+                onDownload = onDownload,
+                track = track,
+            )
         }
     }
 }

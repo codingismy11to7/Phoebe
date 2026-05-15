@@ -194,7 +194,7 @@ private fun MetadataEditorArtwork(track: Track, modifier: Modifier = Modifier) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("Artwork", color = PhoebeUi.mutedText, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.08.em)
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            ArtworkImage(track.album, track.thumbUrl, Modifier.size(132.dp), radius = 12.dp)
+            TrackArtworkImage(track, Modifier.size(132.dp), radius = 12.dp)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 AutoScrollingText(track.title, color = PhoebeUi.primaryText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 AutoScrollingText(track.artist, color = PhoebeUi.secondaryText, fontSize = 12.sp)
