@@ -22,7 +22,10 @@ import kotlinx.coroutines.launch
 private const val AppearanceThemeFile = "appearance_theme"
 
 @Composable
-fun App(dependencies: AppDependencies? = null) {
+fun App(
+    dependencies: AppDependencies? = null,
+    onAppearanceChange: ((Boolean) -> Unit)? = null,
+) {
     val resolvedDependencies by produceState<AppDependencies?>(initialValue = dependencies, dependencies) {
         if (dependencies == null) {
             value = AppDependencies.create()
@@ -54,6 +57,10 @@ fun App(dependencies: AppDependencies? = null) {
 
     LaunchedEffect(state) {
         bindCarPlayPlayback(state)
+    }
+
+    LaunchedEffect(useLightAppearance) {
+        onAppearanceChange?.invoke(useLightAppearance)
     }
 
     PhoebeTheme(useLightAppearance = useLightAppearance) {

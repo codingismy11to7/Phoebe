@@ -13,6 +13,9 @@ import androidx.compose.ui.window.rememberWindowState
 import com.phoebe.app.platform.PhoebeLog
 import com.phoebe.app.platform.isDebugBuild
 import com.phoebe.app.ui.RegisterDesktopWindowKeyDispatcher
+import com.sun.jna.Library
+import com.sun.jna.Native
+import com.sun.jna.Pointer
 import javax.swing.RootPaneContainer
 
 fun main() {
@@ -36,8 +39,12 @@ fun main() {
             icon = icon,
         ) {
             RegisterDesktopWindowKeyDispatcher(window)
-            ApplyMacWindowChrome()
-            App()
+            ApplyDesktopWindowChrome()
+            App(
+                onAppearanceChange = { useLightAppearance ->
+                    WindowsWindowChrome.apply(window, useLightAppearance)
+                },
+            )
         }
     }
 }
@@ -56,15 +63,82 @@ private fun configureSandboxedNativeLibraries() {
 private fun isMacOs(): Boolean =
     System.getProperty("os.name").startsWith("Mac", ignoreCase = true)
 
+private fun isWindows(): Boolean =
+    System.getProperty("os.name").startsWith("Windows", ignoreCase = true)
+
 @Composable
-private fun WindowScope.ApplyMacWindowChrome() {
-    if (!isMacOs()) return
+private fun WindowScope.ApplyDesktopWindowChrome() {
+    if (!isMacOs() && !isWindows()) return
 
     DisposableEffect(window) {
+        MacWindowChrome.apply(window)
+        onDispose {}
+    }
+}
+
+private object MacWindowChrome {
+    fun apply(window: java.awt.Window) {
+        if (!isMacOs()) return
+
         val rootPane = (window as? RootPaneContainer)?.rootPane
         rootPane?.putClientProperty("apple.awt.fullWindowContent", true)
         rootPane?.putClientProperty("apple.awt.transparentTitleBar", true)
         rootPane?.putClientProperty("apple.awt.windowTitleVisible", false)
-        onDispose {}
+    }
+}
+
+private object WindowsWindowChrome {
+    private const val DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+    private const val DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1 = 19
+    private const val DWMWA_BORDER_COLOR = 34
+    private const val DWMWA_CAPTION_COLOR = 35
+    private const val DWMWA_TEXT_COLOR = 36
+
+    private const val DARK_SHELL_TOP = 0xFF151A27.toInt()
+    private const val DARK_PRIMARY_TEXT = 0xFFF4F5F7.toInt()
+    private const val LIGHT_SHELL_TOP = 0xFFFFFFFF.toInt()
+    private const val LIGHT_PRIMARY_TEXT = 0xFF181B22.toInt()
+
+    fun apply(window: java.awt.Window, useLightAppearance: Boolean) {
+        if (!isWindows()) return
+
+        runCatching {
+            val shellTop = if (useLightAppearance) LIGHT_SHELL_TOP else DARK_SHELL_TOP
+            val primaryText = if (useLightAppearance) LIGHT_PRIMARY_TEXT else DARK_PRIMARY_TEXT
+            val hwnd = Native.getComponentPointer(window)
+            if (setBooleanAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, !useLightAppearance) != 0) {
+                setBooleanAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1, !useLightAppearance)
+            }
+            setColorAttribute(hwnd, DWMWA_CAPTION_COLOR, shellTop)
+            setColorAttribute(hwnd, DWMWA_BORDER_COLOR, shellTop)
+            setColorAttribute(hwnd, DWMWA_TEXT_COLOR, primaryText)
+        }.onFailure { error ->
+            PhoebeLog.d("Phoebe") { "Windows title bar appearance unavailable: ${error.message}" }
+        }
+    }
+
+    private fun setBooleanAttribute(hwnd: Pointer, attribute: Int, enabled: Boolean): Int {
+        val value = intArrayOf(if (enabled) 1 else 0)
+        return DwmApi.INSTANCE.DwmSetWindowAttribute(hwnd, attribute, value, Int.SIZE_BYTES)
+    }
+
+    private fun setColorAttribute(hwnd: Pointer, attribute: Int, argb: Int) {
+        val value = intArrayOf(argb.toColorRef())
+        DwmApi.INSTANCE.DwmSetWindowAttribute(hwnd, attribute, value, Int.SIZE_BYTES)
+    }
+
+    private fun Int.toColorRef(): Int {
+        val red = this shr 16 and 0xFF
+        val green = this shr 8 and 0xFF
+        val blue = this and 0xFF
+        return red or (green shl 8) or (blue shl 16)
+    }
+
+    private interface DwmApi : Library {
+        fun DwmSetWindowAttribute(hwnd: Pointer, attribute: Int, value: IntArray, size: Int): Int
+
+        companion object {
+            val INSTANCE: DwmApi = Native.load("dwmapi", DwmApi::class.java)
+        }
     }
 }

@@ -170,6 +170,7 @@ kotlin {
         desktopMain.dependencies {
             implementation(compose.desktop.currentOs)
             implementation(libs.jnativehook)
+            implementation(libs.jna)
             implementation(libs.coroutines.swing)
             implementation(libs.jaudiotagger)
             implementation(libs.ktor.client.cio)
@@ -268,6 +269,14 @@ android {
 compose.desktop {
     application {
         mainClass = "com.phoebe.app.MainKt"
+        jvmArgs += listOf(
+            "-Xms32m",
+            "-Xmx256m",
+            "-XX:MinHeapFreeRatio=5",
+            "-XX:MaxHeapFreeRatio=20",
+            "-XX:+UseStringDeduplication",
+            "-Dskiko.gpu.resourceCacheLimit=64M",
+        )
         if (System.getProperty("os.name").lowercase().contains("mac")) {
             val mediaKeysDylibPath =
                 layout.buildDirectory.get().asFile.resolve("native/macos/libPhoebeMediaKeys.dylib").absolutePath

@@ -8,81 +8,124 @@ Phoebe is a Compose Multiplatform Plex-first music player for Android, iOS, desk
 
 ## Features
 
+### Library and catalog
+
 - **Plex streaming** — PIN sign-in, server and music-library selection, and browsing of artists, albums, playlists, and tracks from your Plex library.
 - **Lazy library loading** — Track lists load on demand for albums, artists, and playlists; opened detail views are preserved across catalog refreshes.
-- **Plex playlists** — Create playlists, add tracks from the library, and drag a song onto a sidebar playlist row to append it.
-- **Plex playback sync** — Reports playback to Plex’s timeline API so plays show up on the server and other Plex clients.
-- **Metadata editing** — Edit title, artist, album, year, and genre from the library or track surfaces; changes persist locally and sync to Plex when supported.
-- **Downloads** — Download Plex tracks as original files and browse them in a dedicated downloads area.
-- **Local music folders** — Add one or more local folder roots (desktop, Android, and iOS), enable or disable them individually, and merge them with your Plex catalog in one library.
+- **Local music folders** — Add one or more local folder roots (desktop, Android, and iOS), enable or disable them individually, and merge them with your Plex catalog in one library. You can add a folder from the sign-in screen to use Phoebe without Plex.
 - **Unified catalog** — Plex (`plex:`-prefixed ids) and local tracks appear together in search, library views, and playback.
+- **Home** — Recently added songs, artists, and albums (7-day window), recently played and most-played rows, random artist/album picks, a **personal mix** seeded from your listening history, and a **decade mix** that shuffles tracks from a chosen decade.
+- **Collections** — Browse artists and albums grouped by **genre**, **mood**, or **style** (from Plex collection metadata and local tags), with grid/list sorting.
+- **Play history** — Dedicated screens for recently played and most played tracks; last-played timestamps and play counts surface in the library and home UI.
+- **Rich library table** — Configurable columns (title, artist, album, year, genre, path, codec, bitrate, duration, rating, favorite, and related fields where available).
+- **Sorting and layout prefs** — Sort library and detail views; column visibility and sort preferences persist per platform.
+
+### Playlists, likes, and ratings
+
+- **Plex playlists** — Create playlists, add tracks from the library, and drag a song onto a sidebar playlist row to append it.
+- **Local playlists** — Phoebe-only playlists for local audio (desktop, Android, iOS, and web logic); export to **M3U8**, plain text, or **CSV** (written under `exports/` in app storage on desktop).
+- **Liked Songs** — Heart tracks to sync with Plex’s Liked Songs playlist when signed in (with local fallback when offline or unsigned).
+- **Star ratings** — Half-star ratings on tracks, artists, albums, and playlists; synced to Plex when the server supports ratings.
+
+### Playback and player
+
 - **Playback** — Play, pause, seek, next/previous, shuffle, repeat, and an Up Next queue you can add to, reorder, and play from.
 - **Now playing** — Full-screen player with artwork, progress, transport controls, queue, and a now-playing badge on the active track row.
+- **Lyrics** — Synced and plain lyrics from embedded tags, sidecar files, and [LRCLIB](https://lrclib.net); cached in SQLDelight with auto-scroll during playback (desktop lyrics section and mobile detail flow).
+- **Plex playback sync** — Reports playback to Plex’s timeline API so plays show up on the server and other Plex clients.
 - **Search** — Search songs, artists, and albums across the merged catalog, with recent search history.
-- **Rich library table** — Configurable columns (title, artist, album, year, genre, path, codec, bitrate, duration, and related fields where available).
-- **Sorting and layout prefs** — Sort library and detail views; column visibility and sort preferences persist per platform.
-- **Play history** — Last-played timestamps for artists, albums, and tracks surfaced in the library UI.
-- **Appearance** — Album-art-inspired Material 3 UI with light and dark modes.
-- **Settings** — Manage Plex sign-in, local folders, library options, downloads, and appearance.
-- **System integration** — Volume control with OS system volume where supported; global media-key shortcuts on desktop (including a macOS native bridge).
+
+### Downloads and metadata
+
+- **Downloads** — Download Plex tracks as original files, pick a download directory (where supported), and browse them in a dedicated downloads area.
+- **Metadata editing** — Edit title, artist, album, year, and genre from the library or track surfaces; changes persist locally and sync to Plex when supported.
+
+### Appearance and settings
+
+- **Appearance** — Album-art-inspired Material 3 UI with light and dark modes (preference stored in app storage).
+- **Settings** — Manage Plex sign-in, local folders, library options, downloads, and appearance (desktop settings shell includes additional category placeholders).
+
+### System integration
+
+- **Volume** — OS system volume where supported; on Linux Flatpak, volume can be adjusted via host `pactl` when sandboxed.
+- **Global media keys** — Desktop play/pause (Space when no text field is focused), media-key shortcuts, and a macOS native bridge for hardware media keys.
+- **Chromecast (Android)** — Google Cast queue and transport when a Cast device is connected; volume keys route to Cast while casting.
+- **Android Auto** — Media browse tree over the cached catalog for in-car browsing.
+- **CarPlay (iOS)** — Browse and play from the CarPlay template (requires the CarPlay audio entitlement on your App ID for distribution signing).
+- **Window chrome** — macOS unified title bar (full-window content, transparent title bar); Windows caption/border colors and immersive dark mode matched to the app theme via DWM.
+- **Artwork cache** — LRU-bounded remote artwork cache with decode-size keys; desktop decodes downscaled bitmaps via Skia to limit memory use.
+
+### Multiplatform and data
+
 - **Multiplatform** — Android, iOS, desktop (JVM), and browser (Kotlin/Wasm) targets from a shared Compose UI and data layer.
-- **Offline-friendly persistence** — SQLDelight-backed catalog, session, media sources, library preferences, downloads state, and play history cached across restarts.
+- **Offline-friendly persistence** — SQLDelight-backed catalog, session, media sources, library preferences, downloads state, play history, and lyrics cached across restarts.
+
+## Platform notes
+
+| Platform | Local folders | Cast | Notes |
+|----------|---------------|------|--------|
+| **Desktop (JVM)** | Yes (folder picker) | — | DEB, MSI, DMG, and Flatpak builds via release CI; tuned JVM heap and Skiko GPU cache for lower idle memory. |
+| **Android** | Yes (SAF tree URI) | Chromecast | APK/AAB releases; Android Auto browse; instrumented playback tests on CI emulator. |
+| **iOS** | Yes (native folder picker) | Stub (Cast SDK not bundled) | CarPlay browse/play in code; CarPlay entitlement required to ship. |
+| **Web (Wasm)** | Stubbed (sandbox) | — | Plex streaming and SQLDelight worker DB; local folder picker/indexing not available in the browser. |
 
 ## What works now
 
 ### App shell and UI
 
 - Compose Multiplatform entry points for Android, iOS, desktop, and Wasm JS.
-- Album-art-inspired Material 3 UI: sign-in, server and library selection, library tabs (albums, artists, playlists, downloads), detail screens, downloads, and now-playing surfaces.
-- Library table with configurable columns (title, artist, album, year, genre, path, codec, bitrate, duration, and related fields where data exists).
-- Sorting and column visibility preferences persisted per platform.
+- **Desktop layout** — Sidebar with Home, Search, Library, Lyrics, Playlists, and Settings; persistent player bar; drag-and-drop onto playlist rows.
+- **Mobile layout** — Tabbed library (albums, artists, playlists, downloads, settings), stack-based detail navigation, and system bar colors aligned to the theme.
+- Library table, home discovery rows, collection grids, play-history screens, lyrics, metadata editor, downloads, and now-playing surfaces.
 
 ### Plex integration
 
-- PIN-based sign-in against Plex.tv, server discovery (including relay and shared connections), and music-library discovery.
-- Fetching artists, albums, playlists, and tracks; lazy loading of track lists for large libraries with merge logic so opened detail views are not wiped on refresh.
+- PIN-based sign-in, server discovery (relay and shared connections), and music-library discovery.
+- Fetching artists, albums, playlists, and tracks; lazy loading with merge logic so opened detail views survive refresh.
 - Stream URLs with tokenized asset URLs and optional original-file download (`download=1`).
-- **Playlists:** resolve the server’s canonical machine id via `/identity` (important when relay ids differ from `clientIdentifier`), create playlists, and append tracks using Plex’s `server://…/library/metadata/…` URI format.
-- **Metadata sync:** editing a track’s title or artist can push changes to the Plex server (`PUT` on the library section); the local catalog is always updated and persisted. Album and other fields are kept in the app catalog even when Plex does not accept them via this API path.
+- Playlists via server `/identity` machine id and `server://…/library/metadata/…` URIs.
+- Metadata `PUT` for supported fields; likes and ratings pushed when the server allows.
+- Collection facet values loaded from Plex where available, merged with local tag metadata.
 
 ### Local media and merged catalog
 
-- **Media sources:** multiple local folder roots with labels and enable/disable flags, stored in SQLDelight (with migration from older file-backed JSON where applicable).
-- **Catalog merge:** Plex catalog (with stable `plex:` id prefix) merged with indexed local-folder catalogs from `LocalFolderMusicSourcePlugin`.
-- **Platform indexing:** Desktop walks a chosen folder with common audio extensions and reads tags via JAudioTagger. Android uses Storage Access Framework (tree URI) and `MediaMetadataRetriever` for metadata. iOS has a native folder implementation. **Web:** local folder picker and indexing are currently stubbed (browser sandbox); Plex streaming works in the browser.
+- Multiple local folder roots with labels and enable/disable flags in SQLDelight.
+- Desktop: folder walk + JAudioTagger. Android: SAF + `MediaMetadataRetriever`. iOS: native indexer. Web: stubs only.
 
-### Metadata editing
+### Lyrics
 
-- Metadata editor (dialog / overlay) for title, artist, album, year, and genre, wired from the library and track surfaces.
-- **Desktop and web:** secondary-click (right-click) opens the editor where enabled.
-- Saves update the in-memory catalog and SQLDelight-backed persistence; when signed in to Plex and the change maps to a Plex track, the client attempts a server-side metadata update as described above.
+- Resolution order: SQLDelight cache → embedded/sidecar local lyrics → LRCLIB lookup.
+- Synced LRC-style lines with playback position; instrumental detection.
 
 ### Web (Kotlin/Wasm)
 
-- **Wasm JS target** with Webpack dev and production browser runs.
-- **Persistence:** SQLDelight **Web Worker** driver with **sql.js** (`@cashapp/sqldelight-sqljs-worker`), a bundled worker script (`phoebe-sqljs.worker.js`), and copied `sql-wasm.js` / `sql-wasm.wasm` assets so the database does not block the main UI thread.
-- **Storage:** schema initialization keyed in `localStorage` so the async schema can be created once per revision.
-- **Playback:** HTML `<audio>` element implementing the shared `AudioPlayer` API; volume mapped to element volume.
-- **HTTP:** Ktor client with the JS engine for Plex and downloads.
+- Wasm JS target with Webpack dev and production browser runs.
+- SQLDelight **Web Worker** driver with **sql.js**, bundled worker script, and copied wasm assets.
+- HTML `<audio>` playback; Ktor JS client for Plex and downloads.
 
 ### Audio and platform services
 
-- Shared `AudioPlayer` and `SystemVolumeController` abstractions with Android (Media3 / ExoPlayer), desktop (JavaFX-based player and macOS media-keys native bridge compiled from `MediaKeysBridge.m`), iOS, and web implementations.
-- Global media-key and playback-shortcut hooks where implemented per platform.
+- Shared `AudioPlayer` and `SystemVolumeController` with per-target implementations (Media3/ExoPlayer on Android, JavaFX on desktop, HTML audio on web).
+- macOS `MediaKeysBridge` dylib; Android `PlaybackService` + Cast; iOS AVPlayer and CarPlay bridge.
 
 ### Data layer
 
-- **SQLDelight** async database (`PhoebeDatabase`) for catalog, downloads state, session, media sources, library UI prefs, and play history — with **Android**, **SQLite (desktop)**, **Native (iOS)**, and **Web Worker (Wasm)** drivers.
-- **Session** and **play history** repositories: play timestamps feed “last played” aggregates for artists, albums, and tracks in the library UI.
+- **SQLDelight** async `PhoebeDatabase` with Android, desktop SQLite, iOS Native, and Web Worker drivers.
+- Catalog, session, media sources, library UI prefs, play history, lyrics, and download state.
 
 ## Verify
 
 ```bash
 ./gradlew :composeApp:desktopTest
+./gradlew :composeApp:wasmJsBrowserTest
+./gradlew :composeApp:verifyRoborazziDebug
+npm run web:screenshots
+./gradlew :composeApp:compileDebugAndroidTestKotlinAndroid
 ./gradlew :composeApp:assembleDebug
 ./gradlew :composeApp:compileKotlinIosSimulatorArm64
-./gradlew :composeApp:wasmJsBrowserTest
 ```
+
+PR CI runs desktop tests, Wasm tests, Roborazzi screenshot verification, Playwright web screenshots, and Android instrumented tests. See [docs/github-actions.md](docs/github-actions.md) for updating baselines and release workflow details.
 
 ## Run
 
@@ -106,6 +149,10 @@ Phoebe is a Compose Multiplatform Plex-first music player for Android, iOS, desk
 
 The Android SDK path is set in `local.properties` for this machine and ignored by git.
 
+## Releases
+
+Tagged releases (`release/x.y.z` matching `phoebe.versionName` in `gradle.properties`) build signed Android APK/AAB, Linux DEB and Flatpak, Windows MSI, and macOS DMG artifacts as draft GitHub releases. Signing secrets and setup are documented in [docs/github-actions.md](docs/github-actions.md) and `docs/release-signing-setup.md`.
+
 ## Debug logging
 
 Verbose diagnostics use a shared `PhoebeLog` helper (`composeApp/src/commonMain/kotlin/com/phoebe/app/platform/PhoebeLog.kt`). All log calls are no-ops in release builds.
@@ -126,7 +173,7 @@ Lazy message lambdas avoid string work when logging is disabled.
 
 Android logs go to Logcat (`Log.d`). Other platforms print `[tag] message` to stdout / the browser console.
 
-Instrumented areas include catalog sync, Plex session and API calls, local folder indexing, playback, and app startup.
+Instrumented areas include catalog sync, Plex session and API calls, local folder indexing, playback, lyrics, and app startup.
 
 ## Mockups
 
