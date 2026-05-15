@@ -6,7 +6,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -29,7 +28,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.phoebe.app.domain.CatalogSnapshot
-import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.PlayHistoryKind
 import com.phoebe.app.domain.Track
 
@@ -38,10 +36,8 @@ internal fun PlayHistoryScreen(
     kind: PlayHistoryKind,
     catalog: CatalogSnapshot,
     playHistory: PlayHistorySnapshot,
-    nowMs: Long,
     modifier: Modifier = Modifier,
     onBack: () -> Unit,
-    onSong: (Track) -> Unit,
     onPlayTracks: (List<Track>, Int) -> Unit,
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
@@ -56,13 +52,10 @@ internal fun PlayHistoryScreen(
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         PlayHistoryHeader(kind, rows.size, onBack)
-        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+        Box(Modifier.weight(1f).fillMaxWidth()) {
             PlayHistoryTracks(
                 rows = rows,
-                compact = maxWidth < 700.dp,
-                nowMs = nowMs,
-                kind = kind,
-                onSong = onSong,
+                showPlayCount = kind == PlayHistoryKind.MostPlayed,
                 onPlayTracks = onPlayTracks,
                 onAddToUpNext = onAddToUpNext,
                 onDownload = onDownload,
@@ -102,10 +95,7 @@ private fun PlayHistoryHeader(kind: PlayHistoryKind, count: Int, onBack: () -> U
 @Composable
 private fun PlayHistoryTracks(
     rows: List<HomePlayedTrack>,
-    compact: Boolean,
-    nowMs: Long,
-    kind: PlayHistoryKind,
-    onSong: (Track) -> Unit,
+    showPlayCount: Boolean,
     onPlayTracks: (List<Track>, Int) -> Unit,
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
@@ -116,36 +106,21 @@ private fun PlayHistoryTracks(
         return
     }
     val tracks = rows.map { it.track }
-    if (!compact) {
-        Column(modifier) {
-            SongsTableHeader(LibraryColumnVisibility())
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.fillMaxSize()) {
-                itemsIndexed(rows, key = { _, row -> row.track.id }) { index, row ->
-                    SongRow(
-                        track = row.track,
-                        selected = false,
-                        columns = LibraryColumnVisibility(),
-                        onSelect = { onSong(row.track) },
-                        onPlay = { onPlayTracks(tracks, index) },
-                        onAddToUpNext = { onAddToUpNext(row.track) },
-                        onDownload = { onDownload(row.track) },
-                    )
-                }
-            }
-        }
-        return
-    }
+    val nowPlaying = LocalNowPlaying.current
     LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         itemsIndexed(rows, key = { _, row -> row.track.id }) { index, row ->
-            val trailing = when (kind) {
-                PlayHistoryKind.RecentlyPlayed -> row.lastPlayedMs?.let { formatLastPlayed(it, nowMs) }.orEmpty()
-                PlayHistoryKind.MostPlayed -> if (row.playCount == 1L) "1 play" else "${row.playCount} plays"
-            }
-            CompactTrackRow(
+            ContentTrackRow(
                 track = row.track,
-                trailing = trailing,
-                onClick = { onSong(row.track) },
+                libraryColumns = SongIdentityColumns,
                 onPlay = { onPlayTracks(tracks, index) },
+                onAddToUpNext = { onAddToUpNext(row.track) },
+                onDownload = { onDownload(row.track) },
+                compactLayout = true,
+                isNowPlaying = row.track.id == nowPlaying.trackId,
+                nowPlayingIsPlaying = nowPlaying.isPlaying,
+                nowPlayingIsBuffering = nowPlaying.isBuffering,
+                playCount = if (showPlayCount) row.playCount else null,
+                sharedKey = "song:${row.track.id}",
             )
         }
     }

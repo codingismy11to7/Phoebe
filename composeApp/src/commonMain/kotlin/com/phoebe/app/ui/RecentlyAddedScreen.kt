@@ -38,7 +38,6 @@ import com.phoebe.app.data.catalogAlbumsForArtist
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.CatalogSnapshot
-import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.RecentlyAddedKind
 import com.phoebe.app.domain.Track
 
@@ -51,7 +50,6 @@ internal fun RecentlyAddedScreen(
     onBack: () -> Unit,
     onArtist: (Artist) -> Unit,
     onAlbum: (Album) -> Unit,
-    onSong: (Track) -> Unit,
     onPlayTracks: (List<Track>, Int) -> Unit,
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
@@ -70,8 +68,6 @@ internal fun RecentlyAddedScreen(
             when (kind) {
                 RecentlyAddedKind.Songs -> RecentlyAddedSongs(
                     tracks = page.tracks,
-                    compact = maxWidth < 700.dp,
-                    onSong = onSong,
                     onPlayTracks = onPlayTracks,
                     onAddToUpNext = onAddToUpNext,
                     onDownload = onDownload,
@@ -127,8 +123,6 @@ private fun RecentlyAddedHeader(page: RecentlyAddedPage, onBack: () -> Unit) {
 @Composable
 private fun RecentlyAddedSongs(
     tracks: List<Track>,
-    compact: Boolean,
-    onSong: (Track) -> Unit,
     onPlayTracks: (List<Track>, Int) -> Unit,
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
@@ -138,31 +132,13 @@ private fun RecentlyAddedSongs(
         RecentlyAddedEmpty("No songs were added in the last 7 days.", modifier)
         return
     }
-    if (!compact) {
-        Column(modifier) {
-            SongsTableHeader(LibraryColumnVisibility())
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.fillMaxSize()) {
-                itemsIndexed(tracks, key = { _, track -> track.id }) { index, track ->
-                    SongRow(
-                        track = track,
-                        selected = false,
-                        columns = LibraryColumnVisibility(),
-                        onSelect = { onSong(track) },
-                        onPlay = { onPlayTracks(tracks, index) },
-                        onAddToUpNext = { onAddToUpNext(track) },
-                        onDownload = { onDownload(track) },
-                    )
-                }
-            }
-        }
-        return
-    }
     LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         itemsIndexed(tracks, key = { _, track -> track.id }) { index, track ->
-            RecentlyAddedTrackCard(
+            RecentSongRow(
                 track = track,
-                onClick = { onSong(track) },
                 onPlay = { onPlayTracks(tracks, index) },
+                onAddToUpNext = { onAddToUpNext(track) },
+                onDownload = { onDownload(track) },
             )
         }
     }
@@ -282,48 +258,24 @@ private fun RecentlyAddedMediaCard(
 }
 
 @Composable
-private fun RecentlyAddedTrackCard(track: Track, onClick: () -> Unit, onPlay: () -> Unit) {
-    Row(
-        Modifier
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
-            .background(PhoebeUi.elevatedFill)
-            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(12.dp))
-            .padding(10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        ArtworkImage(
-            track.title,
-            track.thumbUrl,
-            Modifier.size(52.dp).sharedArtworkTransition("song:${track.id}"),
-            radius = 8.dp,
-            elevated = false,
-        )
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(
-                track.title,
-                color = PhoebeUi.primaryText,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.sharedBoundsTransition("song:${track.id}:title"),
-            )
-            Text("${track.artist} • ${track.album}", color = PhoebeUi.secondaryText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(track.dateAddedMs?.let { formatLastPlayed(it, LocalNowMs.current) } ?: "Date unknown", color = PhoebeUi.mutedText, fontSize = 10.sp)
-        }
-        Box(
-            Modifier
-                .size(34.dp)
-                .clip(CircleShape)
-                .clickable(onClick = onPlay)
-                .background(PhoebeUi.accent.copy(alpha = 0.22f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            PhoebeIconView(PhoebeIcon.Play, tint = PhoebeUi.accentLight, modifier = Modifier.size(16.dp))
-        }
-    }
+private fun RecentSongRow(
+    track: Track,
+    onPlay: () -> Unit,
+    onAddToUpNext: () -> Unit,
+    onDownload: () -> Unit,
+) {
+    val nowPlaying = LocalNowPlaying.current
+    ContentTrackRow(
+        track = track,
+        libraryColumns = SongIdentityColumns,
+        onPlay = onPlay,
+        onAddToUpNext = onAddToUpNext,
+        onDownload = onDownload,
+        compactLayout = true,
+        isNowPlaying = track.id == nowPlaying.trackId,
+        nowPlayingIsPlaying = nowPlaying.isPlaying,
+        nowPlayingIsBuffering = nowPlaying.isBuffering,
+    )
 }
 
 @Composable

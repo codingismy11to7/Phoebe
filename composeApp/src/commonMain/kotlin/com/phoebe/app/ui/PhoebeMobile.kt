@@ -222,8 +222,8 @@ internal fun MobileHomeHero(track: Track?, onOpenFullPlayer: () -> Unit) {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             SectionLabel("Now Playing", PhoebeUi.accentLight)
             ArtworkImage(track.album, track.thumbUrl, Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(14.dp)))
-            Text(track.title, color = PhoebeUi.primaryText, fontSize = 22.sp, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text(track.artist, color = PhoebeUi.secondaryText, fontSize = 15.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            AutoScrollingText(track.title, color = PhoebeUi.primaryText, fontSize = 22.sp, fontWeight = FontWeight.Black)
+            AutoScrollingText(track.artist, color = PhoebeUi.secondaryText, fontSize = 15.sp)
             Text(
                 "Open full player",
                 color = PhoebeUi.accentLight,
@@ -526,6 +526,8 @@ internal fun MobileBrowseShell(
                     decadeMixNotice = decadeMixNotice,
                     onClearDecadeMixNotice = onClearDecadeMixNotice,
                     onPlayTracks = onPlayTracks,
+                    onAddToUpNext = onAddToUpNext,
+                    onDownload = onDownload,
                 )
                 }
                 section == DesktopSection.Library && selectedPlaylistId == null -> LibraryMobileView(
@@ -612,20 +614,16 @@ internal fun MobileBrowseShell(
                 ) {
                     ArtworkImage(currentTrack.album, currentTrack.thumbUrl, Modifier.size(44.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(
+                        AutoScrollingText(
                             currentTrack.title,
                             color = PhoebeUi.primaryText,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
                         )
-                        Text(
+                        AutoScrollingText(
                             currentTrack.artist,
                             color = PhoebeUi.secondaryText,
                             fontSize = 12.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                 }
@@ -641,9 +639,7 @@ internal fun MobileBrowseShell(
 
 @Composable
 internal fun SwipeableMobileArtwork(
-    trackId: String,
-    album: String,
-    thumbUrl: String?,
+    track: Track,
     nextTrack: Track?,
     previousTrack: Track?,
     onSkipQueueBy: (Int) -> Unit,
@@ -657,7 +653,7 @@ internal fun SwipeableMobileArtwork(
     var isSwipeAnimating by remember { mutableStateOf(false) }
     var settleJob by remember { mutableStateOf<Job?>(null) }
 
-    LaunchedEffect(trackId) {
+    LaunchedEffect(track.id) {
         if (isSwipeAnimating) return@LaunchedEffect
         settleJob?.cancel()
         settleOffset.stop()
@@ -736,7 +732,7 @@ internal fun SwipeableMobileArtwork(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(trackId, widthPx, swipeThresholdPx) {
+                .pointerInput(track.id, widthPx, swipeThresholdPx) {
                     detectHorizontalDragGestures(
                         onDragStart = {
                             settleJob?.cancel()
@@ -790,8 +786,8 @@ internal fun SwipeableMobileArtwork(
                         scaleY = scale
                     },
             ) {
-                key(trackId) {
-                    ArtworkImage(album, thumbUrl, Modifier.fillMaxSize(), radius = 10.dp)
+                key(track.id) {
+                    FlippableSongArtwork(track = track, modifier = Modifier.fillMaxSize(), radius = 10.dp)
                 }
             }
         }
@@ -995,17 +991,15 @@ internal fun MobilePlayer(
                                     },
                             ) {
                                 SwipeableMobileArtwork(
-                                    trackId = track.id,
-                                    album = track.album,
-                                    thumbUrl = track.thumbUrl,
+                                    track = track,
                                     nextTrack = upNext.firstOrNull(),
                                     previousTrack = previousTrack,
                                     onSkipQueueBy = onSkipQueueBy,
                                     modifier = Modifier.fillMaxWidth().aspectRatio(1f),
                                 )
                                 Spacer(Modifier.height(20.dp))
-                                Text(track.title, color = PhoebeUi.primaryText, fontSize = 22.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text(track.artist, color = PhoebeUi.secondaryText, fontSize = 15.sp)
+                                AutoScrollingText(track.title, color = PhoebeUi.primaryText, fontSize = 22.sp, fontWeight = FontWeight.Black)
+                                AutoScrollingText(track.artist, color = PhoebeUi.secondaryText, fontSize = 15.sp)
                             }
                         }
                     } else {

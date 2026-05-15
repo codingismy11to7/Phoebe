@@ -211,6 +211,7 @@ internal fun PhoebeScreenshotApp(
             ),
             LocalDragDrop provides DragDropController(),
             LocalSharedElementTransitionsEnabled provides false,
+            LocalContinuousMotionEnabled provides false,
         ) {
             BoxWithConstraints(modifier.fillMaxSize()) {
                 if (maxWidth < 900.dp) {

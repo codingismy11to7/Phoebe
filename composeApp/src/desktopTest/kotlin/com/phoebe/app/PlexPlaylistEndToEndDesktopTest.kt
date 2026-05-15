@@ -103,6 +103,20 @@ class PlexPlaylistEndToEndDesktopTest {
     }
 
     @Test
+    fun refreshAggregatedLoadsLikedSongsForGlobalLikeState() = runTest {
+        val (db, sqlDriver) = newInMemoryPhoebeDatabase()
+        driver = sqlDriver
+        val http = testHttpClient(plexCatalogMockEngine(includeLikedPlaylist = true))
+        val repo = catalogRepository(db, http)
+
+        repo.refreshAggregated(testPlexSession())
+
+        val liked = repo.catalog.value.playlists.single { it.title == "Liked Songs" }
+        assertEquals(listOf("plex:t1"), repo.catalog.value.tracksByParent[liked.id].orEmpty().map { it.id })
+        assertTrue(repo.isTrackLiked("plex:t1"))
+    }
+
+    @Test
     fun toggleLikedTrackFindsExistingLikedPlaylistAndRemovesItem() = runTest {
         var plexRemoveCalled = false
         val (db, sqlDriver) = newInMemoryPhoebeDatabase()

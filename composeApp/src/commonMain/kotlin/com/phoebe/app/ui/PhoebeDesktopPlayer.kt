@@ -387,7 +387,6 @@ internal fun DesktopPlayer(
                                         onBack = onPopDetail,
                                         onArtist = onArtist,
                                         onAlbum = onAlbum,
-                                        onSong = onSong,
                                         onPlayTracks = onPlayTracks,
                                         onAddToUpNext = onAddToUpNext,
                                         onDownload = onDownload,
@@ -399,10 +398,8 @@ internal fun DesktopPlayer(
                                         kind = targetScreen.kind,
                                         catalog = catalog,
                                         playHistory = playHistory,
-                                        nowMs = LocalNowMs.current,
                                         modifier = Modifier.weight(1f).fillMaxWidth(),
                                         onBack = onPopDetail,
-                                        onSong = onSong,
                                         onPlayTracks = onPlayTracks,
                                         onAddToUpNext = onAddToUpNext,
                                         onDownload = onDownload,
@@ -433,6 +430,8 @@ internal fun DesktopPlayer(
                                         decadeMixNotice = decadeMixNotice,
                                         onClearDecadeMixNotice = onClearDecadeMixNotice,
                                         onPlayTracks = onPlayTracks,
+                                        onAddToUpNext = onAddToUpNext,
+                                        onDownload = onDownload,
                                     )
                                     }
                                     section == DesktopSection.Search && selectedPlaylistId == null -> SearchDesktopView(

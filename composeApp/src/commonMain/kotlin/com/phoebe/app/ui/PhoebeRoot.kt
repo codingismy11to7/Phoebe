@@ -587,7 +587,6 @@ fun PhoebeRoot(
                         onBack = state::popDetail,
                         onArtist = { state.open(AppScreen.ArtistDetail(it)) },
                         onAlbum = { state.open(AppScreen.AlbumDetail(it)) },
-                        onSong = { state.open(AppScreen.SongDetail(it)) },
                         onPlayTracks = { tracks, index ->
                             state.playTracks(tracks, index)
                             state.open(AppScreen.Player)
@@ -599,10 +598,8 @@ fun PhoebeRoot(
                         kind = scr.kind,
                         catalog = catalog,
                         playHistory = playHistory,
-                        nowMs = nowMs,
                         modifier = Modifier.fillMaxSize(),
                         onBack = state::popDetail,
-                        onSong = { state.open(AppScreen.SongDetail(it)) },
                         onPlayTracks = { tracks, index ->
                             state.playTracks(tracks, index)
                             state.open(AppScreen.Player)

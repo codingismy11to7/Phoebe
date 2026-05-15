@@ -232,10 +232,17 @@ internal data class LikeActions(
     val likesEnabled: Boolean = false,
     val onToggleLiked: (Track) -> Unit = {},
 ) {
-    fun isLiked(track: Track): Boolean = track.id in likedTrackIds
+    fun isLiked(track: Track): Boolean =
+        equivalentTrackIds(track.id).any { it in likedTrackIds }
 }
 
 internal val LocalLikeActions = compositionLocalOf { LikeActions() }
+
+private fun equivalentTrackIds(id: String): Set<String> {
+    if (id.isBlank()) return emptySet()
+    if (id.startsWith("plex:")) return setOf(id, id.removePrefix("plex:"))
+    return if (':' in id) setOf(id) else setOf(id, "plex:$id")
+}
 
 /**
  * Drag state for "drag a song row onto a sidebar playlist row to add it". Song rows update
@@ -316,6 +323,8 @@ internal val LocalDragDrop = compositionLocalOf<DragDropController?> { null }
 internal val LocalPlaylistDragEnabled = compositionLocalOf { true }
 
 internal val LocalSharedElementTransitionsEnabled = compositionLocalOf { true }
+
+internal val LocalContinuousMotionEnabled = compositionLocalOf { true }
 
 @OptIn(ExperimentalSharedTransitionApi::class)
 internal val LocalSharedTransitionScope = compositionLocalOf<SharedTransitionScope?> { null }
