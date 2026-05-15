@@ -412,18 +412,23 @@ class CatalogRepository(
                 tracks.all { it.shouldPreserveAcrossPlexRefresh(currentToken) }
             }
 
-        // If Plex reports a playlist grew, keep the stale tracks visible and refetch after the
-        // main catalog is published so the detail panel updates in place.
+        // If Plex reports a playlist count mismatch, keep stale tracks visible and refetch after
+        // the main catalog is published so additions and removals update the detail panel in place.
+        // Liked Songs is also fetched the first time it appears so global heart state has ids to
+        // compare against.
         val staleForRefetch = mutableListOf<Playlist>()
         val reconciledPlaylists = merged.playlists.map { p ->
             val cached = preservedTracks[p.id]
             val cachedSize = cached?.size ?: 0
             when {
-                cached != null && p.trackCount > cachedSize -> {
+                p.isLikedSongsPlaylist() && p.id != PENDING_LIKED_SONGS_PLAYLIST_ID && p.trackCount > 0 && cached == null -> {
                     staleForRefetch += p
                     p
                 }
-                cachedSize > p.trackCount -> p.copy(trackCount = cachedSize)
+                cached != null && p.trackCount != cachedSize -> {
+                    staleForRefetch += p
+                    p
+                }
                 else -> p
             }
         }
@@ -875,7 +880,7 @@ class CatalogRepository(
         val snapshot = mutableCatalog.value
         val playlistMeta = snapshot.playlists.find { it.id == playlist.id } ?: playlist
         val existing = snapshot.tracksByParent[playlist.id]
-        if (!existing.isNullOrEmpty() && existing.size >= playlistMeta.trackCount) return existing
+        if (!existing.isNullOrEmpty() && existing.size == playlistMeta.trackCount) return existing
         refetchPlaylistTracksFromPlex(session, playlistMeta)
         return mutableCatalog.value.tracksByParent[playlist.id].orEmpty()
     }
@@ -905,7 +910,7 @@ class CatalogRepository(
     fun isTrackLiked(trackId: String): Boolean {
         if (trackId.isBlank()) return false
         val liked = mutableCatalog.value.playlists.firstOrNull { it.isLikedSongsPlaylist() } ?: return false
-        return mutableCatalog.value.tracksByParent[liked.id].orEmpty().any { it.id == trackId }
+        return mutableCatalog.value.tracksByParent[liked.id].orEmpty().any { it.hasSamePlexIdentity(trackId) }
     }
 
     suspend fun toggleLikedTrack(session: PlexSession?, track: Track): Boolean {
@@ -917,9 +922,9 @@ class CatalogRepository(
         val playlist = ensureLocalLikedSongsPlaylist()
         val snapshot = mutableCatalog.value
         val existing = snapshot.tracksByParent[playlist.id].orEmpty()
-        val isLiked = existing.any { it.id == track.id }
+        val isLiked = existing.any { it.hasSamePlexIdentity(track.id) }
         val updated = if (isLiked) {
-            existing.filterNot { it.id == track.id }
+            existing.filterNot { it.hasSamePlexIdentity(track.id) }
         } else {
             existing + track
         }
@@ -929,11 +934,13 @@ class CatalogRepository(
 
     suspend fun syncLikedSongsPlaylist(session: PlexSession?): Boolean {
         if (session?.supportsPlexPlaylists() != true) return false
-        val localPlaylist = mutableCatalog.value.playlists.firstOrNull { it.isLikedSongsPlaylist() } ?: return false
-        val desiredTracks = mutableCatalog.value.tracksByParent[localPlaylist.id].orEmpty()
         val remotePlaylist = mutableCatalog.value.playlists.firstOrNull {
             it.isLikedSongsPlaylist() && it.id != PENDING_LIKED_SONGS_PLAYLIST_ID
-        } ?: run {
+        }
+        val localPlaylistBeforeFetch = mutableCatalog.value.playlists.firstOrNull { it.isLikedSongsPlaylist() } ?: return false
+        val desiredTracksBeforeFetch = mutableCatalog.value.tracksByParent[localPlaylistBeforeFetch.id]
+        if (remotePlaylist == null) {
+            val desiredTracks = desiredTracksBeforeFetch.orEmpty()
             if (desiredTracks.isEmpty()) return false
             return createPlaylist(session, LIKED_SONGS_PLAYLIST_TITLE, desiredTracks) != null
         }
@@ -944,10 +951,15 @@ class CatalogRepository(
         }.getOrElse {
             mutableCatalog.value.tracksByParent[remotePlaylist.id].orEmpty()
         }
-        val desiredIds = desiredTracks.map { it.id }.toSet()
-        val remoteIds = remoteTracks.map { it.id }.toSet()
-        val toAdd = desiredTracks.filterNot { it.id in remoteIds }
-        val toRemove = remoteTracks.filter { it.id !in desiredIds && it.playlistItemId != null }
+        val desiredTracks = desiredTracksBeforeFetch ?: remoteTracks
+        val desiredIds = desiredTracks.mapNotNull { it.plexIdentityKey() }.toSet()
+        val toAdd = desiredTracks.filter { desired ->
+            val desiredKey = desired.plexIdentityKey()
+            desiredKey != null && remoteTracks.none { it.plexIdentityKey() == desiredKey }
+        }
+        val toRemove = remoteTracks.filter { remote ->
+            remote.plexIdentityKey() !in desiredIds && remote.playlistItemId != null
+        }
         if (toAdd.isNotEmpty()) {
             addTracksToPlaylist(session, remotePlaylist, toAdd)
         }
@@ -979,11 +991,11 @@ class CatalogRepository(
             appendTracksToPlexPlaylistRemoteOnly(session, remotePlaylist, listOf(track))
         } else {
             val localLikedTrack = mutableCatalog.value.tracksByParent[remotePlaylist.id].orEmpty()
-                .firstOrNull { it.id == track.id }
+                .firstOrNull { it.hasSamePlexIdentity(track.id) }
             val removable = localLikedTrack?.takeIf { it.playlistItemId != null } ?: run {
                 runCatching { refetchPlaylistTracksFromPlex(session, remotePlaylist) }
                 mutableCatalog.value.tracksByParent[remotePlaylist.id].orEmpty()
-                    .firstOrNull { it.id == track.id && it.playlistItemId != null }
+                    .firstOrNull { it.hasSamePlexIdentity(track.id) && it.playlistItemId != null }
             }
             removable?.let { removeTrackFromPlexPlaylist(session, remotePlaylist, it) } ?: false
         }
@@ -1039,7 +1051,7 @@ class CatalogRepository(
         }.getOrElse {
             mutableCatalog.value.tracksByParent[playlist.id].orEmpty()
         }
-        val existing = fresh.firstOrNull { it.id == track.id }
+        val existing = fresh.firstOrNull { it.hasSamePlexIdentity(track.id) }
         return if (existing == null) {
             addTracksToPlaylist(session, playlist, listOf(track))
             true
@@ -1573,6 +1585,16 @@ class CatalogRepository(
 
     private fun plexRatingKey(id: String): String? =
         if (id.startsWith("plex:")) id.removePrefix("plex:") else null
+
+    private fun Track.plexIdentityKey(): String? =
+        plexRatingKey(id) ?: id.takeIf { it.isNotBlank() && ':' !in it }
+
+    private fun Track.hasSamePlexIdentity(otherId: String): Boolean {
+        if (id == otherId) return true
+        val selfKey = plexIdentityKey() ?: return false
+        val otherKey = plexRatingKey(otherId) ?: otherId.takeIf { it.isNotBlank() && ':' !in it } ?: return false
+        return selfKey == otherKey
+    }
 
     /**
      * Lazy-loaded Plex tracks come back with raw rating keys (e.g. `46171`), but the rest of

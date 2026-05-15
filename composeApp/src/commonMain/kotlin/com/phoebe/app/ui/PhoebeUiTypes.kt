@@ -213,6 +213,19 @@ internal val FullTrackMetadataColumns = LibraryColumnVisibility(
     duration = true,
 )
 
+/** Compact song rows that only show title, artist, and album text. */
+internal val SongIdentityColumns = LibraryColumnVisibility(
+    year = false,
+    genre = false,
+    filepath = false,
+    audioCodec = false,
+    bitrate = false,
+    duration = false,
+    sampleRate = false,
+    fileType = false,
+    dateAdded = false,
+)
+
 internal data class SearchHistoryState(
     val recentSearches: List<String>,
     val commitSearch: (String) -> Unit,

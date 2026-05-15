@@ -729,16 +729,14 @@ private fun MobileSongRow(
             }
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(
+            AutoScrollingText(
                 track.title,
                 color = if (isNowPlaying) PhoebeUi.accentLight else PhoebeUi.primaryText,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.sharedBoundsTransition("song:${track.id}:title"),
             )
-            Text(
+            AutoScrollingText(
                 buildString {
                     append(track.artist)
                     track.audioCodec?.takeIf { it.isNotBlank() }?.let { append(" • ").append(it.uppercase()) }
@@ -746,8 +744,6 @@ private fun MobileSongRow(
                 },
                 color = PhoebeUi.secondaryText,
                 fontSize = 11.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
             )
         }
         Text(formatMinutesSeconds(track.durationMs), color = PhoebeUi.mutedText, fontSize = 11.sp)

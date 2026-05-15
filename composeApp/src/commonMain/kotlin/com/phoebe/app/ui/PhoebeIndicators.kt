@@ -212,13 +212,11 @@ internal fun DragGhost() {
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 0.08.em,
             )
-            Text(
+            AutoScrollingText(
                 "♪  ${track.title}",
                 color = PhoebeUi.primaryText,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.widthIn(max = 260.dp),
             )
         }

@@ -196,8 +196,8 @@ private fun MetadataEditorArtwork(track: Track, modifier: Modifier = Modifier) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             ArtworkImage(track.album, track.thumbUrl, Modifier.size(132.dp), radius = 12.dp)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(track.title, color = PhoebeUi.primaryText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(track.artist, color = PhoebeUi.secondaryText, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                AutoScrollingText(track.title, color = PhoebeUi.primaryText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                AutoScrollingText(track.artist, color = PhoebeUi.secondaryText, fontSize = 12.sp)
                 Text("Artwork changes are not editable yet.", color = PhoebeUi.mutedText, fontSize = 11.sp)
             }
         }

@@ -1,5 +1,7 @@
 use correct icons
 
+offline / caching
+
 create a mix functionality
 -improve
 

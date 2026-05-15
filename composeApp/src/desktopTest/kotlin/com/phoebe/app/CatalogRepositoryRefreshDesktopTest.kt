@@ -407,6 +407,48 @@ class CatalogRepositoryRefreshDesktopTest {
         )
     }
 
+    @Test
+    fun refreshRefetchesPlaylistWhenPlexReportsFewerTracksThanCache() = runTest {
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        var playlistTrackCount = 2
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/library/sections/1/all" -> if (request.url.parameters["type"] == "10") {
+                    respondJson(trackPageJson())
+                } else {
+                    respondJson(artistsJson())
+                }
+                "/library/sections/1/albums" -> respondJson(albumsJson())
+                "/playlists" -> respondJson(playlistsJson(trackCount = playlistTrackCount))
+                "/playlists/p1/items" -> respondJson(
+                    if (playlistTrackCount == 1) playlistTracksAfterServerDeletionJson() else playlistTracksJson(),
+                )
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val http = testHttpClient(engine)
+        val media = MediaSourcesRepository(db, PlatformStorage())
+        val repo = CatalogRepository(
+            plexClient = PlexClient(http),
+            database = db,
+            storage = PlatformStorage(),
+            httpClient = http,
+            mediaSourcesRepository = media,
+        )
+
+        repo.refreshAggregated(testSession())
+        val playlist = repo.catalog.value.playlists.single()
+        assertEquals(listOf("plex:t1", "plex:t2"), repo.tracksForPlaylist(testSession(), playlist).map { it.id })
+
+        playlistTrackCount = 1
+        repo.refreshAggregated(testSession())
+
+        val refreshedPlaylist = repo.catalog.value.playlists.single { it.id == playlist.id }
+        assertEquals(1, refreshedPlaylist.trackCount)
+        assertEquals(listOf("plex:t1"), repo.catalog.value.tracksByParent[playlist.id].orEmpty().map { it.id })
+    }
+
     private fun MockRequestHandleScope.respondJson(content: String) = respond(
         content = content,
         status = HttpStatusCode.OK,
@@ -517,6 +559,25 @@ class CatalogRepositoryRefreshDesktopTest {
                 "duration": 2000,
                 "Media": [
                   { "Part": [ { "key": "/library/parts/t2/file.mp3", "file": "two.mp3" } ] }
+                ]
+              }
+            ]
+          }
+        }
+    """.trimIndent()
+
+    private fun playlistTracksAfterServerDeletionJson(): String = """
+        {
+          "MediaContainer": {
+            "Metadata": [
+              {
+                "ratingKey": "t1",
+                "title": "Playlist Song One",
+                "grandparentTitle": "Artist One",
+                "parentTitle": "Album One",
+                "duration": 1000,
+                "Media": [
+                  { "Part": [ { "key": "/library/parts/t1/file.mp3", "file": "one.mp3" } ] }
                 ]
               }
             ]

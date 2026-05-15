@@ -595,8 +595,12 @@ internal fun SearchTopTrackCard(
     ) {
         ArtworkImage(track.album, track.thumbUrl, Modifier.size(if (compact) 76.dp else 170.dp), radius = 10.dp)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(if (compact) 5.dp else 8.dp)) {
-            Text(track.title, color = PhoebeUi.primaryText, fontSize = if (compact) 14.sp else 24.sp, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text(track.artist, color = PhoebeUi.secondaryText, fontSize = if (compact) 11.sp else 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (compact) {
+                AutoScrollingText(track.title, color = PhoebeUi.primaryText, fontSize = 14.sp, fontWeight = FontWeight.Black)
+            } else {
+                Text(track.title, color = PhoebeUi.primaryText, fontSize = 24.sp, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            AutoScrollingText(track.artist, color = PhoebeUi.secondaryText, fontSize = if (compact) 11.sp else 14.sp)
             Text("Song • ${formatDuration(track.durationMs)}", color = PhoebeUi.mutedText, fontSize = if (compact) 11.sp else 12.sp)
             if (!compact) {
                 SearchPlayChip(enabled = true) { onPlayTracks(tracks, 0) }
@@ -774,8 +778,8 @@ internal fun SearchSongResultRow(
         ) {
             ArtworkImage(track.album, track.thumbUrl, Modifier.size(38.dp), radius = 7.dp)
             Column(Modifier.weight(1f)) {
-                Text(track.title, color = if (index == 0) PhoebeUi.accentLight else PhoebeUi.primaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(track.artist, color = PhoebeUi.secondaryText, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                AutoScrollingText(track.title, color = if (index == 0) PhoebeUi.accentLight else PhoebeUi.primaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                AutoScrollingText(track.artist, color = PhoebeUi.secondaryText, fontSize = 10.sp)
             }
             Text(formatDuration(track.durationMs), color = PhoebeUi.mutedText, fontSize = 10.sp)
             SearchOverflowMenu(track, expanded = menuExpanded, onExpandedChange = { menuExpanded = it }, onAddToUpNext = onAddToUpNext, onDownload = onDownload)
@@ -795,9 +799,9 @@ internal fun SearchSongResultRow(
         ) {
             Text((index + 1).toString(), color = PhoebeUi.mutedText, fontSize = 11.sp, modifier = Modifier.width(18.dp))
             ArtworkImage(track.album, track.thumbUrl, Modifier.size(24.dp), radius = 5.dp)
-            Text(track.title, color = if (index == 0) PhoebeUi.accentLight else PhoebeUi.primaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1.25f))
-            Text(track.artist, color = PhoebeUi.secondaryText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(0.95f))
-            Text(track.album, color = PhoebeUi.secondaryText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(0.95f))
+            AutoScrollingText(track.title, color = if (index == 0) PhoebeUi.accentLight else PhoebeUi.primaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1.25f))
+            AutoScrollingText(track.artist, color = PhoebeUi.secondaryText, fontSize = 11.sp, modifier = Modifier.weight(0.95f))
+            AutoScrollingText(track.album, color = PhoebeUi.secondaryText, fontSize = 11.sp, modifier = Modifier.weight(0.95f))
             Text(formatDuration(track.durationMs), color = PhoebeUi.mutedText, fontSize = 11.sp, textAlign = TextAlign.End, modifier = Modifier.width(66.dp))
             SearchOverflowMenu(track, expanded = menuExpanded, onExpandedChange = { menuExpanded = it }, onAddToUpNext = onAddToUpNext, onDownload = onDownload)
         }

@@ -243,6 +243,8 @@ internal fun ContentTrackRow(
     isNowPlaying: Boolean = false,
     nowPlayingIsPlaying: Boolean = false,
     nowPlayingIsBuffering: Boolean = false,
+    playCount: Long? = null,
+    sharedKey: String? = null,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     val cols = libraryColumns
@@ -291,7 +293,7 @@ internal fun ContentTrackRow(
                 ArtworkImage(
                     track.album,
                     track.thumbUrl,
-                    Modifier.fillMaxSize(),
+                    Modifier.fillMaxSize().sharedArtworkTransition(sharedKey),
                     elevated = !compactLayout,
                 )
                 if (isNowPlaying) {
@@ -311,27 +313,40 @@ internal fun ContentTrackRow(
                 }
             }
             Column(Modifier.weight(1f)) {
-                Text(
+                AutoScrollingText(
                     track.title,
                     color = if (isNowPlaying) PhoebeUi.accentLight else PhoebeUi.primaryText,
                     fontWeight = FontWeight.Bold,
                     fontSize = 14.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.sharedBoundsTransition(sharedKey?.let { "$it:title" }),
                 )
-                Text("${track.artist} • ${track.album}", color = PhoebeUi.secondaryText, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                AutoScrollingText(track.artist, color = PhoebeUi.secondaryText, fontSize = 12.sp)
+                if (track.album.isNotBlank()) {
+                    AutoScrollingText(track.album, color = PhoebeUi.mutedText, fontSize = 11.sp)
+                }
                 if (cols.year && track.year != null) {
-                    Text(track.year.toString(), color = PhoebeUi.mutedText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    AutoScrollingText(track.year.toString(), color = PhoebeUi.mutedText, fontSize = 11.sp)
                 }
                 if (cols.genre && !track.genre.isNullOrBlank()) {
-                    Text(track.genre!!, color = PhoebeUi.mutedText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    AutoScrollingText(track.genre!!, color = PhoebeUi.mutedText, fontSize = 11.sp)
                 }
                 if (cols.filepath && !track.filepath.isNullOrBlank()) {
                     Text(track.filepath!!, color = PhoebeUi.mutedText, fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
                 if (techParts.isNotEmpty()) {
-                    Text(techParts.joinToString(" · "), color = PhoebeUi.mutedText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    AutoScrollingText(techParts.joinToString(" · "), color = PhoebeUi.mutedText, fontSize = 11.sp)
                 }
+            }
+            if (playCount != null) {
+                Text(
+                    formatPlayCount(playCount),
+                    color = PhoebeUi.secondaryText,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.widthIn(min = 58.dp, max = 82.dp),
+                )
             }
             if (cols.duration) {
                 if (compactLayout) {
@@ -372,6 +387,11 @@ internal fun ContentTrackRow(
             track = track,
         )
     }
+}
+
+private fun formatPlayCount(playCount: Long): String {
+    val playWord = if (playCount == 1L) "play" else "plays"
+    return "$playCount $playWord"
 }
 
 @Composable

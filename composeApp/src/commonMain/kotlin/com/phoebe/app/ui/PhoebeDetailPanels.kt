@@ -112,6 +112,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.composed
 import androidx.compose.ui.platform.LocalDensity
@@ -247,19 +248,7 @@ internal fun SongDetailPanel(
                 )
             }
             item("metadata") {
-                HomePanelLike {
-                    DetailMetaRow("Artist", track.artist)
-                    DetailMetaRow("Album", track.album)
-                    DetailMetaRow("Duration", formatDuration(track.durationMs))
-                    DetailMetaRow("Year", track.year?.toString() ?: "Unknown")
-                    DetailMetaRow("Genre", track.genre ?: "Unknown")
-                    DetailMetaRow("Date Added", track.dateAddedMs?.let { formatLastPlayed(it, nowMs) } ?: "Unknown")
-                    DetailMetaRow("Last Played", lastPlayed?.let { formatLastPlayed(it, nowMs) } ?: "Never")
-                    DetailMetaRow("Plays", (playHistory.playCountByTrack[track.id] ?: 0L).toString())
-                    track.audioCodec?.let { DetailMetaRow("Codec", it.uppercase()) }
-                    track.bitrateKbps?.let { DetailMetaRow("Bitrate", "$it kbps") }
-                    track.filepath?.let { DetailMetaRow("File", it) }
-                }
+                HomePanelLike { SongDetailMetadataRows(track, nowMs, lastPlayed, playHistory.playCountByTrack[track.id] ?: 0L) }
             }
         }
     }
@@ -278,16 +267,15 @@ private fun SongDetailHero(
             Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            ArtworkImage(
-                track.album,
-                track.thumbUrl,
+            FlippableSongArtwork(
+                track = track,
                 Modifier
                     .size(220.dp)
-                    .align(Alignment.CenterHorizontally)
-                    .sharedArtworkTransition("song:${track.id}"),
+                    .align(Alignment.CenterHorizontally),
+                artworkModifier = Modifier.sharedArtworkTransition("song:${track.id}"),
                 radius = 14.dp,
             )
-            SongDetailText(track, titleSize = 28.sp, titleLineHeight = 32.sp, titleMaxLines = 3)
+            SongDetailText(track, titleSize = 28.sp, titleLineHeight = 32.sp, titleMaxLines = 3, autoScroll = true)
             SongActionRow(
                 track = track,
                 scrollable = true,
@@ -302,9 +290,8 @@ private fun SongDetailHero(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(24.dp),
         ) {
-            ArtworkImage(
-                track.album,
-                track.thumbUrl,
+            FlippableSongArtwork(
+                track = track,
                 Modifier
                     .size(180.dp)
                     .sharedArtworkTransition("song:${track.id}"),
@@ -330,20 +317,127 @@ private fun SongDetailText(
     titleSize: TextUnit,
     titleLineHeight: TextUnit,
     titleMaxLines: Int,
+    autoScroll: Boolean = false,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        if (autoScroll) {
+            AutoScrollingText(
+                track.title,
+                color = PhoebeUi.primaryText,
+                fontSize = titleSize,
+                lineHeight = titleLineHeight,
+                fontWeight = FontWeight.Black,
+                modifier = Modifier.sharedBoundsTransition("song:${track.id}:title"),
+            )
+            AutoScrollingText(track.artist, color = PhoebeUi.secondaryText, fontSize = 17.sp)
+            AutoScrollingText(track.album, color = PhoebeUi.mutedText, fontSize = 14.sp)
+        } else {
+            Text(
+                track.title,
+                color = PhoebeUi.primaryText,
+                fontSize = titleSize,
+                lineHeight = titleLineHeight,
+                fontWeight = FontWeight.Black,
+                maxLines = titleMaxLines,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.sharedBoundsTransition("song:${track.id}:title"),
+            )
+            Text(track.artist, color = PhoebeUi.secondaryText, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(track.album, color = PhoebeUi.mutedText, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+internal fun FlippableSongArtwork(
+    track: Track,
+    modifier: Modifier = Modifier,
+    artworkModifier: Modifier = Modifier,
+    radius: Dp = 10.dp,
+) {
+    var showingDetails by remember(track.id) { mutableStateOf(false) }
+    val rotation by animateFloatAsState(
+        targetValue = if (showingDetails) 180f else 0f,
+        animationSpec = tween(durationMillis = 520, easing = FastOutSlowInEasing),
+        label = "songArtworkFlip",
+    )
+    val shape = RoundedCornerShape(radius)
+    val density = LocalDensity.current
+
+    Box(
+        modifier
+            .aspectRatio(1f)
+            .graphicsLayer {
+                rotationY = rotation
+                cameraDistance = 12f * density.density
+            }
+            .clip(shape),
+    ) {
+        if (rotation <= 90f) {
+            ArtworkImage(
+                track.album,
+                track.thumbUrl,
+                Modifier
+                    .fillMaxSize()
+                    .then(artworkModifier)
+                    .combinedClickable(
+                        onClick = {},
+                        onLongClick = { showingDetails = true },
+                    ),
+                radius = radius,
+            )
+        } else {
+            SongArtworkDetailBack(
+                track = track,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer { rotationY = 180f }
+                    .clickable { showingDetails = false },
+                shape = shape,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SongArtworkDetailBack(
+    track: Track,
+    modifier: Modifier,
+    shape: RoundedCornerShape,
+) {
+    val nowMs = LocalNowMs.current
+    val playHistory = LocalPlayHistory.current
+    val lastPlayed = playHistory.byTrack[track.id]
+
+    Column(
+        modifier
+            .clip(shape)
+            .background(PhoebeUi.panel)
+            .border(BorderStroke(1.dp, PhoebeUi.border), shape)
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
         Text(
             track.title,
             color = PhoebeUi.primaryText,
-            fontSize = titleSize,
-            lineHeight = titleLineHeight,
+            fontSize = 18.sp,
+            lineHeight = 22.sp,
             fontWeight = FontWeight.Black,
-            maxLines = titleMaxLines,
+            maxLines = 2,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.sharedBoundsTransition("song:${track.id}:title"),
         )
-        Text(track.artist, color = PhoebeUi.secondaryText, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(track.album, color = PhoebeUi.mutedText, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        SongDetailMetadataRows(
+            track = track,
+            nowMs = nowMs,
+            lastPlayed = lastPlayed,
+            playCount = playHistory.playCountByTrack[track.id] ?: 0L,
+            labelWidth = 72.dp,
+            labelFontSize = 10.sp,
+            valueFontSize = 11.sp,
+        )
+        Text("Tap to show artwork", color = PhoebeUi.mutedText, fontSize = 11.sp)
     }
 }
 
@@ -409,10 +503,39 @@ private fun HomePanelLike(content: @Composable androidx.compose.foundation.layou
 }
 
 @Composable
-private fun DetailMetaRow(label: String, value: String) {
+private fun SongDetailMetadataRows(
+    track: Track,
+    nowMs: Long,
+    lastPlayed: Long?,
+    playCount: Long,
+    labelWidth: Dp = 108.dp,
+    labelFontSize: TextUnit = 12.sp,
+    valueFontSize: TextUnit = 13.sp,
+) {
+    DetailMetaRow("Artist", track.artist, labelWidth, labelFontSize, valueFontSize)
+    DetailMetaRow("Album", track.album, labelWidth, labelFontSize, valueFontSize)
+    DetailMetaRow("Duration", formatDuration(track.durationMs), labelWidth, labelFontSize, valueFontSize)
+    DetailMetaRow("Year", track.year?.toString() ?: "Unknown", labelWidth, labelFontSize, valueFontSize)
+    DetailMetaRow("Genre", track.genre ?: "Unknown", labelWidth, labelFontSize, valueFontSize)
+    DetailMetaRow("Date Added", track.dateAddedMs?.let { formatLastPlayed(it, nowMs) } ?: "Unknown", labelWidth, labelFontSize, valueFontSize)
+    DetailMetaRow("Last Played", lastPlayed?.let { formatLastPlayed(it, nowMs) } ?: "Never", labelWidth, labelFontSize, valueFontSize)
+    DetailMetaRow("Plays", playCount.toString(), labelWidth, labelFontSize, valueFontSize)
+    track.audioCodec?.let { DetailMetaRow("Codec", it.uppercase(), labelWidth, labelFontSize, valueFontSize) }
+    track.bitrateKbps?.let { DetailMetaRow("Bitrate", "$it kbps", labelWidth, labelFontSize, valueFontSize) }
+    track.filepath?.let { DetailMetaRow("File", it, labelWidth, labelFontSize, valueFontSize) }
+}
+
+@Composable
+private fun DetailMetaRow(
+    label: String,
+    value: String,
+    labelWidth: Dp = 108.dp,
+    labelFontSize: TextUnit = 12.sp,
+    valueFontSize: TextUnit = 13.sp,
+) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, color = PhoebeUi.mutedText, fontSize = 12.sp, modifier = Modifier.width(108.dp))
-        Text(value, color = PhoebeUi.primaryText, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        Text(label, color = PhoebeUi.mutedText, fontSize = labelFontSize, modifier = Modifier.width(labelWidth))
+        Text(value, color = PhoebeUi.primaryText, fontSize = valueFontSize, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
     }
 }
 

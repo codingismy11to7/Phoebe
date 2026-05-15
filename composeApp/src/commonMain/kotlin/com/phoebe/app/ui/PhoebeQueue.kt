@@ -252,11 +252,14 @@ internal fun UpNextList(
     rowHeight: Dp = 60.dp,
 ) {
     val density = LocalDensity.current
-    val rowHeightPx = with(density) { rowHeight.toPx() }
+    val rowSpacing = 2.dp
+    val rowStepPx = with(density) { rowHeight.toPx() + rowSpacing.toPx() }
     var draggingTrackId by remember { mutableStateOf<String?>(null) }
+    var dragStartIndex by remember { mutableStateOf<Int?>(null) }
+    var dragTargetIndex by remember { mutableStateOf<Int?>(null) }
     var dragOffsetPx by remember { mutableStateOf(0f) }
 
-    LazyColumn(modifier = modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    LazyColumn(modifier = modifier, verticalArrangement = Arrangement.spacedBy(rowSpacing)) {
         if (currentTrack != null) {
             item(key = "now-playing-${currentTrack.id}", contentType = "now-playing") {
                 UpNextRow(
@@ -272,10 +275,20 @@ internal fun UpNextList(
         }
         itemsIndexed(upNext, key = { _, t -> t.id }, contentType = { _, _ -> "up-next" }) { index, track ->
             val isDragging = draggingTrackId == track.id
+            val draggingId = draggingTrackId
+            val startIndex = dragStartIndex
+            val targetIndex = dragTargetIndex
+            val rowOffsetPx = when {
+                draggingId == null || startIndex == null || targetIndex == null -> 0f
+                isDragging -> dragOffsetPx
+                targetIndex > startIndex && index in (startIndex + 1)..targetIndex -> -rowStepPx
+                targetIndex < startIndex && index in targetIndex until startIndex -> rowStepPx
+                else -> 0f
+            }
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .offset { IntOffset(0, if (isDragging) dragOffsetPx.roundToInt() else 0) }
+                    .offset { IntOffset(0, rowOffsetPx.roundToInt()) }
                     .zIndex(if (isDragging) 1f else 0f),
             ) {
                 UpNextRow(
@@ -288,35 +301,40 @@ internal fun UpNextList(
                         Box(
                             Modifier
                                 .size(36.dp)
-                                .pointerInput(Unit) {
+                                .pointerInput(track.id, index, upNext.lastIndex, rowStepPx) {
                                     detectDragGestures(
                                         onDragStart = {
                                             draggingTrackId = track.id
+                                            dragStartIndex = index
+                                            dragTargetIndex = index
                                             dragOffsetPx = 0f
                                         },
                                         onDragEnd = {
+                                            val from = dragStartIndex
+                                            val to = dragTargetIndex
                                             draggingTrackId = null
+                                            dragStartIndex = null
+                                            dragTargetIndex = null
                                             dragOffsetPx = 0f
+                                            if (from != null && to != null && from != to) {
+                                                onMoveUpNext(from, to)
+                                            }
                                         },
                                         onDragCancel = {
                                             draggingTrackId = null
+                                            dragStartIndex = null
+                                            dragTargetIndex = null
                                             dragOffsetPx = 0f
                                         },
-                                        onDrag = { _, drag ->
-                                            dragOffsetPx += drag.y
-                                            val currentId = draggingTrackId
+                                        onDrag = { change, drag ->
+                                            change.consume()
+                                            val startIndex = dragStartIndex
                                                 ?: return@detectDragGestures
-                                            val curIndex = upNext.indexOfFirst { it.id == currentId }
-                                            if (curIndex < 0) return@detectDragGestures
-                                            val shift = (dragOffsetPx / rowHeightPx).roundToInt()
-                                            if (shift != 0) {
-                                                val target = (curIndex + shift)
-                                                    .coerceIn(0, upNext.lastIndex)
-                                                if (target != curIndex) {
-                                                    onMoveUpNext(curIndex, target)
-                                                    dragOffsetPx -= shift * rowHeightPx
-                                                }
-                                            }
+                                            val minOffset = -startIndex * rowStepPx
+                                            val maxOffset = (upNext.lastIndex - startIndex) * rowStepPx
+                                            dragOffsetPx = (dragOffsetPx + drag.y).coerceIn(minOffset, maxOffset)
+                                            dragTargetIndex = (startIndex + (dragOffsetPx / rowStepPx).roundToInt())
+                                                .coerceIn(0, upNext.lastIndex)
                                         },
                                     )
                                 }
@@ -451,4 +469,3 @@ internal fun UpNextRow(
         }
     }
 }
-

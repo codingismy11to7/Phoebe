@@ -199,7 +199,7 @@ internal fun MainFeature(track: Track?, modifier: Modifier) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(40.dp),
             ) {
-                ArtworkImage(track.album, track.thumbUrl, Modifier.size(292.dp))
+                FlippableSongArtwork(track = track, modifier = Modifier.size(292.dp))
                 Column(Modifier.widthIn(max = 280.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     SectionLabel("Now Playing", PhoebeUi.accentLight)
                     Text(track.title, color = PhoebeUi.primaryText, fontSize = 34.sp, lineHeight = 39.sp, fontWeight = FontWeight.Black)

@@ -2,6 +2,7 @@ import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import org.gradle.api.tasks.JavaExec
 import org.gradle.api.tasks.testing.Test
 import java.io.File
+import java.time.Duration
 
 val phoebeVersionName = providers.gradleProperty("phoebe.versionName")
     .orElse(providers.environmentVariable("PHOEBE_VERSION_NAME"))
@@ -154,6 +155,7 @@ kotlin {
         }
         androidMain.dependencies {
             implementation(libs.androidx.activity.compose)
+            implementation(libs.androidx.fragment)
             implementation(libs.androidx.documentfile)
             implementation(libs.androidx.media3.cast)
             implementation(libs.androidx.media3.exoplayer)
@@ -330,7 +332,33 @@ tasks.withType<JavaExec>().configureEach {
 }
 
 tasks.withType<Test>().configureEach {
+    val requestedRoborazziTasks = gradle.startParameter.taskNames.map { it.substringAfterLast(":") }
+    val requestedAnyRoborazzi = requestedRoborazziTasks.any {
+        it == "recordRoborazzi" ||
+            it == "verifyRoborazzi" ||
+            it == "compareRoborazzi" ||
+            it == "verifyAndRecordRoborazzi" ||
+            it.startsWith("recordRoborazzi") ||
+            it.startsWith("verifyRoborazzi") ||
+            it.startsWith("compareRoborazzi") ||
+            it.startsWith("verifyAndRecordRoborazzi")
+    }
+
     if (name.contains("desktop", ignoreCase = true)) {
         systemProperty("phoebe.debug", "true")
+    }
+    if (requestedAnyRoborazzi) {
+        timeout.set(Duration.ofMinutes(5))
+        maxParallelForks = 1
+    }
+    if (requestedAnyRoborazzi && name == "testDebugUnitTest") {
+        filter {
+            includeTestsMatching("com.phoebe.app.PhoebeAndroid*ScreenshotTest")
+        }
+    }
+    if (requestedAnyRoborazzi && name == "desktopTest") {
+        filter {
+            includeTestsMatching("com.phoebe.app.PhoebeDesktopScreenshotTest")
+        }
     }
 }
