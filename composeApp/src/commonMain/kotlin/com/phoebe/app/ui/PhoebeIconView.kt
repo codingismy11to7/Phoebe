@@ -111,6 +111,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.composed
@@ -176,8 +177,8 @@ internal fun PhoebeIconView(
 ) {
     Canvas(modifier) {
         val s = size.minDimension
-        val strokeWidth = (s * 0.105f).coerceAtLeast(1.35f)
-        val stroke = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+        val strokeWidth = (s * 0.073f).coerceAtLeast(1.35f)
+        val stroke = Stroke(width = strokeWidth, cap = StrokeCap.Round, join = StrokeJoin.Round)
         fun p(x: Float, y: Float) = Offset(s * x, s * y)
         fun line(x1: Float, y1: Float, x2: Float, y2: Float) =
             drawLine(tint, p(x1, y1), p(x2, y2), strokeWidth = strokeWidth, cap = StrokeCap.Round)
@@ -185,37 +186,40 @@ internal fun PhoebeIconView(
         when (icon) {
             PhoebeIcon.Home -> {
                 val roof = Path().apply {
-                    moveTo(s * 0.16f, s * 0.52f)
-                    lineTo(s * 0.5f, s * 0.20f)
-                    lineTo(s * 0.84f, s * 0.52f)
+                    moveTo(s * 0.18f, s * 0.50f)
+                    lineTo(s * 0.50f, s * 0.22f)
+                    lineTo(s * 0.82f, s * 0.50f)
                 }
                 drawPath(roof, tint, style = stroke)
-                line(0.25f, 0.48f, 0.25f, 0.82f)
-                line(0.75f, 0.48f, 0.75f, 0.82f)
-                line(0.25f, 0.82f, 0.75f, 0.82f)
-                line(0.47f, 0.82f, 0.47f, 0.62f)
-                line(0.57f, 0.82f, 0.57f, 0.62f)
+                line(0.23f, 0.48f, 0.23f, 0.78f)
+                line(0.77f, 0.48f, 0.77f, 0.78f)
+                line(0.23f, 0.78f, 0.42f, 0.78f)
+                line(0.58f, 0.78f, 0.77f, 0.78f)
+                line(0.42f, 0.78f, 0.42f, 0.62f)
+                line(0.58f, 0.78f, 0.58f, 0.62f)
+                line(0.42f, 0.62f, 0.58f, 0.62f)
             }
             PhoebeIcon.Search -> {
-                drawCircle(tint, radius = s * 0.25f, center = p(0.43f, 0.42f), style = stroke)
-                line(0.61f, 0.61f, 0.82f, 0.82f)
+                drawCircle(tint, radius = s * 0.25f, center = p(0.43f, 0.41f), style = stroke)
+                line(0.61f, 0.60f, 0.80f, 0.79f)
             }
             PhoebeIcon.Library -> {
-                line(0.22f, 0.30f, 0.78f, 0.30f)
-                line(0.22f, 0.50f, 0.78f, 0.50f)
-                line(0.22f, 0.70f, 0.78f, 0.70f)
+                line(0.30f, 0.22f, 0.30f, 0.78f)
+                line(0.50f, 0.22f, 0.50f, 0.78f)
+                line(0.68f, 0.26f, 0.82f, 0.76f)
             }
             PhoebeIcon.Queue -> {
                 val play = Path().apply {
-                    moveTo(s * 0.18f, s * 0.26f)
-                    lineTo(s * 0.18f, s * 0.74f)
-                    lineTo(s * 0.44f, s * 0.50f)
+                    moveTo(s * 0.24f, s * 0.54f)
+                    lineTo(s * 0.24f, s * 0.72f)
+                    lineTo(s * 0.38f, s * 0.63f)
                     close()
                 }
                 drawPath(play, tint, style = androidx.compose.ui.graphics.drawscope.Fill)
-                line(0.54f, 0.30f, 0.82f, 0.30f)
-                line(0.54f, 0.50f, 0.82f, 0.50f)
-                line(0.54f, 0.70f, 0.82f, 0.70f)
+                drawCircle(tint, radius = s * 0.035f, center = p(0.25f, 0.31f))
+                line(0.42f, 0.30f, 0.78f, 0.30f)
+                line(0.42f, 0.47f, 0.78f, 0.47f)
+                line(0.42f, 0.64f, 0.78f, 0.64f)
             }
             PhoebeIcon.Plus -> {
                 line(0.50f, 0.20f, 0.50f, 0.80f)
@@ -240,11 +244,16 @@ internal fun PhoebeIconView(
                 line(0.50f, 0.62f, 0.75f, 0.38f)
             }
             PhoebeIcon.Bell -> {
-                line(0.30f, 0.72f, 0.70f, 0.72f)
-                line(0.36f, 0.72f, 0.32f, 0.40f)
-                line(0.68f, 0.72f, 0.64f, 0.40f)
-                drawCircle(tint, radius = s * 0.18f, center = p(0.50f, 0.40f), style = stroke)
-                line(0.46f, 0.84f, 0.54f, 0.84f)
+                val body = Path().apply {
+                    moveTo(s * 0.30f, s * 0.68f)
+                    cubicTo(s * 0.36f, s * 0.62f, s * 0.35f, s * 0.50f, s * 0.35f, s * 0.42f)
+                    cubicTo(s * 0.35f, s * 0.25f, s * 0.45f, s * 0.20f, s * 0.50f, s * 0.20f)
+                    cubicTo(s * 0.55f, s * 0.20f, s * 0.65f, s * 0.25f, s * 0.65f, s * 0.42f)
+                    cubicTo(s * 0.65f, s * 0.50f, s * 0.64f, s * 0.62f, s * 0.70f, s * 0.68f)
+                    lineTo(s * 0.30f, s * 0.68f)
+                }
+                drawPath(body, tint, style = stroke)
+                line(0.46f, 0.78f, 0.54f, 0.78f)
             }
             PhoebeIcon.Back -> {
                 line(0.62f, 0.22f, 0.34f, 0.50f)
@@ -255,10 +264,19 @@ internal fun PhoebeIconView(
                 line(0.66f, 0.50f, 0.38f, 0.78f)
             }
             PhoebeIcon.Music -> {
-                line(0.62f, 0.20f, 0.62f, 0.68f)
-                line(0.62f, 0.20f, 0.80f, 0.26f)
-                drawCircle(tint, radius = s * 0.12f, center = p(0.46f, 0.72f), style = stroke)
-                line(0.50f, 0.70f, 0.62f, 0.66f)
+                line(0.48f, 0.30f, 0.48f, 0.72f)
+                line(0.76f, 0.22f, 0.76f, 0.64f)
+                line(0.48f, 0.30f, 0.76f, 0.22f)
+                line(0.48f, 0.42f, 0.76f, 0.34f)
+                drawCircle(tint, radius = s * 0.095f, center = p(0.36f, 0.75f), style = stroke)
+                drawCircle(tint, radius = s * 0.095f, center = p(0.64f, 0.67f), style = stroke)
+            }
+            PhoebeIcon.Lyrics -> {
+                line(0.25f, 0.28f, 0.75f, 0.28f)
+                line(0.20f, 0.45f, 0.80f, 0.45f)
+                line(0.28f, 0.62f, 0.72f, 0.62f)
+                drawCircle(tint, radius = s * 0.035f, center = p(0.18f, 0.28f))
+                drawCircle(tint, radius = s * 0.035f, center = p(0.82f, 0.62f))
             }
             PhoebeIcon.Previous -> {
                 line(0.22f, 0.24f, 0.22f, 0.76f)
@@ -296,16 +314,16 @@ internal fun PhoebeIconView(
             PhoebeIcon.Volume -> {
                 val speaker = Path().apply {
                     moveTo(s * 0.18f, s * 0.42f)
-                    lineTo(s * 0.34f, s * 0.42f)
-                    lineTo(s * 0.54f, s * 0.26f)
-                    lineTo(s * 0.54f, s * 0.74f)
-                    lineTo(s * 0.34f, s * 0.58f)
+                    lineTo(s * 0.33f, s * 0.42f)
+                    lineTo(s * 0.53f, s * 0.27f)
+                    lineTo(s * 0.53f, s * 0.73f)
+                    lineTo(s * 0.33f, s * 0.58f)
                     lineTo(s * 0.18f, s * 0.58f)
                     close()
                 }
                 drawPath(speaker, tint, style = stroke)
-                line(0.66f, 0.38f, 0.74f, 0.50f)
-                line(0.74f, 0.50f, 0.66f, 0.62f)
+                drawArc(tint, startAngle = -38f, sweepAngle = 76f, useCenter = false, topLeft = Offset(s * 0.54f, s * 0.38f), size = Size(s * 0.20f, s * 0.24f), style = stroke)
+                drawArc(tint, startAngle = -43f, sweepAngle = 86f, useCenter = false, topLeft = Offset(s * 0.58f, s * 0.28f), size = Size(s * 0.30f, s * 0.44f), style = stroke)
             }
             PhoebeIcon.Cast -> {
                 line(0.20f, 0.28f, 0.80f, 0.28f)
@@ -365,22 +383,23 @@ internal fun PhoebeIconView(
             }
             PhoebeIcon.Settings -> {
                 val center = p(0.5f, 0.5f)
-                drawCircle(tint, radius = s * 0.14f, center = center, style = stroke)
-                drawCircle(tint, radius = s * 0.30f, center = center, style = stroke)
-                val r1 = s * 0.28f
-                val r2 = s * 0.40f
-                repeat(8) { i ->
-                    val a = (kotlin.math.PI.toFloat() / 4f) * i - kotlin.math.PI.toFloat() / 8f
-                    val ca = kotlin.math.cos(a.toDouble()).toFloat()
-                    val sa = kotlin.math.sin(a.toDouble()).toFloat()
-                    drawLine(
-                        tint,
-                        Offset(center.x + r1 * ca, center.y + r1 * sa),
-                        Offset(center.x + r2 * ca, center.y + r2 * sa),
-                        strokeWidth = strokeWidth,
-                        cap = StrokeCap.Round,
+                val gear = Path()
+                repeat(16) { i ->
+                    val radius = if (i % 2 == 0) s * 0.36f else s * 0.27f
+                    val angle = -kotlin.math.PI.toFloat() / 2f + i * kotlin.math.PI.toFloat() / 8f
+                    val point = Offset(
+                        center.x + radius * kotlin.math.cos(angle.toDouble()).toFloat(),
+                        center.y + radius * kotlin.math.sin(angle.toDouble()).toFloat(),
                     )
+                    if (i == 0) {
+                        gear.moveTo(point.x, point.y)
+                    } else {
+                        gear.lineTo(point.x, point.y)
+                    }
                 }
+                gear.close()
+                drawPath(gear, tint, style = stroke)
+                drawCircle(tint, radius = s * 0.12f, center = center, style = stroke)
             }
         }
     }

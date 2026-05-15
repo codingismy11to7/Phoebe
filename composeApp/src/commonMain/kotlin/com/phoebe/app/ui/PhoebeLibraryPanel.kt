@@ -287,6 +287,12 @@ internal fun LibrarySortAndDisplayBar(
                     LibraryColumnDropdownRow("Date added", prefs.columns.dateAdded) {
                         onColumns(prefs.columns.copy(dateAdded = !prefs.columns.dateAdded))
                     }
+                    LibraryColumnDropdownRow("Rating", prefs.columns.rating) {
+                        onColumns(prefs.columns.copy(rating = !prefs.columns.rating))
+                    }
+                    LibraryColumnDropdownRow("Favorite", prefs.columns.favorite) {
+                        onColumns(prefs.columns.copy(favorite = !prefs.columns.favorite))
+                    }
                     LibraryColumnDropdownRow("File path", prefs.columns.filepath) {
                         onColumns(prefs.columns.copy(filepath = !prefs.columns.filepath))
                     }

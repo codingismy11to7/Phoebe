@@ -73,9 +73,15 @@ actual object LocalLibraryIO {
             durationMs = durationMs.coerceAtLeast(0L),
             year = null,
             genre = null,
+            mood = null,
+            style = null,
             bitrateKbps = null,
             audioCodec = null,
         )
+    }
+
+    actual suspend fun readLyrics(uri: String): String? = withContext(Dispatchers.Default) {
+        null
     }
 }
 

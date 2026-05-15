@@ -1,0 +1,7 @@
+CREATE TABLE CollectionTagRow (
+    target TEXT NOT NULL,
+    facet TEXT NOT NULL,
+    itemId TEXT NOT NULL,
+    value TEXT NOT NULL,
+    PRIMARY KEY (target, facet, itemId, value)
+);

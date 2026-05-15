@@ -1,0 +1,1 @@
+ALTER TABLE CollectionValueRow ADD COLUMN itemsLoaded INTEGER NOT NULL DEFAULT 0;

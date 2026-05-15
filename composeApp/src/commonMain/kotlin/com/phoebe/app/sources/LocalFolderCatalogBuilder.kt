@@ -76,6 +76,9 @@ object LocalFolderCatalogBuilder {
                     year = null,
                     thumbUrl = null,
                     dateAddedMs = tracks.mapNotNull { it.dateAddedMs }.maxOrNull(),
+                    genre = dominantTrackTag(tracks) { it.genre },
+                    mood = dominantTrackTag(tracks) { it.mood },
+                    style = dominantTrackTag(tracks) { it.style },
                 ),
             )
             tracksByParent[albumId] = tracks
@@ -86,7 +89,17 @@ object LocalFolderCatalogBuilder {
                 .filter { it.artist.equals(name, ignoreCase = true) }
                 .mapNotNull { it.dateAddedMs }
                 .maxOrNull()
-            Artist(id = "$prefix:artist:${name.hashCode()}", title = name, thumbUrl = null, albumCount = 0, dateAddedMs = artistAdded)
+            val artistTracks = tracksByParent.values.flatten().filter { it.artist.equals(name, ignoreCase = true) }
+            Artist(
+                id = "$prefix:artist:${name.hashCode()}",
+                title = name,
+                thumbUrl = null,
+                albumCount = 0,
+                dateAddedMs = artistAdded,
+                genre = dominantTrackTag(artistTracks) { it.genre },
+                mood = dominantTrackTag(artistTracks) { it.mood },
+                style = dominantTrackTag(artistTracks) { it.style },
+            )
         }
         val artists = enrichArtistAlbumCountsOnly(enrichArtistArtwork(rawArtists, albums), albums)
 
@@ -184,6 +197,8 @@ object LocalFolderCatalogBuilder {
             localUri = file.uri,
             year = meta.year,
             genre = meta.genre,
+            mood = meta.mood,
+            style = meta.style,
             filepath = file.filepath.ifBlank { filepathDisplay(file.uri) },
             audioCodec = meta.audioCodec,
             bitrateKbps = meta.bitrateKbps,
@@ -216,6 +231,14 @@ object LocalFolderCatalogBuilder {
             "Library"
         }
     }
+
+    private fun dominantTrackTag(tracks: List<Track>, tag: (Track) -> String?): String? =
+        tracks.asSequence()
+            .mapNotNull { tag(it)?.trim()?.takeIf { value -> value.isNotBlank() } }
+            .groupingBy { it }
+            .eachCount()
+            .maxByOrNull { it.value }
+            ?.key
 }
 
 private data class LocalFolderBuildEntries(

@@ -333,6 +333,7 @@ internal fun DesktopContent(
                 selectedPlaylist != null -> "Playlist"
                 section == DesktopSection.Search -> "Search"
                 section == DesktopSection.Library -> "Your Library"
+                section == DesktopSection.Lyrics -> "Lyrics"
                 section == DesktopSection.Playlists -> "Playlists"
                 section == DesktopSection.Settings -> "Settings"
                 else -> "Home"
@@ -340,6 +341,7 @@ internal fun DesktopContent(
             val headline = selectedPlaylist?.title ?: when (section) {
                 DesktopSection.Search -> "Find your sound"
                 DesktopSection.Library -> "Albums, artists, and songs"
+                DesktopSection.Lyrics -> "Follow along"
                 DesktopSection.Playlists -> "Your Plex playlists"
                 DesktopSection.Settings -> "Customize your listening experience"
                 DesktopSection.Home -> "Now playing"
@@ -411,11 +413,11 @@ internal fun DesktopContent(
                         onAscending = { playlistAscending = it },
                         columns = libraryUi.columns,
                         onColumns = onLibraryColumns,
+                        actions = {
+                            DownloadActionButton("Download Playlist", sortedPlaylistTracks) { onDownloadPlaylist(selectedPlaylist) }
+                            PlaylistExportMenu(playlist = selectedPlaylist)
+                        },
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        DownloadActionButton("Download Playlist", sortedPlaylistTracks) { onDownloadPlaylist(selectedPlaylist) }
-                        PlaylistExportMenu(playlist = selectedPlaylist)
-                    }
                     TrackList(
                         tracks = filteredPlaylistTracks,
                         empty = if (searchQuery.isNotBlank()) {

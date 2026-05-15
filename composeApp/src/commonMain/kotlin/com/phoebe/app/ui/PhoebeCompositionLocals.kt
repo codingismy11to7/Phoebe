@@ -259,6 +259,33 @@ internal data class LikeActions(
 
 internal val LocalLikeActions = compositionLocalOf { LikeActions() }
 
+internal data class RatingActions(
+    val ratingsEnabled: Boolean = false,
+    val catalog: CatalogSnapshot = CatalogSnapshot(),
+    val onRateTrack: (Track, Float?) -> Unit = { _, _ -> },
+    val onRateArtist: (Artist, Float?) -> Unit = { _, _ -> },
+    val onRateAlbum: (Album, Float?) -> Unit = { _, _ -> },
+    val onRatePlaylist: (Playlist, Float?) -> Unit = { _, _ -> },
+) {
+    fun ratingFor(track: Track): Float? =
+        catalog.tracksByParent.values.asSequence()
+            .flatten()
+            .firstOrNull { existing -> equivalentTrackIds(track.id).any { it in equivalentTrackIds(existing.id) } }
+            ?.rating
+            ?: track.rating
+
+    fun ratingFor(artist: Artist): Float? =
+        catalog.artists.firstOrNull { it.id == artist.id }?.rating ?: artist.rating
+
+    fun ratingFor(album: Album): Float? =
+        catalog.albums.firstOrNull { it.id == album.id }?.rating ?: album.rating
+
+    fun ratingFor(playlist: Playlist): Float? =
+        catalog.playlists.firstOrNull { it.id == playlist.id }?.rating ?: playlist.rating
+}
+
+internal val LocalRatingActions = compositionLocalOf { RatingActions() }
+
 internal data class TrackNavigationActions(
     val onOpenArtistForTrack: (Track) -> Boolean = { false },
     val onOpenAlbumForTrack: (Track) -> Boolean = { false },

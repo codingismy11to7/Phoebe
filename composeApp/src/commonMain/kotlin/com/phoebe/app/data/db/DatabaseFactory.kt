@@ -32,7 +32,7 @@ internal const val LocalDbName: String = "phoebe.db"
  * is cheap. Replace this with proper SQLDelight migration files (and a `verifyMigrations`
  * task) before any public release.
  */
-internal const val LocalDbRevision: Long = 7L
+internal const val LocalDbRevision: Long = 12L
 
 /** Persistence key used to store [LocalDbRevision] alongside the database. */
 internal const val LocalDbRevisionKey: String = "phoebe.db.revision"

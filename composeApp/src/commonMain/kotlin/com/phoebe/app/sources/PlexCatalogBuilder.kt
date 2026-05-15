@@ -52,6 +52,10 @@ class PlexCatalogBuilder(
                         title = first.artist,
                         thumbUrl = first.thumbUrl,
                         albumCount = list.size,
+                        genre = first.genre,
+                        mood = first.mood,
+                        style = first.style,
+                        rating = first.rating,
                     )
                 }
             },
@@ -63,6 +67,8 @@ class PlexCatalogBuilder(
             albums = albumsEnriched,
             playlists = playlistsEnriched,
             tracksByParent = tracksByParent,
+            collectionValues = metadata.collectionValues,
+            collectionTags = metadata.collectionTags,
             downloads = emptyList(),
         )
     }
@@ -89,6 +95,10 @@ class PlexCatalogBuilder(
                         title = first.artist,
                         thumbUrl = first.thumbUrl,
                         albumCount = list.size,
+                        genre = first.genre,
+                        mood = first.mood,
+                        style = first.style,
+                        rating = first.rating,
                     )
                 }
             },
@@ -151,6 +161,9 @@ class PlexCatalogBuilder(
                         title = first.artist,
                         thumbUrl = first.thumbUrl,
                         albumCount = list.size,
+                        genre = first.genre,
+                        mood = first.mood,
+                        style = first.style,
                     )
                 }
             },

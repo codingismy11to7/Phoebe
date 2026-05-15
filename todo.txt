@@ -1,11 +1,11 @@
 use correct icons
 
-add rating system (sync with plex)
+predictive back / swipe to dismiss
+
+eq
 
 create a mix functionality
 -improve
-
-caching / downloading
 
 web target 
 - continue to iterate on perf

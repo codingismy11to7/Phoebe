@@ -1,0 +1,8 @@
+CREATE TABLE CollectionValueRow (
+    target TEXT NOT NULL,
+    facet TEXT NOT NULL,
+    value TEXT NOT NULL,
+    key TEXT NOT NULL,
+    fastKey TEXT,
+    PRIMARY KEY (target, facet, value)
+);

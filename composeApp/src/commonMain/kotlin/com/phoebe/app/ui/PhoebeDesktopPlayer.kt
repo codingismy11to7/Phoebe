@@ -142,7 +142,9 @@ import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryUiPreferences
+import com.phoebe.app.domain.LyricsLoadState
 import com.phoebe.app.domain.CatalogSnapshot
+import com.phoebe.app.domain.CollectionEntry
 import com.phoebe.app.domain.LocalFolderMediaSourceConfig
 import com.phoebe.app.domain.MediaSourcesState
 import com.phoebe.app.domain.MusicLibrary
@@ -186,6 +188,8 @@ internal fun DesktopPlayer(
     isBuffering: Boolean = false,
     positionMs: Long,
     currentIndex: Int,
+    lyricsTrack: Track? = null,
+    lyricsState: LyricsLoadState = LyricsLoadState.Idle,
     section: DesktopSection,
     selectedPlaylistId: String?,
     searchQuery: String,
@@ -208,11 +212,14 @@ internal fun DesktopPlayer(
     onArtist: (Artist) -> Unit,
     onAlbum: (Album) -> Unit,
     onSong: (Track) -> Unit,
+    onOpenLyrics: (Track) -> Unit = {},
     onRecentSongs: () -> Unit,
     onRecentArtists: () -> Unit,
     onRecentAlbums: () -> Unit,
     onRecentlyPlayed: () -> Unit,
     onMostPlayed: () -> Unit,
+    onCollections: (CollectionEntry) -> Unit,
+    onCollectionValue: (CollectionEntry, String) -> Unit,
     onRefreshRandomArtists: () -> Unit,
     onRefreshRandomAlbums: () -> Unit,
     onPrefetchHomeArtist: (Artist) -> Unit = {},
@@ -229,6 +236,7 @@ internal fun DesktopPlayer(
     onVolume: (Float) -> Unit,
     onSeek: (Long) -> Unit,
     onCast: () -> Unit = {},
+    onLyrics: () -> Unit = {},
     onPlayQueue: (Int) -> Unit,
     onClearQueue: () -> Unit,
     onMoveUpNext: (Int, Int) -> Unit,
@@ -264,6 +272,7 @@ internal fun DesktopPlayer(
     onDeleteAllDownloads: () -> Unit,
     useLightAppearance: Boolean,
     onUseLightAppearanceChange: (Boolean) -> Unit,
+    onRetryLyrics: () -> Unit = {},
 ) {
     var desktopUpNextExpanded by remember { mutableStateOf(true) }
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -302,7 +311,16 @@ internal fun DesktopPlayer(
                         Row(Modifier.weight(1f).fillMaxWidth()) {
                             SharedTransitionLayout(Modifier.weight(1f).fillMaxHeight()) {
                                 val sharedTransitionScope = this
-                                CompositionLocalProvider(LocalSharedTransitionScope provides sharedTransitionScope) {
+                                var previousScreen by remember { mutableStateOf<AppScreen?>(null) }
+                                val sharedElementsEnabled = LocalSharedElementTransitionsEnabled.current &&
+                                    shouldUseDesktopSharedElements(previousScreen, screen)
+                                LaunchedEffect(screen) {
+                                    previousScreen = screen
+                                }
+                                CompositionLocalProvider(
+                                    LocalSharedTransitionScope provides sharedTransitionScope,
+                                    LocalSharedElementTransitionsEnabled provides sharedElementsEnabled,
+                                ) {
                                     AnimatedContent(
                                         targetState = screen,
                                         modifier = Modifier.fillMaxSize(),
@@ -385,8 +403,18 @@ internal fun DesktopPlayer(
                                         onPlay = { onPlayTracks(listOf(targetScreen.track), 0) },
                                         onAddToUpNext = onAddToUpNext,
                                         onDownload = onDownload,
+                                        onOpenLyrics = onOpenLyrics,
                                     )
                                 }
+                                is AppScreen.Lyrics -> LyricsView(
+                                    track = lyricsTrack,
+                                    currentTrackId = track?.id,
+                                    positionMs = positionMs,
+                                    state = lyricsState,
+                                    modifier = Modifier.fillMaxSize(),
+                                    onBack = onPopDetail,
+                                    onRetry = onRetryLyrics,
+                                )
                                 is AppScreen.RecentlyAdded -> Column(Modifier.fillMaxSize()) {
                                     LibraryTopBar(searchQuery = searchQuery, onSearchQuery = onSearchQuery)
                                     RecentlyAddedScreen(
@@ -400,6 +428,28 @@ internal fun DesktopPlayer(
                                         onPlayTracks = onPlayTracks,
                                         onAddToUpNext = onAddToUpNext,
                                         onDownload = onDownload,
+                                    )
+                                }
+                                is AppScreen.Collections -> Column(Modifier.fillMaxSize()) {
+                                    LibraryTopBar(searchQuery = searchQuery, onSearchQuery = onSearchQuery)
+                                    CollectionsScreen(
+                                        entry = targetScreen.entry,
+                                        catalog = catalog,
+                                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                                        onBack = onPopDetail,
+                                        onCollectionValue = { entry, value -> onCollectionValue(entry, value) },
+                                    )
+                                }
+                                is AppScreen.CollectionItems -> Column(Modifier.fillMaxSize()) {
+                                    LibraryTopBar(searchQuery = searchQuery, onSearchQuery = onSearchQuery)
+                                    CollectionItemsScreen(
+                                        entry = targetScreen.entry,
+                                        value = targetScreen.value,
+                                        catalog = catalog,
+                                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                                        onBack = onPopDetail,
+                                        onArtist = onArtist,
+                                        onAlbum = onAlbum,
                                     )
                                 }
                                 is AppScreen.PlayHistory -> Column(Modifier.fillMaxSize()) {
@@ -432,6 +482,7 @@ internal fun DesktopPlayer(
                                         onRecentAlbums = onRecentAlbums,
                                         onRecentlyPlayed = onRecentlyPlayed,
                                         onMostPlayed = onMostPlayed,
+                                        onCollections = onCollections,
                                         onRefreshArtists = onRefreshRandomArtists,
                                         onRefreshAlbums = onRefreshRandomAlbums,
                                         onPrefetchArtist = onPrefetchHomeArtist,
@@ -476,6 +527,15 @@ internal fun DesktopPlayer(
                                             modifier = Modifier.fillMaxSize(),
                                         )
                                     }
+                                    section == DesktopSection.Lyrics && selectedPlaylistId == null -> LyricsView(
+                                        track = lyricsTrack,
+                                        currentTrackId = track?.id,
+                                        positionMs = positionMs,
+                                        state = lyricsState,
+                                        modifier = Modifier.fillMaxSize(),
+                                        onBack = null,
+                                        onRetry = onRetryLyrics,
+                                    )
                                     section == DesktopSection.Settings && selectedPlaylistId == null -> SettingsDesktopView(
                                         isLightMode = useLightAppearance,
                                         onLightModeChange = onUseLightAppearanceChange,
@@ -544,6 +604,7 @@ internal fun DesktopPlayer(
                             volume = volume,
                             castState = castState,
                             compact = compact,
+                            lyricsVisible = section == DesktopSection.Lyrics && selectedPlaylistId == null,
                             upNextVisible = showQueue && desktopUpNextExpanded,
                             upNextToggleEnabled = showQueue,
                             onToggle = onToggle,
@@ -553,6 +614,7 @@ internal fun DesktopPlayer(
                             onRepeat = onRepeat,
                             onVolume = onVolume,
                             onSeek = onSeek,
+                            onLyrics = onLyrics,
                             onToggleUpNext = { desktopUpNextExpanded = !desktopUpNextExpanded },
                             onCast = onCast,
                         )
@@ -561,4 +623,29 @@ internal fun DesktopPlayer(
             }
         }
     }
+}
+
+private fun shouldUseDesktopSharedElements(initial: AppScreen?, target: AppScreen): Boolean =
+    initial != null &&
+        initial.hasDesktopSharedElements() &&
+        target.hasDesktopSharedElements()
+
+private fun AppScreen.hasDesktopSharedElements(): Boolean = when (this) {
+    AppScreen.Home,
+    is AppScreen.AlbumDetail,
+    is AppScreen.ArtistDetail,
+    is AppScreen.CollectionItems,
+    is AppScreen.PlayHistory,
+    is AppScreen.PlaylistDetail,
+    is AppScreen.RecentlyAdded,
+    is AppScreen.SongDetail,
+    is AppScreen.Lyrics,
+    -> true
+
+    is AppScreen.Collections,
+    AppScreen.LibraryPicker,
+    AppScreen.Player,
+    AppScreen.ServerPicker,
+    AppScreen.SignIn,
+    -> false
 }

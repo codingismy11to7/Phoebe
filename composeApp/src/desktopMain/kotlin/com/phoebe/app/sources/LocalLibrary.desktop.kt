@@ -58,7 +58,7 @@ actual object LocalLibraryIO {
     actual suspend fun readAudioMetadata(uri: String): AudioMetadata = withContext(Dispatchers.IO) {
         val path = runCatching { Paths.get(URI(uri)) }.getOrNull()
         if (path == null || !Files.isRegularFile(path)) {
-            return@withContext AudioMetadata(title = null, artist = null, album = null, durationMs = 0L, year = null, genre = null, bitrateKbps = null, audioCodec = null)
+            return@withContext AudioMetadata(title = null, artist = null, album = null, durationMs = 0L, year = null, genre = null, mood = null, style = null, bitrateKbps = null, audioCodec = null)
         }
         runCatching {
             val audioFile = AudioFileIO.read(path.toFile())
@@ -76,6 +76,7 @@ actual object LocalLibraryIO {
             }
             val year = first(FieldKey.YEAR)?.filter { it.isDigit() }?.take(4)?.toIntOrNull()
             val genre = first(FieldKey.GENRE)
+            val mood = first(FieldKey.MOOD)
             val bitrateStr = header.bitRate
             val bitrateKbps = bitrateStr?.filter { it.isDigit() }?.toIntOrNull()?.takeIf { it > 0 }
             val audioCodec = header.format?.substringBefore(' ')?.takeIf { it.isNotBlank() }
@@ -86,12 +87,34 @@ actual object LocalLibraryIO {
                 durationMs = durationMs.coerceAtLeast(0L),
                 year = year,
                 genre = genre,
+                mood = mood,
+                style = null,
                 bitrateKbps = bitrateKbps,
                 audioCodec = audioCodec,
             )
         }.getOrElse {
-            AudioMetadata(title = null, artist = null, album = null, durationMs = 0L, year = null, genre = null, bitrateKbps = null, audioCodec = null)
+            AudioMetadata(title = null, artist = null, album = null, durationMs = 0L, year = null, genre = null, mood = null, style = null, bitrateKbps = null, audioCodec = null)
         }
+    }
+
+    actual suspend fun readLyrics(uri: String): String? = withContext(Dispatchers.IO) {
+        val path = runCatching { Paths.get(URI(uri)) }.getOrNull() ?: return@withContext null
+        if (!Files.isRegularFile(path)) return@withContext null
+        val baseName = path.fileName.toString().substringBeforeLast('.', path.fileName.toString())
+        val parent = path.parent
+        if (parent != null) {
+            listOf("$baseName.lrc", "$baseName.txt").forEach { sidecarName ->
+                val sidecar = parent.resolve(sidecarName)
+                if (Files.isRegularFile(sidecar)) {
+                    val text = runCatching { Files.readString(sidecar) }.getOrNull()
+                    if (!text.isNullOrBlank()) return@withContext text
+                }
+            }
+        }
+        runCatching {
+            val tag = AudioFileIO.read(path.toFile()).tag ?: return@runCatching null
+            tag.getFirst(FieldKey.LYRICS)?.trim()?.takeIf { it.isNotEmpty() }
+        }.getOrNull()
     }
 }
 

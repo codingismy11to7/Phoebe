@@ -65,11 +65,19 @@ data class PlexMediaContainer(
 @Serializable
 data class PlexDirectoryDto(
     val key: String,
+    val fastKey: String? = null,
+    val ratingKey: String? = null,
     val title: String,
     val type: String? = null,
     val thumb: String? = null,
     val leafCount: Int? = null,
     val addedAt: Long? = null,
+    @SerialName("parentTitle") val parentTitle: String? = null,
+    val year: Int? = null,
+    val userRating: Double? = null,
+    @SerialName("Genre") val genreTags: List<PlexGenreTagDto>? = null,
+    @SerialName("Mood") val moodTags: List<PlexGenreTagDto>? = null,
+    @SerialName("Style") val styleTags: List<PlexGenreTagDto>? = null,
 )
 
 @Serializable
@@ -102,7 +110,10 @@ data class PlexMetadataDto(
     val thumb: String? = null,
     val addedAt: Long? = null,
     val updatedAt: Long? = null,
+    val userRating: Double? = null,
     @SerialName("Genre") val genreTags: List<PlexGenreTagDto>? = null,
+    @SerialName("Mood") val moodTags: List<PlexGenreTagDto>? = null,
+    @SerialName("Style") val styleTags: List<PlexGenreTagDto>? = null,
     @SerialName("Media") val media: List<PlexMediaDto> = emptyList(),
 )
 

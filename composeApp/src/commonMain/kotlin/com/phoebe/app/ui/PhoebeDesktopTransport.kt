@@ -180,6 +180,7 @@ internal fun DesktopTransport(
     volume: Float,
     castState: CastState = CastState(),
     compact: Boolean,
+    lyricsVisible: Boolean = false,
     upNextVisible: Boolean,
     upNextToggleEnabled: Boolean,
     onToggle: () -> Unit,
@@ -189,6 +190,7 @@ internal fun DesktopTransport(
     onRepeat: () -> Unit,
     onVolume: (Float) -> Unit,
     onSeek: (Long) -> Unit,
+    onLyrics: () -> Unit,
     onToggleUpNext: () -> Unit,
     onCast: () -> Unit,
 ) {
@@ -274,6 +276,12 @@ internal fun DesktopTransport(
             Box(Modifier.height(40.dp), contentAlignment = Alignment.Center) {
                 VolumeSlider(volume, onVolume, Modifier.width(if (compact) 84.dp else 112.dp))
             }
+            TransportIcon(
+                PhoebeIcon.Lyrics,
+                if (lyricsVisible) "Hide Lyrics" else "Show Lyrics",
+                onLyrics,
+                active = lyricsVisible,
+            )
             UpNextToggleIcon(
                 visible = upNextVisible,
                 enabled = upNextToggleEnabled,

@@ -78,7 +78,7 @@ fun artistsJson(): String = """
     {
       "MediaContainer": {
         "Metadata": [
-          { "ratingKey": "artist1", "type": "artist", "title": "Artist One", "leafCount": 1, "addedAt": 1700000000 }
+          { "ratingKey": "artist1", "type": "artist", "title": "Artist One", "leafCount": 1, "addedAt": 1700000000, "userRating": 8.0 }
         ]
       }
     }
@@ -88,7 +88,7 @@ fun albumsJson(): String = """
     {
       "MediaContainer": {
         "Metadata": [
-          { "ratingKey": "a1", "title": "Album One", "parentTitle": "Artist One", "year": 1995, "addedAt": 1700000100 }
+          { "ratingKey": "a1", "title": "Album One", "parentTitle": "Artist One", "year": 1995, "addedAt": 1700000100, "userRating": 7.0 }
         ]
       }
     }
@@ -106,7 +106,7 @@ fun playlistsJson(trackCount: Int, includeLikedPlaylist: Boolean = false, playli
     {
       "MediaContainer": {
         "Metadata": [
-          { "ratingKey": "p1", "title": "Playlist One", "leafCount": $trackCount, "key": "/playlists/p1/items"$thumb }$liked
+          { "ratingKey": "p1", "title": "Playlist One", "leafCount": $trackCount, "key": "/playlists/p1/items", "userRating": 9.0$thumb }$liked
         ]
       }
     }
@@ -135,6 +135,7 @@ fun albumTracksJson(): String = """
             "parentYear": 1995,
             "duration": 1000,
             "addedAt": 1700000200,
+            "userRating": 6.0,
             "Media": [
               { "Part": [ { "key": "/library/parts/t1/file.mp3", "file": "file.mp3" } ] }
             ]

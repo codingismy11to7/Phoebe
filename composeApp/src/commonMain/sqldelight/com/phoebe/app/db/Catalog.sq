@@ -8,7 +8,11 @@ CREATE TABLE ArtistRow (
     albumCount INTEGER NOT NULL DEFAULT 0,
     songCount INTEGER NOT NULL DEFAULT 0,
     sortKey INTEGER NOT NULL DEFAULT 0,
-    dateAddedMs INTEGER
+    dateAddedMs INTEGER,
+    genre TEXT,
+    mood TEXT,
+    style TEXT,
+    rating REAL
 );
 
 CREATE TABLE AlbumRow (
@@ -18,7 +22,11 @@ CREATE TABLE AlbumRow (
     year INTEGER,
     thumbUrl TEXT,
     sortKey INTEGER NOT NULL DEFAULT 0,
-    dateAddedMs INTEGER
+    dateAddedMs INTEGER,
+    genre TEXT,
+    mood TEXT,
+    style TEXT,
+    rating REAL
 );
 
 CREATE TABLE PlaylistRow (
@@ -27,7 +35,8 @@ CREATE TABLE PlaylistRow (
     trackCount INTEGER NOT NULL,
     plKey TEXT,
     thumbUrl TEXT,
-    sortKey INTEGER NOT NULL DEFAULT 0
+    sortKey INTEGER NOT NULL DEFAULT 0,
+    rating REAL
 );
 
 CREATE TABLE TrackRow (
@@ -43,10 +52,13 @@ CREATE TABLE TrackRow (
     localUri TEXT,
     year INTEGER,
     genre TEXT,
+    mood TEXT,
+    style TEXT,
     filepath TEXT,
     audioCodec TEXT,
     bitrateKbps INTEGER,
     dateAddedMs INTEGER,
+    rating REAL,
     parentAlbumId TEXT
 );
 
@@ -58,6 +70,31 @@ CREATE TABLE TrackParentRow (
 );
 
 CREATE INDEX TrackParentRow_parent_position ON TrackParentRow(parentId, position);
+
+CREATE TABLE CollectionTagRow (
+    target TEXT NOT NULL,
+    facet TEXT NOT NULL,
+    itemId TEXT NOT NULL,
+    value TEXT NOT NULL,
+    PRIMARY KEY (target, facet, itemId, value)
+);
+
+CREATE TABLE CollectionValueRow (
+    target TEXT NOT NULL,
+    facet TEXT NOT NULL,
+    value TEXT NOT NULL,
+    key TEXT NOT NULL,
+    fastKey TEXT,
+    filterField TEXT,
+    itemsLoaded INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (target, facet, value)
+);
+
+CREATE TABLE CollectionValueLoadRow (
+    target TEXT NOT NULL,
+    facet TEXT NOT NULL,
+    PRIMARY KEY (target, facet)
+);
 
 CREATE TABLE LocalFileMetadataCacheRow (
     folderId TEXT NOT NULL,
@@ -72,6 +109,8 @@ CREATE TABLE LocalFileMetadataCacheRow (
     durationMs INTEGER NOT NULL,
     year INTEGER,
     genre TEXT,
+    mood TEXT,
+    style TEXT,
     bitrateKbps INTEGER,
     audioCodec TEXT,
     filepath TEXT,
@@ -94,6 +133,15 @@ SELECT * FROM TrackRow;
 selectTrackParents:
 SELECT parentId, trackId, position FROM TrackParentRow ORDER BY parentId, position;
 
+selectCollectionTags:
+SELECT * FROM CollectionTagRow;
+
+selectCollectionValues:
+SELECT * FROM CollectionValueRow;
+
+selectCollectionValueLoads:
+SELECT * FROM CollectionValueLoadRow;
+
 selectTracksForParent:
 SELECT t.*
 FROM TrackRow t
@@ -102,28 +150,46 @@ WHERE tp.parentId = ?
 ORDER BY tp.position;
 
 upsertArtist:
-INSERT OR REPLACE INTO ArtistRow(id, title, thumbUrl, albumCount, songCount, sortKey, dateAddedMs)
-VALUES (?, ?, ?, ?, ?, ?, ?);
+INSERT OR REPLACE INTO ArtistRow(id, title, thumbUrl, albumCount, songCount, sortKey, dateAddedMs, genre, mood, style, rating)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 upsertAlbum:
-INSERT OR REPLACE INTO AlbumRow(id, title, artist, year, thumbUrl, sortKey, dateAddedMs)
-VALUES (?, ?, ?, ?, ?, ?, ?);
+INSERT OR REPLACE INTO AlbumRow(id, title, artist, year, thumbUrl, sortKey, dateAddedMs, genre, mood, style, rating)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 upsertPlaylist:
-INSERT OR REPLACE INTO PlaylistRow(id, title, trackCount, plKey, thumbUrl, sortKey)
-VALUES (?, ?, ?, ?, ?, ?);
+INSERT OR REPLACE INTO PlaylistRow(id, title, trackCount, plKey, thumbUrl, sortKey, rating)
+VALUES (?, ?, ?, ?, ?, ?, ?);
 
 upsertTrack:
 INSERT OR REPLACE INTO TrackRow(
     id, title, artist, album, durationMs, streamUrl, downloadUrl,
-    thumbUrl, localArtworkUri, localUri, year, genre, filepath, audioCodec, bitrateKbps, dateAddedMs, parentAlbumId
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    thumbUrl, localArtworkUri, localUri, year, genre, mood, style, filepath, audioCodec, bitrateKbps, dateAddedMs, rating, parentAlbumId
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 upsertTrackParent:
 INSERT OR REPLACE INTO TrackParentRow(parentId, trackId, position) VALUES (?, ?, ?);
 
+upsertCollectionTag:
+INSERT OR REPLACE INTO CollectionTagRow(target, facet, itemId, value) VALUES (?, ?, ?, ?);
+
+upsertCollectionValue:
+INSERT OR REPLACE INTO CollectionValueRow(target, facet, value, key, fastKey, filterField, itemsLoaded) VALUES (?, ?, ?, ?, ?, ?, ?);
+
+upsertCollectionValueLoad:
+INSERT OR REPLACE INTO CollectionValueLoadRow(target, facet) VALUES (?, ?);
+
 deleteTrackParents:
 DELETE FROM TrackParentRow WHERE parentId = ?;
+
+clearCollectionTags:
+DELETE FROM CollectionTagRow;
+
+clearCollectionValues:
+DELETE FROM CollectionValueRow;
+
+clearCollectionValueLoads:
+DELETE FROM CollectionValueLoadRow;
 
 clearArtists:
 DELETE FROM ArtistRow;
@@ -146,8 +212,8 @@ SELECT * FROM LocalFileMetadataCacheRow WHERE folderId = ?;
 upsertLocalFileMetadataCache:
 INSERT OR REPLACE INTO LocalFileMetadataCacheRow(
     folderId, uri, sizeBytes, modifiedAtMs, trackId, albumId, title, artist,
-    album, durationMs, year, genre, bitrateKbps, audioCodec, filepath, dateAddedMs
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    album, durationMs, year, genre, mood, style, bitrateKbps, audioCodec, filepath, dateAddedMs
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 deleteLocalFileMetadataCache:
 DELETE FROM LocalFileMetadataCacheRow WHERE folderId = ? AND uri = ?;

@@ -217,6 +217,7 @@ internal fun SongDetailPanel(
     onPlay: () -> Unit,
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
+    onOpenLyrics: (Track) -> Unit = {},
 ) {
     val nowMs = LocalNowMs.current
     val playHistory = LocalPlayHistory.current
@@ -246,12 +247,40 @@ internal fun SongDetailPanel(
                     onPlay = onPlay,
                     onAddToUpNext = onAddToUpNext,
                     onDownload = onDownload,
+                    onOpenLyrics = onOpenLyrics,
                 )
             }
             item("metadata") {
-                HomePanelLike { SongDetailMetadataRows(track, nowMs, lastPlayed, playHistory.playCountByTrack[track.id] ?: 0L) }
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    if (compact) {
+                        SongLyricsEntry { onOpenLyrics(track) }
+                    }
+                    HomePanelLike { SongDetailMetadataRows(track, nowMs, lastPlayed, playHistory.playCountByTrack[track.id] ?: 0L) }
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun SongLyricsEntry(onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .background(PhoebeUi.panel)
+            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(14.dp))
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        PhoebeIconView(PhoebeIcon.Lyrics, tint = PhoebeUi.accentLight, modifier = Modifier.size(20.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text("Lyrics", color = PhoebeUi.primaryText, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Text("Follow along with this song", color = PhoebeUi.secondaryText, fontSize = 12.sp)
+        }
+        PhoebeIconView(PhoebeIcon.Forward, tint = PhoebeUi.secondaryText, modifier = Modifier.size(18.dp))
     }
 }
 
@@ -262,6 +291,7 @@ private fun SongDetailHero(
     onPlay: () -> Unit,
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
+    onOpenLyrics: (Track) -> Unit,
 ) {
     if (compact) {
         Column(
@@ -283,6 +313,7 @@ private fun SongDetailHero(
                 onPlay = onPlay,
                 onAddToUpNext = onAddToUpNext,
                 onDownload = onDownload,
+                onOpenLyrics = onOpenLyrics,
             )
         }
     } else {
@@ -306,6 +337,7 @@ private fun SongDetailHero(
                     onPlay = onPlay,
                     onAddToUpNext = onAddToUpNext,
                     onDownload = onDownload,
+                    onOpenLyrics = onOpenLyrics,
                 )
             }
         }
@@ -320,6 +352,7 @@ private fun SongDetailText(
     titleMaxLines: Int,
     autoScroll: Boolean = false,
 ) {
+    val ratingActions = LocalRatingActions.current
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         if (autoScroll) {
             AutoScrollingText(
@@ -345,6 +378,15 @@ private fun SongDetailText(
             )
             Text(track.artist, color = PhoebeUi.secondaryText, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(track.album, color = PhoebeUi.mutedText, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        if (ratingActions.ratingsEnabled && track.isPlexLibraryTrack()) {
+            RatingStars(
+                rating = ratingActions.ratingFor(track),
+                enabled = true,
+                onRating = { ratingActions.onRateTrack(track, it) },
+                starSize = 16.dp,
+                showClear = true,
+            )
         }
     }
 }
@@ -448,6 +490,7 @@ private fun SongActionRow(
     onPlay: () -> Unit,
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
+    onOpenLyrics: (Track) -> Unit,
 ) {
     if (scrollable) {
         LazyRow(
@@ -457,6 +500,7 @@ private fun SongActionRow(
         ) {
             item("play") { SongActionButton(PhoebeIcon.Play, "Play", onPlay) }
             item("up-next") { SongActionButton(PhoebeIcon.Queue, "Up Next") { onAddToUpNext(track) } }
+            item("lyrics") { SongActionButton(PhoebeIcon.Lyrics, "Lyrics") { onOpenLyrics(track) } }
             item("download") { DownloadActionButton("Download", listOf(track)) { onDownload(track) } }
         }
     } else {
@@ -466,6 +510,7 @@ private fun SongActionRow(
         ) {
             SongActionButton(PhoebeIcon.Play, "Play", onPlay)
             SongActionButton(PhoebeIcon.Queue, "Up Next") { onAddToUpNext(track) }
+            SongActionButton(PhoebeIcon.Lyrics, "Lyrics") { onOpenLyrics(track) }
             DownloadActionButton("Download", listOf(track)) { onDownload(track) }
         }
     }
@@ -511,44 +556,46 @@ internal fun DownloadActionButton(
         allComplete -> 1f
         else -> null
     }
-    Row(
-        modifier
-            .clip(RoundedCornerShape(999.dp))
-            .clickable {
-                if (allComplete) {
-                    confirmDelete = true
-                } else {
-                    onClick()
-                }
-            }
-            .background(PhoebeUi.elevatedFill)
-            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(999.dp))
-            .padding(horizontal = 14.dp, vertical = 9.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(7.dp),
-    ) {
-        when {
-            active.isNotEmpty() -> CircularProgressIndicator(
-                progress = { progress ?: 0f },
-                modifier = Modifier.size(15.dp),
-                color = PhoebeUi.accentLight,
-                strokeWidth = 2.dp,
-            )
-            allComplete -> PhoebeIconView(PhoebeIcon.Check, tint = PhoebeUi.accentLight, modifier = Modifier.size(15.dp))
-            else -> PhoebeIconView(PhoebeIcon.Download, tint = PhoebeUi.accentLight, modifier = Modifier.size(15.dp))
-        }
-        Text(
-            when {
-                active.isNotEmpty() && uniqueTracks.size > 1 -> "Downloading ${((progress ?: 0f) * 100).toInt()}%"
-                active.isNotEmpty() -> "Downloading"
-                allComplete -> "Downloaded"
-                else -> label
-            },
-            color = PhoebeUi.primaryText,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.SemiBold,
-        )
+    val isActive = active.isNotEmpty()
+    val statusLabel = when {
+        isActive && uniqueTracks.size > 1 -> "${((progress ?: 0f) * 100).toInt()}%"
+        else -> null
     }
+    val labelText = when {
+        isActive -> "Downloading"
+        allComplete -> "Downloaded"
+        else -> label
+    }
+    val iconColor = when {
+        isActive || allComplete -> PhoebeUi.accentLight
+        else -> PhoebeUi.mutedText
+    }
+    LibraryToolbarButton(
+        icon = if (allComplete) PhoebeIcon.Check else PhoebeIcon.Download,
+        label = labelText,
+        value = statusLabel,
+        iconTint = iconColor,
+        modifier = modifier,
+        onClick = {
+            if (allComplete) {
+                confirmDelete = true
+            } else {
+                onClick()
+            }
+        },
+        leadingContent = if (isActive) {
+            {
+                CircularProgressIndicator(
+                    progress = { progress ?: 0f },
+                    modifier = Modifier.size(13.dp),
+                    color = PhoebeUi.accentLight,
+                    strokeWidth = 2.dp,
+                )
+            }
+        } else {
+            null
+        },
+    )
     if (confirmDelete) {
         val noun = if (uniqueTracks.size == 1) "song" else "songs"
         ConfirmDeleteDownloadsDialog(
@@ -671,6 +718,7 @@ internal fun ArtistDetailPanel(
         filterTracksByQuery(sortedTracks, searchQuery)
     }
     val nowPlaying = LocalNowPlaying.current
+    val ratingActions = LocalRatingActions.current
 
     BoxWithConstraints(modifier.fillMaxSize()) {
         val useTable = maxWidth >= 640.dp
@@ -707,7 +755,18 @@ internal fun ArtistDetailPanel(
                     modifier = Modifier.sharedBoundsTransition("artist:${artist.id}:title"),
                 )
                 Text("${albums.size} $albumWord · ${tracks.size} $songWord", color = PhoebeUi.secondaryText, fontSize = 14.sp)
-                DownloadActionButton("Download Artist", tracks) { onDownloadArtist(artist) }
+                if (ratingActions.ratingsEnabled && artist.id.startsWith("plex:")) {
+                    RatingStars(
+                        rating = ratingActions.ratingFor(artist),
+                        enabled = true,
+                        onRating = { ratingActions.onRateArtist(artist, it) },
+                        starSize = 16.dp,
+                        showClear = true,
+                    )
+                }
+                if (!useTable) {
+                    DownloadActionButton("Download Artist", tracks) { onDownloadArtist(artist) }
+                }
                 Spacer(Modifier.height(6.dp))
                 ArtworkImage(
                     artist.title,
@@ -734,6 +793,11 @@ internal fun ArtistDetailPanel(
                 onAscending = { albumAscending = it },
                 viewMode = albumViewMode,
                 onViewMode = { albumViewMode = it },
+                actions = {
+                    if (useTable) {
+                        DownloadActionButton("Download Artist", tracks) { onDownloadArtist(artist) }
+                    }
+                },
             )
         }
         if (albumViewMode == LibraryViewMode.Grid) {
@@ -985,7 +1049,7 @@ internal fun AlbumDetailPanel(
                             Modifier.size(160.dp).sharedArtworkTransition("album:${album.id}"),
                             elevated = true,
                         )
-                        AlbumDetailHeaderText(album, tracks, onDownloadAlbum)
+                        AlbumDetailHeaderText(album, tracks, onDownloadAlbum, showDownload = false)
                     }
                 } else {
                     Column(
@@ -1021,6 +1085,13 @@ internal fun AlbumDetailPanel(
                     onAscending = { ascending = it },
                     columns = libraryUi.columns,
                     onColumns = onLibraryColumns,
+                    actions = {
+                        if (useTable) {
+                            DownloadActionButton("Download Album", tracks) {
+                                onDownloadAlbum(album)
+                            }
+                        }
+                    },
                 )
                 if (catalogRefreshing && searchQuery.isBlank()) {
                     CatalogLoadingStrip()
@@ -1080,7 +1151,9 @@ private fun AlbumDetailHeaderText(
     tracks: List<Track>,
     onDownloadAlbum: (Album) -> Unit,
     compact: Boolean = false,
+    showDownload: Boolean = true,
 ) {
+    val ratingActions = LocalRatingActions.current
     Column(
         modifier = if (compact) Modifier.fillMaxWidth() else Modifier,
         verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -1104,12 +1177,23 @@ private fun AlbumDetailHeaderText(
         album.year?.let { y ->
             Text("$y", color = PhoebeUi.mutedText, fontSize = 13.sp)
         }
-        DownloadActionButton(
-            label = "Download Album",
-            tracks = tracks,
-            modifier = Modifier.padding(top = 4.dp),
-        ) {
-            onDownloadAlbum(album)
+        if (ratingActions.ratingsEnabled && album.id.startsWith("plex:")) {
+            RatingStars(
+                rating = ratingActions.ratingFor(album),
+                enabled = true,
+                onRating = { ratingActions.onRateAlbum(album, it) },
+                starSize = 16.dp,
+                showClear = true,
+            )
+        }
+        if (showDownload) {
+            DownloadActionButton(
+                label = "Download Album",
+                tracks = tracks,
+                modifier = Modifier.padding(top = 4.dp),
+            ) {
+                onDownloadAlbum(album)
+            }
         }
     }
 }
@@ -1191,6 +1275,7 @@ internal fun PlaylistDetailPanel(
     val visibleTracks = remember(sortedTracks, searchQuery) {
         filterTracksByQuery(sortedTracks, searchQuery)
     }
+    val ratingActions = LocalRatingActions.current
 
     BoxWithConstraints(modifier.fillMaxSize()) {
         val useTable = maxWidth >= 640.dp
@@ -1211,19 +1296,30 @@ internal fun PlaylistDetailPanel(
                     visibleCount = visibleTracks.size,
                     searchQuery = searchQuery,
                 )
+                if (ratingActions.ratingsEnabled && playlist.id.startsWith("plex:")) {
+                    RatingStars(
+                        rating = ratingActions.ratingFor(playlist),
+                        enabled = true,
+                        onRating = { ratingActions.onRatePlaylist(playlist, it) },
+                        starSize = 16.dp,
+                        showClear = true,
+                    )
+                }
                 SearchPill(
                     query = searchQuery,
                     onQueryChange = onSearchQuery,
                     modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                     placeholder = "Search songs and artists",
                 )
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(top = 4.dp),
-                ) {
-                    DownloadActionButton("Download Playlist", tracks) { onDownloadPlaylist(playlist) }
-                    PlaylistExportMenu(playlist = playlist)
+                if (!useTable) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(top = 4.dp),
+                    ) {
+                        DownloadActionButton("Download Playlist", tracks) { onDownloadPlaylist(playlist) }
+                        PlaylistExportMenu(playlist = playlist)
+                    }
                 }
                 Spacer(Modifier.height(6.dp))
                 SectionLabel("Tracks", PhoebeUi.primaryText)
@@ -1246,6 +1342,12 @@ internal fun PlaylistDetailPanel(
                 onAscending = { ascending = it },
                 columns = libraryUi.columns,
                 onColumns = onLibraryColumns,
+                actions = {
+                    if (useTable) {
+                        DownloadActionButton("Download Playlist", tracks) { onDownloadPlaylist(playlist) }
+                        PlaylistExportMenu(playlist = playlist)
+                    }
+                },
             )
         }
         if (visibleTracks.isEmpty()) {

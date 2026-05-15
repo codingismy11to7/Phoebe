@@ -105,6 +105,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -151,9 +152,12 @@ import com.phoebe.app.data.catalogTracksForArtist
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.AppScreen
 import com.phoebe.app.domain.Artist
+import com.phoebe.app.domain.CollectionEntry
+import com.phoebe.app.domain.CollectionTarget
 import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryUiPreferences
+import com.phoebe.app.domain.LyricsLoadState
 import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.LocalFolderMediaSourceConfig
 import com.phoebe.app.domain.MediaSourcesState
@@ -172,6 +176,7 @@ import com.phoebe.app.domain.isLocalPlaylist
 import com.phoebe.app.domain.isLikedSongsPlaylist
 import com.phoebe.app.domain.isPlexLibraryTrack
 import com.phoebe.app.domain.supportsPlexPlaylists
+import com.phoebe.app.domain.supportsPlexRatings
 import com.phoebe.app.player.CastState
 import com.phoebe.app.platform.createPlatformHttpClient
 import com.phoebe.app.platform.currentTimeMs
@@ -255,6 +260,9 @@ fun PhoebeRoot(
         is AppScreen.ArtistDetail -> "artist:${currentScreen.artist.id}"
         is AppScreen.AlbumDetail -> "album:${currentScreen.album.id}"
         is AppScreen.SongDetail -> "song:${currentScreen.track.id}"
+        is AppScreen.Lyrics -> "lyrics:${currentScreen.track?.id.orEmpty()}"
+        is AppScreen.Collections -> "collections:${currentScreen.entry}"
+        is AppScreen.CollectionItems -> "collection-items:${currentScreen.entry}:${currentScreen.value}"
         is AppScreen.RecentlyAdded -> "recently-added:${currentScreen.kind}"
         is AppScreen.PlayHistory -> "play-history:${currentScreen.kind}"
         is AppScreen.PlaylistDetail -> "playlist:${currentScreen.playlist.id}"
@@ -275,6 +283,34 @@ fun PhoebeRoot(
     val upNext = player.upNext
     val currentTrack = player.currentTrack
     val currentIndex = player.currentIndex.takeIf { it >= 0 } ?: 0
+    var lyricsRefreshNonce by remember { mutableStateOf(0) }
+    var lyricsRefreshTrackId by remember { mutableStateOf<String?>(null) }
+    val lyricsTrack = when (val currentScreen = screen) {
+        is AppScreen.Lyrics -> currentScreen.track ?: currentTrack
+        AppScreen.Home -> if (browseSection == DesktopSection.Lyrics) currentTrack else null
+        else -> null
+    }
+    val lyricsState by produceState<LyricsLoadState>(
+        initialValue = if (lyricsTrack == null) LyricsLoadState.Idle else LyricsLoadState.Loading,
+        lyricsTrack?.id,
+        lyricsRefreshNonce,
+    ) {
+        val target = lyricsTrack
+        if (target == null) {
+            value = LyricsLoadState.Idle
+        } else {
+            value = LyricsLoadState.Loading
+            value = state.loadLyrics(
+                target,
+                forceRefresh = lyricsRefreshNonce > 0 && lyricsRefreshTrackId == target.id,
+            )
+        }
+    }
+    val retryLyrics = {
+        lyricsRefreshTrackId = lyricsTrack?.id
+        lyricsRefreshNonce++
+        Unit
+    }
     val catalogHasContent = catalog.artists.isNotEmpty() ||
         catalog.albums.isNotEmpty() ||
         catalog.playlists.isNotEmpty()
@@ -364,6 +400,20 @@ fun PhoebeRoot(
         browseSection = DesktopSection.Home
         state.open(AppScreen.PlayHistory(PlayHistoryKind.MostPlayed))
     }
+    val openCollections: (CollectionEntry) -> Unit = { entry ->
+        selectedPlaylistId = null
+        browseSection = DesktopSection.Home
+        libraryFilter = when (entry.target) {
+            CollectionTarget.Artists -> LibraryFilterTab.Artists
+            CollectionTarget.Albums -> LibraryFilterTab.Albums
+        }
+        state.open(AppScreen.Collections(entry))
+    }
+    val openCollectionValue: (CollectionEntry, String) -> Unit = { entry, value ->
+        selectedPlaylistId = null
+        browseSection = DesktopSection.Home
+        state.open(AppScreen.CollectionItems(entry, value))
+    }
     val commitSearch: (String) -> Unit = { rawQuery ->
         val trimmed = rawQuery.trim()
         if (trimmed.isNotBlank()) {
@@ -427,6 +477,16 @@ fun PhoebeRoot(
             onToggleLiked = { track -> state.toggleLikedTrack(track) },
         )
     }
+    val ratingActions = remember(catalog, session) {
+        RatingActions(
+            ratingsEnabled = session.supportsPlexRatings(),
+            catalog = catalog,
+            onRateTrack = { track, rating -> state.rateTrack(track, rating) },
+            onRateArtist = { artist, rating -> state.rateArtist(artist, rating) },
+            onRateAlbum = { album, rating -> state.rateAlbum(album, rating) },
+            onRatePlaylist = { playlist, rating -> state.ratePlaylist(playlist, rating) },
+        )
+    }
     val trackNavigationActions = remember(catalog, state) {
         TrackNavigationActions(
             onOpenArtistForTrack = { track ->
@@ -464,6 +524,7 @@ fun PhoebeRoot(
         LocalNowMs provides nowMs,
         LocalPlaylistActions provides playlistActions,
         LocalLikeActions provides likeActions,
+        LocalRatingActions provides ratingActions,
         LocalTrackNavigationActions provides trackNavigationActions,
         LocalMetadataEditorActions provides metadataEditorActions,
         LocalDragDrop provides dragDrop,
@@ -609,6 +670,16 @@ fun PhoebeRoot(
                         },
                         onAddToUpNext = state::addToUpNext,
                         onDownload = state::download,
+                        onOpenLyrics = { state.open(AppScreen.Lyrics(it)) },
+                    )
+                    is AppScreen.Lyrics -> LyricsView(
+                        track = lyricsTrack,
+                        currentTrackId = currentTrack?.id,
+                        positionMs = player.positionMs,
+                        state = lyricsState,
+                        modifier = Modifier.fillMaxSize(),
+                        onBack = state::popDetail,
+                        onRetry = retryLyrics,
                     )
                     is AppScreen.RecentlyAdded -> RecentlyAddedScreen(
                         kind = scr.kind,
@@ -624,6 +695,22 @@ fun PhoebeRoot(
                         },
                         onAddToUpNext = state::addToUpNext,
                         onDownload = state::download,
+                    )
+                    is AppScreen.Collections -> CollectionsScreen(
+                        entry = scr.entry,
+                        catalog = catalog,
+                        modifier = Modifier.fillMaxSize(),
+                        onBack = state::popDetail,
+                        onCollectionValue = openCollectionValue,
+                    )
+                    is AppScreen.CollectionItems -> CollectionItemsScreen(
+                        entry = scr.entry,
+                        value = scr.value,
+                        catalog = catalog,
+                        modifier = Modifier.fillMaxSize(),
+                        onBack = state::popDetail,
+                        onArtist = { state.open(AppScreen.ArtistDetail(it)) },
+                        onAlbum = { state.open(AppScreen.AlbumDetail(it)) },
                     )
                     is AppScreen.PlayHistory -> PlayHistoryScreen(
                         kind = scr.kind,
@@ -678,6 +765,9 @@ fun PhoebeRoot(
                         onMoveUpNext = state::moveUpNext,
                         onRemoveUpNext = state::removeUpNext,
                         onCast = state::showCastPicker,
+                        onLyrics = {
+                            currentTrack?.let { state.open(AppScreen.Lyrics(it)) }
+                        },
                         onBack = state::handleBack,
                         onSwipeDismiss = {
                             playerSwipeDismiss = true
@@ -708,6 +798,9 @@ fun PhoebeRoot(
                             val scoped = scopedScreen is AppScreen.ArtistDetail ||
                                 scopedScreen is AppScreen.AlbumDetail ||
                                 scopedScreen is AppScreen.SongDetail ||
+                                scopedScreen is AppScreen.Lyrics ||
+                                scopedScreen is AppScreen.Collections ||
+                                scopedScreen is AppScreen.CollectionItems ||
                                 scopedScreen is AppScreen.RecentlyAdded ||
                                 scopedScreen is AppScreen.PlayHistory ||
                                 scopedScreen is AppScreen.PlaylistDetail ||
@@ -733,6 +826,7 @@ fun PhoebeRoot(
                         onRecentAlbums = openRecentAlbums,
                         onRecentlyPlayed = openRecentlyPlayed,
                         onMostPlayed = openMostPlayed,
+                        onCollections = openCollections,
                         onRefreshRandomArtists = { randomArtistSeed = Random.nextInt() },
                         onRefreshRandomAlbums = { randomAlbumSeed = Random.nextInt() },
                         onPrefetchHomeArtist = state::prefetchHomeArtistStats,
@@ -782,6 +876,8 @@ fun PhoebeRoot(
                     isBuffering = player.isBuffering,
                     positionMs = player.positionMs,
                     currentIndex = currentIndex,
+                    lyricsTrack = lyricsTrack,
+                    lyricsState = lyricsState,
                     section = browseSection,
                     selectedPlaylistId = selectedPlaylistId,
                     searchQuery = searchQuery,
@@ -807,8 +903,11 @@ fun PhoebeRoot(
                         // Stay in any scoped context (playlist, detail, or library tab)
                         // and let that view filter its own contents by the query.
                         val scoped = screen is AppScreen.ArtistDetail ||
-                            screen is AppScreen.AlbumDetail ||
-                            screen is AppScreen.SongDetail ||
+                        screen is AppScreen.AlbumDetail ||
+                        screen is AppScreen.SongDetail ||
+                        screen is AppScreen.Lyrics ||
+                        screen is AppScreen.Collections ||
+                            screen is AppScreen.CollectionItems ||
                             screen is AppScreen.RecentlyAdded ||
                             screen is AppScreen.PlayHistory ||
                             screen is AppScreen.PlaylistDetail ||
@@ -829,11 +928,14 @@ fun PhoebeRoot(
                     onArtist = { state.open(AppScreen.ArtistDetail(it)) },
                     onAlbum = { state.open(AppScreen.AlbumDetail(it)) },
                     onSong = { state.open(AppScreen.SongDetail(it)) },
+                    onOpenLyrics = { state.open(AppScreen.Lyrics(it)) },
                     onRecentSongs = openRecentSongs,
                     onRecentArtists = openRecentArtists,
                     onRecentAlbums = openRecentAlbums,
                     onRecentlyPlayed = openRecentlyPlayed,
                     onMostPlayed = openMostPlayed,
+                    onCollections = openCollections,
+                    onCollectionValue = openCollectionValue,
                     onRefreshRandomArtists = { randomArtistSeed = Random.nextInt() },
                     onRefreshRandomAlbums = { randomAlbumSeed = Random.nextInt() },
                     onPrefetchHomeArtist = state::prefetchHomeArtistStats,
@@ -850,6 +952,11 @@ fun PhoebeRoot(
                     onVolume = state::setVolume,
                     onSeek = state::seekTo,
                     onCast = state::showCastPicker,
+                    onLyrics = {
+                        state.dismissDetailsToHome()
+                        selectedPlaylistId = null
+                        browseSection = if (browseSection == DesktopSection.Lyrics) DesktopSection.Home else DesktopSection.Lyrics
+                    },
                     onPlayQueue = state::playUpNext,
                     onClearQueue = state::clearQueue,
                     onMoveUpNext = state::moveUpNext,
@@ -885,6 +992,7 @@ fun PhoebeRoot(
                     onDeleteAllDownloads = state::deleteAllDownloads,
                     useLightAppearance = useLightAppearance,
                     onUseLightAppearanceChange = onUseLightAppearanceChange,
+                    onRetryLyrics = retryLyrics,
                 )
             }
             metadataEditorTrack?.let { editing ->
@@ -963,10 +1071,19 @@ private fun catalogHasContentForSurface(
             catalogTracksForArtist(catalog, screen.artist.title).isNotEmpty()
         is AppScreen.PlaylistDetail -> catalog.tracksByParent[screen.playlist.id].orEmpty().isNotEmpty()
         is AppScreen.SongDetail -> true
+        is AppScreen.Lyrics -> true
         is AppScreen.RecentlyAdded -> catalog.tracksByParent.values.any { it.isNotEmpty() } ||
             catalog.albums.isNotEmpty() ||
             catalog.artists.isNotEmpty()
         is AppScreen.PlayHistory -> true
+        is AppScreen.Collections -> when (screen.entry.target) {
+            CollectionTarget.Artists -> catalog.artists.isNotEmpty()
+            CollectionTarget.Albums -> catalog.albums.isNotEmpty()
+        }
+        is AppScreen.CollectionItems -> when (screen.entry.target) {
+            CollectionTarget.Artists -> catalog.artists.isNotEmpty()
+            CollectionTarget.Albums -> catalog.albums.isNotEmpty()
+        }
         AppScreen.Home -> when (browseSection) {
             DesktopSection.Home -> catalog.artists.isNotEmpty() ||
                 catalog.albums.isNotEmpty() ||
@@ -980,6 +1097,7 @@ private fun catalogHasContentForSurface(
                 LibraryFilterTab.Albums -> catalog.albums.isNotEmpty()
                 LibraryFilterTab.Songs -> catalog.tracksByParent.values.any { it.isNotEmpty() }
             }
+            DesktopSection.Lyrics -> true
             DesktopSection.Playlists -> catalog.playlists.isNotEmpty()
             DesktopSection.Settings -> true
         }

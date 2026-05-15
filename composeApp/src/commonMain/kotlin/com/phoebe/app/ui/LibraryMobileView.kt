@@ -52,6 +52,7 @@ import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryUiPreferences
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.Track
+import com.phoebe.app.domain.canTogglePlexLike
 import com.phoebe.app.domain.isLocalMediaPlayback
 import com.phoebe.app.domain.isLikedSongsPlaylist
 import com.phoebe.app.domain.isPlexLibraryTrack
@@ -122,6 +123,7 @@ internal fun LibraryMobileView(
                 )
                 LibraryFilterTab.Songs -> MobileSongsList(
                     tracks = sortedTracks,
+                    columns = libraryUi.columns,
                     onPlay = { index -> onPlayTracks(sortedTracks, index) },
                     onAddToUpNext = onAddToUpNext,
                     onDownload = onDownload,
@@ -287,6 +289,8 @@ private fun MobileLibraryToolbar(
                         MobileColumnRow("Sample rate", prefs.columns.sampleRate) { onColumns(prefs.columns.copy(sampleRate = !prefs.columns.sampleRate)) }
                         MobileColumnRow("File type", prefs.columns.fileType) { onColumns(prefs.columns.copy(fileType = !prefs.columns.fileType)) }
                         MobileColumnRow("Date added", prefs.columns.dateAdded) { onColumns(prefs.columns.copy(dateAdded = !prefs.columns.dateAdded)) }
+                        MobileColumnRow("Rating", prefs.columns.rating) { onColumns(prefs.columns.copy(rating = !prefs.columns.rating)) }
+                        MobileColumnRow("Favorite", prefs.columns.favorite) { onColumns(prefs.columns.copy(favorite = !prefs.columns.favorite)) }
                         MobileColumnRow("File path", prefs.columns.filepath) { onColumns(prefs.columns.copy(filepath = !prefs.columns.filepath)) }
                         MobileColumnRow("Year", prefs.columns.year) { onColumns(prefs.columns.copy(year = !prefs.columns.year)) }
                         MobileColumnRow("Genre", prefs.columns.genre) { onColumns(prefs.columns.copy(genre = !prefs.columns.genre)) }
@@ -646,6 +650,7 @@ private fun MobileAlbumListRow(
 @Composable
 private fun MobileSongsList(
     tracks: List<Track>,
+    columns: LibraryColumnVisibility,
     onPlay: (Int) -> Unit,
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
@@ -665,6 +670,7 @@ private fun MobileSongsList(
             val track = tracks[index]
             MobileSongRow(
                 track = track,
+                columns = columns,
                 isNowPlaying = track.id == nowPlaying.trackId,
                 nowPlayingIsPlaying = nowPlaying.isPlaying,
                 nowPlayingIsBuffering = nowPlaying.isBuffering,
@@ -680,6 +686,7 @@ private fun MobileSongsList(
 @Composable
 private fun MobileSongRow(
     track: Track,
+    columns: LibraryColumnVisibility,
     isNowPlaying: Boolean,
     nowPlayingIsPlaying: Boolean,
     nowPlayingIsBuffering: Boolean,
@@ -688,6 +695,13 @@ private fun MobileSongRow(
     onDownload: () -> Unit,
 ) {
     var menuExpanded by remember(track.id) { mutableStateOf(false) }
+    val likeActions = LocalLikeActions.current
+    val ratingActions = LocalRatingActions.current
+    val downloads = LocalDownloadStatus.current
+    val canRate = ratingActions.ratingsEnabled && track.isPlexLibraryTrack()
+    val canLike = likeActions.likesEnabled && track.canTogglePlexLike()
+    val liked = likeActions.isLiked(track)
+    val downloaded = downloads.isComplete(track)
     Row(
         Modifier
             .fillMaxWidth()
@@ -735,17 +749,44 @@ private fun MobileSongRow(
                 modifier = Modifier.sharedBoundsTransition("song:${track.id}:title"),
             )
             AutoScrollingText(
-                buildString {
-                    append(track.artist)
-                    track.audioCodec?.takeIf { it.isNotBlank() }?.let { append(" • ").append(it.uppercase()) }
-                    if (isLossless(track)) append(" • 44.1 kHz • Lossless")
-                },
+                track.artist,
                 color = PhoebeUi.secondaryText,
                 fontSize = 11.sp,
             )
+            if (track.album.isNotBlank()) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    AutoScrollingText(
+                        track.album,
+                        color = PhoebeUi.mutedText,
+                        fontSize = 10.sp,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    TrackStateBadges(
+                        liked = !columns.favorite && canLike && liked,
+                        downloaded = downloaded,
+                        iconSize = 10.dp,
+                    )
+                }
+            }
+            if (columns.rating && canRate) {
+                RatingStars(
+                    rating = ratingActions.ratingFor(track),
+                    enabled = true,
+                    onRating = { ratingActions.onRateTrack(track, it) },
+                    starSize = 11.dp,
+                    gap = 0.dp,
+                )
+            }
         }
         Text(formatMinutesSeconds(track.durationMs), color = PhoebeUi.mutedText, fontSize = 11.sp)
-        TrackDownloadIndicator(track)
+        if (columns.favorite) {
+            LikeButton(
+                liked = liked,
+                enabled = canLike,
+                onClick = { likeActions.onToggleLiked(track) },
+                modifier = Modifier.size(34.dp),
+            )
+        }
         Box {
             Box(
                 Modifier

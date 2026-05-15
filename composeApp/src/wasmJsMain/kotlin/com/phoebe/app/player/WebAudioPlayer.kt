@@ -27,6 +27,11 @@ private class WebAudioPlayer : SimpleAudioPlayer() {
         audio.onplaying = {
             markPlaybackReady(generation = generation)
         }
+        audio.onended = {
+            if (isPlayRequestCurrent(generation)) {
+                next()
+            }
+        }
         audio.onerror = { _, _, _, _, _ ->
             markPlaybackFailed(generation = generation)
             null

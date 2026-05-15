@@ -18,6 +18,7 @@ import org.robolectric.annotation.GraphicsMode
 @Config(sdk = [35], application = ScreenshotTestApplication::class)
 class PhoebeAndroidPhoneScreenshotTest {
     @Test fun phoneHomeDark() = capturePhone("home", PhoebeScreenshotScenario.Home)
+    @Test fun phoneHomePlayedRowsDark() = capturePhone("home-played-rows", PhoebeScreenshotScenario.HomePlayedRows)
     @Test fun phoneLibraryDark() = capturePhone("library", PhoebeScreenshotScenario.Library)
     @Test fun phonePlaylistDark() = capturePhone("playlist", PhoebeScreenshotScenario.Playlist)
     @Test fun phoneArtistDark() = capturePhone("artist", PhoebeScreenshotScenario.Artist)
