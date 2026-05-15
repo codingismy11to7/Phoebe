@@ -20,6 +20,10 @@ val phoebeDesktopPackageVersion = phoebeVersionName.map { version ->
 fun providerValue(name: String, envName: String): String? =
     providers.gradleProperty(name).orElse(providers.environmentVariable(envName)).orNull
 
+fun String.asJpackageMacSigningUserName(): String =
+    removePrefix("Developer ID Application: ")
+        .removePrefix("3rd Party Mac Developer Application: ")
+
 val javaFxClassifier = when {
     System.getProperty("os.name").startsWith("Mac", ignoreCase = true) &&
         System.getProperty("os.arch") == "aarch64" -> "mac-aarch64"
@@ -281,6 +285,12 @@ compose.desktop {
             macOS {
                 bundleID = "com.phoebe.app"
                 iconFile.set(iconsDir.file("icon.icns").asFile)
+                signing {
+                    identity.set(
+                        providers.gradleProperty("compose.desktop.mac.signing.identity")
+                            .map(String::asJpackageMacSigningUserName)
+                    )
+                }
             }
             windows {
                 iconFile.set(iconsDir.file("icon.ico").asFile)

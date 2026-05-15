@@ -389,9 +389,12 @@ jobs:
           security list-keychains -d user -s "${keychain_path}" login.keychain
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "${MACOS_KEYCHAIN_PASSWORD}" "${keychain_path}"
 
+          jpackage_signing_identity="${MACOS_DEVELOPER_IDENTITY#Developer ID Application: }"
+          jpackage_signing_identity="${jpackage_signing_identity#3rd Party Mac Developer Application: }"
+
           {
             echo "compose.desktop.mac.sign=true"
-            echo "compose.desktop.mac.signing.identity=${MACOS_DEVELOPER_IDENTITY}"
+            echo "compose.desktop.mac.signing.identity=${jpackage_signing_identity}"
             echo "compose.desktop.mac.signing.keychain=${keychain_path}"
           } >> "${HOME}/.gradle/gradle.properties"
 
@@ -401,6 +404,22 @@ jobs:
           ./gradlew
           :composeApp:packageReleaseDmg
           -Pphoebe.versionName=${{ needs.version.outputs.version }}
+
+      - name: Print macOS packaging logs
+        if: failure()
+        shell: bash
+        run: |
+          log_dir="composeApp/build/compose/logs"
+          if [[ ! -d "${log_dir}" ]]; then
+            echo "No Compose packaging logs found."
+            exit 0
+          fi
+
+          while IFS= read -r log_file; do
+            echo "::group::${log_file}"
+            sed -n '1,240p' "${log_file}"
+            echo "::endgroup::"
+          done < <(find "${log_dir}" -type f -name 'jpackage-*.txt' | sort)
 
       - name: Notarize macOS package
         shell: bash
