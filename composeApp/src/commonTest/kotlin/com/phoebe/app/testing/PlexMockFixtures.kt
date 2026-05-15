@@ -12,6 +12,7 @@ import io.ktor.http.headersOf
 
 fun plexCatalogMockEngine(
     playlistTrackCount: Int = 2,
+    playlistThumb: String? = null,
     onPlaylistAdd: (() -> Unit)? = null,
     onPlaylistRemove: (() -> Unit)? = null,
     includeLikedPlaylist: Boolean = false,
@@ -25,7 +26,7 @@ fun plexCatalogMockEngine(
         "/library/sections/1/albums" -> respondPlexJson(albumsJson())
         "/playlists" -> when (request.method.value) {
             "POST" -> respondPlexJson(createdPlaylistJson(request.url.parameters["title"] ?: "New Mix"))
-            else -> respondPlexJson(playlistsJson(playlistTrackCount, includeLikedPlaylist))
+            else -> respondPlexJson(playlistsJson(playlistTrackCount, includeLikedPlaylist, playlistThumb))
         }
         "/library/metadata/a1/children" -> respondPlexJson(albumTracksJson())
         "/playlists/p1/items" -> when (request.method.value) {
@@ -93,18 +94,19 @@ fun albumsJson(): String = """
     }
 """.trimIndent()
 
-fun playlistsJson(trackCount: Int, includeLikedPlaylist: Boolean = false): String {
+fun playlistsJson(trackCount: Int, includeLikedPlaylist: Boolean = false, playlistThumb: String? = null): String {
     val liked = if (includeLikedPlaylist) {
         """,
           { "ratingKey": "p2", "title": "Liked Songs", "leafCount": 1, "key": "/playlists/p2/items" }"""
     } else {
         ""
     }
+    val thumb = playlistThumb?.let { """, "thumb": "$it"""" }.orEmpty()
     return """
     {
       "MediaContainer": {
         "Metadata": [
-          { "ratingKey": "p1", "title": "Playlist One", "leafCount": $trackCount, "key": "/playlists/p1/items" }$liked
+          { "ratingKey": "p1", "title": "Playlist One", "leafCount": $trackCount, "key": "/playlists/p1/items"$thumb }$liked
         ]
       }
     }

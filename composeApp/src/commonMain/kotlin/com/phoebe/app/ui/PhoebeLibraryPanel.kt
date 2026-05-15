@@ -220,6 +220,7 @@ internal fun LibrarySortAndDisplayBar(
                         buildString {
                             append("Sort: ")
                             append(when (prefs.sortBy) {
+                                LibrarySortBy.AlbumOrder -> "Album order"
                                 LibrarySortBy.Name -> "Name"
                                 LibrarySortBy.Artist -> "Artist"
                                 LibrarySortBy.Album -> "Album"

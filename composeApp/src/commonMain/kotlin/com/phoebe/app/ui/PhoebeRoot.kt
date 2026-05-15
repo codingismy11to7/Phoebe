@@ -215,6 +215,7 @@ fun PhoebeRoot(
     val librariesLoading by state.librariesLoading.collectAsState()
     val message by state.message.collectAsState()
     val decadeMixNotice by state.decadeMixNotice.collectAsState()
+    val downloadDirectory by state.downloadDirectory.collectAsState()
     val pin by state.pin.collectAsState()
     val servers by state.servers.collectAsState()
     val libraries by state.libraries.collectAsState()
@@ -295,6 +296,9 @@ fun PhoebeRoot(
             isPlaying = player.isPlaying,
             isBuffering = player.isBuffering,
         )
+    }
+    val downloadStatus = remember(catalog.downloads) {
+        DownloadStatusSnapshot(catalog.downloads.associateBy { it.trackId })
     }
     val playHistory = remember(lastPlayedByArtist, lastPlayedByAlbum, lastPlayedByTrack, playCountsByTrack) {
         PlayHistorySnapshot(
@@ -401,8 +405,8 @@ fun PhoebeRoot(
             onCreatePlaylist = { title, initialTracks -> state.createPlaylist(title, initialTracks) },
             onRequestCreatePlaylist = { initialTracks ->
                 val canCreate = when {
-                    initialTracks.any { it.canAddToLocalPlaylist() } -> localReady
                     initialTracks.any { it.canAddToPlexPlaylist() } -> plexReady
+                    initialTracks.any { it.canAddToLocalPlaylist() } -> localReady
                     else -> plexReady || localReady
                 }
                 if (canCreate) {
@@ -423,19 +427,44 @@ fun PhoebeRoot(
             onToggleLiked = { track -> state.toggleLikedTrack(track) },
         )
     }
+    val trackNavigationActions = remember(catalog, state) {
+        TrackNavigationActions(
+            onOpenArtistForTrack = { track ->
+                resolveArtistForTrack(catalog, track)?.let { artist ->
+                    state.open(AppScreen.ArtistDetail(artist))
+                    true
+                } ?: false
+            },
+            onOpenAlbumForTrack = { track ->
+                resolveAlbumForTrack(catalog, track)?.let { album ->
+                    state.open(AppScreen.AlbumDetail(album))
+                    true
+                } ?: false
+            },
+            onOpenSongDetail = { track ->
+                state.open(AppScreen.SongDetail(track))
+            },
+        )
+    }
     val metadataEditorActions = remember {
         MetadataEditorActions(onRequestEdit = { track -> metadataEditorTrack = track })
+    }
+    val downloadActions = remember(state) {
+        DownloadActions(onDeleteDownloadedTracks = { tracks -> state.deleteDownloads(tracks) })
     }
     val dragDrop = remember { DragDropController() }
 
     CompositionLocalProvider(
         LocalCatalogHasContent provides catalogHasContent,
         LocalCatalogSyncState provides catalogSyncState,
+        LocalDownloadStatus provides downloadStatus,
+        LocalDownloadActions provides downloadActions,
         LocalNowPlaying provides nowPlaying,
         LocalPlayHistory provides playHistory,
         LocalNowMs provides nowMs,
         LocalPlaylistActions provides playlistActions,
         LocalLikeActions provides likeActions,
+        LocalTrackNavigationActions provides trackNavigationActions,
         LocalMetadataEditorActions provides metadataEditorActions,
         LocalDragDrop provides dragDrop,
         LocalSearchHistory provides searchHistory,
@@ -550,6 +579,7 @@ fun PhoebeRoot(
                         },
                         onAddToUpNext = state::addToUpNext,
                         onDownload = state::download,
+                        onDownloadArtist = state::download,
                         onLibraryColumns = state::setLibraryColumns,
                     )
                     is AppScreen.AlbumDetail -> AlbumDetailPanel(
@@ -566,6 +596,7 @@ fun PhoebeRoot(
                         },
                         onAddToUpNext = state::addToUpNext,
                         onDownload = state::download,
+                        onDownloadAlbum = state::download,
                         onLibraryColumns = state::setLibraryColumns,
                     )
                     is AppScreen.SongDetail -> SongDetailPanel(
@@ -622,6 +653,7 @@ fun PhoebeRoot(
                         },
                         onAddToUpNext = state::addToUpNext,
                         onDownload = state::download,
+                        onDownloadPlaylist = state::download,
                         onLibraryColumns = state::setLibraryColumns,
                     )
                     AppScreen.Player -> MobilePlayer(
@@ -722,6 +754,11 @@ fun PhoebeRoot(
                         onLibrarySortBy = state::setLibrarySortBy,
                         onLibraryAscending = state::setLibrarySortAscending,
                         onLibraryColumns = state::setLibraryColumns,
+                        downloadDirectory = downloadDirectory,
+                        downloadCount = catalog.downloads.size,
+                        defaultDownloadDirectoryLabel = state.defaultDownloadDirectoryLabel,
+                        onDownloadDirectory = state::setDownloadDirectory,
+                        onDeleteAllDownloads = state::deleteAllDownloads,
                         useLightAppearance = useLightAppearance,
                         onUseLightAppearanceChange = onUseLightAppearanceChange,
                     )
@@ -820,6 +857,9 @@ fun PhoebeRoot(
                     onPlayTracks = state::playTracks,
                     onAddToUpNext = state::addToUpNext,
                     onDownload = state::download,
+                    onDownloadArtist = state::download,
+                    onDownloadAlbum = state::download,
+                    onDownloadPlaylist = state::download,
                     onStartSignIn = state::startPlexSignIn,
                     onFinishSignIn = state::finishPlexSignIn,
                     onSignOut = state::signOut,
@@ -838,6 +878,11 @@ fun PhoebeRoot(
                     onLibrarySortBy = state::setLibrarySortBy,
                     onLibraryAscending = state::setLibrarySortAscending,
                     onLibraryColumns = state::setLibraryColumns,
+                    downloadDirectory = downloadDirectory,
+                    downloadCount = catalog.downloads.size,
+                    defaultDownloadDirectoryLabel = state.defaultDownloadDirectoryLabel,
+                    onDownloadDirectory = state::setDownloadDirectory,
+                    onDeleteAllDownloads = state::deleteAllDownloads,
                     useLightAppearance = useLightAppearance,
                     onUseLightAppearanceChange = onUseLightAppearanceChange,
                 )
@@ -943,5 +988,33 @@ private fun catalogHasContentForSurface(
         AppScreen.LibraryPicker,
         AppScreen.Player,
         -> true
+    }
+}
+
+private fun resolveArtistForTrack(catalog: CatalogSnapshot, track: Track): Artist? {
+    val title = track.artist.trim()
+    if (title.isBlank()) return null
+    return catalog.artists.firstOrNull { it.title.equals(title, ignoreCase = true) }
+        ?: resolveAlbumForTrack(catalog, track)?.let { album ->
+            catalog.artists.firstOrNull { it.title.equals(album.artist, ignoreCase = true) }
+        }
+        ?: catalog.artists.firstOrNull { artist ->
+            catalogAlbumsForArtist(catalog, artist.title).any { album ->
+                album.title.equals(track.album, ignoreCase = true)
+            }
+        }
+}
+
+private fun resolveAlbumForTrack(catalog: CatalogSnapshot, track: Track): Album? {
+    track.parentAlbumId?.let { parentAlbumId ->
+        catalog.albums.firstOrNull { it.id == parentAlbumId }?.let { return it }
+    }
+    val albumTitle = track.album.trim()
+    if (albumTitle.isBlank()) return null
+    return catalog.albums.firstOrNull { album ->
+        album.title.equals(albumTitle, ignoreCase = true) &&
+            album.artist.equals(track.artist, ignoreCase = true)
+    } ?: catalog.albums.firstOrNull { album ->
+        album.title.equals(albumTitle, ignoreCase = true)
     }
 }

@@ -214,6 +214,7 @@ class CatalogRepositoryRefreshDesktopTest {
                 streamUrl = "https://plex.example/old?X-Plex-Token=token",
                 downloadUrl = "https://plex.example/old?X-Plex-Token=token&download=1",
                 thumbUrl = null,
+                localArtworkUri = null,
                 localUri = null,
                 year = null,
                 genre = null,
@@ -278,6 +279,7 @@ class CatalogRepositoryRefreshDesktopTest {
                 streamUrl = "https://plex.example/t1?X-Plex-Token=token",
                 downloadUrl = "https://plex.example/t1?X-Plex-Token=token&download=1",
                 thumbUrl = null,
+                localArtworkUri = null,
                 localUri = null,
                 year = null,
                 genre = null,
@@ -364,7 +366,7 @@ class CatalogRepositoryRefreshDesktopTest {
             when (request.url.encodedPath) {
                 "/library/sections/1/all" -> respondJson(artistsJson())
                 "/library/sections/1/albums" -> respondJson(albumsJson())
-                "/playlists" -> respondJson(playlistsJson(trackCount = 2))
+                "/playlists" -> respondJson(playlistsJson(trackCount = 2, thumb = "/playlists/p1/art"))
                 "/library/metadata/a1/children" -> respondJson(albumTracksJson())
                 "/playlists/p1/items" -> when (request.method.value) {
                     "PUT" -> respondJson(playlistAddResponseJson(leafCount = 3))
@@ -483,15 +485,18 @@ class CatalogRepositoryRefreshDesktopTest {
         }
     """.trimIndent()
 
-    private fun playlistsJson(trackCount: Int): String = """
+    private fun playlistsJson(trackCount: Int, thumb: String? = null): String {
+        val thumbJson = thumb?.let { """, "thumb": "$it"""" }.orEmpty()
+        return """
         {
           "MediaContainer": {
             "Metadata": [
-              { "ratingKey": "p1", "title": "Playlist One", "leafCount": $trackCount, "key": "/playlists/p1/items" }
+              { "ratingKey": "p1", "title": "Playlist One", "leafCount": $trackCount, "key": "/playlists/p1/items"$thumbJson }
             ]
           }
         }
     """.trimIndent()
+    }
 
     private fun albumTracksJson(): String = """
         {

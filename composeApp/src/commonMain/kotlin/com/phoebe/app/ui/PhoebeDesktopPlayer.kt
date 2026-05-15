@@ -236,6 +236,9 @@ internal fun DesktopPlayer(
     onPlayTracks: (List<Track>, Int) -> Unit,
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
+    onDownloadArtist: (Artist) -> Unit,
+    onDownloadAlbum: (Album) -> Unit,
+    onDownloadPlaylist: (Playlist) -> Unit,
     onStartSignIn: () -> Unit,
     onFinishSignIn: () -> Unit,
     onSignOut: () -> Unit,
@@ -254,6 +257,11 @@ internal fun DesktopPlayer(
     onLibrarySortBy: (LibrarySortBy) -> Unit,
     onLibraryAscending: (Boolean) -> Unit,
     onLibraryColumns: (LibraryColumnVisibility) -> Unit,
+    downloadDirectory: String?,
+    downloadCount: Int,
+    defaultDownloadDirectoryLabel: String,
+    onDownloadDirectory: (String?) -> Unit,
+    onDeleteAllDownloads: () -> Unit,
     useLightAppearance: Boolean,
     onUseLightAppearanceChange: (Boolean) -> Unit,
 ) {
@@ -347,6 +355,7 @@ internal fun DesktopPlayer(
                                         onPlayTracks = onPlayTracks,
                                         onAddToUpNext = onAddToUpNext,
                                         onDownload = onDownload,
+                                        onDownloadArtist = onDownloadArtist,
                                         onLibraryColumns = onLibraryColumns,
                                     )
                                 }
@@ -363,6 +372,7 @@ internal fun DesktopPlayer(
                                         onPlayTracks = onPlayTracks,
                                         onAddToUpNext = onAddToUpNext,
                                         onDownload = onDownload,
+                                        onDownloadAlbum = onDownloadAlbum,
                                         onLibraryColumns = onLibraryColumns,
                                     )
                                 }
@@ -469,6 +479,11 @@ internal fun DesktopPlayer(
                                     section == DesktopSection.Settings && selectedPlaylistId == null -> SettingsDesktopView(
                                         isLightMode = useLightAppearance,
                                         onLightModeChange = onUseLightAppearanceChange,
+                                        downloadDirectory = downloadDirectory,
+                                        downloadCount = downloadCount,
+                                        defaultDownloadDirectoryLabel = defaultDownloadDirectoryLabel,
+                                        onDownloadDirectory = onDownloadDirectory,
+                                        onDeleteAllDownloads = onDeleteAllDownloads,
                                         modifier = Modifier.fillMaxSize(),
                                     )
                                     else -> DesktopContent(
@@ -491,6 +506,7 @@ internal fun DesktopPlayer(
                                         onLibrarySortBy = onLibrarySortBy,
                                         onLibraryAscending = onLibraryAscending,
                                         onLibraryColumns = onLibraryColumns,
+                                        onDownloadPlaylist = onDownloadPlaylist,
                                     )
                                 }
                             }

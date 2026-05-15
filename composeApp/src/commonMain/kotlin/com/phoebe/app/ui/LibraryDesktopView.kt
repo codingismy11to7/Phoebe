@@ -70,7 +70,7 @@ import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryUiPreferences
 import com.phoebe.app.domain.Track
-import com.phoebe.app.domain.canAddToPlexPlaylist
+import com.phoebe.app.domain.canTogglePlexLike
 
 internal enum class LibraryFilterTab { Artists, Albums, Songs }
 
@@ -1070,7 +1070,7 @@ internal fun SongsTableHeader(columns: LibraryColumnVisibility) {
         if (columns.fileType) TableHeaderCell("File Type", modifier = Modifier.width(70.dp))
         if (columns.dateAdded) TableHeaderCell("Date Added", modifier = Modifier.width(96.dp))
         if (columns.filepath) TableHeaderCell("File Path", modifier = Modifier.weight(1.4f))
-        Spacer(Modifier.width(36.dp))
+        Spacer(Modifier.width(114.dp))
     }
 }
 
@@ -1086,7 +1086,6 @@ internal fun SongRow(
     modifier: Modifier = Modifier,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
-    val metadataEditorActions = LocalMetadataEditorActions.current
     val hasMenu = true
     val nowPlaying = LocalNowPlaying.current
     val likeActions = LocalLikeActions.current
@@ -1123,7 +1122,7 @@ internal fun SongRow(
                 }
             }
             Box(Modifier.size(42.dp).sharedArtworkTransition("song:${track.id}").clickable(onClick = onPlay), contentAlignment = Alignment.Center) {
-                ArtworkImage(track.album, track.thumbUrl, Modifier.fillMaxSize(), radius = 6.dp)
+                TrackArtworkImage(track, Modifier.fillMaxSize(), radius = 6.dp)
                 if (isCurrent) {
                     Box(
                         Modifier
@@ -1163,68 +1162,38 @@ internal fun SongRow(
         if (columns.fileType) TableCellText(displayFileTypeLabel(track), modifier = Modifier.width(70.dp), color = PhoebeUi.secondaryText)
         if (columns.dateAdded) TableCellText("—", modifier = Modifier.width(96.dp), color = PhoebeUi.mutedText)
         if (columns.filepath) TableCellText(track.filepath?.let(::shortenFilepath) ?: "—", modifier = Modifier.weight(1.4f), color = PhoebeUi.mutedText)
+        TrackDownloadIndicator(
+            track = track,
+            modifier = Modifier.width(34.dp),
+            onDownload = onDownload,
+        )
         LikeButton(
             liked = likeActions.isLiked(track),
-            enabled = likeActions.likesEnabled && track.canAddToPlexPlaylist(),
+            enabled = likeActions.likesEnabled && track.canTogglePlexLike(),
             onClick = { likeActions.onToggleLiked(track) },
             modifier = Modifier.width(36.dp),
         )
-        Box(Modifier.width(36.dp), contentAlignment = Alignment.Center) {
-            PhoebeIconView(
-                PhoebeIcon.More,
-                tint = PhoebeUi.secondaryText,
-                modifier = Modifier
-                    .size(17.dp)
+        Box(Modifier.width(44.dp), contentAlignment = Alignment.Center) {
+            Box(
+                Modifier
+                    .size(34.dp)
                     .clip(CircleShape)
-                    .clickable(onClick = { if (hasMenu) menuExpanded = true else onPlay() })
-                    .padding(horizontal = 6.dp),
-            )
-            if (hasMenu) {
-                DropdownMenu(
-                    expanded = menuExpanded,
-                    onDismissRequest = { menuExpanded = false },
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("Edit Metadata") },
-                        onClick = {
-                            metadataEditorActions.onRequestEdit(track)
-                            menuExpanded = false
-                        },
-                    )
-                    if (onAddToUpNext != null) {
-                        DropdownMenuItem(
-                            text = { Text("Add to Up Next") },
-                            onClick = {
-                                onAddToUpNext()
-                                menuExpanded = false
-                            },
-                        )
-                    }
-                    if (likeActions.likesEnabled && track.canAddToPlexPlaylist()) {
-                        val liked = likeActions.isLiked(track)
-                        DropdownMenuItem(
-                            text = { Text(if (liked) "Unlike Song" else "Like Song") },
-                            onClick = {
-                                likeActions.onToggleLiked(track)
-                                menuExpanded = false
-                            },
-                        )
-                    }
-                    AddToPlaylistMenuItems(
-                        track = track,
-                        onAfter = { menuExpanded = false },
-                    )
-                    if (onDownload != null) {
-                        DropdownMenuItem(
-                            text = { Text("Download Song") },
-                            onClick = {
-                                onDownload()
-                                menuExpanded = false
-                            },
-                        )
-                    }
-                }
+                    .clickable(onClick = { if (hasMenu) menuExpanded = true else onPlay() }),
+                contentAlignment = Alignment.Center,
+            ) {
+                PhoebeIconView(
+                    PhoebeIcon.More,
+                    tint = PhoebeUi.secondaryText,
+                    modifier = Modifier.size(17.dp),
+                )
             }
+            TrackActionMenu(
+                expanded = menuExpanded,
+                onDismiss = { menuExpanded = false },
+                onAddToUpNext = onAddToUpNext,
+                onDownload = onDownload,
+                track = track,
+            )
         }
     }
 }
@@ -1427,7 +1396,7 @@ private fun SongDetailSidebar(
                     .clip(RoundedCornerShape(12.dp))
                     .clickable(onClick = onPlay),
             ) {
-                ArtworkImage(track.album, track.thumbUrl, Modifier.fillMaxSize(), radius = 12.dp)
+                TrackArtworkImage(track, Modifier.fillMaxSize(), radius = 12.dp)
                 if (isCurrent) {
                     Box(
                         Modifier
@@ -1467,13 +1436,12 @@ private fun SongDetailSidebar(
         }
         Spacer(Modifier.height(2.dp))
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            if (likeActions.likesEnabled && track.canAddToPlexPlaylist()) {
+            if (likeActions.likesEnabled && track.canTogglePlexLike()) {
                 SongDetailAction(
                     PhoebeIcon.Heart,
                     if (likeActions.isLiked(track)) "Unlike Song" else "Like Song",
                 ) { likeActions.onToggleLiked(track) }
             }
-            SongDetailAction(PhoebeIcon.Search, "Reveal in Finder", onPlay)
             Box {
                 SongDetailAction(PhoebeIcon.Plus, "Add to Playlist") { playlistMenuExpanded = true }
                 DropdownMenu(
@@ -1486,7 +1454,7 @@ private fun SongDetailSidebar(
                     )
                 }
             }
-            SongDetailAction(PhoebeIcon.Cast, "Download Song", onDownload)
+            DownloadActionButton("Download Song", listOf(track), onClick = onDownload)
         }
     }
 }
@@ -1731,6 +1699,7 @@ internal fun sortAlbumsForLibrary(albums: List<Album>, sortBy: LibrarySortBy, as
 
 internal fun sortTracksForLibrary(tracks: List<Track>, sortBy: LibrarySortBy, ascending: Boolean): List<Track> =
     when (sortBy) {
+        LibrarySortBy.AlbumOrder -> if (ascending) tracks else tracks.asReversed()
         LibrarySortBy.PlaylistOrder -> if (ascending) tracks else tracks.asReversed()
         LibrarySortBy.Album -> tracks.sortedWith(
             if (ascending) compareBy<Track>({ it.album.lowercase() }, { it.title.lowercase() })

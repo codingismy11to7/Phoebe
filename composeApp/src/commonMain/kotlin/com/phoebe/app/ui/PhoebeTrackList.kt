@@ -151,6 +151,7 @@ import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.canAddToLocalPlaylist
 import com.phoebe.app.domain.canAddToPlexPlaylist
+import com.phoebe.app.domain.canTogglePlexLike
 import com.phoebe.app.domain.isLocalMediaPlayback
 import com.phoebe.app.domain.isLocalPlaylist
 import com.phoebe.app.domain.isLikedSongsPlaylist
@@ -249,7 +250,7 @@ internal fun ContentTrackRow(
     var menuExpanded by remember { mutableStateOf(false) }
     val cols = libraryColumns
     val likeActions = LocalLikeActions.current
-    val canLike = likeActions.likesEnabled && track.canAddToPlexPlaylist()
+    val canLike = likeActions.likesEnabled && track.canTogglePlexLike()
     val liked = likeActions.isLiked(track)
     val techParts = remember(track.id, cols) {
         buildList {
@@ -290,9 +291,8 @@ internal fun ContentTrackRow(
                 }
             }
             Box(Modifier.size(46.dp), contentAlignment = Alignment.Center) {
-                ArtworkImage(
-                    track.album,
-                    track.thumbUrl,
+                TrackArtworkImage(
+                    track,
                     Modifier.fillMaxSize().sharedArtworkTransition(sharedKey),
                     elevated = !compactLayout,
                 )
@@ -367,6 +367,7 @@ internal fun ContentTrackRow(
             } else {
                 Spacer(Modifier.width(8.dp))
             }
+            TrackDownloadIndicator(track, onDownload = onDownload)
             LikeButton(
                 liked = liked,
                 enabled = canLike,
@@ -389,6 +390,65 @@ internal fun ContentTrackRow(
     }
 }
 
+@Composable
+internal fun TrackDownloadIndicator(
+    track: Track,
+    modifier: Modifier = Modifier,
+    onDownload: (() -> Unit)? = null,
+) {
+    val downloads = LocalDownloadStatus.current
+    val downloadActions = LocalDownloadActions.current
+    val item = downloads.itemFor(track)
+    var confirmDelete by remember(track.id) { mutableStateOf(false) }
+    val isActive = downloads.isActive(track)
+    val isComplete = downloads.isComplete(track)
+    val clickModifier = if (onDownload != null && !isActive) {
+        Modifier
+            .clip(CircleShape)
+            .clickable {
+                if (isComplete) {
+                    confirmDelete = true
+                } else {
+                    onDownload()
+                }
+            }
+    } else {
+        Modifier
+    }
+    Box(modifier.size(28.dp).then(clickModifier), contentAlignment = Alignment.Center) {
+        when {
+            isActive -> CircularProgressIndicator(
+                progress = { item?.progress?.coerceIn(0f, 1f) ?: 0f },
+                color = PhoebeUi.accentLight,
+                strokeWidth = 2.dp,
+                modifier = Modifier.size(16.dp),
+            )
+            isComplete -> PhoebeIconView(
+                PhoebeIcon.Check,
+                tint = PhoebeUi.accentLight,
+                modifier = Modifier.size(15.dp),
+            )
+            else -> PhoebeIconView(
+                PhoebeIcon.Download,
+                tint = PhoebeUi.mutedText.copy(alpha = 0.42f),
+                modifier = Modifier.size(14.dp),
+            )
+        }
+    }
+    if (confirmDelete) {
+        ConfirmDeleteDownloadsDialog(
+            title = "Delete Download?",
+            body = "Remove the downloaded file for \"${track.title}\" from this device?",
+            confirmLabel = "Delete",
+            onDismiss = { confirmDelete = false },
+            onConfirm = {
+                downloadActions.onDeleteDownloadedTracks(listOf(track))
+                confirmDelete = false
+            },
+        )
+    }
+}
+
 private fun formatPlayCount(playCount: Long): String {
     val playWord = if (playCount == 1L) "play" else "plays"
     return "$playCount $playWord"
@@ -398,13 +458,17 @@ private fun formatPlayCount(playCount: Long): String {
 internal fun TrackActionMenu(
     expanded: Boolean,
     onDismiss: () -> Unit,
-    onAddToUpNext: () -> Unit,
-    onDownload: () -> Unit,
+    onAddToUpNext: (() -> Unit)?,
+    onDownload: (() -> Unit)?,
     track: Track? = null,
 ) {
     val actions = LocalPlaylistActions.current
     val likeActions = LocalLikeActions.current
     val metadataEditorActions = LocalMetadataEditorActions.current
+    val navigationActions = LocalTrackNavigationActions.current
+    val downloads = LocalDownloadStatus.current
+    val downloadActions = LocalDownloadActions.current
+    var confirmDeleteDownload by remember(track?.id) { mutableStateOf(false) }
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
         if (track != null) {
             DropdownMenuItem(
@@ -415,15 +479,38 @@ internal fun TrackActionMenu(
                 },
             )
         }
-        DropdownMenuItem(
-            text = { Text("Add to Up Next") },
-            onClick = {
-                onAddToUpNext()
-                onDismiss()
-            },
-        )
+        if (onAddToUpNext != null) {
+            DropdownMenuItem(
+                text = { Text("Add to Up Next") },
+                onClick = {
+                    onAddToUpNext()
+                    onDismiss()
+                },
+            )
+        }
         if (track != null) {
-            if (likeActions.likesEnabled && track.canAddToPlexPlaylist()) {
+            DropdownMenuItem(
+                text = { Text("Go to Song Detail") },
+                onClick = {
+                    navigationActions.onOpenSongDetail(track)
+                    onDismiss()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("Go to Artist") },
+                onClick = {
+                    navigationActions.onOpenArtistForTrack(track)
+                    onDismiss()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("Go to Album") },
+                onClick = {
+                    navigationActions.onOpenAlbumForTrack(track)
+                    onDismiss()
+                },
+            )
+            if (likeActions.likesEnabled && track.canTogglePlexLike()) {
                 val liked = likeActions.isLiked(track)
                 DropdownMenuItem(
                     text = { Text(if (liked) "Unlike Song" else "Like Song") },
@@ -439,13 +526,80 @@ internal fun TrackActionMenu(
                 onAfter = onDismiss,
             )
         }
-        DropdownMenuItem(
-            text = { Text("Download Song") },
-            onClick = {
-                onDownload()
-                onDismiss()
+        if (onDownload != null && track?.let { !downloads.isActive(it) } != false) {
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        if (track?.let { downloads.isComplete(it) } == true) {
+                            "Delete Download"
+                        } else {
+                            "Download Song"
+                        },
+                    )
+                },
+                onClick = {
+                    if (track?.let { downloads.isComplete(it) } == true) {
+                        confirmDeleteDownload = true
+                    } else {
+                        onDownload()
+                    }
+                    onDismiss()
+                },
+            )
+        }
+    }
+    if (confirmDeleteDownload && track != null) {
+        ConfirmDeleteDownloadsDialog(
+            title = "Delete Download?",
+            body = "Remove the downloaded file for \"${track.title}\" from this device?",
+            confirmLabel = "Delete",
+            onDismiss = { confirmDeleteDownload = false },
+            onConfirm = {
+                downloadActions.onDeleteDownloadedTracks(listOf(track))
+                confirmDeleteDownload = false
             },
         )
+    }
+}
+
+@Composable
+internal fun ConfirmDeleteDownloadsDialog(
+    title: String,
+    body: String,
+    confirmLabel: String,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Column(
+            Modifier
+                .padding(horizontal = 24.dp, vertical = 24.dp)
+                .widthIn(min = 300.dp, max = 420.dp)
+                .shadow(elevation = 28.dp, shape = RoundedCornerShape(18.dp), clip = false)
+                .clip(RoundedCornerShape(18.dp))
+                .background(PhoebeUi.modalSurface)
+                .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(18.dp))
+                .padding(horizontal = 22.dp, vertical = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Text(title, color = PhoebeUi.primaryText, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text(body, color = PhoebeUi.secondaryText, fontSize = 13.sp, lineHeight = 18.sp)
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = onDismiss) {
+                    Text("Cancel", color = PhoebeUi.secondaryText)
+                }
+                TextButton(onClick = onConfirm) {
+                    Text(confirmLabel, color = PhoebeUi.accentLight, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
     }
 }
 
@@ -492,8 +646,8 @@ internal fun AddToPlaylistMenuItems(
     if (!isLocal && !isPlex) return
     val eligiblePlaylists = actions.playlists.filter { playlist ->
         when {
-            isLocal -> playlist.isLocalPlaylist()
-            isPlex -> playlist.id.startsWith("plex:")
+            playlist.isLocalPlaylist() -> isLocal
+            playlist.id.startsWith("plex:") -> isPlex
             else -> false
         }
     }

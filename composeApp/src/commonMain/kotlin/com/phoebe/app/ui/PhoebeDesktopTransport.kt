@@ -149,7 +149,7 @@ import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
-import com.phoebe.app.domain.canAddToPlexPlaylist
+import com.phoebe.app.domain.canTogglePlexLike
 import com.phoebe.app.player.CastState
 import com.phoebe.app.domain.isLocalMediaPlayback
 import com.phoebe.app.domain.isPlexLibraryTrack
@@ -194,7 +194,8 @@ internal fun DesktopTransport(
 ) {
     val hasTrack = track != null
     val likeActions = LocalLikeActions.current
-    val canLike = track != null && likeActions.likesEnabled && track.canAddToPlexPlaylist()
+    val trackNavigationActions = LocalTrackNavigationActions.current
+    val canLike = track != null && likeActions.likesEnabled && track.canTogglePlexLike()
     val liked = track != null && likeActions.isLiked(track)
     Row(
         modifier = Modifier
@@ -206,7 +207,12 @@ internal fun DesktopTransport(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (track != null) {
-            ArtworkImage(track.album, track.thumbUrl, Modifier.size(56.dp))
+            TrackArtworkImage(
+                track,
+                Modifier
+                    .size(56.dp)
+                    .clickable { trackNavigationActions.onOpenAlbumForTrack(track) },
+            )
         } else {
             EmptyNowPlayingArtworkSlot(Modifier.size(56.dp), glyphSp = 20.sp)
         }
@@ -226,6 +232,11 @@ internal fun DesktopTransport(
                 fontSize = 12.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.clickable(
+                    enabled = track != null && track.artist.isNotBlank(),
+                ) {
+                    track?.let { trackNavigationActions.onOpenArtistForTrack(it) }
+                },
             )
         }
         LikeButton(

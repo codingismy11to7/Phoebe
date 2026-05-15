@@ -195,12 +195,14 @@ internal enum class PhoebeIcon {
     Volume,
     Queue,
     Cast,
+    Download,
     Repeat,
     Drag,
     More,
     ActiveDot,
     Grid,
     Close,
+    Check,
 }
 
 /** When showing tracks outside Library (e.g. Search), show all optional metadata columns. */

@@ -1,6 +1,6 @@
 use correct icons
 
-offline / caching
+add rating system (sync with plex)
 
 create a mix functionality
 -improve

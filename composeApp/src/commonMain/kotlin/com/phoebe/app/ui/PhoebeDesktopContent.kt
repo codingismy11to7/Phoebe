@@ -314,6 +314,7 @@ internal fun DesktopContent(
     headlineFontSize: TextUnit = 30.sp,
     headlineLineHeight: TextUnit = 35.sp,
     searchPillModifier: Modifier = Modifier.width(270.dp),
+    onDownloadPlaylist: (Playlist) -> Unit = {},
 ) {
     val selectedPlaylist = catalog.playlists.firstOrNull { it.id == selectedPlaylistId }
     val playlistTracks = selectedPlaylistId?.let { catalog.tracksByParent[it].orEmpty() }.orEmpty()
@@ -411,7 +412,10 @@ internal fun DesktopContent(
                         columns = libraryUi.columns,
                         onColumns = onLibraryColumns,
                     )
-                    PlaylistExportMenu(playlist = selectedPlaylist)
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        DownloadActionButton("Download Playlist", sortedPlaylistTracks) { onDownloadPlaylist(selectedPlaylist) }
+                        PlaylistExportMenu(playlist = selectedPlaylist)
+                    }
                     TrackList(
                         tracks = filteredPlaylistTracks,
                         empty = if (searchQuery.isNotBlank()) {

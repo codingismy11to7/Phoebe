@@ -315,6 +315,12 @@ internal fun PhoebeIconView(
                 drawArc(tint, startAngle = -90f, sweepAngle = 90f, useCenter = false, topLeft = Offset(s * 0.12f, s * 0.58f), size = Size(s * 0.28f, s * 0.28f), style = stroke)
                 drawArc(tint, startAngle = -90f, sweepAngle = 90f, useCenter = false, topLeft = Offset(s * 0.02f, s * 0.48f), size = Size(s * 0.48f, s * 0.48f), style = stroke)
             }
+            PhoebeIcon.Download -> {
+                line(0.50f, 0.18f, 0.50f, 0.62f)
+                line(0.32f, 0.46f, 0.50f, 0.64f)
+                line(0.68f, 0.46f, 0.50f, 0.64f)
+                line(0.24f, 0.78f, 0.76f, 0.78f)
+            }
             PhoebeIcon.Repeat -> {
                 line(0.28f, 0.34f, 0.72f, 0.34f)
                 line(0.72f, 0.34f, 0.62f, 0.24f)
@@ -353,6 +359,10 @@ internal fun PhoebeIconView(
                 line(0.30f, 0.30f, 0.70f, 0.70f)
                 line(0.70f, 0.30f, 0.30f, 0.70f)
             }
+            PhoebeIcon.Check -> {
+                line(0.22f, 0.52f, 0.42f, 0.72f)
+                line(0.42f, 0.72f, 0.80f, 0.30f)
+            }
             PhoebeIcon.Settings -> {
                 val center = p(0.5f, 0.5f)
                 drawCircle(tint, radius = s * 0.14f, center = center, style = stroke)
@@ -375,4 +385,3 @@ internal fun PhoebeIconView(
         }
     }
 }
-
