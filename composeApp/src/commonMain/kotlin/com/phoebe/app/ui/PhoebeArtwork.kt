@@ -168,6 +168,7 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.yield
+import kotlin.math.max
 
 @Composable
 internal fun SectionLabel(label: String, color: Color) {
@@ -229,11 +230,15 @@ internal fun rememberRemoteImage(url: String?, maxDecodeDimension: Int = 512, fa
     val fallbackSource = fallbackUrl?.takeIf { it.isNotBlank() }
     val target = primary ?: fallbackSource ?: return null
     val fallback = fallbackSource?.takeIf { it != target }
-    var image by remember(target, fallback) {
-        mutableStateOf(RemoteArtworkCache.images[target] ?: fallback?.let { RemoteArtworkCache.images[it] })
+    var image by remember(target, fallback, maxDecodeDimension) {
+        mutableStateOf(
+            RemoteArtworkCache.cached(target, maxDecodeDimension)
+                ?: fallback?.let { RemoteArtworkCache.cached(it, maxDecodeDimension) },
+        )
     }
     // Stay subscribed to cache writes from any concurrent loader for this URL.
-    val cached = RemoteArtworkCache.images[target] ?: fallback?.let { RemoteArtworkCache.images[it] }
+    val cached = RemoteArtworkCache.cached(target, maxDecodeDimension)
+        ?: fallback?.let { RemoteArtworkCache.cached(it, maxDecodeDimension) }
     if (cached != null) {
         image = cached
     }
@@ -241,44 +246,76 @@ internal fun rememberRemoteImage(url: String?, maxDecodeDimension: Int = 512, fa
         while (isActive && image == null) {
             image = RemoteArtworkCache.awaitLoad(target, maxDecodeDimension)
                 ?: fallback?.let { RemoteArtworkCache.awaitLoad(it, maxDecodeDimension) }
-                ?: RemoteArtworkCache.images[target]
-                ?: fallback?.let { RemoteArtworkCache.images[it] }
+                ?: RemoteArtworkCache.cached(target, maxDecodeDimension)
+                ?: fallback?.let { RemoteArtworkCache.cached(it, maxDecodeDimension) }
             if (image == null) delay(10_000L)
         }
     }
     return image
 }
 
+internal data class ArtworkCacheStats(
+    val imageCount: Int,
+    val estimatedBytes: Long,
+    val inFlightCount: Int,
+)
+
 internal object RemoteArtworkCache {
-    val images = mutableStateMapOf<String, ImageBitmap>()
+    private const val DefaultMaxEntries = 300
+    private const val DefaultMaxEstimatedBytes = 96L * 1024L * 1024L
+    private const val FailedLoadRetryMs = 10L * 60L * 1000L
+
+    private data class CacheKey(
+        val url: String,
+        val maxDecodeDimension: Int,
+    )
+
+    private val images = mutableStateMapOf<CacheKey, ImageBitmap>()
 
     internal val httpClient: HttpClient by lazy { createPlatformHttpClient() }
     private val storage: PlatformStorage by lazy { PlatformStorage() }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val gate = Semaphore(permits = 6)
     private val mutex = Mutex()
-    private val inFlight = mutableMapOf<String, Deferred<ImageBitmap?>>()
+    private val inFlight = mutableMapOf<CacheKey, Deferred<ImageBitmap?>>()
+    private val estimatedBytesByKey = mutableMapOf<CacheKey, Long>()
+    private val accessOrder = LinkedHashMap<CacheKey, Unit>()
+    private val recentFailures = mutableMapOf<CacheKey, Long>()
+    private var maxEntries = DefaultMaxEntries
+    private var maxEstimatedBytes = DefaultMaxEstimatedBytes
+    private var estimatedBytes = 0L
+
+    fun cached(url: String, maxDecodeDimension: Int = 512): ImageBitmap? {
+        val key = CacheKey(url, maxDecodeDimension.normalizedDecodeDimension())
+        val image = images[key] ?: return null
+        touch(key)
+        return image
+    }
 
     suspend fun awaitLoad(url: String, maxDecodeDimension: Int = 512): ImageBitmap? {
-        images[url]?.let { return it }
+        val key = CacheKey(url, maxDecodeDimension.normalizedDecodeDimension())
+        cached(key)?.let { return it }
+        if (!shouldRetryFailedLoad(key)) return null
 
         val job = mutex.withLock {
-            images[url]?.let { return it }
-            inFlight[url] ?: scope.async {
+            cached(key)?.let { return it }
+            if (!shouldRetryFailedLoad(key)) return null
+            inFlight[key] ?: scope.async {
                 try {
-                    fetchAndDecode(url, maxDecodeDimension)
+                    fetchAndDecode(key)
                 } finally {
-                    mutex.withLock { inFlight.remove(url) }
+                    mutex.withLock { inFlight.remove(key) }
                 }
-            }.also { inFlight[url] = it }
+            }.also { inFlight[key] = it }
         }
         return job.await()
     }
 
-    private suspend fun fetchAndDecode(url: String, maxDecodeDimension: Int): ImageBitmap? {
-        if (images.containsKey(url)) return images[url]
+    private suspend fun fetchAndDecode(key: CacheKey): ImageBitmap? {
+        cached(key)?.let { return it }
         return gate.withPermit {
-            if (images.containsKey(url)) return@withPermit images[url]
+            cached(key)?.let { return@withPermit it }
+            val url = key.url
             val remote = url.startsWith("http://") || url.startsWith("https://")
             val decoded = runCatching {
                 val bytes: ByteArray = if (remote) {
@@ -290,16 +327,90 @@ internal object RemoteArtworkCache {
                     storage.readUriBytes(url) ?: return@runCatching null
                 }
                 yield()
-                decodeImageBitmap(bytes, maxDecodeDimension)
+                decodeImageBitmap(bytes, key.maxDecodeDimension)
             }.getOrNull()
             if (decoded != null) {
-                images[url] = decoded
+                put(key, decoded)
                 decoded
             } else {
+                recentFailures[key] = currentTimeMs()
                 null
             }
         }
     }
+
+    private fun cached(key: CacheKey): ImageBitmap? {
+        val image = images[key] ?: return null
+        touch(key)
+        return image
+    }
+
+    private fun put(key: CacheKey, image: ImageBitmap) {
+        val newBytes = image.estimatedBytes()
+        estimatedBytes -= estimatedBytesByKey[key] ?: 0L
+        images[key] = image
+        estimatedBytesByKey[key] = newBytes
+        estimatedBytes += newBytes
+        recentFailures.remove(key)
+        touch(key)
+        trimToLimits()
+    }
+
+    private fun touch(key: CacheKey) {
+        accessOrder.remove(key)
+        accessOrder[key] = Unit
+    }
+
+    private fun trimToLimits() {
+        while (images.size > maxEntries || estimatedBytes > maxEstimatedBytes) {
+            val eldest = accessOrder.keys.firstOrNull() ?: return
+            accessOrder.remove(eldest)
+            images.remove(eldest)
+            estimatedBytes -= estimatedBytesByKey.remove(eldest) ?: 0L
+            recentFailures.remove(eldest)
+        }
+    }
+
+    private fun shouldRetryFailedLoad(key: CacheKey): Boolean {
+        val failedAt = recentFailures[key] ?: return true
+        val retry = currentTimeMs() - failedAt >= FailedLoadRetryMs
+        if (retry) recentFailures.remove(key)
+        return retry
+    }
+
+    fun stats(): ArtworkCacheStats =
+        ArtworkCacheStats(
+            imageCount = images.size,
+            estimatedBytes = estimatedBytes,
+            inFlightCount = inFlight.size,
+        )
+
+    internal fun putForTest(url: String, maxDecodeDimension: Int, image: ImageBitmap) {
+        put(CacheKey(url, maxDecodeDimension.normalizedDecodeDimension()), image)
+    }
+
+    internal fun clearForTest() {
+        images.clear()
+        inFlight.clear()
+        estimatedBytesByKey.clear()
+        accessOrder.clear()
+        recentFailures.clear()
+        estimatedBytes = 0L
+        maxEntries = DefaultMaxEntries
+        maxEstimatedBytes = DefaultMaxEstimatedBytes
+    }
+
+    internal fun configureLimitsForTest(maxEntries: Int = DefaultMaxEntries, maxEstimatedBytes: Long = DefaultMaxEstimatedBytes) {
+        this.maxEntries = max(1, maxEntries)
+        this.maxEstimatedBytes = max(1L, maxEstimatedBytes)
+        trimToLimits()
+    }
+
+    private fun Int.normalizedDecodeDimension(): Int =
+        takeIf { it > 0 } ?: Int.MAX_VALUE
+
+    private fun ImageBitmap.estimatedBytes(): Long =
+        width.toLong() * height.toLong() * 4L
 }
 
 @Composable
