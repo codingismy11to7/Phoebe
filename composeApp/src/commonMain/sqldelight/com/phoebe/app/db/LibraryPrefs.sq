@@ -26,3 +26,6 @@ INSERT OR REPLACE INTO LibraryPrefsRow(
     colYear, colGenre, colFilepath, colAudioCodec, colBitrate,
     colDuration, colSampleRate, colFileType, colDateAdded, colRating, colFavorite
 ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+clear:
+DELETE FROM LibraryPrefsRow;

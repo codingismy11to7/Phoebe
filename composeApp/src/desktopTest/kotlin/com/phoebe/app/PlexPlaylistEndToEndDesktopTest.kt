@@ -17,6 +17,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
@@ -81,7 +82,7 @@ class PlexPlaylistEndToEndDesktopTest {
         assertTrue(plexAddCalled)
         assertEquals(3, repo.catalog.value.playlists.single { it.id == playlist.id }.trackCount)
         assertEquals(
-            listOf("plex:t1", "plex:t2", "plex:t3"),
+            listOf("plex:t3", "plex:t1", "plex:t2"),
             repo.catalog.value.tracksByParent[playlist.id].orEmpty().map { it.id },
         )
     }
@@ -100,6 +101,23 @@ class PlexPlaylistEndToEndDesktopTest {
         val tracks = repo.tracksForPlaylist(testPlexSession(), playlist)
 
         assertEquals(listOf("plex:t1", "plex:t2"), tracks.map { it.id })
+    }
+
+    @Test
+    fun warmPlaylistTracksLoadsMissingTracksWithoutForegroundRefresh() = runTest {
+        val (db, sqlDriver) = newInMemoryPhoebeDatabase()
+        driver = sqlDriver
+        val http = testHttpClient(plexCatalogMockEngine(playlistThumb = "/playlists/p1/art"))
+        val repo = catalogRepository(db, http)
+
+        repo.refreshAggregated(testPlexSession())
+        val playlist = repo.catalog.value.playlists.single()
+        assertTrue(repo.catalog.value.tracksByParent[playlist.id].isNullOrEmpty())
+
+        repo.warmPlaylistTracks(testPlexSession())
+
+        assertFalse(repo.catalogRefreshing.value)
+        assertEquals(listOf("plex:t1", "plex:t2"), repo.catalog.value.tracksByParent[playlist.id].orEmpty().map { it.id })
     }
 
     @Test

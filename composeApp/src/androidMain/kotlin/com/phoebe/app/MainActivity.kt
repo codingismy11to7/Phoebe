@@ -1,9 +1,11 @@
 package com.phoebe.app
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.provider.MediaStore
 import android.view.ContextThemeWrapper
 import android.view.Gravity
 import android.view.KeyEvent
@@ -29,6 +31,13 @@ class MainActivity : FragmentActivity() {
         requestNotificationPermissionIfNeeded()
         setContent { App() }
         installCastRouteButton()
+        handlePlayFromSearchIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handlePlayFromSearchIntent(intent)
     }
 
     override fun onDestroy() {
@@ -85,6 +94,14 @@ class MainActivity : FragmentActivity() {
             arrayOf(Manifest.permission.POST_NOTIFICATIONS),
             REQUEST_POST_NOTIFICATIONS,
         )
+    }
+
+    private fun handlePlayFromSearchIntent(intent: Intent?) {
+        if (intent?.action != MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH) return
+        val serviceIntent = Intent(this, com.phoebe.app.player.PlaybackService::class.java)
+            .setAction(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH)
+            .putExtras(intent)
+        ContextCompat.startForegroundService(this, serviceIntent)
     }
 
     private companion object {

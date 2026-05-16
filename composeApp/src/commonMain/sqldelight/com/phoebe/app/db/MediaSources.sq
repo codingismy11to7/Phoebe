@@ -18,3 +18,6 @@ DELETE FROM LocalFolderRow WHERE id = ?;
 
 setEnabled:
 UPDATE LocalFolderRow SET enabled = ? WHERE id = ?;
+
+clear:
+DELETE FROM LocalFolderRow;

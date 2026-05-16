@@ -465,6 +465,7 @@ fun PhoebeRoot(
             },
             onOpenLikedSongs = { state.openLikedSongsPlaylist() },
             onExportLocalPlaylist = { playlist, format -> state.exportLocalPlaylist(playlist, format) },
+            onShufflePlaylist = { playlist -> state.playPlaylistShuffled(playlist) },
         )
     }
     val likeActions = remember(catalog.playlists, catalog.tracksByParent, session) {
@@ -510,7 +511,10 @@ fun PhoebeRoot(
         MetadataEditorActions(onRequestEdit = { track -> metadataEditorTrack = track })
     }
     val downloadActions = remember(state) {
-        DownloadActions(onDeleteDownloadedTracks = { tracks -> state.deleteDownloads(tracks) })
+        DownloadActions(
+            onDeleteDownloadedTracks = { tracks -> state.deleteDownloads(tracks) },
+            onCancelDownloadedTracks = { tracks -> state.cancelDownloads(tracks) },
+        )
     }
     val dragDrop = remember { DragDropController() }
 

@@ -12,3 +12,6 @@ SELECT * FROM LyricsRow WHERE trackFingerprint = ?;
 upsertLyrics:
 INSERT OR REPLACE INTO LyricsRow(trackFingerprint, source, syncedLyrics, plainLyrics, instrumental)
 VALUES (?, ?, ?, ?, ?);
+
+clear:
+DELETE FROM LyricsRow;

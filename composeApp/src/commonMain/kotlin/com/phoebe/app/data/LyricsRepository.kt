@@ -29,6 +29,12 @@ class LyricsRepository(
     private val memoryCache = mutableMapOf<String, LyricsLoadState>()
     private val lookupMutex = Mutex()
 
+    suspend fun clearMemoryCache() {
+        lookupMutex.withLock {
+            memoryCache.clear()
+        }
+    }
+
     suspend fun lyricsFor(track: Track, forceRefresh: Boolean = false): LyricsLoadState = withContext(Dispatchers.Default) {
         val fingerprint = track.lyricsFingerprint()
         if (!forceRefresh) {

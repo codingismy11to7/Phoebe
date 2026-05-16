@@ -299,6 +299,7 @@ internal fun ContentTrackRow(
                     track,
                     Modifier.fillMaxSize().sharedArtworkTransition(sharedKey),
                     elevated = !compactLayout,
+                    maxDecodeDimension = ThumbnailArtworkMaxDecodeDimension,
                 )
                 if (isNowPlaying) {
                     Box(
@@ -428,13 +429,16 @@ internal fun TrackDownloadIndicator(
     val downloadActions = LocalDownloadActions.current
     val item = downloads.itemFor(track)
     var confirmDelete by remember(track.id) { mutableStateOf(false) }
+    var confirmCancel by remember(track.id) { mutableStateOf(false) }
     val isActive = downloads.isActive(track)
     val isComplete = downloads.isComplete(track)
-    val clickModifier = if (onDownload != null && !isActive) {
+    val clickModifier = if (onDownload != null) {
         Modifier
             .clip(CircleShape)
             .clickable {
-                if (isComplete) {
+                if (isActive) {
+                    confirmCancel = true
+                } else if (isComplete) {
                     confirmDelete = true
                 } else {
                     onDownload()
@@ -475,6 +479,18 @@ internal fun TrackDownloadIndicator(
             },
         )
     }
+    if (confirmCancel) {
+        ConfirmDeleteDownloadsDialog(
+            title = "Cancel Download?",
+            body = "Stop the current download and remove anything already downloaded for \"${track.title}\" from this device?",
+            confirmLabel = "Cancel Download",
+            onDismiss = { confirmCancel = false },
+            onConfirm = {
+                downloadActions.onCancelDownloadedTracks(listOf(track))
+                confirmCancel = false
+            },
+        )
+    }
 }
 
 private fun formatPlayCount(playCount: Long): String {
@@ -502,6 +518,7 @@ internal fun TrackActionMenu(
     val downloadComplete = track?.let { downloads.isComplete(it) } == true
     val downloadProgress = downloadItem?.progress?.coerceIn(0f, 1f) ?: 0f
     var confirmDeleteDownload by remember(track?.id) { mutableStateOf(false) }
+    var confirmCancelDownload by remember(track?.id) { mutableStateOf(false) }
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
         if (track != null) {
             DropdownMenuItem(
@@ -606,17 +623,29 @@ internal fun TrackActionMenu(
                     }
                 },
                 onClick = {
-                    if (!downloadActive) {
-                        if (downloadComplete) {
-                            confirmDeleteDownload = true
-                        } else {
-                            onDownload()
-                        }
-                        onDismiss()
+                    if (downloadActive) {
+                        confirmCancelDownload = true
+                    } else if (downloadComplete) {
+                        confirmDeleteDownload = true
+                    } else {
+                        onDownload()
                     }
+                    onDismiss()
                 },
             )
         }
+    }
+    if (confirmCancelDownload && track != null) {
+        ConfirmDeleteDownloadsDialog(
+            title = "Cancel Download?",
+            body = "Stop the current download and remove anything already downloaded for \"${track.title}\" from this device?",
+            confirmLabel = "Cancel Download",
+            onDismiss = { confirmCancelDownload = false },
+            onConfirm = {
+                downloadActions.onCancelDownloadedTracks(listOf(track))
+                confirmCancelDownload = false
+            },
+        )
     }
     if (confirmDeleteDownload && track != null) {
         ConfirmDeleteDownloadsDialog(

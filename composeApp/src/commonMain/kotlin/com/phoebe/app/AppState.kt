@@ -104,6 +104,7 @@ class AppState(
     private var playRequestGeneration = 0
     private var recentAlbumWarmSignature: String? = null
     private var plexPlayHistorySyncJob: Job? = null
+    private val activeDownloadJobs = mutableSetOf<Job>()
 
     init {
         scope.launch {
@@ -121,6 +122,7 @@ class AppState(
             }
             dependencies.catalogRepository.restoreCachedCatalog()
             cacheDownloadedArtworkInBackground()
+            warmPlaylistTracksInBackground()
             syncPlexPlayHistoryInBackground()
             ensureLikedSongsPlaylistIfPossible()
             if (session.value?.token?.isNotBlank() == true && session.value?.selectedServer != null) {
@@ -309,10 +311,22 @@ class AppState(
                 dependencies.catalogRepository.refreshAggregated(session.value)
                 ensureLikedSongsPlaylistIfPossible()
             }
+            warmPlaylistTracksInBackground()
             syncPlexPlayHistoryInBackground()
             cacheDownloadedArtworkInBackground()
             if (catalogMessage != null) mutableMessage.value = catalogMessage
         }.onFailure { mutableMessage.value = it.message ?: "Something went sideways." }
+    }
+
+    private fun warmPlaylistTracksInBackground() {
+        if (!session.value.supportsPlexPlaylists()) return
+        scope.launch {
+            runCatching {
+                dependencies.catalogRepository.warmPlaylistTracks(session.value)
+            }.onFailure { error ->
+                PhoebeLog.d("AppState") { "playlist warm failed: ${error.message}" }
+            }
+        }
     }
 
     private fun cacheDownloadedArtworkInBackground() {
@@ -534,6 +548,23 @@ class AppState(
         }
     }
 
+    fun playPlaylistShuffled(playlist: Playlist) = scope.launch {
+        val tracks = runCatching {
+            dependencies.catalogRepository.tracksForPlaylist(session.value, playlist)
+        }.getOrElse { error ->
+            mutableMessage.value = error.message ?: "Couldn't load ${playlist.title}."
+            return@launch
+        }
+        if (tracks.isEmpty()) {
+            mutableMessage.value = "${playlist.title} has no songs to shuffle."
+            return@launch
+        }
+        playTracks(tracks.shuffled(), 0)
+        dependencies.audioPlayer.setShuffle(true)
+        open(AppScreen.Player)
+        mutableMessage.value = "Shuffling ${playlist.title}."
+    }
+
     fun clearDecadeMixNotice() {
         mutableDecadeMixNotice.value = null
     }
@@ -741,27 +772,40 @@ class AppState(
         }
     }
 
-    fun download(track: Track) = scope.launch {
+    fun download(track: Track) = launchDownload {
         val result = dependencies.catalogRepository.download(track)
         mutableMessage.value = downloadMessage(result, singular = "song", plural = "songs")
     }
 
-    fun download(album: Album) = scope.launch {
+    fun download(album: Album) = launchDownload {
         mutableMessage.value = "Downloading ${album.title}…"
         val result = dependencies.catalogRepository.downloadAlbum(session.value, album)
         mutableMessage.value = downloadMessage(result, singular = "song from ${album.title}", plural = "songs from ${album.title}")
     }
 
-    fun download(artist: Artist) = scope.launch {
+    fun download(artist: Artist) = launchDownload {
         mutableMessage.value = "Downloading ${artist.title}…"
         val result = dependencies.catalogRepository.downloadArtist(session.value, artist)
         mutableMessage.value = downloadMessage(result, singular = "song by ${artist.title}", plural = "songs by ${artist.title}")
     }
 
-    fun download(playlist: Playlist) = scope.launch {
+    fun download(playlist: Playlist) = launchDownload {
         mutableMessage.value = "Downloading ${playlist.title}…"
         val result = dependencies.catalogRepository.downloadPlaylist(session.value, playlist)
         mutableMessage.value = downloadMessage(result, singular = "song from ${playlist.title}", plural = "songs from ${playlist.title}")
+    }
+
+    private fun launchDownload(block: suspend () -> Unit): Job {
+        lateinit var downloadJob: Job
+        downloadJob = scope.launch {
+            try {
+                block()
+            } finally {
+                activeDownloadJobs.remove(downloadJob)
+            }
+        }
+        activeDownloadJobs += downloadJob
+        return downloadJob
     }
 
     fun setDownloadDirectory(uri: String?) = scope.launch {
@@ -791,6 +835,18 @@ class AppState(
             "No downloaded songs to delete."
         } else {
             "Deleted $deleted downloaded ${if (deleted == 1) "song" else "songs"}."
+        }
+    }
+
+    fun cancelDownloads(tracks: List<Track>) = scope.launch {
+        val jobs = activeDownloadJobs.toList()
+        jobs.forEach { it.cancel() }
+        jobs.forEach { it.join() }
+        val deleted = dependencies.catalogRepository.deleteDownloadsForTracks(tracks)
+        mutableMessage.value = if (deleted == 0) {
+            "Cancelled download."
+        } else {
+            "Cancelled download and deleted $deleted downloaded ${if (deleted == 1) "song" else "songs"}."
         }
     }
 
@@ -1044,7 +1100,7 @@ class AppState(
         scope.launch {
             runCatching {
                 dependencies.sessionRepository.signOut()
-                refreshCatalogSuspended(catalogMessage = null)
+                dependencies.deleteDatabaseDataForSignOut()
             }.onFailure { mutableMessage.value = it.message ?: "Something went sideways." }
             mutableMessage.value = "Signed out."
             mutableBusy.value = false

@@ -50,6 +50,32 @@ internal fun browseTrackItem(track: Track): MediaItem =
         )
         .build()
 
+internal fun browseTrackItem(track: Track, mediaId: String): MediaItem =
+    browseTrackItem(track).buildUpon()
+        .setMediaId(mediaId)
+        .build()
+
+internal fun browsePlayableActionItem(
+    mediaId: String,
+    title: String,
+    subtitle: String? = null,
+    artworkUri: Uri? = null,
+): MediaItem =
+    MediaItem.Builder()
+        .setMediaId(mediaId)
+        .setMediaMetadata(
+            MediaMetadata.Builder()
+                .setTitle(title)
+                .setDisplayTitle(title)
+                .apply { subtitle?.let { setSubtitle(it) } }
+                .setIsBrowsable(false)
+                .setIsPlayable(true)
+                .setMediaType(MediaMetadata.MEDIA_TYPE_PLAYLIST)
+                .apply { artworkUri?.let { setArtworkUri(it) } }
+                .build(),
+        )
+        .build()
+
 internal fun Artist.toBrowseItem(): MediaItem =
     browseFolderItem(
         mediaId = BrowseMediaIds.artist(id),

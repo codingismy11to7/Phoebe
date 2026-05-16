@@ -9,6 +9,7 @@ import com.phoebe.app.data.PlexClient
 import com.phoebe.app.data.PlexPlayHistorySyncer
 import com.phoebe.app.data.PlexPlaybackReporter
 import com.phoebe.app.data.SessionRepository
+import com.phoebe.app.data.db.clearAllAppData
 import com.phoebe.app.data.db.createPhoebeDatabase
 import com.phoebe.app.db.PhoebeDatabase
 import com.phoebe.app.platform.PlatformStorage
@@ -36,6 +37,17 @@ class AppDependencies(
     /** File-backed on desktop; NSUserDefaults keys on iOS; etc. Used for lightweight UI prefs. */
     val platformStorage: PlatformStorage,
 ) {
+    suspend fun deleteDatabaseDataForSignOut() {
+        database.clearAllAppData()
+        listOf("session.json", "catalog.json", "media_sources.json", "library_ui_prefs.json").forEach {
+            platformStorage.delete(it)
+        }
+        catalogRepository.clearInMemoryCatalog()
+        mediaSourcesRepository.clearInMemoryState()
+        libraryUiRepository.resetInMemoryState()
+        lyricsRepository.clearMemoryCache()
+    }
+
     companion object {
         suspend fun create(): AppDependencies {
             val httpClient = createPlatformHttpClient()

@@ -80,6 +80,7 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
         AndroidPlaybackBridge.onTrackEnded = { next() }
         AndroidPlaybackBridge.onPlayQueue = { queue, index -> play(queue, index) }
         AndroidPlaybackBridge.onAdoptQueue = { queue, index, playing ->
+            loadedQueueIds = queue.map { it.id }
             adoptQueueState(queue, index, playing)
         }
         AndroidPlaybackBridge.onEnsureLocalPlaybackPaused = { forceLocalPlaybackPaused() }
@@ -276,7 +277,12 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
             controllerIndex >= 0 &&
             controllerIndex != appState.currentIndex
         ) {
-            return
+            val queueIds = appState.queue.map { it.id }
+            if (loadedQueueIds == queueIds && controllerIndex in appState.queue.indices) {
+                adoptQueueState(appState.queue, controllerIndex, player.isPlaying)
+            } else {
+                return
+            }
         }
         val controllerPosition = player.currentPosition.coerceAtLeast(0L)
         if (appState.isBuffering &&

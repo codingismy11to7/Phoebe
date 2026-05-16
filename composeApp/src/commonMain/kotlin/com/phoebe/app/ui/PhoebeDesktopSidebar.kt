@@ -379,6 +379,7 @@ private fun SidebarPlaylistDropRow(
     onPlaylist: (Playlist) -> Unit,
 ) {
     val controller = LocalDragDrop.current
+    val playlistActions = LocalPlaylistActions.current
     val isHovered = (controller?.draggedTrack != null || controller?.draggedPlaylist != null) &&
         controller.isHovering(playlist.id)
     Box(
@@ -404,6 +405,7 @@ private fun SidebarPlaylistDropRow(
             accent = playlist.isLikedSongsPlaylist(),
             active = playlist.id == selectedPlaylistId,
             onClick = { onPlaylist(playlist) },
+            onLongClick = { playlistActions.onShufflePlaylist(playlist) },
         )
     }
 }
@@ -428,12 +430,21 @@ internal fun NavRow(icon: PhoebeIcon, label: String, active: Boolean, onClick: (
 }
 
 @Composable
-internal fun PlaylistRow(icon: PhoebeIcon?, title: String, subtitle: String?, thumbUrl: String? = null, accent: Boolean = false, active: Boolean = false, onClick: () -> Unit) {
+internal fun PlaylistRow(
+    icon: PhoebeIcon?,
+    title: String,
+    subtitle: String?,
+    thumbUrl: String? = null,
+    accent: Boolean = false,
+    active: Boolean = false,
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .background(if (active) PhoebeUi.accent.copy(alpha = 0.09f) else Color.Transparent)
             .padding(2.dp),
         verticalAlignment = Alignment.CenterVertically,

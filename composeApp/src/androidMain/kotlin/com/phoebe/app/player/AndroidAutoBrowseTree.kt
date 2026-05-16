@@ -31,9 +31,36 @@ internal class AndroidAutoBrowseTree(
 
     fun trackById(trackId: String): Track? = tree.trackById(trackId)
 
+    fun tracksForPlayableMediaId(mediaId: String): List<Track> = tree.tracksForPlayableMediaId(mediaId)
+
+    fun startIndexForMediaId(mediaId: String, tracks: List<Track>, fallback: Int): Int =
+        tree.startIndexForMediaId(mediaId, tracks, fallback)
+
+    fun searchTracks(
+        query: String,
+        title: String? = null,
+        artist: String? = null,
+        album: String? = null,
+        playlist: String? = null,
+        genre: String? = null,
+    ): List<Track> = tree.searchTracks(
+        query = query,
+        title = title,
+        artist = artist,
+        album = album,
+        playlist = playlist,
+        genre = genre,
+    )
+
     private fun BrowseNode.toMediaItem(): MediaItem =
         when {
-            isPlayable && track != null -> browseTrackItem(track)
+            isPlayable && track != null -> browseTrackItem(track, mediaId)
+            isPlayable -> browsePlayableActionItem(
+                mediaId = mediaId,
+                title = title,
+                subtitle = subtitle,
+                artworkUri = drawableArtUri(R.drawable.ic_aa_tab_playlists),
+            )
             mediaId == BrowseMediaIds.ARTISTS -> browseFolderItem(
                 mediaId = mediaId,
                 title = title,

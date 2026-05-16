@@ -1,5 +1,8 @@
 package com.phoebe.app.player
 
+import android.app.SearchManager
+import android.os.Bundle
+import android.provider.MediaStore
 import androidx.media3.common.MediaItem
 import com.phoebe.app.data.CatalogRepository
 import com.phoebe.app.data.SessionRepository
@@ -16,6 +19,8 @@ interface CatalogBrowseSource {
     suspend fun getItem(mediaId: String): MediaItem?
     suspend fun resolveTracks(mediaItems: List<MediaItem>): List<Track>
     suspend fun expandPlayableItem(mediaItem: MediaItem): List<Track>
+    fun startIndexForMediaItem(mediaItem: MediaItem, tracks: List<Track>, fallback: Int): Int
+    suspend fun searchTracks(query: String, extras: Bundle?): List<Track>
 }
 
 internal class CatalogBrowseSourceImpl(
@@ -38,12 +43,27 @@ internal class CatalogBrowseSourceImpl(
         BrowseMediaIds.parseAlbumId(parentId)?.let { albumId ->
             val album = tree.getAlbum(albumId) ?: return@withContext emptyList()
             val tracks = catalogRepository.tracksForAlbum(session, album)
-            return@withContext tracks.map { browseTrackItem(it) }
+            return@withContext listOf(
+                browsePlayableActionItem(
+                    mediaId = BrowseMediaIds.albumPlay(albumId),
+                    title = "Play album",
+                ),
+            ) + tracks.map { browseTrackItem(it, BrowseMediaIds.track(parentId, it.id)) }
         }
         BrowseMediaIds.parsePlaylistId(parentId)?.let { playlistId ->
             val playlist = tree.getPlaylist(playlistId) ?: return@withContext emptyList()
             val tracks = catalogRepository.tracksForPlaylist(session, playlist)
-            return@withContext tracks.map { browseTrackItem(it) }
+            return@withContext listOf(
+                browsePlayableActionItem(
+                    mediaId = BrowseMediaIds.playlistPlay(playlistId),
+                    title = "Play playlist",
+                ),
+                browsePlayableActionItem(
+                    mediaId = BrowseMediaIds.playlistShuffle(playlistId),
+                    title = "Shuffle",
+                    subtitle = "Play this playlist in random order",
+                ),
+            ) + tracks.map { browseTrackItem(it, BrowseMediaIds.track(parentId, it.id)) }
         }
         emptyList()
     }
@@ -54,11 +74,7 @@ internal class CatalogBrowseSourceImpl(
 
     override suspend fun resolveTracks(mediaItems: List<MediaItem>): List<Track> = withContext(Dispatchers.IO) {
         mediaItems.mapNotNull { item ->
-            if (item.mediaId.isNotBlank()) {
-                tree.trackById(item.mediaId)
-            } else {
-                null
-            }
+            if (item.mediaId.isBlank()) null else tree.trackById(item.mediaId)
         }
     }
 
@@ -66,8 +82,64 @@ internal class CatalogBrowseSourceImpl(
         val metadata = mediaItem.mediaMetadata
         if (metadata.isBrowsable == true) {
             val children = getChildren(mediaItem.mediaId)
-            return@withContext children.mapNotNull { tree.trackById(it.mediaId) }
+            return@withContext children
+                .filter { it.mediaMetadata.isPlayable == true }
+                .flatMap { child -> tracksForPlayableMediaId(child.mediaId) }
+                .distinctBy { it.id }
         }
-        tree.trackById(mediaItem.mediaId)?.let { listOf(it) } ?: emptyList()
+        tracksForPlayableMediaId(mediaItem.mediaId)
+    }
+
+    override fun startIndexForMediaItem(mediaItem: MediaItem, tracks: List<Track>, fallback: Int): Int =
+        tree.startIndexForMediaId(mediaItem.mediaId, tracks, fallback)
+
+    private suspend fun tracksForPlayableMediaId(mediaId: String): List<Track> {
+        BrowseMediaIds.parseAlbumPlayId(mediaId)?.let { albumId ->
+            val album = tree.getAlbum(albumId) ?: return emptyList()
+            return catalogRepository.tracksForAlbum(sessionRepository.session.value, album)
+        }
+
+        BrowseMediaIds.parsePlaylistPlayId(mediaId)?.let { playlistId ->
+            val playlist = tree.getPlaylist(playlistId) ?: return emptyList()
+            return catalogRepository.tracksForPlaylist(sessionRepository.session.value, playlist)
+        }
+
+        BrowseMediaIds.parsePlaylistShuffleId(mediaId)?.let { playlistId ->
+            val playlist = tree.getPlaylist(playlistId) ?: return emptyList()
+            return catalogRepository.tracksForPlaylist(sessionRepository.session.value, playlist).shuffled()
+        }
+
+        BrowseMediaIds.parseTrackId(mediaId)?.let { browseTrack ->
+            BrowseMediaIds.parseAlbumId(browseTrack.parentMediaId)?.let { albumId ->
+                val album = tree.getAlbum(albumId) ?: return@let null
+                val tracks = catalogRepository.tracksForAlbum(sessionRepository.session.value, album)
+                if (tracks.any { it.id == browseTrack.trackId }) return tracks
+            }
+            BrowseMediaIds.parsePlaylistId(browseTrack.parentMediaId)?.let { playlistId ->
+                val playlist = tree.getPlaylist(playlistId) ?: return@let null
+                val tracks = catalogRepository.tracksForPlaylist(sessionRepository.session.value, playlist)
+                if (tracks.any { it.id == browseTrack.trackId }) return tracks
+            }
+        }
+
+        return tree.tracksForPlayableMediaId(mediaId)
+    }
+
+    override suspend fun searchTracks(query: String, extras: Bundle?): List<Track> = withContext(Dispatchers.IO) {
+        val searchQuery = query.ifBlank { extras?.getString(SearchManager.QUERY).orEmpty() }
+        val mediaFocus = extras?.getString(MediaStore.EXTRA_MEDIA_FOCUS)
+        tree.searchTracks(
+            query = searchQuery,
+            title = extras?.getString(MediaStore.EXTRA_MEDIA_TITLE)
+                ?: searchQuery.takeIf { mediaFocus == MediaStore.Audio.Media.ENTRY_CONTENT_TYPE },
+            artist = extras?.getString(MediaStore.EXTRA_MEDIA_ARTIST)
+                ?: searchQuery.takeIf { mediaFocus == MediaStore.Audio.Artists.ENTRY_CONTENT_TYPE },
+            album = extras?.getString(MediaStore.EXTRA_MEDIA_ALBUM)
+                ?: searchQuery.takeIf { mediaFocus == MediaStore.Audio.Albums.ENTRY_CONTENT_TYPE },
+            playlist = extras?.getString(MediaStore.EXTRA_MEDIA_PLAYLIST)
+                ?: searchQuery.takeIf { mediaFocus == MediaStore.Audio.Playlists.ENTRY_CONTENT_TYPE },
+            genre = extras?.getString(MediaStore.EXTRA_MEDIA_GENRE)
+                ?: searchQuery.takeIf { mediaFocus == MediaStore.Audio.Genres.ENTRY_CONTENT_TYPE },
+        )
     }
 }

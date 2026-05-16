@@ -86,6 +86,10 @@ class MediaSourcesRepository(
         }
     }
 
+    fun clearInMemoryState() {
+        mutableState.value = MediaSourcesState()
+    }
+
     private suspend fun reload() {
         val folders = database.mediaSourcesQueries.selectAll().awaitAsList().map { it.toConfig() }
         mutableState.value = MediaSourcesState(folders)
