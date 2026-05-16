@@ -192,6 +192,7 @@ internal val LocalDownloadStatus = compositionLocalOf { DownloadStatusSnapshot()
 
 internal data class DownloadActions(
     val onDeleteDownloadedTracks: (List<Track>) -> Unit = {},
+    val onCancelDownloadedTracks: (List<Track>) -> Unit = {},
 )
 
 internal val LocalDownloadActions = compositionLocalOf { DownloadActions() }
@@ -244,6 +245,7 @@ internal data class PlaylistActions(
     val onRequestCreatePlaylist: (initialTracks: List<Track>) -> Unit = {},
     val onOpenLikedSongs: () -> Unit = {},
     val onExportLocalPlaylist: (Playlist, PlaylistExportFormat) -> Unit = { _, _ -> },
+    val onShufflePlaylist: (Playlist) -> Unit = {},
 )
 
 internal val LocalPlaylistActions = compositionLocalOf { PlaylistActions() }

@@ -59,6 +59,10 @@ class LibraryUiRepository(
         mutableState.value = mutableState.value.copy(columns = columns)
     }
 
+    fun resetInMemoryState() {
+        mutableState.value = LibraryUiPreferences()
+    }
+
     suspend fun persistCurrentToDisk() {
         withContext(Dispatchers.Default) { persist(mutableState.value) }
     }

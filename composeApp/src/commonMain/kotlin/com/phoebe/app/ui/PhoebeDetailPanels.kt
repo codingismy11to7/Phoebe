@@ -548,6 +548,7 @@ internal fun DownloadActionButton(
     val active = items.filter { it.state == DownloadState.Queued || it.state == DownloadState.Downloading }
     val allComplete = uniqueTracks.isNotEmpty() && complete == uniqueTracks.size
     var confirmDelete by remember(uniqueTracks.map { it.id }) { mutableStateOf(false) }
+    var confirmCancel by remember(uniqueTracks.map { it.id }) { mutableStateOf(false) }
     val progress = when {
         active.isNotEmpty() -> {
             val activeProgress = active.map { it.progress.coerceIn(0f, 1f) }.average().toFloat()
@@ -577,7 +578,9 @@ internal fun DownloadActionButton(
         iconTint = iconColor,
         modifier = modifier,
         onClick = {
-            if (allComplete) {
+            if (isActive) {
+                confirmCancel = true
+            } else if (allComplete) {
                 confirmDelete = true
             } else {
                 onClick()
@@ -596,6 +599,20 @@ internal fun DownloadActionButton(
             null
         },
     )
+    if (confirmCancel) {
+        val noun = if (uniqueTracks.size == 1) "song" else "songs"
+        val bodyTarget = if (uniqueTracks.size == 1) "this song" else "these ${uniqueTracks.size} $noun"
+        ConfirmDeleteDownloadsDialog(
+            title = "Cancel Download?",
+            body = "Stop the current download and remove anything already downloaded for $bodyTarget from this device?",
+            confirmLabel = "Cancel Download",
+            onDismiss = { confirmCancel = false },
+            onConfirm = {
+                downloadActions.onCancelDownloadedTracks(uniqueTracks)
+                confirmCancel = false
+            },
+        )
+    }
     if (confirmDelete) {
         val noun = if (uniqueTracks.size == 1) "song" else "songs"
         ConfirmDeleteDownloadsDialog(
@@ -1276,10 +1293,13 @@ internal fun PlaylistDetailPanel(
         filterTracksByQuery(sortedTracks, searchQuery)
     }
     val ratingActions = LocalRatingActions.current
+    val nowPlaying = LocalNowPlaying.current
 
     BoxWithConstraints(modifier.fillMaxSize()) {
         val useTable = maxWidth >= 640.dp
+        val listState = RetainedLazyListStates.remember("playlist-detail:${playlist.id}")
     LazyColumn(
+        state = listState,
         modifier = Modifier.fillMaxSize().padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -1383,13 +1403,15 @@ internal fun PlaylistDetailPanel(
             }
         } else {
             itemsIndexed(visibleTracks, key = { _, t -> t.id }, contentType = { _, _ -> "playlist-track" }) { index, track ->
-                ContentTrackRow(
+                MobileSongRow(
                     track = track,
-                    libraryColumns = libraryUi.columns,
+                    columns = libraryUi.columns,
+                    isNowPlaying = track.id == nowPlaying.trackId,
+                    nowPlayingIsPlaying = nowPlaying.isPlaying,
+                    nowPlayingIsBuffering = nowPlaying.isBuffering,
                     onPlay = { onPlayTracks(visibleTracks, index) },
                     onAddToUpNext = { onAddToUpNext(track) },
                     onDownload = { onDownload(track) },
-                    modifier = Modifier.animateItem(),
                 )
             }
         }

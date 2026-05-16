@@ -206,6 +206,9 @@ DELETE FROM TrackRow;
 clearTrackParents:
 DELETE FROM TrackParentRow;
 
+clearLocalFileMetadataCache:
+DELETE FROM LocalFileMetadataCacheRow;
+
 selectLocalFileMetadataCacheForFolder:
 SELECT * FROM LocalFileMetadataCacheRow WHERE folderId = ?;
 

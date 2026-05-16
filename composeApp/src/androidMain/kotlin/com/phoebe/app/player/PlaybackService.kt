@@ -1,8 +1,10 @@
 package com.phoebe.app.player
 
 import android.app.PendingIntent
+import android.app.SearchManager
 import android.content.Intent
 import android.os.Bundle
+import android.provider.MediaStore
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -20,10 +22,19 @@ import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.ListenableFuture
 import com.phoebe.app.MainActivity
 import com.phoebe.app.R
+import com.phoebe.app.domain.Track
+import com.phoebe.app.platform.PhoebeLog
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class PlaybackService : MediaLibraryService() {
 
     private var mediaLibrarySession: MediaLibrarySession? = null
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val servicePlayerListener = object : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
             if (playbackState == Player.STATE_ENDED) {
@@ -46,6 +57,7 @@ class PlaybackService : MediaLibraryService() {
             session: MediaSession,
             controller: MediaSession.ControllerInfo,
         ): MediaSession.ConnectionResult {
+            PhoebeLog.d(TAG) { "onConnect package=${controller.packageName}" }
             return MediaSession.ConnectionResult.accept(
                 MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS,
                 MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS,
@@ -80,18 +92,6 @@ class PlaybackService : MediaLibraryService() {
                 if (handled) return Player.COMMAND_INVALID
             }
             return when (playerCommand) {
-                Player.COMMAND_SEEK_TO_NEXT,
-                Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
-                -> {
-                    AndroidPlaybackBridge.onSkipNext?.invoke()
-                    Player.COMMAND_INVALID
-                }
-                Player.COMMAND_SEEK_TO_PREVIOUS,
-                Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
-                -> {
-                    AndroidPlaybackBridge.onSkipPrevious?.invoke()
-                    Player.COMMAND_INVALID
-                }
                 else -> super.onPlayerCommandRequest(session, controller, playerCommand)
             }
         }
@@ -101,19 +101,13 @@ class PlaybackService : MediaLibraryService() {
             browser: MediaSession.ControllerInfo,
             params: LibraryParams?,
         ): ListenableFuture<LibraryResult<MediaItem>> {
-            AndroidPlaybackRuntime.ensureInstalled()
             val rootParams = androidAutoRootParams(params)
-            val source = AndroidPlaybackRuntime.catalogBrowseSource
-            return if (source == null) {
-                immediateFuture(
-                    LibraryResult.ofItem(
-                        browseFolderItem(BrowseMediaIds.ROOT, "Phoebe"),
-                        rootParams,
-                    ),
-                )
-            } else {
-                listenableFuture("onGetLibraryRoot") {
+            return listenableFuture("onGetLibraryRoot") {
+                val source = AndroidPlaybackRuntime.ensureInstalledNow()
+                runCatching {
                     LibraryResult.ofItem(source.getLibraryRoot(), rootParams)
+                }.getOrElse {
+                    LibraryResult.ofItem(browseFolderItem(BrowseMediaIds.ROOT, "Phoebe"), rootParams)
                 }
             }
         }
@@ -124,9 +118,8 @@ class PlaybackService : MediaLibraryService() {
             browser: MediaSession.ControllerInfo,
             mediaId: String,
         ): ListenableFuture<LibraryResult<MediaItem>> {
-            val source = AndroidPlaybackRuntime.catalogBrowseSource
-                ?: return immediateFuture(LibraryResult.ofError(SessionError.ERROR_BAD_VALUE))
             return listenableFuture("onGetItem") {
+                val source = AndroidPlaybackRuntime.ensureInstalledNow()
                 val item = source.getItem(mediaId)
                 if (item == null) {
                     LibraryResult.ofError(SessionError.ERROR_BAD_VALUE)
@@ -145,27 +138,47 @@ class PlaybackService : MediaLibraryService() {
             pageSize: Int,
             params: LibraryParams?,
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
-            AndroidPlaybackRuntime.ensureInstalled()
-            val source = AndroidPlaybackRuntime.catalogBrowseSource
-            if (source == null) {
-                val children = when (parentId) {
-                    BrowseMediaIds.ROOT -> listOf(
-                        browseFolderItem(
-                            BrowseMediaIds.SIGN_IN,
-                            "Open Phoebe and sign in to Plex",
-                        ),
-                    )
-                    else -> emptyList()
-                }
-                return if (children.isEmpty()) {
-                    immediateFuture(LibraryResult.ofItemList(ImmutableList.of(), params))
-                } else {
-                    immediateFuture(LibraryResult.ofItemList(children, params))
-                }
-            }
             return listenableFuture("onGetChildren") {
+                val source = AndroidPlaybackRuntime.ensureInstalledNow()
                 val children = source.getChildren(parentId)
                 LibraryResult.ofItemList(ImmutableList.copyOf(children), params)
+            }
+        }
+
+        override fun onSearch(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            query: String,
+            params: LibraryParams?,
+        ): ListenableFuture<LibraryResult<Void>> {
+            return listenableFuture("onSearch") {
+                val source = AndroidPlaybackRuntime.ensureInstalledNow()
+                val count = source.searchTracks(query, params?.extras).size
+                PhoebeLog.d(TAG) { "onSearch package=${browser.packageName} query=$query count=$count" }
+                if (query.isNotBlank()) {
+                    session.notifySearchResultChanged(browser, query, count, params)
+                }
+                LibraryResult.ofVoid()
+            }
+        }
+
+        override fun onGetSearchResult(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            query: String,
+            page: Int,
+            pageSize: Int,
+            params: LibraryParams?,
+        ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
+            return listenableFuture("onGetSearchResult") {
+                val source = AndroidPlaybackRuntime.ensureInstalledNow()
+                val items = source.searchTracks(query, params?.extras)
+                    .map { browseTrackItem(it) }
+                    .paged(page, pageSize)
+                PhoebeLog.d(TAG) {
+                    "onGetSearchResult package=${browser.packageName} query=$query page=$page pageSize=$pageSize count=${items.size}"
+                }
+                LibraryResult.ofItemList(ImmutableList.copyOf(items), params)
             }
         }
 
@@ -177,9 +190,8 @@ class PlaybackService : MediaLibraryService() {
             if (mediaItems.isInAppPlaybackQueue()) {
                 return immediateFuture(mediaItems)
             }
-            val source = AndroidPlaybackRuntime.catalogBrowseSource
-                ?: return immediateFuture(mediaItems)
             return listenableFuture("onAddMediaItems") {
+                val source = AndroidPlaybackRuntime.ensureInstalledNow()
                 source.resolveTracks(mediaItems).map { playbackMediaItem(it) }
             }
         }
@@ -192,17 +204,17 @@ class PlaybackService : MediaLibraryService() {
             startIndex: Int,
             startPositionMs: Long,
         ): ListenableFuture<MediaItemsWithStartPosition> {
-            val source = AndroidPlaybackRuntime.catalogBrowseSource
-                ?: return immediateFuture(
-                    MediaItemsWithStartPosition(mediaItems, startIndex, startPositionMs),
-                )
             if (mediaItems.isInAppPlaybackQueue()) {
                 return immediateFuture(MediaItemsWithStartPosition(mediaItems, startIndex, startPositionMs))
             }
             return listenableFuture("onSetMediaItems") {
+                val source = AndroidPlaybackRuntime.ensureInstalledNow()
+                PhoebeLog.d(TAG) {
+                    "onSetMediaItems package=${controller.packageName} count=${mediaItems.size} item=${mediaItems.firstOrNull()?.debugSummary()}"
+                }
                 val expanded = expandMediaItems(source, mediaItems, startIndex)
                 if (expanded != null) {
-                    val tracks = source.resolveTracks(expanded.items)
+                    val tracks = expanded.tracks
                     if (tracks.isNotEmpty()) {
                         AndroidPlaybackBridge.onAdoptQueue?.invoke(
                             tracks,
@@ -212,6 +224,10 @@ class PlaybackService : MediaLibraryService() {
                     }
                     MediaItemsWithStartPosition(expanded.items, expanded.startIndex, startPositionMs)
                 } else {
+                    val searched = resolveSearchMediaItems(source, mediaItems, startIndex, startPositionMs)
+                    if (searched != null) {
+                        return@listenableFuture searched
+                    }
                     val resolved = source.resolveTracks(mediaItems).map { playbackMediaItem(it) }
                     val tracks = source.resolveTracks(mediaItems)
                     if (tracks.isNotEmpty()) {
@@ -257,8 +273,17 @@ class PlaybackService : MediaLibraryService() {
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? =
         mediaLibrarySession
 
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val result = super.onStartCommand(intent, flags, startId)
+        if (intent?.action == MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH) {
+            playFromSearchIntent(intent)
+        }
+        return result
+    }
+
     @OptIn(UnstableApi::class)
     override fun onDestroy() {
+        serviceScope.cancel()
         mediaLibrarySession?.player?.let { player ->
             AndroidPlaybackBridge.detachServicePlayer(servicePlayerListener)
             player.release()
@@ -268,7 +293,11 @@ class PlaybackService : MediaLibraryService() {
         super.onDestroy()
     }
 
-    private data class ExpandedItems(val items: List<MediaItem>, val startIndex: Int)
+    private data class ExpandedItems(
+        val items: List<MediaItem>,
+        val tracks: List<Track>,
+        val startIndex: Int,
+    )
 
     private suspend fun expandMediaItems(
         source: CatalogBrowseSource,
@@ -278,16 +307,85 @@ class PlaybackService : MediaLibraryService() {
         if (mediaItems.size != 1) return null
         val item = mediaItems.first()
         val tracks = source.expandPlayableItem(item)
-        if (tracks.size <= 1) return null
+        if (tracks.isEmpty()) return null
         val items = tracks.map { playbackMediaItem(it) }
-        val index = tracks.indexOfFirst { it.id == item.mediaId }.takeIf { it >= 0 } ?: startIndex
-        return ExpandedItems(items, index)
+        val index = source.startIndexForMediaItem(item, tracks, startIndex)
+        return ExpandedItems(items, tracks, index)
+    }
+
+    private suspend fun resolveSearchMediaItems(
+        source: CatalogBrowseSource,
+        mediaItems: List<MediaItem>,
+        startIndex: Int,
+        startPositionMs: Long,
+    ): MediaItemsWithStartPosition? {
+        if (mediaItems.size != 1) return null
+        val request = mediaItems.first().requestMetadata
+        val query = request.searchQuery?.toString()?.trim().orEmpty()
+        val extras = request.extras
+        if (!isSearchRequest(query, extras)) return null
+
+        val tracks = source.searchTracks(query, extras)
+        if (tracks.isEmpty()) return null
+
+        val items = tracks.map { playbackMediaItem(it) }
+        val resolvedStartIndex = startIndex.takeIf { it in items.indices } ?: 0
+        AndroidPlaybackBridge.onAdoptQueue?.invoke(tracks, resolvedStartIndex, true)
+        return MediaItemsWithStartPosition(items, resolvedStartIndex, startPositionMs)
+    }
+
+    private fun playFromSearchIntent(intent: Intent) {
+        val query = intent.getStringExtra(SearchManager.QUERY).orEmpty()
+        val extras = intent.extras?.let(::Bundle)
+        serviceScope.launch {
+            val source = withContext(Dispatchers.Default) {
+                AndroidPlaybackRuntime.ensureInstalledNow()
+            }
+            val tracks = withContext(Dispatchers.IO) {
+                source.searchTracks(query, extras)
+            }
+            PhoebeLog.d(TAG) { "playFromSearchIntent query=$query count=${tracks.size}" }
+            if (tracks.isEmpty()) return@launch
+
+            val items = tracks.map { playbackMediaItem(it) }
+            AndroidPlaybackBridge.onAdoptQueue?.invoke(tracks, 0, true)
+            mediaLibrarySession?.player?.run {
+                setMediaItems(items, 0, C.TIME_UNSET)
+                prepare()
+                play()
+            }
+        }
     }
 
     private fun List<MediaItem>.isInAppPlaybackQueue(): Boolean =
         isNotEmpty() && all { it.requestMetadata.extras?.getBoolean(InAppPlaybackExtra, false) == true }
 
+    private fun MediaItem.debugSummary(): String {
+        val extras = requestMetadata.extras
+        return "mediaId=$mediaId search=${requestMetadata.searchQuery} title=${mediaMetadata.title} " +
+            "artist=${mediaMetadata.artist} extras=${extras?.keySet()?.joinToString()}"
+    }
+
+    private fun isSearchRequest(query: String, extras: Bundle?): Boolean =
+        query.isNotBlank() ||
+            extras?.containsKey(SearchManager.QUERY) == true ||
+            extras?.containsKey(MediaStore.EXTRA_MEDIA_FOCUS) == true ||
+            extras?.containsKey(MediaStore.EXTRA_MEDIA_TITLE) == true ||
+            extras?.containsKey(MediaStore.EXTRA_MEDIA_ARTIST) == true ||
+            extras?.containsKey(MediaStore.EXTRA_MEDIA_ALBUM) == true ||
+            extras?.containsKey(MediaStore.EXTRA_MEDIA_PLAYLIST) == true ||
+            extras?.containsKey(MediaStore.EXTRA_MEDIA_GENRE) == true
+
+    private fun <T> List<T>.paged(page: Int, pageSize: Int): List<T> {
+        if (page < 0) return emptyList()
+        if (pageSize <= 0) return this
+        val fromIndex = page * pageSize
+        if (fromIndex >= size) return emptyList()
+        return subList(fromIndex, minOf(fromIndex + pageSize, size))
+    }
+
     private companion object {
+        private const val TAG = "PlaybackService"
         private const val NOTIFICATION_ID = 1001
 
         private fun androidAutoRootParams(

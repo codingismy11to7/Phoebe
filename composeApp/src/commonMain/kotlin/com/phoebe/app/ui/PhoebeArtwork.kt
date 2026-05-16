@@ -170,6 +170,8 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.yield
 import kotlin.math.max
 
+internal const val ThumbnailArtworkMaxDecodeDimension = 160
+
 @Composable
 internal fun SectionLabel(label: String, color: Color) {
     Text(label.uppercase(), color = color, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.08.em)

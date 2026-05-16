@@ -1168,7 +1168,12 @@ internal fun SongRow(
                 }
             }
             Box(Modifier.size(42.dp).sharedArtworkTransition("song:${track.id}").clickable(onClick = onPlay), contentAlignment = Alignment.Center) {
-                TrackArtworkImage(track, Modifier.fillMaxSize(), radius = 6.dp)
+                TrackArtworkImage(
+                    track,
+                    Modifier.fillMaxSize(),
+                    radius = 6.dp,
+                    maxDecodeDimension = ThumbnailArtworkMaxDecodeDimension,
+                )
                 if (isCurrent) {
                     Box(
                         Modifier

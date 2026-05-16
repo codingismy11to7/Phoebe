@@ -684,7 +684,7 @@ private fun MobileSongsList(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun MobileSongRow(
+internal fun MobileSongRow(
     track: Track,
     columns: LibraryColumnVisibility,
     isNowPlaying: Boolean,
@@ -723,6 +723,7 @@ private fun MobileSongRow(
                 Modifier.fillMaxSize().sharedArtworkTransition("song:${track.id}"),
                 radius = 8.dp,
                 elevated = false,
+                maxDecodeDimension = ThumbnailArtworkMaxDecodeDimension,
             )
             if (isNowPlaying) {
                 Box(
@@ -903,6 +904,7 @@ internal fun PlaylistsMobileView(
                             thumbUrl = playlist.thumbUrl,
                             accent = liked,
                             onClick = { onPlaylist(playlist) },
+                            onLongClick = { playlistActions.onShufflePlaylist(playlist) },
                         )
                     }
                 }
@@ -919,12 +921,13 @@ private fun MobilePlaylistRow(
     thumbUrl: String? = null,
     accent: Boolean = false,
     onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
 ) {
     Row(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(horizontal = 4.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),

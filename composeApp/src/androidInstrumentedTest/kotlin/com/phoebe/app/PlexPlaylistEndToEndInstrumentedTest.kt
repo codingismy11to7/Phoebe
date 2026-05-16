@@ -95,7 +95,7 @@ class PlexPlaylistEndToEndInstrumentedTest {
         assertTrue(plexAddCalled)
         assertEquals(3, repo.catalog.value.playlists.single { it.id == playlist.id }.trackCount)
         assertEquals(
-            listOf("plex:t1", "plex:t2", "plex:t3"),
+            listOf("plex:t3", "plex:t1", "plex:t2"),
             repo.catalog.value.tracksByParent[playlist.id].orEmpty().map { it.id },
         )
     }

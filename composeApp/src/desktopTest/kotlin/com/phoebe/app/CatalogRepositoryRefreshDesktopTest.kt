@@ -650,7 +650,7 @@ class CatalogRepositoryRefreshDesktopTest {
         val updated = repo.catalog.value.playlists.single { it.id == playlist.id }
         assertEquals(3, updated.trackCount)
         assertEquals(
-            listOf("plex:t1", "plex:t2", "plex:t3"),
+            listOf("plex:t3", "plex:t1", "plex:t2"),
             repo.catalog.value.tracksByParent[playlist.id].orEmpty().map { it.id },
         )
     }

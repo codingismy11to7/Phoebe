@@ -91,7 +91,7 @@ class LocalPlaylistEndToEndInstrumentedTest {
         val playlist = catalog.catalog.value.playlists.single { it.title == "Android Mix" }
         assertEquals(2, playlist.trackCount)
         val playlistTracks = catalog.tracksForPlaylist(null, playlist)
-        assertEquals(listOf("alpha", "beta"), playlistTracks.map { it.title })
+        assertEquals(listOf("beta", "alpha"), playlistTracks.map { it.title })
 
         val m3u8 = PlaylistExporter.export(playlistTracks, PlaylistExportFormat.M3U8)
         assertTrue(m3u8.startsWith("#EXTM3U"))

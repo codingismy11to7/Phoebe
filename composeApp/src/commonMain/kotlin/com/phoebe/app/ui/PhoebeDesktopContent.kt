@@ -522,6 +522,7 @@ internal fun DesktopContent(
                                     thumbUrl = playlist.thumbUrl,
                                     accent = liked,
                                     onClick = { onPlaylist(playlist) },
+                                    onLongClick = { playlistActions.onShufflePlaylist(playlist) },
                                 )
                             }
                         }

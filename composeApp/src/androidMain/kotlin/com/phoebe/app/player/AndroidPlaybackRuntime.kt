@@ -5,9 +5,12 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 object AndroidPlaybackRuntime {
     private val installScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val installMutex = Mutex()
 
     @Volatile
     var catalogBrowseSource: CatalogBrowseSource? = null
@@ -25,8 +28,16 @@ object AndroidPlaybackRuntime {
     fun ensureInstalled() {
         if (catalogBrowseSource != null) return
         installScope.launch {
-            if (catalogBrowseSource != null) return@launch
+            ensureInstalledNow()
+        }
+    }
+
+    suspend fun ensureInstalledNow(): CatalogBrowseSource {
+        catalogBrowseSource?.let { return it }
+        return installMutex.withLock {
+            catalogBrowseSource?.let { return@withLock it }
             install(AppDependencies.create())
+            checkNotNull(catalogBrowseSource)
         }
     }
 }

@@ -41,10 +41,12 @@ class CatalogBrowseTree(
                     return albumsForArtist(artist.title).map { it.toBrowseNode() }
                 }
                 BrowseMediaIds.parseAlbumId(parentId)?.let { albumId ->
-                    return tracksForParent(albumId).map { it.toBrowseNode() }
+                    return listOf(playAlbumNode(albumId)) +
+                        tracksForParent(albumId).map { it.toBrowseNode(parentId) }
                 }
                 BrowseMediaIds.parsePlaylistId(parentId)?.let { playlistId ->
-                    return tracksForParent(playlistId).map { it.toBrowseNode() }
+                    return listOf(playPlaylistNode(playlistId), shufflePlaylistNode(playlistId)) +
+                        tracksForParent(playlistId).map { it.toBrowseNode(parentId) }
                 }
                 emptyList()
             }
@@ -61,20 +63,136 @@ class CatalogBrowseTree(
         artists().find { BrowseMediaIds.artist(it.id) == mediaId }?.toBrowseNode()?.let { return it }
         albums().find { BrowseMediaIds.album(it.id) == mediaId }?.toBrowseNode()?.let { return it }
         playlists().find { BrowseMediaIds.playlist(it.id) == mediaId }?.toBrowseNode()?.let { return it }
+        BrowseMediaIds.parseAlbumPlayId(mediaId)?.let { albumId ->
+            albums().find { it.id == albumId }?.let { return playAlbumNode(albumId) }
+        }
+        BrowseMediaIds.parsePlaylistPlayId(mediaId)?.let { playlistId ->
+            playlists().find { it.id == playlistId }?.let { return playPlaylistNode(playlistId) }
+        }
+        BrowseMediaIds.parsePlaylistShuffleId(mediaId)?.let { playlistId ->
+            playlists().find { it.id == playlistId }?.let { return shufflePlaylistNode(playlistId) }
+        }
+        BrowseMediaIds.parseTrackId(mediaId)?.let { browseTrack ->
+            trackById(browseTrack.trackId)?.toBrowseNode(browseTrack.parentMediaId)?.let { return it }
+        }
         trackById(mediaId)?.toBrowseNode()?.let { return it }
         return null
     }
 
     fun trackById(trackId: String): Track? {
-        val row = database.catalogQueries.selectAllTracks().executeAsList().find { it.id == trackId }
+        val resolvedId = BrowseMediaIds.parseTrackId(trackId)?.trackId ?: trackId
+        val row = database.catalogQueries.selectAllTracks().executeAsList().find { it.id == resolvedId }
             ?: return null
         return row.toTrack()
+    }
+
+    fun tracksForPlayableMediaId(mediaId: String): List<Track> {
+        BrowseMediaIds.parseAlbumPlayId(mediaId)?.let { albumId ->
+            return tracksForParent(albumId)
+        }
+        BrowseMediaIds.parsePlaylistPlayId(mediaId)?.let { playlistId ->
+            return tracksForParent(playlistId)
+        }
+        BrowseMediaIds.parsePlaylistShuffleId(mediaId)?.let { playlistId ->
+            return tracksForParent(playlistId).shuffled()
+        }
+
+        BrowseMediaIds.parseTrackId(mediaId)?.let { browseTrack ->
+            val parentTracks = tracksForParentMediaId(browseTrack.parentMediaId)
+            if (parentTracks.any { it.id == browseTrack.trackId }) return parentTracks
+            return trackById(browseTrack.trackId)?.let { listOf(it) }.orEmpty()
+        }
+
+        BrowseMediaIds.parseAlbumId(mediaId)?.let { return tracksForParent(it) }
+        BrowseMediaIds.parsePlaylistId(mediaId)?.let { return tracksForParent(it) }
+        return trackById(mediaId)?.let { listOf(it) }.orEmpty()
+    }
+
+    fun startIndexForMediaId(mediaId: String, tracks: List<Track>, fallback: Int): Int {
+        val selectedTrackId = BrowseMediaIds.parseTrackId(mediaId)?.trackId ?: mediaId
+        return tracks.indexOfFirst { it.id == selectedTrackId }
+            .takeIf { it >= 0 }
+            ?: fallback.takeIf { it in tracks.indices }
+            ?: 0
+    }
+
+    fun searchTracks(
+        query: String,
+        title: String? = null,
+        artist: String? = null,
+        album: String? = null,
+        playlist: String? = null,
+        genre: String? = null,
+    ): List<Track> {
+        val playlistTracks = playlist?.takeIf { it.isNotBlank() }?.let { playlistQuery ->
+            playlists()
+                .asSequence()
+                .filter { it.title.matchesVoiceQuery(playlistQuery) }
+                .flatMap { tracksForParent(it.id).asSequence() }
+                .toList()
+        }.orEmpty()
+        if (playlistTracks.isNotEmpty()) return playlistTracks.distinctBy { it.id }
+
+        val albumTracks = album?.takeIf { it.isNotBlank() }?.let { albumQuery ->
+            val matchedAlbums = albums()
+                .filter { candidate ->
+                    candidate.title.matchesVoiceQuery(albumQuery) &&
+                        artist?.takeIf { it.isNotBlank() }?.let { candidate.artist.matchesVoiceQuery(it) } != false
+                }
+            matchedAlbums.flatMap { tracksForParent(it.id) }.ifEmpty {
+                allTracks().filter { track ->
+                    track.album.matchesVoiceQuery(albumQuery) &&
+                        artist?.takeIf { it.isNotBlank() }?.let { track.artist.matchesVoiceQuery(it) } != false
+                }
+            }
+        }.orEmpty()
+        if (albumTracks.isNotEmpty()) return albumTracks.distinctBy { it.id }
+
+        val artistTracks = artist?.takeIf { it.isNotBlank() }?.let { artistQuery ->
+            allTracks().filter { it.artist.matchesVoiceQuery(artistQuery) }
+        }.orEmpty()
+        if (artistTracks.isNotEmpty()) return artistTracks.distinctBy { it.id }
+
+        val titleTracks = title?.takeIf { it.isNotBlank() }?.let { titleQuery ->
+            allTracks().rankedByVoiceQuery(titleQuery) {
+                listOf(
+                    VoiceSearchField(it.title, FieldWeightTitle),
+                    VoiceSearchField(it.artist, FieldWeightArtist),
+                    VoiceSearchField(it.album, FieldWeightAlbum),
+                )
+            }
+        }.orEmpty()
+        if (titleTracks.isNotEmpty()) return titleTracks
+
+        val genreTracks = genre?.takeIf { it.isNotBlank() }?.let { genreQuery ->
+            allTracks().filter { it.genre?.matchesVoiceQuery(genreQuery) == true }
+        }.orEmpty()
+        if (genreTracks.isNotEmpty()) return genreTracks.distinctBy { it.id }
+
+        val freeformQuery = query.trim()
+        return if (freeformQuery.isBlank()) {
+            allTracks()
+                .sortedWith(compareByDescending<Track> { it.dateAddedMs ?: Long.MIN_VALUE }.thenBy { it.title.lowercase() })
+                .take(25)
+        } else {
+            allTracks().rankedByVoiceQuery(freeformQuery) {
+                listOf(
+                    VoiceSearchField(it.title, FieldWeightTitle),
+                    VoiceSearchField(it.artist, FieldWeightArtist),
+                    VoiceSearchField(it.album, FieldWeightAlbum),
+                    VoiceSearchField(it.genre.orEmpty(), FieldWeightGenre),
+                )
+            }
+        }
     }
 
     private fun hasCachedCatalog(): Boolean =
         database.catalogQueries.selectArtists().executeAsList().isNotEmpty() ||
             database.catalogQueries.selectAlbums().executeAsList().isNotEmpty() ||
             database.catalogQueries.selectPlaylists().executeAsList().isNotEmpty()
+
+    private fun allTracks(): List<Track> =
+        database.catalogQueries.selectAllTracks().executeAsList().map { it.toTrack() }
 
     private fun artists(): List<Artist> =
         database.catalogQueries.selectArtists().executeAsList().map {
@@ -165,7 +283,7 @@ class CatalogBrowseTree(
         title = title,
         subtitle = artist,
         isBrowsable = true,
-        isPlayable = true,
+        isPlayable = false,
         thumbUrl = thumbUrl,
     )
 
@@ -173,12 +291,34 @@ class CatalogBrowseTree(
         mediaId = BrowseMediaIds.playlist(id),
         title = title,
         isBrowsable = true,
-        isPlayable = true,
+        isPlayable = false,
         thumbUrl = thumbUrl,
     )
 
-    private fun Track.toBrowseNode(): BrowseNode = BrowseNode(
-        mediaId = id,
+    private fun playAlbumNode(albumId: String): BrowseNode = BrowseNode(
+        mediaId = BrowseMediaIds.albumPlay(albumId),
+        title = "Play album",
+        isBrowsable = false,
+        isPlayable = true,
+    )
+
+    private fun playPlaylistNode(playlistId: String): BrowseNode = BrowseNode(
+        mediaId = BrowseMediaIds.playlistPlay(playlistId),
+        title = "Play playlist",
+        isBrowsable = false,
+        isPlayable = true,
+    )
+
+    private fun shufflePlaylistNode(playlistId: String): BrowseNode = BrowseNode(
+        mediaId = BrowseMediaIds.playlistShuffle(playlistId),
+        title = "Shuffle",
+        subtitle = "Play this playlist in random order",
+        isBrowsable = false,
+        isPlayable = true,
+    )
+
+    private fun Track.toBrowseNode(parentMediaId: String? = null): BrowseNode = BrowseNode(
+        mediaId = parentMediaId?.let { BrowseMediaIds.track(it, id) } ?: id,
         title = title,
         subtitle = listOf(artist, album).filter { it.isNotBlank() }.distinct().joinToString(" • "),
         isBrowsable = false,
@@ -186,4 +326,62 @@ class CatalogBrowseTree(
         thumbUrl = thumbUrl,
         track = this,
     )
+
+    private fun tracksForParentMediaId(parentMediaId: String): List<Track> {
+        BrowseMediaIds.parseAlbumId(parentMediaId)?.let { return tracksForParent(it) }
+        BrowseMediaIds.parsePlaylistId(parentMediaId)?.let { return tracksForParent(it) }
+        return emptyList()
+    }
+
+    private fun String.matchesVoiceQuery(query: String): Boolean {
+        val value = normalizedForVoiceSearch()
+        val target = query.normalizedForVoiceSearch()
+        return target.isNotBlank() && (value == target || value.contains(target))
+    }
+
+    private fun List<Track>.rankedByVoiceQuery(
+        query: String,
+        fields: (Track) -> List<VoiceSearchField>,
+    ): List<Track> {
+        val normalizedQuery = query.normalizedForVoiceSearch()
+        val tokens = normalizedQuery.split(' ').filter { it.isNotBlank() }
+        if (normalizedQuery.isBlank()) return emptyList()
+        return asSequence()
+            .mapNotNull { track ->
+                val score = fields(track).maxOfOrNull { field ->
+                    val normalizedField = field.value.normalizedForVoiceSearch()
+                    when {
+                        normalizedField == normalizedQuery -> 400 + field.weight
+                        normalizedField.startsWith(normalizedQuery) -> 300 + field.weight
+                        normalizedField.contains(normalizedQuery) -> 200 + field.weight
+                        tokens.all { token -> normalizedField.contains(token) } -> 100 + field.weight
+                        else -> 0
+                    }
+                } ?: 0
+                if (score > 0) track to score else null
+            }
+            .sortedWith(
+                compareByDescending<Pair<Track, Int>> { it.second }
+                    .thenBy { it.first.title.lowercase() }
+                    .thenBy { it.first.artist.lowercase() },
+            )
+            .map { it.first }
+            .distinctBy { it.id }
+            .toList()
+    }
+
+    private fun String.normalizedForVoiceSearch(): String =
+        lowercase()
+            .replace(Regex("[^a-z0-9]+"), " ")
+            .trim()
+            .replace(Regex("\\s+"), " ")
+
+    private data class VoiceSearchField(val value: String, val weight: Int)
+
+    private companion object {
+        private const val FieldWeightTitle = 40
+        private const val FieldWeightArtist = 30
+        private const val FieldWeightAlbum = 20
+        private const val FieldWeightGenre = 10
+    }
 }
