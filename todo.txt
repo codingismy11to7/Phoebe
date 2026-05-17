@@ -1,6 +1,6 @@
 use correct icons
 
-jellyfin / navidrome?
+jellyfin / navidrome / emby?
 
 predictive back / swipe to dismiss
 

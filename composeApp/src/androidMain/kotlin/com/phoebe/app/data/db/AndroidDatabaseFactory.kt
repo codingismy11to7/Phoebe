@@ -14,7 +14,7 @@ actual suspend fun createSqlDriver(schema: SqlSchema<QueryResult.AsyncValue<Unit
     return AndroidSqliteDriver(
         schema = schema.synchronous(),
         context = context,
-        name = LocalDbName,
+        name = localDatabaseFileName(),
     )
 }
 
@@ -24,10 +24,11 @@ actual suspend fun createSqlDriver(schema: SqlSchema<QueryResult.AsyncValue<Unit
  * Replace with real migrations once we ship.
  */
 private fun wipeIfRevisionChanged(context: Context) {
-    val prefs = context.getSharedPreferences("phoebe-db-meta", Context.MODE_PRIVATE)
-    val onDisk = if (prefs.contains(LocalDbRevisionKey)) prefs.getLong(LocalDbRevisionKey, -1L) else null
+    val revisionKey = localDatabaseRevisionKey()
+    val prefs = context.getSharedPreferences(localDatabaseMetaPrefsName(), Context.MODE_PRIVATE)
+    val onDisk = if (prefs.contains(revisionKey)) prefs.getLong(revisionKey, -1L) else null
     if (onDisk != null && onDisk < 6L) {
-        context.deleteDatabase(LocalDbName)
+        context.deleteDatabase(localDatabaseFileName())
     }
-    prefs.edit().putLong(LocalDbRevisionKey, LocalDbRevision).apply()
+    prefs.edit().putLong(revisionKey, LocalDbRevision).apply()
 }

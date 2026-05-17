@@ -114,7 +114,8 @@ private const val DownloadDirectoryKey = "download-location"
 private fun storageRootPath(): String {
     val docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, true)
         .firstOrNull() as? String
-    return if (docs != null) "$docs/phoebe" else "phoebe"
+    val folder = com.phoebe.app.data.db.localStorageDirectoryName()
+    return if (docs != null) "$docs/$folder" else folder
 }
 
 @OptIn(ExperimentalForeignApi::class)

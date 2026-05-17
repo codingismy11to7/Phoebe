@@ -11,30 +11,35 @@ import androidx.compose.ui.window.WindowScope
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.phoebe.app.platform.PhoebeLog
+import com.phoebe.app.platform.appDisplayName
 import com.phoebe.app.platform.isDebugBuild
 import com.phoebe.app.ui.RegisterDesktopWindowKeyDispatcher
 import com.sun.jna.Library
 import com.sun.jna.Native
 import com.sun.jna.Pointer
+import java.awt.Image
+import javax.imageio.ImageIO
 import javax.swing.RootPaneContainer
 
 fun main() {
     configureSandboxedNativeLibraries()
+    applyMacDockIcon(isDebugBuild())
     application {
         PhoebeLog.d("Phoebe") { "desktop launched (debug=${isDebugBuild()})" }
         val windowState = rememberWindowState(width = 1480.dp, height = 880.dp)
         val isMacOs = isMacOs()
         // macOS bakes the squircle shape into app icons (unlike iOS/Android, which auto-mask),
         // so on Mac we use a pre-rounded variant. Other desktops keep the full-bleed square.
+        val debugSuffix = if (isDebugBuild()) "-debug" else ""
         val iconResource = if (isMacOs) {
-            "icon-macos.png"
+            "icon-macos$debugSuffix.png"
         } else {
-            "icon.png"
+            "icon$debugSuffix.png"
         }
         val icon = useResource(iconResource) { BitmapPainter(loadImageBitmap(it)) }
         Window(
             onCloseRequest = ::exitApplication,
-            title = if (isMacOs) "" else "Phoebe",
+            title = if (isMacOs) "" else appDisplayName(),
             state = windowState,
             icon = icon,
         ) {
@@ -56,12 +61,30 @@ private fun configureSandboxedNativeLibraries() {
     val cacheRoot = System.getenv("XDG_CACHE_HOME")?.takeIf { it.isNotBlank() }
         ?: System.getProperty("user.home")?.plus("/.cache")
         ?: return
-    val nativeLibDir = java.io.File(cacheRoot, "phoebe/native").apply { mkdirs() }
+    val cacheFolder = if (isDebugBuild()) "phoebe-debug" else "phoebe"
+    val nativeLibDir = java.io.File(cacheRoot, "$cacheFolder/native").apply { mkdirs() }
     System.setProperty("jnativehook.lib.path", nativeLibDir.absolutePath)
 }
 
 private fun isMacOs(): Boolean =
     System.getProperty("os.name").startsWith("Mac", ignoreCase = true)
+
+/** macOS Dock icon comes from {@code -Xdock:icon} in packaged runs; override it for dev/debug. */
+private fun applyMacDockIcon(debug: Boolean) {
+    if (!isMacOs()) return
+    val resourceName = if (debug) "icon-macos-debug.png" else "icon-macos.png"
+    val dockImage = Thread.currentThread().contextClassLoader
+        .getResourceAsStream(resourceName)
+        ?.use(ImageIO::read)
+        ?: return
+    runCatching {
+        val applicationClass = Class.forName("com.apple.eawt.Application")
+        val application = applicationClass.getMethod("getApplication").invoke(null)
+        applicationClass
+            .getMethod("setDockIconImage", Image::class.java)
+            .invoke(application, dockImage)
+    }
+}
 
 private fun isWindows(): Boolean =
     System.getProperty("os.name").startsWith("Windows", ignoreCase = true)

@@ -15,7 +15,7 @@ actual suspend fun createSqlDriver(schema: SqlSchema<QueryResult.AsyncValue<Unit
     wipeIfRevisionChanged()
     return NativeSqliteDriver(
         schema = schema.synchronous(),
-        name = LocalDbName,
+        name = localDatabaseFileName(),
     )
 }
 
@@ -27,16 +27,18 @@ actual suspend fun createSqlDriver(schema: SqlSchema<QueryResult.AsyncValue<Unit
 @OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
 private fun wipeIfRevisionChanged() {
     val defaults = NSUserDefaults.standardUserDefaults
-    val present = defaults.objectForKey(LocalDbRevisionKey) != null
-    val onDisk = if (present) defaults.integerForKey(LocalDbRevisionKey) else null
+    val revisionKey = localDatabaseRevisionKey()
+    val dbFileName = localDatabaseFileName()
+    val present = defaults.objectForKey(revisionKey) != null
+    val onDisk = if (present) defaults.integerForKey(revisionKey) else null
     if (onDisk != null && onDisk < 6L) {
         val docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, true)
             .firstOrNull() as? String
         if (docs != null) {
             // NativeSqliteDriver writes to `${documents}/databases/${name}.db` by default.
-            val path = "$docs/databases/$LocalDbName.db"
+            val path = "$docs/databases/$dbFileName.db"
             NSFileManager.defaultManager.removeItemAtPath(path, error = null)
         }
     }
-    defaults.setInteger(LocalDbRevision, forKey = LocalDbRevisionKey)
+    defaults.setInteger(LocalDbRevision, forKey = revisionKey)
 }

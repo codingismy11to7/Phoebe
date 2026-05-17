@@ -17,6 +17,11 @@ val phoebeDesktopPackageVersion = phoebeVersionName.map { version ->
     if (version.substringBefore(".").toIntOrNull() == 0) "1.0.0" else version
 }
 
+val phoebeDebugDistribution = providers.gradleProperty("phoebe.debugDistribution")
+    .orElse(providers.environmentVariable("PHOEBE_DEBUG_DISTRIBUTION"))
+    .map(String::toBoolean)
+    .orElse(false)
+
 fun providerValue(name: String, envName: String): String? =
     providers.gradleProperty(name).orElse(providers.environmentVariable(envName)).orNull
 
@@ -236,6 +241,13 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    buildTypes {
+        debug {
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+        }
+    }
+
     buildFeatures {
         buildConfig = true
     }
@@ -300,11 +312,17 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             modules("java.instrument", "java.management", "java.net.http", "java.sql", "jdk.jfr", "jdk.unsupported")
-            packageName = "Phoebe"
+            packageName = if (phoebeDebugDistribution.get()) "Phoebe Debug" else "Phoebe"
             packageVersion = phoebeDesktopPackageVersion.get()
-            val iconsDir = project.layout.projectDirectory.dir("src/desktopMain/resources/icons")
+            val iconsDir = project.layout.projectDirectory.dir(
+                if (phoebeDebugDistribution.get()) {
+                    "src/desktopMain/resources/icons-debug"
+                } else {
+                    "src/desktopMain/resources/icons"
+                },
+            )
             macOS {
-                bundleID = "com.phoebe.app"
+                bundleID = if (phoebeDebugDistribution.get()) "com.phoebe.app.debug" else "com.phoebe.app"
                 iconFile.set(iconsDir.file("icon.icns").asFile)
                 signing {
                     identity.set(
@@ -356,9 +374,25 @@ val compileMacMediaKeysNative = tasks.register<Exec>("compileMacMediaKeysNative"
 
 tasks.named("compileKotlinDesktop") { dependsOn(compileMacMediaKeysNative) }
 
+val desktopDevRunTaskNames = setOf("run", "hotRunDesktop", "hotDevDesktop", "desktopRunHot")
+
 tasks.withType<JavaExec>().configureEach {
-    if (name == "run") {
-        systemProperty("phoebe.debug", "true")
+    if (name !in desktopDevRunTaskNames) return@configureEach
+
+    systemProperty("phoebe.debug", "true")
+    val debugHome = File(System.getProperty("user.home"), ".phoebe-debug")
+    systemProperty("phoebe.storage.root", debugHome.absolutePath)
+
+    // Compose Desktop always passes -Xdock:icon for the production .icns; swap it for debug runs.
+    if (System.getProperty("os.name").lowercase().contains("mac")) {
+        val debugDockIcon = layout.projectDirectory
+            .file("src/desktopMain/resources/icons-debug/icon.icns")
+            .asFile
+        doFirst {
+            jvmArgs = jvmArgs
+                .filterNot { it.startsWith("-Xdock:icon=") }
+                .plus("-Xdock:icon=${debugDockIcon.absolutePath}")
+        }
     }
 }
 

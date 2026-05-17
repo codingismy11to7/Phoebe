@@ -1,9 +1,13 @@
 importScripts("/kotlin/sql-wasm.js");
 
-const databaseName = "phoebe-sql";
+const workerParams = new URL(self.location.href).searchParams;
+const isDebugBuild = workerParams.get("debug") === "1";
+const databaseName = isDebugBuild ? "phoebe-sql-debug" : "phoebe-sql";
 const storeName = "databases";
-const revisionParam = new URL(self.location.href).searchParams.get("revision") ?? "0";
-const databaseKey = `phoebe.db.v${revisionParam}.async`;
+const revisionParam = workerParams.get("revision") ?? "0";
+const databaseKey = isDebugBuild
+    ? `phoebe-debug.db.v${revisionParam}.async`
+    : `phoebe.db.v${revisionParam}.async`;
 
 let db = null;
 let transactionDepth = 0;
