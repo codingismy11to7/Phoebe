@@ -216,6 +216,7 @@ internal data class PlayHistorySnapshot(
     val byAlbum: Map<String, Long> = emptyMap(),
     val byTrack: Map<String, Long> = emptyMap(),
     val playCountByTrack: Map<String, Long> = emptyMap(),
+    val playEventsByTrack: Map<String, List<Long>> = emptyMap(),
 )
 
 internal val LocalPlayHistory = compositionLocalOf { PlayHistorySnapshot() }
@@ -260,6 +261,24 @@ internal data class LikeActions(
 }
 
 internal val LocalLikeActions = compositionLocalOf { LikeActions() }
+
+internal data class FavoriteActions(
+    val catalog: CatalogSnapshot = CatalogSnapshot(),
+    val onToggleArtist: (Artist) -> Unit = {},
+    val onToggleAlbum: (Album) -> Unit = {},
+    val onTogglePlaylist: (Playlist) -> Unit = {},
+) {
+    fun isFavorite(artist: Artist): Boolean =
+        catalog.artists.firstOrNull { it.id == artist.id }?.favorite ?: artist.favorite
+
+    fun isFavorite(album: Album): Boolean =
+        catalog.albums.firstOrNull { it.id == album.id }?.favorite ?: album.favorite
+
+    fun isFavorite(playlist: Playlist): Boolean =
+        catalog.playlists.firstOrNull { it.id == playlist.id }?.favorite ?: playlist.favorite
+}
+
+internal val LocalFavoriteActions = compositionLocalOf { FavoriteActions() }
 
 internal data class RatingActions(
     val ratingsEnabled: Boolean = false,

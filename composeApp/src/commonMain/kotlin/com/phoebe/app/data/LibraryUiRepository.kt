@@ -3,6 +3,7 @@ package com.phoebe.app.data
 import app.cash.sqldelight.async.coroutines.awaitAsOneOrNull
 import com.phoebe.app.db.PhoebeDatabase
 import com.phoebe.app.domain.LibraryColumnVisibility
+import com.phoebe.app.domain.HomeSection
 import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryUiPreferences
 import com.phoebe.app.platform.PlatformStorage
@@ -54,6 +55,11 @@ class LibraryUiRepository(
         persistCurrentToDisk()
     }
 
+    suspend fun setHomeSections(sections: List<HomeSection>) {
+        val normalized = sections.normalizedHomeSections()
+        save(mutableState.value.copy(homeSections = normalized))
+    }
+
     /** Updates UI state immediately; pair with [persistCurrentToDisk] on a background coroutine. */
     fun applyColumns(columns: LibraryColumnVisibility) {
         mutableState.value = mutableState.value.copy(columns = columns)
@@ -88,6 +94,7 @@ class LibraryUiRepository(
             colDateAdded = c.dateAdded.toDb(),
             colRating = c.rating.toDb(),
             colFavorite = c.favorite.toDb(),
+            homeSections = prefs.homeSections.joinToString(",") { it.name },
         )
     }
 
@@ -108,6 +115,7 @@ class LibraryUiRepository(
                 rating = colRating.toBool(),
                 favorite = colFavorite.toBool(),
             ),
+            homeSections = homeSections.toHomeSections(),
         )
 
     private companion object {
@@ -117,3 +125,20 @@ class LibraryUiRepository(
 
 private fun Boolean.toDb(): Long = if (this) 1L else 0L
 private fun Long.toBool(): Boolean = this != 0L
+private fun String.toHomeSections(): List<HomeSection> {
+    val parsed = split(',')
+        .mapNotNull { raw -> runCatching { HomeSection.valueOf(raw.trim()) }.getOrNull() }
+        .distinct()
+    return parsed.normalizedHomeSections()
+}
+
+private fun List<HomeSection>.normalizedHomeSections(): List<HomeSection> =
+    flatMap { section ->
+        when (section) {
+            HomeSection.Favorites -> listOf(HomeSection.FavoritePlaylists, HomeSection.FavoriteArtists, HomeSection.FavoriteAlbums)
+            HomeSection.Recents -> listOf(HomeSection.RecentSongs, HomeSection.RecentArtists, HomeSection.RecentAlbums)
+            else -> listOf(section)
+        }
+    }
+        .filterNot { it == HomeSection.Favorites || it == HomeSection.Recents }
+        .let { (it + HomeSection.defaultOrder).distinct() }

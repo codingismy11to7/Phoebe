@@ -1,0 +1,4 @@
+ALTER TABLE ArtistRow ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE AlbumRow ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE PlaylistRow ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE LibraryPrefsRow ADD COLUMN homeSections TEXT NOT NULL DEFAULT 'Mixes,Collections,FavoritePlaylists,FavoriteArtists,FavoriteAlbums,RecentSongs,RecentArtists,RecentAlbums,Played,Random';

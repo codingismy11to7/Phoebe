@@ -135,14 +135,17 @@ import kotlin.math.roundToInt
 import com.phoebe.app.AppState
 import com.phoebe.app.data.catalogAlbumsForArtist
 import com.phoebe.app.data.catalogTracksForArtist
+import com.phoebe.app.data.defaultPlexRadioStations
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.AppScreen
 import com.phoebe.app.domain.Artist
+import com.phoebe.app.domain.ArtistRadioAvailability
 import com.phoebe.app.domain.CollectionEntry
 import com.phoebe.app.domain.CollectionFacet
 import com.phoebe.app.domain.CollectionTarget
 import com.phoebe.app.domain.DownloadItem
 import com.phoebe.app.domain.DownloadState
+import com.phoebe.app.domain.HomeSection
 import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryUiPreferences
@@ -150,6 +153,7 @@ import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.LocalFolderMediaSourceConfig
 import com.phoebe.app.domain.MediaSourcesState
 import com.phoebe.app.domain.MusicLibrary
+import com.phoebe.app.domain.PlexRadioStation
 import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.Playlist
@@ -176,9 +180,13 @@ import kotlin.math.max
 internal enum class PhoebeScreenshotScenario {
     Home,
     HomePlayedRows,
+    FavoritePlaylists,
+    FavoriteArtists,
+    FavoriteAlbums,
     Library,
     Playlist,
     Artist,
+    ArtistRadio,
     Album,
     CollectionValues,
     CollectionItems,
@@ -259,7 +267,12 @@ internal fun PhoebeDesktopScreenshotScenario(
     modifier: Modifier = Modifier,
 ) {
     val screen = when (scenario) {
-        PhoebeScreenshotScenario.Artist -> AppScreen.ArtistDetail(fixture.artist)
+        PhoebeScreenshotScenario.FavoritePlaylists -> AppScreen.FavoritePlaylists
+        PhoebeScreenshotScenario.FavoriteArtists -> AppScreen.FavoriteArtists
+        PhoebeScreenshotScenario.FavoriteAlbums -> AppScreen.FavoriteAlbums
+        PhoebeScreenshotScenario.Artist,
+        PhoebeScreenshotScenario.ArtistRadio,
+        -> AppScreen.ArtistDetail(fixture.artist)
         PhoebeScreenshotScenario.Album -> AppScreen.AlbumDetail(fixture.album)
         PhoebeScreenshotScenario.CollectionValues -> AppScreen.Collections(CollectionEntry(CollectionTarget.Artists, CollectionFacet.Genre))
         PhoebeScreenshotScenario.CollectionItems -> AppScreen.CollectionItems(CollectionEntry(CollectionTarget.Artists, CollectionFacet.Genre), "Dream pop")
@@ -273,6 +286,12 @@ internal fun PhoebeDesktopScreenshotScenario(
         PhoebeScreenshotScenario.Search -> DesktopSection.Search
         PhoebeScreenshotScenario.Settings -> DesktopSection.Settings
         else -> DesktopSection.Home
+    }
+    val libraryUi = when (scenario) {
+        PhoebeScreenshotScenario.HomePlayedRows -> fixture.libraryUi.copy(
+            homeSections = listOf(HomeSection.Played, HomeSection.Random),
+        )
+        else -> fixture.libraryUi
     }
     DesktopPlayer(
         screen = screen,
@@ -291,7 +310,7 @@ internal fun PhoebeDesktopScreenshotScenario(
         selectedPlaylistId = if (scenario == PhoebeScreenshotScenario.Playlist) fixture.playlist.id else null,
         searchQuery = if (scenario == PhoebeScreenshotScenario.Search) "moon" else "",
         libraryFilter = LibraryFilterTab.Artists,
-        libraryUi = fixture.libraryUi,
+        libraryUi = libraryUi,
         appMessage = "Sign in to Plex or add a local music folder to get started.",
         pinCode = "PHOEBE",
         shuffle = true,
@@ -310,6 +329,9 @@ internal fun PhoebeDesktopScreenshotScenario(
         onRecentSongs = {},
         onRecentArtists = {},
         onRecentAlbums = {},
+        onFavoritePlaylists = {},
+        onFavoriteArtists = {},
+        onFavoriteAlbums = {},
         onCollections = {},
         onCollectionValue = { _, _ -> },
         onRecentlyPlayed = {},
@@ -332,6 +354,14 @@ internal fun PhoebeDesktopScreenshotScenario(
         onAddToUpNext = {},
         onDownload = {},
         onDownloadArtist = {},
+        artistRadioAvailability = if (scenario == PhoebeScreenshotScenario.ArtistRadio) {
+            mapOf(fixture.artist.id to ArtistRadioAvailability.Available)
+        } else {
+            emptyMap()
+        },
+        onPlayArtistRadio = {},
+        radioStations = fixture.radioStations,
+        onPlayRadioStation = {},
         onDownloadAlbum = {},
         onDownloadPlaylist = {},
         onStartSignIn = {},
@@ -351,6 +381,9 @@ internal fun PhoebeDesktopScreenshotScenario(
         onLibrarySortBy = {},
         onLibraryAscending = {},
         onLibraryColumns = {},
+        onHomeSections = {},
+        onExportFavoritePlaylists = {},
+        onImportFavoritePlaylists = {},
         downloadDirectory = null,
         downloadCount = fixture.catalog.downloads.size,
         defaultDownloadDirectoryLabel = "App storage",
@@ -381,7 +414,36 @@ internal fun PhoebeMobileScreenshotScenario(
                 onAddLocalFolder = {},
                 modifier = Modifier.fillMaxSize(),
             )
-            PhoebeScreenshotScenario.Artist -> ArtistDetailPanel(
+            PhoebeScreenshotScenario.FavoritePlaylists -> FavoritePlaylistsMobileView(
+                searchQuery = "",
+                onSearchQuery = {},
+                onPlaylist = {},
+                onBack = {},
+                modifier = Modifier.fillMaxSize(),
+            )
+            PhoebeScreenshotScenario.FavoriteArtists -> FavoriteArtistsMobileView(
+                catalog = fixture.catalog,
+                libraryUi = fixture.libraryUi,
+                onLibrarySortBy = {},
+                onLibraryAscending = {},
+                onLibraryColumns = {},
+                onArtist = {},
+                onBack = {},
+                modifier = Modifier.fillMaxSize(),
+            )
+            PhoebeScreenshotScenario.FavoriteAlbums -> FavoriteAlbumsMobileView(
+                catalog = fixture.catalog,
+                libraryUi = fixture.libraryUi,
+                onLibrarySortBy = {},
+                onLibraryAscending = {},
+                onLibraryColumns = {},
+                onAlbum = {},
+                onBack = {},
+                modifier = Modifier.fillMaxSize(),
+            )
+            PhoebeScreenshotScenario.Artist,
+            PhoebeScreenshotScenario.ArtistRadio,
+            -> ArtistDetailPanel(
                 artist = fixture.artist,
                 catalog = fixture.catalog,
                 libraryUi = fixture.libraryUi,
@@ -392,6 +454,13 @@ internal fun PhoebeMobileScreenshotScenario(
                 onAddToUpNext = {},
                 onDownload = {},
                 onDownloadArtist = {},
+                artistRadioAvailability = if (scenario == PhoebeScreenshotScenario.ArtistRadio) {
+                    ArtistRadioAvailability.Available
+                } else {
+                    null
+                },
+                onPlayArtistRadio = {},
+                onArtist = {},
                 onLibraryColumns = {},
             )
             PhoebeScreenshotScenario.Album -> AlbumDetailPanel(
@@ -469,14 +538,19 @@ internal fun PhoebeMobileScreenshotScenario(
             PhoebeScreenshotScenario.HomePlayedRows -> MobileHomeScreen(
                 state = deriveHomeUiState(fixture.catalog, fixture.playHistory, randomArtistSeed = 7, randomAlbumSeed = 11, nowMs = fixture.nowMs),
                 catalog = fixture.catalog,
-                listState = rememberLazyListState(initialFirstVisibleItemIndex = 5),
+                radioStations = fixture.radioStations,
+                homeSections = listOf(HomeSection.Played, HomeSection.Random),
+                listState = rememberLazyListState(),
                 modifier = Modifier.fillMaxSize(),
-                onTrack = {},
                 onArtist = {},
                 onAlbum = {},
+                onPlaylist = {},
                 onRecentSongs = {},
                 onRecentArtists = {},
                 onRecentAlbums = {},
+                onFavoritePlaylists = {},
+                onFavoriteArtists = {},
+                onFavoriteAlbums = {},
                 onCollections = {},
                 onRecentlyPlayed = {},
                 onMostPlayed = {},
@@ -513,6 +587,9 @@ internal fun PhoebeMobileScreenshotScenario(
                 onRecentSongs = {},
                 onRecentArtists = {},
                 onRecentAlbums = {},
+                onFavoritePlaylists = {},
+                onFavoriteArtists = {},
+                onFavoriteAlbums = {},
                 onCollections = {},
                 onRecentlyPlayed = {},
                 onMostPlayed = {},
@@ -529,6 +606,9 @@ internal fun PhoebeMobileScreenshotScenario(
                 onLibrarySortBy = {},
                 onLibraryAscending = {},
                 onLibraryColumns = {},
+                onHomeSections = {},
+                onExportFavoritePlaylists = {},
+                onImportFavoritePlaylists = {},
                 downloadDirectory = null,
                 downloadCount = fixture.catalog.downloads.size,
                 defaultDownloadDirectoryLabel = "App storage",
@@ -536,6 +616,7 @@ internal fun PhoebeMobileScreenshotScenario(
                 onDeleteAllDownloads = {},
                 useLightAppearance = false,
                 onUseLightAppearanceChange = {},
+                radioStations = fixture.radioStations,
             )
         }
     }
@@ -543,6 +624,7 @@ internal fun PhoebeMobileScreenshotScenario(
 
 internal data class PhoebeScreenshotFixtureData(
     val catalog: CatalogSnapshot,
+    val radioStations: List<PlexRadioStation>,
     val session: PlexSession,
     val mediaSources: MediaSourcesState,
     val libraryUi: LibraryUiPreferences,
@@ -559,11 +641,11 @@ internal data class PhoebeScreenshotFixtureData(
 
 internal val PhoebeScreenshotFixture = run {
     val nowMs = 1_800_000_000_000L
-    val artist = Artist(id = "plex:artist-luna", title = "Luna North", albumCount = 3, songCount = 8, dateAddedMs = nowMs - 86_400_000L, rating = 4.5f)
-    val secondArtist = Artist(id = "artist-echo", title = "Echo Harbor", albumCount = 2, songCount = 6, dateAddedMs = nowMs - 172_800_000L)
+    val artist = Artist(id = "plex:artist-luna", title = "Luna North", albumCount = 3, songCount = 8, dateAddedMs = nowMs - 86_400_000L, rating = 4.5f, favorite = true)
+    val secondArtist = Artist(id = "artist-echo", title = "Echo Harbor", albumCount = 2, songCount = 6, dateAddedMs = nowMs - 172_800_000L, favorite = true)
     val thirdArtist = Artist(id = "artist-marrow", title = "Marrow & Pines", albumCount = 1, songCount = 4, dateAddedMs = nowMs - 259_200_000L)
-    val album = Album(id = "plex:album-moonlit", title = "Moonlit Signals", artist = artist.title, year = 2026, dateAddedMs = nowMs - 86_400_000L, rating = 3.5f)
-    val secondAlbum = Album(id = "album-velvet", title = "Velvet Transit", artist = artist.title, year = 2024, dateAddedMs = nowMs - 172_800_000L)
+    val album = Album(id = "plex:album-moonlit", title = "Moonlit Signals", artist = artist.title, year = 2026, dateAddedMs = nowMs - 86_400_000L, rating = 3.5f, favorite = true)
+    val secondAlbum = Album(id = "album-velvet", title = "Velvet Transit", artist = artist.title, year = 2024, dateAddedMs = nowMs - 172_800_000L, favorite = true)
     val thirdAlbum = Album(id = "album-harbor", title = "Harbor Static", artist = secondArtist.title, year = 2025, dateAddedMs = nowMs - 259_200_000L)
     val fourthAlbum = Album(id = "album-field", title = "Field Notes", artist = thirdArtist.title, year = 2023, dateAddedMs = nowMs - 345_600_000L)
     val tracks = listOf(
@@ -575,8 +657,8 @@ internal val PhoebeScreenshotFixture = run {
         Track("plex:track-quartet", "Quartz Quartet", secondArtist.title, thirdAlbum.title, 198_000L, "https://stream.example/quartet", "https://download.example/quartet", year = 2025, genre = "Indie", filepath = "/music/Echo Harbor/Harbor Static/02 Quartz Quartet.mp3", audioCodec = "MP3", bitrateKbps = 320, dateAddedMs = nowMs - 266_200_000L),
         Track("local:track-field", "Field Recording No. 7", thirdArtist.title, fourthAlbum.title, 314_000L, "file:///field", "", localUri = "file:///Users/music/Field Notes/field-7.flac", year = 2023, genre = "Ambient", filepath = "/Users/music/Field Notes/field-7.flac", audioCodec = "FLAC", bitrateKbps = 773, dateAddedMs = nowMs - 345_600_000L),
     )
-    val playlist = Playlist(id = "plex:playlist-night", title = "Night Drive Mix", trackCount = 5, rating = 4f)
-    val secondPlaylist = Playlist(id = "plex:playlist-focus", title = "Focus Room", trackCount = 4)
+    val playlist = Playlist(id = "plex:playlist-night", title = "Night Drive Mix", trackCount = 5, rating = 4f, favorite = true)
+    val secondPlaylist = Playlist(id = "plex:playlist-focus", title = "Focus Room", trackCount = 4, favorite = true)
     val likedPlaylist = Playlist(id = "plex:playlist-liked", title = "Liked Songs", trackCount = 1)
     val server = PlexServer(
         id = "server-atlas",
@@ -586,7 +668,9 @@ internal val PhoebeScreenshotFixture = run {
         accessToken = "server-token",
     )
     val library = MusicLibrary(key = "42", title = "Music")
+    val radioStations = defaultPlexRadioStations(library)
     PhoebeScreenshotFixtureData(
+        radioStations = radioStations,
         catalog = CatalogSnapshot(
             artists = listOf(artist, secondArtist, thirdArtist),
             albums = listOf(album, secondAlbum, thirdAlbum, fourthAlbum),
@@ -644,6 +728,11 @@ internal val PhoebeScreenshotFixture = run {
             byAlbum = mapOf(album.title to nowMs - 3_600_000L, thirdAlbum.title to nowMs - 172_800_000L),
             byTrack = mapOf(tracks[1].id to nowMs - 60_000L, tracks[0].id to nowMs - 3_600_000L, tracks[4].id to nowMs - 86_400_000L, tracks[2].id to nowMs - 92_000_000L),
             playCountByTrack = mapOf(tracks[1].id to 1284L, tracks[0].id to 982L, tracks[4].id to 876L, tracks[2].id to 741L, tracks[3].id to 695L),
+            playEventsByTrack = mapOf(
+                tracks[1].id to listOf(nowMs - 60_000L, nowMs - 120_000L, nowMs - 180_000L),
+                tracks[0].id to listOf(nowMs - 3_600_000L, nowMs - 3_660_000L),
+                tracks[2].id to listOf(nowMs - 92_000_000L, nowMs - 92_060_000L),
+            ),
         ),
         servers = listOf(server),
         libraries = listOf(library),

@@ -20,9 +20,14 @@ class PhoebeDesktopScreenshotTest {
     fun desktopCoreFlowsDark() = runDesktopComposeUiTest(width = 1365, height = 900) {
         listOf(
             PhoebeScreenshotScenario.Home,
+            PhoebeScreenshotScenario.HomePlayedRows,
+            PhoebeScreenshotScenario.FavoritePlaylists,
+            PhoebeScreenshotScenario.FavoriteArtists,
+            PhoebeScreenshotScenario.FavoriteAlbums,
             PhoebeScreenshotScenario.Library,
             PhoebeScreenshotScenario.Playlist,
             PhoebeScreenshotScenario.Artist,
+            PhoebeScreenshotScenario.ArtistRadio,
             PhoebeScreenshotScenario.Album,
             PhoebeScreenshotScenario.Search,
             PhoebeScreenshotScenario.Player,

@@ -139,6 +139,8 @@ import com.phoebe.app.data.catalogTracksForArtist
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.AppScreen
 import com.phoebe.app.domain.Artist
+import com.phoebe.app.domain.ArtistRadioAvailability
+import com.phoebe.app.domain.HomeSection
 import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryUiPreferences
@@ -151,6 +153,7 @@ import com.phoebe.app.domain.MusicLibrary
 import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.Playlist
+import com.phoebe.app.domain.PlexRadioStation
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.isLocalMediaPlayback
@@ -216,6 +219,9 @@ internal fun DesktopPlayer(
     onRecentSongs: () -> Unit,
     onRecentArtists: () -> Unit,
     onRecentAlbums: () -> Unit,
+    onFavoritePlaylists: () -> Unit = {},
+    onFavoriteArtists: () -> Unit = {},
+    onFavoriteAlbums: () -> Unit = {},
     onRecentlyPlayed: () -> Unit,
     onMostPlayed: () -> Unit,
     onCollections: (CollectionEntry) -> Unit,
@@ -227,6 +233,8 @@ internal fun DesktopPlayer(
     onPlayDecadeMix: (Int) -> Unit = {},
     decadeMixNotice: String? = null,
     onClearDecadeMixNotice: () -> Unit = {},
+    radioStations: List<PlexRadioStation> = emptyList(),
+    onPlayRadioStation: (PlexRadioStation) -> Unit = {},
     onPopDetail: () -> Unit,
     onToggle: () -> Unit,
     onPrevious: () -> Unit,
@@ -245,6 +253,10 @@ internal fun DesktopPlayer(
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
     onDownloadArtist: (Artist) -> Unit,
+    artistRadioAvailability: Map<String, ArtistRadioAvailability> = emptyMap(),
+    radioStartingIds: Set<String> = emptySet(),
+    onProbeArtistRadio: (Artist) -> Unit = {},
+    onPlayArtistRadio: (Artist) -> Unit,
     onDownloadAlbum: (Album) -> Unit,
     onDownloadPlaylist: (Playlist) -> Unit,
     onStartSignIn: () -> Unit,
@@ -265,6 +277,9 @@ internal fun DesktopPlayer(
     onLibrarySortBy: (LibrarySortBy) -> Unit,
     onLibraryAscending: (Boolean) -> Unit,
     onLibraryColumns: (LibraryColumnVisibility) -> Unit,
+    onHomeSections: (List<HomeSection>) -> Unit,
+    onExportFavoritePlaylists: () -> Unit,
+    onImportFavoritePlaylists: () -> Unit,
     downloadDirectory: String?,
     downloadCount: Int,
     defaultDownloadDirectoryLabel: String,
@@ -374,6 +389,11 @@ internal fun DesktopPlayer(
                                         onAddToUpNext = onAddToUpNext,
                                         onDownload = onDownload,
                                         onDownloadArtist = onDownloadArtist,
+                                        artistRadioAvailability = artistRadioAvailability[targetScreen.artist.id],
+                                        artistRadioStarting = targetScreen.artist.id in radioStartingIds,
+                                        onProbeArtistRadio = onProbeArtistRadio,
+                                        onPlayArtistRadio = onPlayArtistRadio,
+                                        onArtist = onArtist,
                                         onLibraryColumns = onLibraryColumns,
                                     )
                                 }
@@ -465,6 +485,36 @@ internal fun DesktopPlayer(
                                         onDownload = onDownload,
                                     )
                                 }
+                                AppScreen.FavoritePlaylists -> FavoritePlaylistsDesktopView(
+                                    playlists = LocalPlaylistActions.current.playlists,
+                                    searchQuery = searchQuery,
+                                    onSearchQuery = onSearchQuery,
+                                    onPlaylist = onPlaylist,
+                                    onBack = onPopDetail,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                                AppScreen.FavoriteArtists -> FavoriteArtistsDesktopView(
+                                    catalog = catalog,
+                                    libraryUi = libraryUi,
+                                    searchQuery = searchQuery,
+                                    onSearchQuery = onSearchQuery,
+                                    onLibrarySortBy = onLibrarySortBy,
+                                    onLibraryAscending = onLibraryAscending,
+                                    onArtist = onArtist,
+                                    onBack = onPopDetail,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                                AppScreen.FavoriteAlbums -> FavoriteAlbumsDesktopView(
+                                    catalog = catalog,
+                                    libraryUi = libraryUi,
+                                    searchQuery = searchQuery,
+                                    onSearchQuery = onSearchQuery,
+                                    onLibrarySortBy = onLibrarySortBy,
+                                    onLibraryAscending = onLibraryAscending,
+                                    onAlbum = onAlbum,
+                                    onBack = onPopDetail,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
                                 else -> when {
                                     section == DesktopSection.Home && selectedPlaylistId == null -> {
                                         val homeListState = RetainedLazyListStates.remember("desktop-home")
@@ -477,9 +527,13 @@ internal fun DesktopPlayer(
                                         onTrack = onSong,
                                         onArtist = onArtist,
                                         onAlbum = onAlbum,
+                                        onPlaylist = onPlaylist,
                                         onRecentSongs = onRecentSongs,
                                         onRecentArtists = onRecentArtists,
                                         onRecentAlbums = onRecentAlbums,
+                                        onFavoritePlaylists = onFavoritePlaylists,
+                                        onFavoriteArtists = onFavoriteArtists,
+                                        onFavoriteAlbums = onFavoriteAlbums,
                                         onRecentlyPlayed = onRecentlyPlayed,
                                         onMostPlayed = onMostPlayed,
                                         onCollections = onCollections,
@@ -490,9 +544,13 @@ internal fun DesktopPlayer(
                                         onPlayDecadeMix = onPlayDecadeMix,
                                         decadeMixNotice = decadeMixNotice,
                                         onClearDecadeMixNotice = onClearDecadeMixNotice,
+                                        radioStations = radioStations,
+                                        radioStartingIds = radioStartingIds,
+                                        onPlayRadioStation = onPlayRadioStation,
                                         onPlayTracks = onPlayTracks,
                                         onAddToUpNext = onAddToUpNext,
                                         onDownload = onDownload,
+                                        homeSections = libraryUi.homeSections,
                                     )
                                     }
                                     section == DesktopSection.Search && selectedPlaylistId == null -> SearchDesktopView(
@@ -519,6 +577,10 @@ internal fun DesktopPlayer(
                                             onLibraryColumns = onLibraryColumns,
                                             onArtist = onArtist,
                                             onAlbum = onAlbum,
+                                            artistRadioAvailability = artistRadioAvailability,
+                                            radioStartingIds = radioStartingIds,
+                                            onProbeArtistRadio = onProbeArtistRadio,
+                                            onPlayArtistRadio = onPlayArtistRadio,
                                             onPlayTracks = onPlayTracks,
                                             searchQuery = searchQuery,
                                             onSearchQuery = onSearchQuery,
@@ -541,9 +603,13 @@ internal fun DesktopPlayer(
                                         onLightModeChange = onUseLightAppearanceChange,
                                         downloadDirectory = downloadDirectory,
                                         downloadCount = downloadCount,
+                                        libraryUi = libraryUi,
                                         defaultDownloadDirectoryLabel = defaultDownloadDirectoryLabel,
                                         onDownloadDirectory = onDownloadDirectory,
                                         onDeleteAllDownloads = onDeleteAllDownloads,
+                                        onHomeSections = onHomeSections,
+                                        onExportFavoritePlaylists = onExportFavoritePlaylists,
+                                        onImportFavoritePlaylists = onImportFavoritePlaylists,
                                         modifier = Modifier.fillMaxSize(),
                                     )
                                     else -> DesktopContent(
@@ -591,6 +657,8 @@ internal fun DesktopPlayer(
                                     onClearQueue = onClearQueue,
                                     onMoveUpNext = onMoveUpNext,
                                     onRemoveUpNext = onRemoveUpNext,
+                                    onOpenTrackDetail = onSong,
+                                    currentTrackClickOpensDetail = true,
                                 )
                             }
                         }
@@ -636,6 +704,9 @@ private fun AppScreen.hasDesktopSharedElements(): Boolean = when (this) {
     is AppScreen.ArtistDetail,
     is AppScreen.CollectionItems,
     is AppScreen.PlayHistory,
+    AppScreen.FavoritePlaylists,
+    AppScreen.FavoriteArtists,
+    AppScreen.FavoriteAlbums,
     is AppScreen.PlaylistDetail,
     is AppScreen.RecentlyAdded,
     is AppScreen.SongDetail,

@@ -75,4 +75,47 @@ class PlexPlaybackHistoryTest {
         assertEquals(1700000000000L, page.entries.single().viewedAtMs)
         assertEquals("t1", page.entries.single().ratingKey)
     }
+
+    @Test
+    fun playbackHistoryPageKeepsEntriesWithoutHistoryKey() = kotlinx.coroutines.test.runTest {
+        val engine = MockEngine {
+            respond(
+                content = """
+                    {
+                      "MediaContainer": {
+                        "size": 1,
+                        "Metadata": [
+                          {
+                            "ratingKey": "t1",
+                            "type": "track",
+                            "librarySectionID": 1,
+                            "title": "Song",
+                            "parentTitle": "Album",
+                            "grandparentTitle": "Artist",
+                            "lastViewedAt": 1700000000
+                          }
+                        ]
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, "application/json"),
+            )
+        }
+        val client = PlexClient(testHttpClient(engine))
+
+        val page = client.playbackHistoryPage(
+            server = PlexServer("server", "Plex", "https://plex.example:32400", owned = true),
+            token = "token",
+            library = MusicLibrary("1", "Music"),
+            minViewedAtMs = null,
+            start = 0,
+            size = 100,
+        )
+
+        assertEquals(1, page.entries.size)
+        assertEquals("plex:t1:1700000000", page.entries.single().historyKey)
+        assertEquals(1700000000000L, page.entries.single().viewedAtMs)
+        assertEquals("1", page.entries.single().librarySectionId)
+    }
 }

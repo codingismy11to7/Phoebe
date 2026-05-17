@@ -3,17 +3,24 @@ package com.phoebe.app.ui
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.CatalogSnapshot
+import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.Track
 import kotlin.random.Random
 
 internal const val RecentlyAddedWindowMs = 7L * 24L * 60L * 60L * 1000L
+internal const val HeavyRotationWindowMs = 14L * 24L * 60L * 60L * 1000L
+private const val HeavyRotationMinimumRecentPlays = 2L
 
 internal data class HomeUiState(
     val recentlyAddedTracks: List<Track> = emptyList(),
     val recentlyAddedArtists: List<Artist> = emptyList(),
     val recentlyAddedAlbums: List<Album> = emptyList(),
+    val heavyRotationTracks: List<HomePlayedTrack> = emptyList(),
     val recentlyPlayedTracks: List<HomePlayedTrack> = emptyList(),
     val mostPlayedTracks: List<HomePlayedTrack> = emptyList(),
+    val favoriteArtists: List<Artist> = emptyList(),
+    val favoriteAlbums: List<Album> = emptyList(),
+    val favoritePlaylists: List<Playlist> = emptyList(),
     val randomArtists: List<Artist> = emptyList(),
     val randomAlbums: List<Album> = emptyList(),
 )
@@ -68,16 +75,61 @@ internal fun deriveHomeUiState(
             tracksById[trackId]?.let { HomePlayedTrack(it, lastPlayedMs = playHistory.byTrack[trackId], playCount = count) }
         }
         .take(limit)
+    val heavyRotation = heavyRotationTracks(
+        playHistory = playHistory,
+        tracksById = tracksById,
+        nowMs = nowMs,
+        limit = limit,
+    )
 
     return HomeUiState(
         recentlyAddedTracks = recentTracks,
         recentlyAddedArtists = recentArtists,
         recentlyAddedAlbums = recentAlbums,
+        heavyRotationTracks = heavyRotation,
         recentlyPlayedTracks = recentlyPlayed,
         mostPlayedTracks = mostPlayed,
+        favoriteArtists = catalog.artists.filter { it.favorite }.sortedBy { it.title.lowercase() }.take(limit),
+        favoriteAlbums = catalog.albums.filter { it.favorite }.sortedBy { it.title.lowercase() }.take(limit),
+        favoritePlaylists = catalog.playlists.filter { it.favorite }.sortedBy { it.title.lowercase() }.take(limit),
         randomArtists = catalog.artists.shuffled(Random(randomArtistSeed)).take(limit),
         randomAlbums = catalog.albums.shuffled(Random(randomAlbumSeed)).take(limit),
     )
+}
+
+private fun heavyRotationTracks(
+    playHistory: PlayHistorySnapshot,
+    tracksById: Map<String, Track>,
+    nowMs: Long,
+    limit: Int,
+): List<HomePlayedTrack> {
+    val cutoffMs = nowMs - HeavyRotationWindowMs
+    val recentPlayCounts = if (playHistory.playEventsByTrack.isNotEmpty()) {
+        playHistory.playEventsByTrack.mapValues { (_, playedAt) ->
+            playedAt.count { it >= cutoffMs }.toLong()
+        }
+    } else {
+        playHistory.byTrack.mapValues { (trackId, lastPlayedAt) ->
+            if (lastPlayedAt >= cutoffMs) playHistory.playCountByTrack[trackId] ?: 1L else 0L
+        }
+    }
+    return recentPlayCounts.entries
+        .filter { it.value >= HeavyRotationMinimumRecentPlays }
+        .sortedWith(
+            compareByDescending<Map.Entry<String, Long>> { it.value }
+                .thenByDescending { playHistory.byTrack[it.key] ?: 0L }
+                .thenByDescending { playHistory.playCountByTrack[it.key] ?: 0L },
+        )
+        .mapNotNull { (trackId, recentCount) ->
+            tracksById[trackId]?.let { track ->
+                HomePlayedTrack(
+                    track = track,
+                    lastPlayedMs = playHistory.byTrack[trackId],
+                    playCount = recentCount,
+                )
+            }
+        }
+        .take(limit)
 }
 
 internal fun albumAddedByTitle(catalog: CatalogSnapshot): Map<String, Long> =
@@ -127,9 +179,10 @@ internal fun personalMix(catalog: CatalogSnapshot, state: HomeUiState, limit: In
     val tracks = allLoadedTracks(catalog)
     if (tracks.isEmpty()) return emptyList()
     val tracksById = tracks.associateBy { it.id }
+    val heavyRotation = state.heavyRotationTracks.mapNotNull { tracksById[it.track.id] }
     val recent = state.recentlyPlayedTracks.mapNotNull { tracksById[it.track.id] }
     val most = state.mostPlayedTracks.mapNotNull { tracksById[it.track.id] }
-    val seeds = (recent + most).distinctBy { it.id }
+    val seeds = (heavyRotation + recent + most).distinctBy { it.id }
     if (seeds.isEmpty()) return tracks.shuffled().take(limit)
 
     val seedArtists = seeds.map { it.artist.lowercase() }.toSet()
@@ -156,10 +209,11 @@ internal fun personalMix(catalog: CatalogSnapshot, state: HomeUiState, limit: In
                 }
             }
         }
-        addSlice(recent, (target * 35) / 100)
-        addSlice(most, (target * 30) / 100)
-        addSlice(similar, (target * 25) / 100)
+        addSlice(heavyRotation, (target * 25) / 100)
+        addSlice(recent, (target * 30) / 100)
+        addSlice(most, (target * 25) / 100)
+        addSlice(similar, (target * 15) / 100)
         addSlice(discovery, target - size)
         tracks.shuffled().forEach { if (size < target && none { existing -> existing.id == it.id }) add(it) }
-    }.shuffled()
+    }
 }

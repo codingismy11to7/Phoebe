@@ -75,6 +75,20 @@ class PlayHistoryRepository(
         }
         .stateIn(scope, SharingStarted.Eagerly, emptyMap())
 
+    val playEventsByTrack: StateFlow<Map<String, List<Long>>> = database.playHistoryQueries
+        .selectLatestPlayEventsByTrack()
+        .asFlow()
+        .mapToList(Dispatchers.Default)
+        .map { rows ->
+            buildMap {
+                for (row in rows) {
+                    val plays = getOrPut(row.track_id) { mutableListOf() }
+                    plays.add(row.played_at_ms)
+                }
+            }
+        }
+        .stateIn(scope, SharingStarted.Eagerly, emptyMap())
+
     /**
      * Eager warm-up. The aggregate flows are already subscribed via
      * `stateIn(Eagerly)`, so this exists only so callers can keep the same
@@ -154,6 +168,33 @@ class PlayHistoryRepository(
             }
             true
         }
+    }
+
+    suspend fun importPlexPlayCountFallback(
+        track: Track,
+        serverId: String,
+        lastPlayedAtMs: Long,
+        playCount: Long,
+        importedAtMs: Long,
+    ): Int {
+        val cappedCount = playCount.coerceIn(0L, 500L).toInt()
+        if (cappedCount <= 0) return 0
+        var imported = 0
+        repeat(cappedCount) { index ->
+            val playedAtMs = (lastPlayedAtMs - index).coerceAtLeast(0L)
+            if (importPlexPlay(
+                    track = track,
+                    serverId = serverId,
+                    historyKey = "plex-stats:$serverId:${track.id}:$index",
+                    playedAtMs = playedAtMs,
+                    importedAtMs = importedAtMs,
+                    mergeWindowMs = 0L,
+                )
+            ) {
+                imported += 1
+            }
+        }
+        return imported
     }
 
     /** Cancel background aggregate collectors. Call before closing the backing [SqlDriver] in tests. */

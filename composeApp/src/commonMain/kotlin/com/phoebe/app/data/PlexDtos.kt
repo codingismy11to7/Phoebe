@@ -58,8 +58,21 @@ data class PlexMediaContainer(
     val leafCountRequested: Int? = null,
     @SerialName("playQueueID") val playQueueId: Long? = null,
     @SerialName("playQueueSelectedItemID") val playQueueSelectedItemId: Long? = null,
+    @SerialName("Hub") val hubs: List<PlexHubDto> = emptyList(),
+    @SerialName("Stations") val stations: List<PlexStationDto> = emptyList(),
     @SerialName("Directory") val directories: List<PlexDirectoryDto> = emptyList(),
     @SerialName("Metadata") val metadata: List<PlexMetadataDto> = emptyList(),
+)
+
+@Serializable
+data class PlexHubDto(
+    val title: String? = null,
+    val type: String? = null,
+    val context: String? = null,
+    val hubIdentifier: String? = null,
+    val key: String? = null,
+    @SerialName("Directory") val directories: List<PlexStationDto> = emptyList(),
+    @SerialName("Metadata") val metadata: List<PlexStationDto> = emptyList(),
 )
 
 @Serializable
@@ -78,6 +91,8 @@ data class PlexDirectoryDto(
     @SerialName("Genre") val genreTags: List<PlexGenreTagDto>? = null,
     @SerialName("Mood") val moodTags: List<PlexGenreTagDto>? = null,
     @SerialName("Style") val styleTags: List<PlexGenreTagDto>? = null,
+    @SerialName("Collection") val collectionTags: List<PlexGenreTagDto>? = null,
+    @SerialName("Stations") val stations: List<PlexStationDto> = emptyList(),
 )
 
 @Serializable
@@ -87,7 +102,7 @@ data class PlexGenreTagDto(
 
 @Serializable
 data class PlexMetadataDto(
-    val ratingKey: String,
+    val ratingKey: String = "",
     val historyKey: String? = null,
     @SerialName("playlistItemID") val playlistItemId: Long? = null,
     @SerialName("playQueueItemID") val playQueueItemId: Long? = null,
@@ -95,6 +110,8 @@ data class PlexMetadataDto(
     val title: String,
     val type: String? = null,
     val viewedAt: Long? = null,
+    val lastViewedAt: Long? = null,
+    val viewCount: Long? = null,
     @Serializable(with = FlexibleStringSerializer::class)
     val librarySectionID: String? = null,
     @SerialName("parentRatingKey") val parentRatingKey: String? = null,
@@ -114,7 +131,20 @@ data class PlexMetadataDto(
     @SerialName("Genre") val genreTags: List<PlexGenreTagDto>? = null,
     @SerialName("Mood") val moodTags: List<PlexGenreTagDto>? = null,
     @SerialName("Style") val styleTags: List<PlexGenreTagDto>? = null,
+    @SerialName("Collection") val collectionTags: List<PlexGenreTagDto>? = null,
+    @SerialName("Stations") val stations: List<PlexStationDto> = emptyList(),
     @SerialName("Media") val media: List<PlexMediaDto> = emptyList(),
+)
+
+@Serializable
+data class PlexStationDto(
+    val ratingKey: String = "",
+    val key: String? = null,
+    val title: String,
+    val type: String? = null,
+    val summary: String? = null,
+    val thumb: String? = null,
+    val leafCount: Int? = null,
 )
 
 @Serializable

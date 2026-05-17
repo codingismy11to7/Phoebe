@@ -220,6 +220,9 @@ fun PhoebeRoot(
     val librariesLoading by state.librariesLoading.collectAsState()
     val message by state.message.collectAsState()
     val decadeMixNotice by state.decadeMixNotice.collectAsState()
+    val radioStations by state.radioStations.collectAsState()
+    val radioStartingIds by state.radioStartingIds.collectAsState()
+    val artistRadioAvailability by state.artistRadioAvailability.collectAsState()
     val downloadDirectory by state.downloadDirectory.collectAsState()
     val pin by state.pin.collectAsState()
     val servers by state.servers.collectAsState()
@@ -229,6 +232,7 @@ fun PhoebeRoot(
     val lastPlayedByAlbum by state.lastPlayedByAlbum.collectAsState()
     val lastPlayedByTrack by state.lastPlayedByTrack.collectAsState()
     val playCountsByTrack by state.playCountsByTrack.collectAsState()
+    val playEventsByTrack by state.playEventsByTrack.collectAsState()
     var browseSection by remember { mutableStateOf(DesktopSection.Home) }
     var selectedPlaylistId by remember { mutableStateOf<String?>(null) }
     val exitPlaylistDetail: () -> Unit = {
@@ -265,6 +269,9 @@ fun PhoebeRoot(
         is AppScreen.CollectionItems -> "collection-items:${currentScreen.entry}:${currentScreen.value}"
         is AppScreen.RecentlyAdded -> "recently-added:${currentScreen.kind}"
         is AppScreen.PlayHistory -> "play-history:${currentScreen.kind}"
+        AppScreen.FavoritePlaylists -> "favorite-playlists"
+        AppScreen.FavoriteArtists -> "favorite-artists"
+        AppScreen.FavoriteAlbums -> "favorite-albums"
         is AppScreen.PlaylistDetail -> "playlist:${currentScreen.playlist.id}"
         else -> "browse:$browseSection:${selectedPlaylistId.orEmpty()}"
     }
@@ -336,12 +343,13 @@ fun PhoebeRoot(
     val downloadStatus = remember(catalog.downloads) {
         DownloadStatusSnapshot(catalog.downloads.associateBy { it.trackId })
     }
-    val playHistory = remember(lastPlayedByArtist, lastPlayedByAlbum, lastPlayedByTrack, playCountsByTrack) {
+    val playHistory = remember(lastPlayedByArtist, lastPlayedByAlbum, lastPlayedByTrack, playCountsByTrack, playEventsByTrack) {
         PlayHistorySnapshot(
             byArtist = lastPlayedByArtist,
             byAlbum = lastPlayedByAlbum,
             byTrack = lastPlayedByTrack,
             playCountByTrack = playCountsByTrack,
+            playEventsByTrack = playEventsByTrack,
         )
     }
     var randomArtistSeed by remember { mutableStateOf(Random.nextInt()) }
@@ -373,7 +381,18 @@ fun PhoebeRoot(
     LaunchedEffect(screen, browseSection, catalog.albums, catalog.tracksByParent.keys, session?.selectedServer, nowMs) {
         if (screen == AppScreen.Home && browseSection == DesktopSection.Home) {
             state.warmRecentAlbumTracks(cutoffMs = nowMs - RecentlyAddedWindowMs, maxAlbums = 10)
+            }
+    }
+    LaunchedEffect(screen, browseSection, playHistory.byAlbum, catalog.albums, catalog.tracksByParent.keys, session?.selectedServer) {
+        if (screen == AppScreen.Home && browseSection == DesktopSection.Home) {
+            val playedAlbumTitles = playHistory.byAlbum.entries
+                .sortedByDescending { it.value }
+                .map { it.key }
+            state.warmPlayedAlbumTracks(playedAlbumTitles, maxAlbums = 10)
         }
+    }
+    LaunchedEffect(session?.selectedServer?.id, session?.selectedLibrary?.key) {
+        state.refreshRadioStations()
     }
     val openRecentSongs: () -> Unit = {
         selectedPlaylistId = null
@@ -399,6 +418,21 @@ fun PhoebeRoot(
         selectedPlaylistId = null
         browseSection = DesktopSection.Home
         state.open(AppScreen.PlayHistory(PlayHistoryKind.MostPlayed))
+    }
+    val openFavoritePlaylists: () -> Unit = {
+        selectedPlaylistId = null
+        browseSection = DesktopSection.Home
+        state.open(AppScreen.FavoritePlaylists)
+    }
+    val openFavoriteArtists: () -> Unit = {
+        selectedPlaylistId = null
+        browseSection = DesktopSection.Home
+        state.open(AppScreen.FavoriteArtists)
+    }
+    val openFavoriteAlbums: () -> Unit = {
+        selectedPlaylistId = null
+        browseSection = DesktopSection.Home
+        state.open(AppScreen.FavoriteAlbums)
     }
     val openCollections: (CollectionEntry) -> Unit = { entry ->
         selectedPlaylistId = null
@@ -488,6 +522,14 @@ fun PhoebeRoot(
             onRatePlaylist = { playlist, rating -> state.ratePlaylist(playlist, rating) },
         )
     }
+    val favoriteActions = remember(catalog, state) {
+        FavoriteActions(
+            catalog = catalog,
+            onToggleArtist = { artist -> state.toggleFavoriteArtist(artist) },
+            onToggleAlbum = { album -> state.toggleFavoriteAlbum(album) },
+            onTogglePlaylist = { playlist -> state.toggleFavoritePlaylist(playlist) },
+        )
+    }
     val trackNavigationActions = remember(catalog, state) {
         TrackNavigationActions(
             onOpenArtistForTrack = { track ->
@@ -528,6 +570,7 @@ fun PhoebeRoot(
         LocalNowMs provides nowMs,
         LocalPlaylistActions provides playlistActions,
         LocalLikeActions provides likeActions,
+        LocalFavoriteActions provides favoriteActions,
         LocalRatingActions provides ratingActions,
         LocalTrackNavigationActions provides trackNavigationActions,
         LocalMetadataEditorActions provides metadataEditorActions,
@@ -645,6 +688,11 @@ fun PhoebeRoot(
                         onAddToUpNext = state::addToUpNext,
                         onDownload = state::download,
                         onDownloadArtist = state::download,
+                        artistRadioAvailability = artistRadioAvailability[scr.artist.id],
+                        artistRadioStarting = scr.artist.id in radioStartingIds,
+                        onProbeArtistRadio = state::probeArtistRadio,
+                        onPlayArtistRadio = state::playArtistRadio,
+                        onArtist = { state.open(AppScreen.ArtistDetail(it)) },
                         onLibraryColumns = state::setLibraryColumns,
                     )
                     is AppScreen.AlbumDetail -> AlbumDetailPanel(
@@ -729,6 +777,37 @@ fun PhoebeRoot(
                         onAddToUpNext = state::addToUpNext,
                         onDownload = state::download,
                     )
+                    AppScreen.FavoritePlaylists -> FavoritePlaylistsMobileView(
+                        searchQuery = searchQuery,
+                        onSearchQuery = { searchQuery = it },
+                        modifier = Modifier.fillMaxSize(),
+                        onBack = state::popDetail,
+                        onPlaylist = { playlist ->
+                            selectedPlaylistId = playlist.id
+                            browseSection = DesktopSection.Playlists
+                            state.open(AppScreen.PlaylistDetail(playlist))
+                        },
+                    )
+                    AppScreen.FavoriteArtists -> FavoriteArtistsMobileView(
+                        catalog = catalog,
+                        libraryUi = libraryUi,
+                        modifier = Modifier.fillMaxSize(),
+                        onBack = state::popDetail,
+                        onLibrarySortBy = state::setLibrarySortBy,
+                        onLibraryAscending = state::setLibrarySortAscending,
+                        onLibraryColumns = state::setLibraryColumns,
+                        onArtist = { state.open(AppScreen.ArtistDetail(it)) },
+                    )
+                    AppScreen.FavoriteAlbums -> FavoriteAlbumsMobileView(
+                        catalog = catalog,
+                        libraryUi = libraryUi,
+                        modifier = Modifier.fillMaxSize(),
+                        onBack = state::popDetail,
+                        onLibrarySortBy = state::setLibrarySortBy,
+                        onLibraryAscending = state::setLibrarySortAscending,
+                        onLibraryColumns = state::setLibraryColumns,
+                        onAlbum = { state.open(AppScreen.AlbumDetail(it)) },
+                    )
                     is AppScreen.PlaylistDetail -> PlaylistDetailPanel(
                         playlist = scr.playlist,
                         catalog = catalog,
@@ -768,6 +847,7 @@ fun PhoebeRoot(
                         onPlayQueue = state::playUpNext,
                         onMoveUpNext = state::moveUpNext,
                         onRemoveUpNext = state::removeUpNext,
+                        onOpenSongDetail = { state.open(AppScreen.SongDetail(it)) },
                         onCast = state::showCastPicker,
                         onLyrics = {
                             currentTrack?.let { state.open(AppScreen.Lyrics(it)) }
@@ -807,6 +887,9 @@ fun PhoebeRoot(
                                 scopedScreen is AppScreen.CollectionItems ||
                                 scopedScreen is AppScreen.RecentlyAdded ||
                                 scopedScreen is AppScreen.PlayHistory ||
+                                scopedScreen is AppScreen.FavoritePlaylists ||
+                                scopedScreen is AppScreen.FavoriteArtists ||
+                                scopedScreen is AppScreen.FavoriteAlbums ||
                                 scopedScreen is AppScreen.PlaylistDetail ||
                                 selectedPlaylistId != null ||
                                 browseSection == DesktopSection.Library ||
@@ -828,6 +911,9 @@ fun PhoebeRoot(
                         onRecentSongs = openRecentSongs,
                         onRecentArtists = openRecentArtists,
                         onRecentAlbums = openRecentAlbums,
+                        onFavoritePlaylists = openFavoritePlaylists,
+                        onFavoriteArtists = openFavoriteArtists,
+                        onFavoriteAlbums = openFavoriteAlbums,
                         onRecentlyPlayed = openRecentlyPlayed,
                         onMostPlayed = openMostPlayed,
                         onCollections = openCollections,
@@ -838,6 +924,9 @@ fun PhoebeRoot(
                         onPlayDecadeMix = state::playDecadeMix,
                         decadeMixNotice = decadeMixNotice,
                         onClearDecadeMixNotice = state::clearDecadeMixNotice,
+                        radioStations = radioStations,
+                        radioStartingIds = radioStartingIds,
+                        onPlayRadioStation = state::playRadioStation,
                         onPlayTracks = { tracks, index ->
                             state.playTracks(tracks, index)
                             state.open(AppScreen.Player)
@@ -852,6 +941,9 @@ fun PhoebeRoot(
                         onLibrarySortBy = state::setLibrarySortBy,
                         onLibraryAscending = state::setLibrarySortAscending,
                         onLibraryColumns = state::setLibraryColumns,
+                        onHomeSections = state::setHomeSections,
+                        onExportFavoritePlaylists = state::exportFavoritePlaylists,
+                        onImportFavoritePlaylists = state::importFavoritePlaylists,
                         downloadDirectory = downloadDirectory,
                         downloadCount = catalog.downloads.size,
                         defaultDownloadDirectoryLabel = state.defaultDownloadDirectoryLabel,
@@ -914,6 +1006,9 @@ fun PhoebeRoot(
                             screen is AppScreen.CollectionItems ||
                             screen is AppScreen.RecentlyAdded ||
                             screen is AppScreen.PlayHistory ||
+                            screen is AppScreen.FavoritePlaylists ||
+                            screen is AppScreen.FavoriteArtists ||
+                            screen is AppScreen.FavoriteAlbums ||
                             screen is AppScreen.PlaylistDetail ||
                             selectedPlaylistId != null ||
                                 browseSection == DesktopSection.Library ||
@@ -936,6 +1031,9 @@ fun PhoebeRoot(
                     onRecentSongs = openRecentSongs,
                     onRecentArtists = openRecentArtists,
                     onRecentAlbums = openRecentAlbums,
+                    onFavoritePlaylists = openFavoritePlaylists,
+                    onFavoriteArtists = openFavoriteArtists,
+                    onFavoriteAlbums = openFavoriteAlbums,
                     onRecentlyPlayed = openRecentlyPlayed,
                     onMostPlayed = openMostPlayed,
                     onCollections = openCollections,
@@ -947,6 +1045,9 @@ fun PhoebeRoot(
                     onPlayDecadeMix = state::playDecadeMix,
                     decadeMixNotice = decadeMixNotice,
                     onClearDecadeMixNotice = state::clearDecadeMixNotice,
+                    radioStations = radioStations,
+                    radioStartingIds = radioStartingIds,
+                    onPlayRadioStation = state::playRadioStation,
                     onPopDetail = state::popDetail,
                     onToggle = state::togglePlayPause,
                     onPrevious = state::previous,
@@ -969,6 +1070,9 @@ fun PhoebeRoot(
                     onAddToUpNext = state::addToUpNext,
                     onDownload = state::download,
                     onDownloadArtist = state::download,
+                    artistRadioAvailability = artistRadioAvailability,
+                    onProbeArtistRadio = state::probeArtistRadio,
+                    onPlayArtistRadio = state::playArtistRadio,
                     onDownloadAlbum = state::download,
                     onDownloadPlaylist = state::download,
                     onStartSignIn = state::startPlexSignIn,
@@ -989,6 +1093,9 @@ fun PhoebeRoot(
                     onLibrarySortBy = state::setLibrarySortBy,
                     onLibraryAscending = state::setLibrarySortAscending,
                     onLibraryColumns = state::setLibraryColumns,
+                    onHomeSections = state::setHomeSections,
+                    onExportFavoritePlaylists = state::exportFavoritePlaylists,
+                    onImportFavoritePlaylists = state::importFavoritePlaylists,
                     downloadDirectory = downloadDirectory,
                     downloadCount = catalog.downloads.size,
                     defaultDownloadDirectoryLabel = state.defaultDownloadDirectoryLabel,
@@ -1080,6 +1187,9 @@ private fun catalogHasContentForSurface(
             catalog.albums.isNotEmpty() ||
             catalog.artists.isNotEmpty()
         is AppScreen.PlayHistory -> true
+        AppScreen.FavoritePlaylists -> catalog.playlists.any { it.favorite }
+        AppScreen.FavoriteArtists -> catalog.artists.any { it.favorite }
+        AppScreen.FavoriteAlbums -> catalog.albums.any { it.favorite }
         is AppScreen.Collections -> when (screen.entry.target) {
             CollectionTarget.Artists -> catalog.artists.isNotEmpty()
             CollectionTarget.Albums -> catalog.albums.isNotEmpty()

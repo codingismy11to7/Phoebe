@@ -59,9 +59,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -177,6 +179,9 @@ internal fun QueuePanel(
     onClearQueue: () -> Unit,
     onMoveUpNext: (Int, Int) -> Unit,
     onRemoveUpNext: (Int) -> Unit,
+    onOpenTrackDetail: (Track) -> Unit = {},
+    currentTrackClickOpensDetail: Boolean = false,
+    listState: LazyListState = rememberLazyListState(),
 ) {
     Column(modifier.padding(top = 132.dp, end = 36.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -208,6 +213,9 @@ internal fun QueuePanel(
                 onPlayQueue = onPlayQueue,
                 onMoveUpNext = onMoveUpNext,
                 onRemoveUpNext = onRemoveUpNext,
+                onOpenTrackDetail = onOpenTrackDetail,
+                currentTrackClickOpensDetail = currentTrackClickOpensDetail,
+                listState = listState,
                 modifier = Modifier.fillMaxWidth(),
             )
         }
@@ -247,6 +255,9 @@ internal fun UpNextList(
     onPlayQueue: (Int) -> Unit,
     onMoveUpNext: (Int, Int) -> Unit,
     onRemoveUpNext: (Int) -> Unit,
+    onOpenTrackDetail: (Track) -> Unit = {},
+    currentTrackClickOpensDetail: Boolean = false,
+    listState: LazyListState = rememberLazyListState(),
     modifier: Modifier = Modifier,
     thumbnail: Dp = 44.dp,
     rowHeight: Dp = 60.dp,
@@ -259,7 +270,7 @@ internal fun UpNextList(
     var dragTargetIndex by remember { mutableStateOf<Int?>(null) }
     var dragOffsetPx by remember { mutableStateOf(0f) }
 
-    LazyColumn(modifier = modifier, verticalArrangement = Arrangement.spacedBy(rowSpacing)) {
+    LazyColumn(state = listState, modifier = modifier, verticalArrangement = Arrangement.spacedBy(rowSpacing)) {
         if (currentTrack != null) {
             item(key = "now-playing-${currentTrack.id}", contentType = "now-playing") {
                 UpNextRow(
@@ -269,7 +280,12 @@ internal fun UpNextList(
                     thumbnail = thumbnail,
                     rowHeight = rowHeight,
                     dragHandle = null,
-                    onClick = { /* no-op, already playing */ },
+                    onClick = if (currentTrackClickOpensDetail) {
+                        { onOpenTrackDetail(currentTrack) }
+                    } else {
+                        { /* no-op, already playing */ }
+                    },
+                    detailAction = { onOpenTrackDetail(currentTrack) },
                 )
             }
         }
@@ -345,7 +361,7 @@ internal fun UpNextList(
                         }
                     },
                     onClick = { onPlayQueue(index) },
-                    onLongPress = { onRemoveUpNext(index) },
+                    onLongPress = { onOpenTrackDetail(track) },
                 )
             }
         }
@@ -388,6 +404,7 @@ internal fun UpNextRow(
     dragHandle: (@Composable () -> Unit)?,
     onClick: () -> Unit,
     onLongPress: (() -> Unit)? = null,
+    detailAction: (() -> Unit)? = null,
 ) {
     Row(
         modifier = Modifier
@@ -464,6 +481,17 @@ internal fun UpNextRow(
         )
         if (dragHandle != null) {
             dragHandle()
+        } else if (detailAction != null) {
+            Box(
+                Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(onClick = detailAction)
+                    .semantics { contentDescription = "Open song details for ${track.title}" },
+                contentAlignment = Alignment.Center,
+            ) {
+                PhoebeIconView(PhoebeIcon.ChevronRight, tint = PhoebeUi.secondaryText, modifier = Modifier.size(18.dp))
+            }
         } else {
             Spacer(Modifier.width(36.dp))
         }

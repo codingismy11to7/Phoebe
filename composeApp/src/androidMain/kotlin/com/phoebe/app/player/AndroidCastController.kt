@@ -14,6 +14,7 @@ import com.google.android.gms.cast.framework.media.RemoteMediaClient
 import com.google.android.gms.common.api.ResultCallback
 import com.phoebe.app.AndroidContextHolder
 import com.phoebe.app.domain.Track
+import com.phoebe.app.platform.PhoebeLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -178,7 +179,6 @@ private class AndroidCastController : CastController {
                 .setCurrentTime(positionMs)
                 .build(),
         )
-        suspendLocalPlayback()
         pendingResult.setResultCallback(
             ResultCallback { result ->
                 scope.launch {
@@ -273,7 +273,6 @@ private class AndroidCastController : CastController {
     private fun connect(session: CastSession) {
         ensurePlaybackServiceRunning()
         session.remoteMediaClient?.registerCallback(remoteMediaClientListener)
-        suspendLocalPlayback()
         mutableState.update {
             it.copy(
                 isAvailable = true,
@@ -403,6 +402,9 @@ private class AndroidCastController : CastController {
         if (status.isSuccess && mediaError == null) {
             onCastLoadSucceeded(requestId)
         } else {
+            PhoebeLog.d("AndroidCastController") {
+                "cast load failed status=${status.statusCode} mediaError=${mediaError?.detailedErrorCode}"
+            }
             val message = mediaError?.detailedErrorCode?.let { code ->
                 "Couldn't load on Chromecast (error $code). Playing on this device."
             } ?: "Couldn't load on Chromecast. Playing on this device."
@@ -413,6 +415,7 @@ private class AndroidCastController : CastController {
     private fun onCastLoadSucceeded(requestId: Long) {
         if (pendingHandoff?.requestId != requestId) return
         pendingHandoff = null
+        suspendLocalPlayback()
         syncRemotePlayback()
     }
 
@@ -455,17 +458,65 @@ private class AndroidCastController : CastController {
             putString(MediaMetadata.KEY_ALBUM_TITLE, album)
             thumbUrl?.let { addImage(com.google.android.gms.common.images.WebImage(android.net.Uri.parse(it))) }
         }
-        return MediaInfo.Builder(streamUrl)
+        val mediaUrl = chromecastMediaUrl()
+        val contentType = chromecastContentType(mediaUrl)
+        PhoebeLog.d("AndroidCastController") {
+            "loading cast media id=$id codec=$audioCodec contentType=$contentType transcode=${mediaUrl != streamUrl}"
+        }
+        return MediaInfo.Builder(mediaUrl)
             .setStreamType(MediaInfo.STREAM_TYPE_BUFFERED)
-            .setContentType(chromecastContentType())
+            .setContentType(contentType)
             .setMetadata(metadata)
             .setStreamDuration(durationMs)
             .build()
     }
 
-    private fun Track.chromecastContentType(): String =
+    private fun Track.chromecastMediaUrl(): String {
+        if (hasChromecastDirectPlayableCodec()) return streamUrl
+        val ratingKey = id.removePrefix("plex:").takeIf { id.startsWith("plex:") && it.isNotBlank() }
+            ?: return streamUrl
+        val uri = android.net.Uri.parse(streamUrl)
+        val token = uri.getQueryParameter("X-Plex-Token").orEmpty()
+        if (uri.scheme.isNullOrBlank() || uri.authority.isNullOrBlank() || token.isBlank()) return streamUrl
+        return uri.buildUpon()
+            .encodedPath("/music/:/transcode/universal/start.mp3")
+            .clearQuery()
+            .appendQueryParameter("path", "/library/metadata/$ratingKey")
+            .appendQueryParameter("mediaIndex", "0")
+            .appendQueryParameter("partIndex", "0")
+            .appendQueryParameter("protocol", "http")
+            .appendQueryParameter("format", "mp3")
+            .appendQueryParameter("audioCodec", "mp3")
+            .appendQueryParameter("directPlay", "0")
+            .appendQueryParameter("directStream", "0")
+            .appendQueryParameter("X-Plex-Token", token)
+            .build()
+            .toString()
+    }
+
+    private fun Track.hasChromecastDirectPlayableCodec(): Boolean =
+        when (audioCodec?.lowercase()) {
+            "aac", "mp3", "mp4", "m4a" -> true
+            else -> {
+                val path = filepath ?: streamUrl.substringBefore('?').substringBefore('#')
+                when (path.substringAfterLast('.', missingDelimiterValue = "").lowercase()) {
+                    "aac", "mp3", "m4a", "mp4" -> true
+                    else -> false
+                }
+            }
+        }
+
+    private fun Track.chromecastContentType(mediaUrl: String): String =
+        if (mediaUrl != streamUrl) {
+            "audio/mpeg"
+        } else {
+            chromecastDirectContentType()
+        }
+
+    private fun Track.chromecastDirectContentType(): String =
         when (audioCodec?.lowercase()) {
             "aac" -> "audio/aac"
+            "mp3" -> "audio/mpeg"
             "alac", "m4a", "mp4" -> "audio/mp4"
             "flac" -> "audio/flac"
             "ogg", "opus", "vorbis" -> "audio/ogg"

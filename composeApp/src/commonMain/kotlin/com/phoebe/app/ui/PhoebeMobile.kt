@@ -65,6 +65,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -147,6 +148,8 @@ import com.phoebe.app.data.catalogTracksForArtist
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.AppScreen
 import com.phoebe.app.domain.Artist
+import com.phoebe.app.domain.ArtistRadioAvailability
+import com.phoebe.app.domain.HomeSection
 import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryUiPreferences
@@ -158,6 +161,7 @@ import com.phoebe.app.domain.MusicLibrary
 import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.Playlist
+import com.phoebe.app.domain.PlexRadioStation
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
 import com.phoebe.app.player.CastState
@@ -396,6 +400,9 @@ internal fun MobileBrowseShell(
     onRecentSongs: () -> Unit,
     onRecentArtists: () -> Unit,
     onRecentAlbums: () -> Unit,
+    onFavoritePlaylists: () -> Unit,
+    onFavoriteArtists: () -> Unit,
+    onFavoriteAlbums: () -> Unit,
     onRecentlyPlayed: () -> Unit,
     onMostPlayed: () -> Unit,
     onCollections: (CollectionEntry) -> Unit,
@@ -406,9 +413,15 @@ internal fun MobileBrowseShell(
     onPlayDecadeMix: (Int) -> Unit = {},
     decadeMixNotice: String? = null,
     onClearDecadeMixNotice: () -> Unit = {},
+    radioStations: List<PlexRadioStation> = emptyList(),
+    radioStartingIds: Set<String> = emptySet(),
+    onPlayRadioStation: (PlexRadioStation) -> Unit = {},
     onPlayTracks: (List<Track>, Int) -> Unit,
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
+    artistRadioAvailability: Map<String, ArtistRadioAvailability> = emptyMap(),
+    onProbeArtistRadio: (Artist) -> Unit = {},
+    onPlayArtistRadio: (Artist) -> Unit = {},
     onOpenNowPlaying: () -> Unit,
     onTogglePlayPause: () -> Unit,
     onSignOut: () -> Unit,
@@ -417,6 +430,9 @@ internal fun MobileBrowseShell(
     onLibrarySortBy: (LibrarySortBy) -> Unit,
     onLibraryAscending: (Boolean) -> Unit,
     onLibraryColumns: (LibraryColumnVisibility) -> Unit,
+    onHomeSections: (List<HomeSection>) -> Unit,
+    onExportFavoritePlaylists: () -> Unit,
+    onImportFavoritePlaylists: () -> Unit,
     downloadDirectory: String?,
     downloadCount: Int,
     defaultDownloadDirectoryLabel: String,
@@ -510,9 +526,13 @@ internal fun MobileBrowseShell(
                     onLightModeChange = onUseLightAppearanceChange,
                     downloadDirectory = downloadDirectory,
                     downloadCount = downloadCount,
+                    libraryUi = libraryUi,
                     defaultDownloadDirectoryLabel = defaultDownloadDirectoryLabel,
                     onDownloadDirectory = onDownloadDirectory,
                     onDeleteAllDownloads = onDeleteAllDownloads,
+                    onHomeSections = onHomeSections,
+                    onExportFavoritePlaylists = onExportFavoritePlaylists,
+                    onImportFavoritePlaylists = onImportFavoritePlaylists,
                     modifier = Modifier.fillMaxSize(),
                 )
                 section == DesktopSection.Home && selectedPlaylistId == null -> {
@@ -523,12 +543,15 @@ internal fun MobileBrowseShell(
                     catalogRefreshing = catalogRefreshing,
                     listState = homeListState,
                     modifier = Modifier.fillMaxSize(),
-                    onTrack = onSong,
                     onArtist = onArtist,
                     onAlbum = onAlbum,
+                    onPlaylist = onPlaylist,
                     onRecentSongs = onRecentSongs,
                     onRecentArtists = onRecentArtists,
                     onRecentAlbums = onRecentAlbums,
+                    onFavoritePlaylists = onFavoritePlaylists,
+                    onFavoriteArtists = onFavoriteArtists,
+                    onFavoriteAlbums = onFavoriteAlbums,
                     onCollections = onCollections,
                     onRecentlyPlayed = onRecentlyPlayed,
                     onMostPlayed = onMostPlayed,
@@ -539,9 +562,13 @@ internal fun MobileBrowseShell(
                     onPlayDecadeMix = onPlayDecadeMix,
                     decadeMixNotice = decadeMixNotice,
                     onClearDecadeMixNotice = onClearDecadeMixNotice,
+                    radioStations = radioStations,
+                    radioStartingIds = radioStartingIds,
+                    onPlayRadioStation = onPlayRadioStation,
                     onPlayTracks = onPlayTracks,
                     onAddToUpNext = onAddToUpNext,
                     onDownload = onDownload,
+                    homeSections = libraryUi.homeSections,
                 )
                 }
                 section == DesktopSection.Library && selectedPlaylistId == null -> LibraryMobileView(
@@ -807,6 +834,29 @@ internal fun SwipeableMobileArtwork(
 }
 
 @Composable
+private fun rememberRetainedMobilePlayerUpNextSheetState(
+    key: String,
+    initiallyExpanded: Boolean,
+): MobilePlayerUpNextSheetState =
+    remember(key) {
+        RetainedMobilePlayerUpNextSheetStates.getOrPut(
+            key = key,
+            initiallyExpanded = initiallyExpanded,
+        )
+    }
+
+private object RetainedMobilePlayerUpNextSheetStates {
+    private val cache = mutableMapOf<String, MobilePlayerUpNextSheetState>()
+
+    fun getOrPut(key: String, initiallyExpanded: Boolean): MobilePlayerUpNextSheetState =
+        cache.getOrPut(key) { MobilePlayerUpNextSheetState(if (initiallyExpanded) 1f else 0f) }
+}
+
+private class MobilePlayerUpNextSheetState(initialProgress: Float) {
+    var progress by mutableFloatStateOf(initialProgress.coerceIn(0f, 1f))
+}
+
+@Composable
 internal fun MobilePlayer(
     track: Track?,
     upNext: List<Track>,
@@ -828,6 +878,7 @@ internal fun MobilePlayer(
     onPlayQueue: (Int) -> Unit,
     onMoveUpNext: (Int, Int) -> Unit,
     onRemoveUpNext: (Int) -> Unit,
+    onOpenSongDetail: (Track) -> Unit = {},
     onCast: () -> Unit = {},
     onLyrics: () -> Unit = {},
     onBack: () -> Unit,
@@ -836,6 +887,11 @@ internal fun MobilePlayer(
 ) {
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
+    val retainedSheetState = rememberRetainedMobilePlayerUpNextSheetState(
+        key = "mobile-player-up-next-sheet",
+        initiallyExpanded = initialUpNextExpanded,
+    )
+    val upNextListState = RetainedLazyListStates.remember("mobile-player-up-next-list")
     var dragOffset by remember { mutableFloatStateOf(0f) }
     var isDraggingDismiss by remember { mutableStateOf(false) }
     var dismissing by remember { mutableStateOf(false) }
@@ -883,27 +939,34 @@ internal fun MobilePlayer(
                 (maxHeight.toPx() - controlsPx - headerPx)
                     .coerceAtLeast(collapsedSheetHeightPx + 80.dp.toPx())
             }
-            val sheetHeight = remember(expandedSheetHeightPx, initialUpNextExpanded) {
-                Animatable(
-                    if (initialUpNextExpanded) expandedSheetHeightPx else collapsedSheetHeightPx,
-                )
+            val sheetRangePx = (expandedSheetHeightPx - collapsedSheetHeightPx).coerceAtLeast(1f)
+            fun progressForHeight(heightPx: Float): Float =
+                ((heightPx - collapsedSheetHeightPx) / sheetRangePx).coerceIn(0f, 1f)
+
+            fun heightForProgress(progress: Float): Float =
+                collapsedSheetHeightPx + sheetRangePx * progress.coerceIn(0f, 1f)
+
+            val sheetHeight = remember(expandedSheetHeightPx, collapsedSheetHeightPx) {
+                Animatable(heightForProgress(retainedSheetState.progress))
+            }
+            LaunchedEffect(expandedSheetHeightPx, collapsedSheetHeightPx) {
+                sheetHeight.snapTo(heightForProgress(retainedSheetState.progress))
             }
             var isDraggingSheet by remember { mutableStateOf(false) }
             var dragSheetHeightPx by remember { mutableFloatStateOf(collapsedSheetHeightPx) }
             val displayedSheetHeightPx = if (isDraggingSheet) dragSheetHeightPx else sheetHeight.value
-            val sheetRangePx = (expandedSheetHeightPx - collapsedSheetHeightPx).coerceAtLeast(1f)
-            val sheetProgress = ((displayedSheetHeightPx - collapsedSheetHeightPx) / sheetRangePx)
-                .coerceIn(0f, 1f)
+            val sheetProgress = progressForHeight(displayedSheetHeightPx)
             val sheetExpanded = sheetProgress > 0.35f
 
             fun snapSheetHeight(currentPx: Float, velocityPxPerSec: Float) {
-                val progress = ((currentPx - collapsedSheetHeightPx) / sheetRangePx).coerceIn(0f, 1f)
+                val progress = progressForHeight(currentPx)
                 val target = when {
                     velocityPxPerSec < -250f -> expandedSheetHeightPx
                     velocityPxPerSec > 250f -> collapsedSheetHeightPx
                     progress >= 0.35f -> expandedSheetHeightPx
                     else -> collapsedSheetHeightPx
                 }
+                retainedSheetState.progress = progressForHeight(target)
                 scope.launch {
                     sheetHeight.snapTo(currentPx)
                     isDraggingSheet = false
@@ -919,6 +982,7 @@ internal fun MobilePlayer(
 
             fun snapSheet(expanded: Boolean) {
                 val target = if (expanded) expandedSheetHeightPx else collapsedSheetHeightPx
+                retainedSheetState.progress = if (expanded) 1f else 0f
                 scope.launch {
                     if (isDraggingSheet) {
                         sheetHeight.snapTo(dragSheetHeightPx)
@@ -1094,6 +1158,7 @@ internal fun MobilePlayer(
                     onSheetDrag = { dragAmountPx ->
                         dragSheetHeightPx = (dragSheetHeightPx - dragAmountPx)
                             .coerceIn(collapsedSheetHeightPx, expandedSheetHeightPx)
+                        retainedSheetState.progress = progressForHeight(dragSheetHeightPx)
                     },
                     onSheetDragStart = {
                         isDraggingSheet = true
@@ -1109,6 +1174,8 @@ internal fun MobilePlayer(
                     onPlayQueue = onPlayQueue,
                     onMoveUpNext = onMoveUpNext,
                     onRemoveUpNext = onRemoveUpNext,
+                    onOpenTrackDetail = onOpenSongDetail,
+                    listState = upNextListState,
                 )
             }
         }
@@ -1132,6 +1199,8 @@ internal fun MobileQueueSheet(
     onPlayQueue: (Int) -> Unit,
     onMoveUpNext: (Int, Int) -> Unit,
     onRemoveUpNext: (Int) -> Unit,
+    onOpenTrackDetail: (Track) -> Unit = {},
+    listState: LazyListState = RetainedLazyListStates.remember("mobile-player-up-next-list"),
 ) {
     val handleWidth by animateFloatAsState(
         targetValue = when {
@@ -1262,6 +1331,8 @@ internal fun MobileQueueSheet(
                     onPlayQueue = onPlayQueue,
                     onMoveUpNext = onMoveUpNext,
                     onRemoveUpNext = onRemoveUpNext,
+                    onOpenTrackDetail = onOpenTrackDetail,
+                    listState = listState,
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()

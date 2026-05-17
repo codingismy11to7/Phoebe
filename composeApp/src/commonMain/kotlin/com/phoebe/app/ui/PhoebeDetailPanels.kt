@@ -138,6 +138,7 @@ import com.phoebe.app.data.catalogTracksForArtist
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.AppScreen
 import com.phoebe.app.domain.Artist
+import com.phoebe.app.domain.ArtistRadioAvailability
 import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryUiPreferences
@@ -705,6 +706,11 @@ internal fun ArtistDetailPanel(
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
     onDownloadArtist: (Artist) -> Unit,
+    artistRadioAvailability: ArtistRadioAvailability? = null,
+    artistRadioStarting: Boolean = false,
+    onProbeArtistRadio: (Artist) -> Unit = {},
+    onPlayArtistRadio: (Artist) -> Unit,
+    onArtist: (Artist) -> Unit,
     onLibraryColumns: (LibraryColumnVisibility) -> Unit,
 ) {
     val albums = remember(catalog.albums, artist.title) { catalogAlbumsForArtist(catalog, artist.title) }
@@ -734,13 +740,21 @@ internal fun ArtistDetailPanel(
     val visibleTracks = remember(sortedTracks, searchQuery) {
         filterTracksByQuery(sortedTracks, searchQuery)
     }
+    val similarArtists = remember(catalog, artist.id, artist.title) {
+        similarArtistsFor(catalog, artist).take(10)
+    }
     val nowPlaying = LocalNowPlaying.current
     val ratingActions = LocalRatingActions.current
+    val favoriteActions = LocalFavoriteActions.current
+    LaunchedEffect(artist.id) {
+        if (artist.id.startsWith("plex:")) onProbeArtistRadio(artist)
+    }
 
     BoxWithConstraints(modifier.fillMaxSize()) {
         val useTable = maxWidth >= 640.dp
         val edgePadding = if (maxWidth < 640.dp) 20.dp else 36.dp
         val topPadding = if (maxWidth < 640.dp) 16.dp else 36.dp
+        val bottomContentPadding = if (useTable) 24.dp else 144.dp
         val albumGridColumns = remember(maxWidth) {
             val minCardWidth = 160.dp
             val gap = 14.dp
@@ -752,7 +766,8 @@ internal fun ArtistDetailPanel(
         val listState = RetainedLazyListStates.remember("artist-detail:${artist.id}")
     LazyColumn(
         state = listState,
-        modifier = Modifier.fillMaxSize().padding(start = edgePadding, end = edgePadding, top = topPadding, bottom = 24.dp),
+        modifier = Modifier.fillMaxSize().padding(start = edgePadding, end = edgePadding, top = topPadding),
+        contentPadding = PaddingValues(bottom = bottomContentPadding),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item(contentType = "artist-header") {
@@ -772,17 +787,34 @@ internal fun ArtistDetailPanel(
                     modifier = Modifier.sharedBoundsTransition("artist:${artist.id}:title"),
                 )
                 Text("${albums.size} $albumWord · ${tracks.size} $songWord", color = PhoebeUi.secondaryText, fontSize = 14.sp)
-                if (ratingActions.ratingsEnabled && artist.id.startsWith("plex:")) {
-                    RatingStars(
-                        rating = ratingActions.ratingFor(artist),
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    LikeButton(
+                        liked = favoriteActions.isFavorite(artist),
                         enabled = true,
-                        onRating = { ratingActions.onRateArtist(artist, it) },
-                        starSize = 16.dp,
-                        showClear = true,
+                        onClick = { favoriteActions.onToggleArtist(artist) },
                     )
+                    if (ratingActions.ratingsEnabled && artist.id.startsWith("plex:")) {
+                        RatingStars(
+                            rating = ratingActions.ratingFor(artist),
+                            enabled = true,
+                            onRating = { ratingActions.onRateArtist(artist, it) },
+                            starSize = 16.dp,
+                            showClear = true,
+                        )
+                    }
                 }
                 if (!useTable) {
-                    DownloadActionButton("Download Artist", tracks) { onDownloadArtist(artist) }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        if (artistRadioAvailability == ArtistRadioAvailability.Available) {
+                            TextButton(enabled = !artistRadioStarting, onClick = { onPlayArtistRadio(artist) }) {
+                                Text(
+                                    if (artistRadioStarting) "Starting Radio..." else "Play Radio",
+                                    color = if (artistRadioStarting) PhoebeUi.mutedText else PhoebeUi.accentLight,
+                                )
+                            }
+                        }
+                        DownloadActionButton("Download Artist", tracks) { onDownloadArtist(artist) }
+                    }
                 }
                 Spacer(Modifier.height(6.dp))
                 ArtworkImage(
@@ -812,6 +844,14 @@ internal fun ArtistDetailPanel(
                 onViewMode = { albumViewMode = it },
                 actions = {
                     if (useTable) {
+                        if (artistRadioAvailability == ArtistRadioAvailability.Available) {
+                            TextButton(enabled = !artistRadioStarting, onClick = { onPlayArtistRadio(artist) }) {
+                                Text(
+                                    if (artistRadioStarting) "Starting Radio..." else "Play Radio",
+                                    color = if (artistRadioStarting) PhoebeUi.mutedText else PhoebeUi.accentLight,
+                                )
+                            }
+                        }
                         DownloadActionButton("Download Artist", tracks) { onDownloadArtist(artist) }
                     }
                 },
@@ -951,7 +991,225 @@ internal fun ArtistDetailPanel(
                 )
             }
         }
+        if (similarArtists.isNotEmpty() && searchQuery.isBlank()) {
+            item(contentType = "artist-similar-artists") {
+                SimilarArtistsSection(
+                    artists = similarArtists,
+                    catalog = catalog,
+                    useTable = useTable,
+                    onArtist = onArtist,
+                )
+            }
+        }
     }
+    }
+}
+
+private fun similarArtistsFor(catalog: CatalogSnapshot, artist: Artist): List<Artist> {
+    val albumsByArtist = catalog.albums.groupBy { it.artist.trim().lowercase() }
+    val tracksByArtist = catalog.tracksByParent.values
+        .asSequence()
+        .flatten()
+        .groupBy { it.artist.trim().lowercase() }
+    val targetTags = artistSimilarityTags(
+        artist = artist,
+        albums = albumsByArtist[artist.title.trim().lowercase()].orEmpty(),
+        tracks = tracksByArtist[artist.title.trim().lowercase()].orEmpty(),
+    )
+    if (targetTags.isEmpty()) return emptyList()
+    return catalog.artists
+        .asSequence()
+        .filter { it.id != artist.id && !it.title.equals(artist.title, ignoreCase = true) }
+        .map { candidate ->
+            val candidateKey = candidate.title.trim().lowercase()
+            val score = artistSimilarityTags(
+                artist = candidate,
+                albums = albumsByArtist[candidateKey].orEmpty(),
+                tracks = tracksByArtist[candidateKey].orEmpty(),
+            ).count { it in targetTags }
+            candidate to score
+        }
+        .filter { (_, score) -> score > 0 }
+        .sortedWith(compareByDescending<Pair<Artist, Int>> { it.second }.thenBy { it.first.title.lowercase() })
+        .map { it.first }
+        .toList()
+}
+
+private fun artistSimilarityTags(
+    artist: Artist,
+    albums: List<Album>,
+    tracks: List<Track>,
+): Set<String> {
+    return buildSet {
+        addSimilarityTag(artist.genre)
+        addSimilarityTag(artist.mood)
+        addSimilarityTag(artist.style)
+        albums.forEach { album ->
+            addSimilarityTag(album.genre)
+            addSimilarityTag(album.mood)
+            addSimilarityTag(album.style)
+        }
+        tracks.forEach { track ->
+            addSimilarityTag(track.genre)
+            addSimilarityTag(track.mood)
+            addSimilarityTag(track.style)
+        }
+    }
+}
+
+private fun MutableSet<String>.addSimilarityTag(value: String?) {
+    value
+        ?.split(',', ';')
+        ?.map { it.trim().lowercase() }
+        ?.filter { it.isNotBlank() }
+        ?.forEach(::add)
+}
+
+@Composable
+private fun SimilarArtistsSection(
+    artists: List<Artist>,
+    catalog: CatalogSnapshot,
+    useTable: Boolean,
+    onArtist: (Artist) -> Unit,
+) {
+    var page by remember(artists) { mutableStateOf(0) }
+    val desktopPageSize = 4
+    val pageCount = ((artists.size + desktopPageSize - 1) / desktopPageSize).coerceAtLeast(1)
+    val currentPage = page.coerceIn(0, pageCount - 1)
+    val desktopArtists = remember(artists, currentPage) {
+        artists.drop(currentPage * desktopPageSize).take(desktopPageSize)
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Spacer(Modifier.height(8.dp))
+        if (useTable) {
+            SimilarArtistsPagerHeader(
+                page = currentPage,
+                pageCount = pageCount,
+                onPrevious = { page = (currentPage - 1).coerceAtLeast(0) },
+                onNext = { page = (currentPage + 1).coerceAtMost(pageCount - 1) },
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                desktopArtists.forEach { artist ->
+                    SimilarArtistCard(
+                        artist = artist,
+                        catalog = catalog,
+                        modifier = Modifier.weight(1f),
+                        onClick = { onArtist(artist) },
+                    )
+                }
+                repeat(desktopPageSize - desktopArtists.size) {
+                    Spacer(Modifier.weight(1f))
+                }
+            }
+        } else {
+            SectionLabel("Similar Artists", PhoebeUi.primaryText)
+            LazyRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                items(artists, key = { it.id }, contentType = { "similar-artist-card" }) { artist ->
+                    SimilarArtistCard(
+                        artist = artist,
+                        catalog = catalog,
+                        modifier = Modifier.widthIn(max = 220.dp),
+                        onClick = { onArtist(artist) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SimilarArtistsPagerHeader(
+    page: Int,
+    pageCount: Int,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        SectionLabel("Similar Artists", PhoebeUi.primaryText)
+        Spacer(Modifier.weight(1f))
+        if (pageCount > 1) {
+            Text(
+                "${page + 1}/$pageCount",
+                color = PhoebeUi.mutedText,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.width(8.dp))
+        }
+        SimilarArtistsPageButton(PhoebeIcon.Previous, enabled = page > 0, onClick = onPrevious)
+        SimilarArtistsPageButton(PhoebeIcon.Next, enabled = page < pageCount - 1, onClick = onNext)
+    }
+}
+
+@Composable
+private fun SimilarArtistsPageButton(icon: PhoebeIcon, enabled: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .size(30.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .background(PhoebeUi.subtleFill)
+            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(8.dp)),
+        contentAlignment = Alignment.Center,
+    ) {
+        PhoebeIconView(
+            icon,
+            tint = if (enabled) PhoebeUi.secondaryText else PhoebeUi.mutedText.copy(alpha = 0.35f),
+            modifier = Modifier.size(15.dp),
+        )
+    }
+}
+
+@Composable
+private fun SimilarArtistCard(
+    artist: Artist,
+    catalog: CatalogSnapshot,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val albums = remember(catalog.albums, artist.title) { catalogAlbumsForArtist(catalog, artist.title) }
+    val tracks = remember(catalog.tracksByParent, artist.title) { catalogTracksForArtist(catalog, artist.title) }
+    val thumbUrl = remember(artist.thumbUrl, albums) { artist.thumbUrl ?: albums.firstNotNullOfOrNull { it.thumbUrl } }
+    Column(
+        modifier
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .background(Color.White.copy(alpha = 0.045f))
+            .padding(12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        ArtworkImage(artist.title, thumbUrl, Modifier.size(74.dp).sharedArtworkTransition("artist:${artist.id}"), radius = 999.dp, elevated = false)
+        Text(artist.title, color = PhoebeUi.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text("${artistAlbumCountSubtitle(artist)} • ${songCountLabel(tracks.size)}", color = PhoebeUi.mutedText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+@Composable
+private fun SimilarArtistRow(
+    artist: Artist,
+    catalog: CatalogSnapshot,
+    onClick: () -> Unit,
+) {
+    val albums = remember(catalog.albums, artist.title) { catalogAlbumsForArtist(catalog, artist.title) }
+    val tracks = remember(catalog.tracksByParent, artist.title) { catalogTracksForArtist(catalog, artist.title) }
+    val thumbUrl = remember(artist.thumbUrl, albums) { artist.thumbUrl ?: albums.firstNotNullOfOrNull { it.thumbUrl } }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .background(Color.White.copy(alpha = 0.045f))
+            .padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        ArtworkImage(artist.title, thumbUrl, Modifier.size(46.dp).sharedArtworkTransition("artist:${artist.id}"), radius = 999.dp, elevated = false)
+        Column(Modifier.weight(1f)) {
+            Text(artist.title, color = PhoebeUi.primaryText, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("${artistAlbumCountSubtitle(artist)} • ${songCountLabel(tracks.size)}", color = PhoebeUi.secondaryText, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        PhoebeIconView(PhoebeIcon.Forward, tint = PhoebeUi.mutedText, modifier = Modifier.size(18.dp))
     }
 }
 
@@ -1171,6 +1429,7 @@ private fun AlbumDetailHeaderText(
     showDownload: Boolean = true,
 ) {
     val ratingActions = LocalRatingActions.current
+    val favoriteActions = LocalFavoriteActions.current
     Column(
         modifier = if (compact) Modifier.fillMaxWidth() else Modifier,
         verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -1194,14 +1453,21 @@ private fun AlbumDetailHeaderText(
         album.year?.let { y ->
             Text("$y", color = PhoebeUi.mutedText, fontSize = 13.sp)
         }
-        if (ratingActions.ratingsEnabled && album.id.startsWith("plex:")) {
-            RatingStars(
-                rating = ratingActions.ratingFor(album),
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            LikeButton(
+                liked = favoriteActions.isFavorite(album),
                 enabled = true,
-                onRating = { ratingActions.onRateAlbum(album, it) },
-                starSize = 16.dp,
-                showClear = true,
+                onClick = { favoriteActions.onToggleAlbum(album) },
             )
+            if (ratingActions.ratingsEnabled && album.id.startsWith("plex:")) {
+                RatingStars(
+                    rating = ratingActions.ratingFor(album),
+                    enabled = true,
+                    onRating = { ratingActions.onRateAlbum(album, it) },
+                    starSize = 16.dp,
+                    showClear = true,
+                )
+            }
         }
         if (showDownload) {
             DownloadActionButton(
@@ -1293,6 +1559,7 @@ internal fun PlaylistDetailPanel(
         filterTracksByQuery(sortedTracks, searchQuery)
     }
     val ratingActions = LocalRatingActions.current
+    val favoriteActions = LocalFavoriteActions.current
     val nowPlaying = LocalNowPlaying.current
 
     BoxWithConstraints(modifier.fillMaxSize()) {
@@ -1316,14 +1583,21 @@ internal fun PlaylistDetailPanel(
                     visibleCount = visibleTracks.size,
                     searchQuery = searchQuery,
                 )
-                if (ratingActions.ratingsEnabled && playlist.id.startsWith("plex:")) {
-                    RatingStars(
-                        rating = ratingActions.ratingFor(playlist),
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    LikeButton(
+                        liked = favoriteActions.isFavorite(playlist),
                         enabled = true,
-                        onRating = { ratingActions.onRatePlaylist(playlist, it) },
-                        starSize = 16.dp,
-                        showClear = true,
+                        onClick = { favoriteActions.onTogglePlaylist(playlist) },
                     )
+                    if (ratingActions.ratingsEnabled && playlist.id.startsWith("plex:")) {
+                        RatingStars(
+                            rating = ratingActions.ratingFor(playlist),
+                            enabled = true,
+                            onRating = { ratingActions.onRatePlaylist(playlist, it) },
+                            starSize = 16.dp,
+                            showClear = true,
+                        )
+                    }
                 }
                 SearchPill(
                     query = searchQuery,

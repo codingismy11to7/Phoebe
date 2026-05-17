@@ -21,6 +21,8 @@ import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.LIKED_SONGS_PLAYLIST_TITLE
 import com.phoebe.app.domain.LOCAL_PLAYLIST_ID_PREFIX
 import com.phoebe.app.domain.PENDING_LIKED_SONGS_PLAYLIST_ID
+import com.phoebe.app.domain.PlexRadioStation
+import com.phoebe.app.domain.PlexRadioStationCategory
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.TrackMetadataUpdate
@@ -59,6 +61,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.yield
+import kotlinx.serialization.Serializable
 import kotlin.random.Random
 
 data class DownloadBatchResult(
@@ -74,6 +77,25 @@ data class RatingSyncResult(
     val savedLocally: Boolean,
     val plexAttempted: Boolean,
     val plexSynced: Boolean,
+)
+
+data class FavoriteSyncResult(
+    val favorite: Boolean? = null,
+    val plexAttempted: Boolean = false,
+    val plexSynced: Boolean = false,
+)
+
+@Serializable
+data class FavoritePlaylistsExport(
+    val version: Int = 1,
+    val playlists: List<FavoritePlaylistExportEntry> = emptyList(),
+)
+
+@Serializable
+data class FavoritePlaylistExportEntry(
+    val id: String,
+    val title: String,
+    val key: String? = null,
 )
 
 class CatalogRepository(
@@ -776,6 +798,7 @@ class CatalogRepository(
                 mood = album.mood ?: previousAlbums[album.id]?.mood,
                 style = album.style ?: previousAlbums[album.id]?.style,
                 rating = album.rating ?: previousAlbums[album.id]?.rating,
+                favorite = album.favorite || previousAlbums[album.id]?.favorite == true,
             )
         }
         val previousArtists = previous.artists.associateBy { it.id }
@@ -792,11 +815,19 @@ class CatalogRepository(
                 mood = artist.mood ?: previousArtists[artist.id]?.mood,
                 style = artist.style ?: previousArtists[artist.id]?.style,
                 rating = artist.rating ?: previousArtists[artist.id]?.rating,
+                favorite = if (artist.id.startsWith("plex:")) {
+                    artist.favorite
+                } else {
+                    artist.favorite || previousArtists[artist.id]?.favorite == true
+                },
             )
         }
         val previousPlaylists = previous.playlists.associateBy { it.id }
         val playlists = next.playlists.map { playlist ->
-            playlist.copy(rating = playlist.rating ?: previousPlaylists[playlist.id]?.rating)
+            playlist.copy(
+                rating = playlist.rating ?: previousPlaylists[playlist.id]?.rating,
+                favorite = playlist.favorite || previousPlaylists[playlist.id]?.favorite == true,
+            )
         }
         return next.copy(artists = artists, albums = albums, playlists = playlists, tracksByParent = tracksByParent)
     }
@@ -1096,6 +1127,134 @@ class CatalogRepository(
         publish(mutableCatalog.value, persist = true)
     }
 
+    suspend fun warmAlbumTracksByTitle(session: PlexSession?, albumTitles: List<String>, maxAlbums: Int = 10) {
+        val server = session?.selectedServer ?: return
+        val token = session.serverAuthToken() ?: return
+        val titleOrder = albumTitles
+            .mapIndexedNotNull { index, title ->
+                title.trim().lowercase().takeIf { it.isNotBlank() }?.let { it to index }
+            }
+            .toMap()
+        if (titleOrder.isEmpty()) return
+        val albumsToFetch = mutableCatalog.value.albums
+            .asSequence()
+            .filter { it.title.trim().lowercase() in titleOrder }
+            .filter { plexRatingKey(it.id) != null }
+            .filter { mutableCatalog.value.tracksByParent[it.id].isNullOrEmpty() }
+            .sortedBy { titleOrder[it.title.trim().lowercase()] ?: Int.MAX_VALUE }
+            .take(maxAlbums)
+            .toList()
+        if (albumsToFetch.isEmpty()) return
+        PhoebeLog.v("CatalogRepository") { "warmAlbumTracksByTitle → ${albumsToFetch.size} albums" }
+
+        coroutineScope {
+            albumsToFetch
+                .chunked(catalogTrackPrefetchParallelism().coerceAtLeast(1))
+                .forEach { chunk ->
+                    chunk.map { album ->
+                        async {
+                            runCatching {
+                                val rating = plexRatingKey(album.id) ?: return@runCatching
+                                val tracks = plexClient.children(server, rating, token)
+                                    .map { track ->
+                                        track.withPlexPrefix().let { prefixed ->
+                                            if (prefixed.dateAddedMs == null && album.dateAddedMs != null) {
+                                                prefixed.copy(dateAddedMs = album.dateAddedMs)
+                                            } else {
+                                                prefixed
+                                            }
+                                        }
+                                    }
+                                    .let { preserveTrackDateAdded(mutableCatalog.value.tracksByParent[album.id].orEmpty(), it) }
+                                catalogMergeMutex.withLock {
+                                    val cur = mutableCatalog.value
+                                    if (cur.tracksByParent[album.id].isNullOrEmpty()) {
+                                        publish(
+                                            cur.copy(tracksByParent = cur.tracksByParent + (album.id to tracks)),
+                                            persist = false,
+                                        )
+                                    }
+                                }
+                            }.onFailure { e ->
+                                PhoebeLog.d("CatalogRepository") { "played album warm failed for '${album.title}': ${e.message}" }
+                            }
+                        }
+                    }.awaitAll()
+                    yield()
+                }
+        }
+        publish(mutableCatalog.value, persist = true)
+    }
+
+    suspend fun warmPlexHistoryTracks(session: PlexSession?, maxEntries: Int = 200): Int {
+        val server = session?.selectedServer ?: return 0
+        val library = session.selectedLibrary ?: return 0
+        val token = session.serverAuthToken() ?: return 0
+        if (maxEntries <= 0) return 0
+
+        val loadedTrackIds = mutableCatalog.value.tracksByParent.values
+            .asSequence()
+            .flatten()
+            .map { it.id }
+            .toSet()
+        val entries = mutableListOf<PlexPlaybackHistoryEntry>()
+        var start = 0
+        while (entries.size < maxEntries) {
+            val pageSize = (maxEntries - entries.size).coerceAtMost(PlexPlayHistorySyncer.PageSize)
+            val page = plexClient.playbackHistoryPage(
+                server = server,
+                token = token,
+                library = library,
+                minViewedAtMs = null,
+                start = start,
+                size = pageSize,
+            )
+            entries += page.entries.filter { entry ->
+                (entry.type == null || entry.type == "track") &&
+                    (entry.librarySectionId == null || entry.librarySectionId == library.key)
+            }
+            val total = page.totalSize
+            val next = page.offset + page.size
+            if (page.size <= 0 || (total != null && next >= total)) break
+            start = next
+        }
+
+        val missingRatingKeys = entries
+            .asSequence()
+            .map { it.ratingKey }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .filterNot { "plex:$it" in loadedTrackIds || it in loadedTrackIds }
+            .toList()
+        if (missingRatingKeys.isEmpty()) return 0
+
+        val fetched = coroutineScope {
+            val tracks = mutableListOf<Track>()
+            missingRatingKeys
+                .chunked(catalogTrackPrefetchParallelism().coerceAtLeast(1))
+                .forEach { chunk ->
+                    tracks.addAll(chunk.map { ratingKey ->
+                        async {
+                            runCatching { plexClient.trackDetails(server, ratingKey, token) }
+                                .onFailure { e ->
+                                    PhoebeLog.d("CatalogRepository") {
+                                        "history track warm failed for '$ratingKey': ${e.message}"
+                                    }
+                                }
+                                .getOrNull()
+                        }
+                    }.awaitAll().filterNotNull())
+                }
+            tracks
+        }
+        if (fetched.isEmpty()) return 0
+
+        publishIndexedPlexTracks(fetched)
+        publish(mutableCatalog.value, persist = true)
+        PhoebeLog.d("CatalogRepository") { "warmPlexHistoryTracks → ${fetched.size} tracks" }
+        return fetched.size
+    }
+
     suspend fun tracksForDecade(session: PlexSession?, decade: Int): List<Track> {
         val start = decade
         val end = decade + 9
@@ -1259,6 +1418,45 @@ class CatalogRepository(
             }
         }
         return cachedTracksForDecade(start, end)
+    }
+
+    suspend fun plexRadioStations(session: PlexSession?): List<PlexRadioStation> {
+        val server = session?.selectedServer ?: return emptyList()
+        val library = session.selectedLibrary ?: return emptyList()
+        val token = session.serverAuthToken() ?: return emptyList()
+        val stations = plexClient.musicStations(server, library, token)
+        return stations.ifEmpty { defaultPlexRadioStations(library) }
+    }
+
+    suspend fun playRadioStation(session: PlexSession?, station: PlexRadioStation): List<Track> {
+        val server = session?.selectedServer ?: return emptyList()
+        session.selectedLibrary ?: return emptyList()
+        val token = session.serverAuthToken() ?: return emptyList()
+        val machineId = resolveMachineIdentifier(server, token)
+        return plexClient.createStationPlayQueue(server, token, machineId, station.key)
+            .map { it.withPlexPrefix() }
+            .also { tracks ->
+                if (tracks.isNotEmpty()) publishIndexedPlexTracks(tracks)
+            }
+    }
+
+    suspend fun playArtistRadio(session: PlexSession?, artist: Artist): List<Track> {
+        val station = artistRadioStation(session, artist) ?: return emptyList()
+        return playRadioStation(session, station)
+    }
+
+    suspend fun artistRadioStation(session: PlexSession?, artist: Artist): PlexRadioStation? {
+        val ratingKey = plexRatingKey(artist.id) ?: return null
+        val server = session?.selectedServer ?: return null
+        session.selectedLibrary ?: return null
+        val token = session.serverAuthToken() ?: return null
+        val station = withTimeoutOrNull(ArtistStationLookupTimeoutMs) {
+            plexClient.artistStation(server, ratingKey, token)
+        }
+        if (station == null) {
+            PhoebeLog.d("CatalogRepository") { "artist radio station not found for '${artist.title}' ($ratingKey)" }
+        }
+        return station
     }
 
     private fun cachedTracksForDecade(start: Int, end: Int): List<Track> =
@@ -1833,6 +2031,109 @@ class CatalogRepository(
         return syncPlexRating(session, playlist.id, normalized, "playlist '${playlist.title}'").copy(savedLocally = true)
     }
 
+    suspend fun toggleFavoriteArtist(session: PlexSession?, artist: Artist): FavoriteSyncResult {
+        val snapshot = mutableCatalog.value
+        var nextFavorite: Boolean? = null
+        val artists = snapshot.artists.map {
+            if (it.id == artist.id) {
+                nextFavorite = !it.favorite
+                it.copy(favorite = nextFavorite!!)
+            } else {
+                it
+            }
+        }
+        val favorite = nextFavorite ?: return FavoriteSyncResult()
+        publish(snapshot.copy(artists = artists), persist = true)
+        return syncPlexFavoriteCollection(
+            session = session,
+            id = artist.id,
+            favorite = favorite,
+            label = "artist '${artist.title}'",
+            sync = { server, token, library, ratingKey ->
+                plexClient.setFavoriteArtistCollection(server, token, library, ratingKey, favorite)
+            },
+        ).copy(favorite = favorite)
+    }
+
+    suspend fun toggleFavoriteAlbum(session: PlexSession?, album: Album): FavoriteSyncResult {
+        val snapshot = mutableCatalog.value
+        var nextFavorite: Boolean? = null
+        val albums = snapshot.albums.map {
+            if (it.id == album.id) {
+                nextFavorite = !it.favorite
+                it.copy(favorite = nextFavorite!!)
+            } else {
+                it
+            }
+        }
+        val favorite = nextFavorite ?: return FavoriteSyncResult()
+        publish(snapshot.copy(albums = albums), persist = true)
+        return syncPlexFavoriteCollection(
+            session = session,
+            id = album.id,
+            favorite = favorite,
+            label = "album '${album.title}'",
+            sync = { server, token, library, ratingKey ->
+                plexClient.setFavoriteAlbumCollection(server, token, library, ratingKey, favorite)
+            },
+        ).copy(favorite = favorite)
+    }
+
+    suspend fun toggleFavoritePlaylist(playlist: Playlist): FavoriteSyncResult {
+        val snapshot = mutableCatalog.value
+        var nextFavorite: Boolean? = null
+        val playlists = snapshot.playlists.map {
+            if (it.id == playlist.id) {
+                nextFavorite = !it.favorite
+                it.copy(favorite = nextFavorite!!)
+            } else {
+                it
+            }
+        }
+        val favorite = nextFavorite ?: return FavoriteSyncResult()
+        publish(snapshot.copy(playlists = playlists), persist = true)
+        return FavoriteSyncResult(favorite = favorite)
+    }
+
+    fun favoritePlaylistsExport(): FavoritePlaylistsExport =
+        FavoritePlaylistsExport(
+            playlists = mutableCatalog.value.playlists
+                .filter { it.favorite }
+                .sortedBy { it.title.lowercase() }
+                .map { playlist ->
+                    FavoritePlaylistExportEntry(
+                        id = playlist.id,
+                        title = playlist.title,
+                        key = playlist.key,
+                    )
+                },
+        )
+
+    suspend fun importFavoritePlaylists(export: FavoritePlaylistsExport): Int {
+        val entries = export.playlists
+        if (entries.isEmpty()) return 0
+        val ids = entries.map { it.id }.toSet()
+        val keys = entries.mapNotNull { it.key?.takeIf { key -> key.isNotBlank() } }.toSet()
+        val titles = entries.map { it.title.normalizedFavoritePlaylistTitle() }.toSet()
+        val snapshot = mutableCatalog.value
+        var matched = 0
+        val playlists = snapshot.playlists.map { playlist ->
+            val matches = playlist.id in ids ||
+                playlist.key?.let { it in keys } == true ||
+                playlist.title.normalizedFavoritePlaylistTitle() in titles
+            if (matches) {
+                matched++
+                playlist.copy(favorite = true)
+            } else {
+                playlist
+            }
+        }
+        if (matched > 0) {
+            publish(snapshot.copy(playlists = playlists), persist = true)
+        }
+        return matched
+    }
+
     private suspend fun syncPlexRating(
         session: PlexSession?,
         id: String,
@@ -1851,6 +2152,28 @@ class CatalogRepository(
             PhoebeLog.d("CatalogRepository") { "rateItem Plex sync failed for $label: ${error.message}" }
         }.isSuccess
         return RatingSyncResult(savedLocally = false, plexAttempted = true, plexSynced = synced)
+    }
+
+    private suspend fun syncPlexFavoriteCollection(
+        session: PlexSession?,
+        id: String,
+        favorite: Boolean,
+        label: String,
+        sync: suspend (PlexServer, String, MusicLibrary, String) -> Unit,
+    ): FavoriteSyncResult {
+        val ratingKey = plexRatingKey(id)
+        val server = session?.selectedServer
+        val library = session?.selectedLibrary
+        val token = session?.serverAuthToken()
+        if (ratingKey == null || server == null || library == null || token == null) {
+            return FavoriteSyncResult(favorite = favorite, plexAttempted = false, plexSynced = false)
+        }
+        val synced = runCatching {
+            sync(server, token, library, ratingKey)
+        }.onFailure { error ->
+            PhoebeLog.d("CatalogRepository") { "favorite collection Plex sync failed for $label: ${error.message}" }
+        }.isSuccess
+        return FavoriteSyncResult(favorite = favorite, plexAttempted = true, plexSynced = synced)
     }
 
     suspend fun download(track: Track): DownloadBatchResult =
@@ -2227,6 +2550,7 @@ class CatalogRepository(
                 thumbUrl = playlist.thumbUrl,
                 sortKey = sortKey.toLong(),
                 rating = playlist.rating?.toDouble(),
+                favorite = playlist.favorite.toDb(),
             )
             tracks.forEach { track ->
                 database.catalogQueries.upsertTrack(
@@ -2286,6 +2610,7 @@ class CatalogRepository(
                     mood = artist.mood,
                     style = artist.style,
                     rating = artist.rating?.toDouble(),
+                    favorite = artist.favorite.toDb(),
                 )
             }
             snapshot.albums.forEachIndexed { index, album ->
@@ -2301,6 +2626,7 @@ class CatalogRepository(
                     mood = album.mood,
                     style = album.style,
                     rating = album.rating?.toDouble(),
+                    favorite = album.favorite.toDb(),
                 )
             }
             snapshot.playlists.forEachIndexed { index, playlist ->
@@ -2312,6 +2638,7 @@ class CatalogRepository(
                     thumbUrl = playlist.thumbUrl,
                     sortKey = index.toLong(),
                     rating = playlist.rating?.toDouble(),
+                    favorite = playlist.favorite.toDb(),
                 )
             }
             val uniqueTracks = snapshot.tracksByParent.values.flatten().distinctBy { it.id }
@@ -2415,6 +2742,7 @@ class CatalogRepository(
                 mood = it.mood,
                 style = it.style,
                 rating = it.rating?.toFloat(),
+                favorite = it.favorite.toBool(),
             )
         }
         val albums = database.catalogQueries.selectAlbums().awaitAsList().map {
@@ -2429,6 +2757,7 @@ class CatalogRepository(
                 mood = it.mood,
                 style = it.style,
                 rating = it.rating?.toFloat(),
+                favorite = it.favorite.toBool(),
             )
         }
         val playlists = database.catalogQueries.selectPlaylists().awaitAsList().map {
@@ -2439,6 +2768,7 @@ class CatalogRepository(
                 key = it.plKey,
                 thumbUrl = it.thumbUrl,
                 rating = it.rating?.toFloat(),
+                favorite = it.favorite.toBool(),
             )
         }
         return CatalogSnapshot(
@@ -2553,6 +2883,9 @@ class CatalogRepository(
     private fun plexRatingKey(id: String): String? =
         if (id.startsWith("plex:")) id.removePrefix("plex:") else null
 
+    private fun String.normalizedFavoritePlaylistTitle(): String =
+        trim().lowercase()
+
     private fun Track.plexIdentityKey(): String? =
         plexRatingKey(id) ?: id.takeIf { it.isNotBlank() && ':' !in it }
 
@@ -2586,15 +2919,44 @@ class CatalogRepository(
         const val DecadeTrackPageSize = 250
         const val DecadeFirstPageSize = 80
         const val DecadeTrackLimit = 500
+        const val ArtistStationLookupTimeoutMs = 8_000L
         const val MaxDecadeTrackPages = 4
     }
 }
+
+private fun Boolean.toDb(): Long = if (this) 1L else 0L
+private fun Long.toBool(): Boolean = this != 0L
 
 data class MetadataUpdateResult(
     val savedLocally: Boolean,
     val plexAttempted: Boolean,
     val plexSynced: Boolean,
 )
+
+fun defaultPlexRadioStations(library: MusicLibrary): List<PlexRadioStation> =
+    listOf(
+        PlexRadioStation(
+            id = "library-${library.key}-radio",
+            title = "Library Radio",
+            subtitle = "Plex radio from ${library.title}",
+            key = "/library/sections/${library.key}/stations/1",
+            category = PlexRadioStationCategory.Library,
+        ),
+        PlexRadioStation(
+            id = "library-${library.key}-deep-cuts",
+            title = "Deep Cuts Radio",
+            subtitle = "Less obvious songs from ${library.title}",
+            key = "/library/sections/${library.key}/stations/8",
+            category = PlexRadioStationCategory.Library,
+        ),
+        PlexRadioStation(
+            id = "library-${library.key}-random-album",
+            title = "Random Album Radio",
+            subtitle = "Full albums selected by Plex",
+            key = "/library/sections/${library.key}/stations/3",
+            category = PlexRadioStationCategory.Library,
+        ),
+    )
 
 private fun Float?.normalizedRating(): Float? =
     this?.coerceIn(0f, 5f)

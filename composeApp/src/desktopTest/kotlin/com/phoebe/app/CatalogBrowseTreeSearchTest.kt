@@ -83,11 +83,11 @@ class CatalogBrowseTreeSearchTest {
         val (db, sqlDriver) = newInMemoryPhoebeDatabase()
         driver = sqlDriver
 
-        db.catalogQueries.upsertArtist("artist-1", "Signal Garden", null, 1, 2, 0, null, null, null, null, null)
-        db.catalogQueries.upsertArtist("artist-2", "Solar Choir", null, 1, 1, 1, null, null, null, null, null)
-        db.catalogQueries.upsertAlbum("album-quiet", "Quiet Hours", "Signal Garden", 2025, null, 0, null, null, null, null, null)
-        db.catalogQueries.upsertAlbum("album-bright", "Moonwink", "Solar Choir", 2024, null, 1, null, null, null, null, null)
-        db.catalogQueries.upsertPlaylist("playlist-night", "Night Drive", 2, null, null, 0, null)
+        db.catalogQueries.upsertArtist("artist-1", "Signal Garden", null, 1, 2, 0, null, null, null, null, null, 0)
+        db.catalogQueries.upsertArtist("artist-2", "Solar Choir", null, 1, 1, 1, null, null, null, null, null, 0)
+        db.catalogQueries.upsertAlbum("album-quiet", "Quiet Hours", "Signal Garden", 2025, null, 0, null, null, null, null, null, 0)
+        db.catalogQueries.upsertAlbum("album-bright", "Moonwink", "Solar Choir", 2024, null, 1, null, null, null, null, null, 0)
+        db.catalogQueries.upsertPlaylist("playlist-night", "Night Drive", 2, null, null, 0, null, 0)
         upsertTrack(
             db = db,
             id = "track-moon",

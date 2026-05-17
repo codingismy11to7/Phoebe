@@ -202,8 +202,8 @@ class CatalogRepositoryRefreshDesktopTest {
         val (db, d) = newInMemoryPhoebeDatabase()
         driver = d
         db.transaction {
-            db.catalogQueries.upsertArtist("plex:artist1", "Artist One", null, 1, 0, 0, null, null, null, null, null)
-            db.catalogQueries.upsertAlbum("plex:a1", "Album One", "Artist One", null, null, 0, null, null, null, null, null)
+            db.catalogQueries.upsertArtist("plex:artist1", "Artist One", null, 1, 0, 0, null, null, null, null, null, 0)
+            db.catalogQueries.upsertAlbum("plex:a1", "Album One", "Artist One", null, null, 0, null, null, null, null, null, 0)
             db.catalogQueries.upsertTrack(
                 id = "plex:old",
                 title = "Cached Song",
@@ -270,8 +270,8 @@ class CatalogRepositoryRefreshDesktopTest {
         val (db, d) = newInMemoryPhoebeDatabase()
         driver = d
         db.transaction {
-            db.catalogQueries.upsertArtist("plex:artist1", "Artist One", null, 1, 0, 0, 41L, null, null, null, null)
-            db.catalogQueries.upsertAlbum("plex:a1", "Album One", "Artist One", null, null, 0, 41L, null, null, null, null)
+            db.catalogQueries.upsertArtist("plex:artist1", "Artist One", null, 1, 0, 0, 41L, null, null, null, null, 0)
+            db.catalogQueries.upsertAlbum("plex:a1", "Album One", "Artist One", null, null, 0, 41L, null, null, null, null, 0)
             db.catalogQueries.upsertTrack(
                 id = "plex:t1",
                 title = "Cached Song",
@@ -368,7 +368,7 @@ class CatalogRepositoryRefreshDesktopTest {
         val (db, d) = newInMemoryPhoebeDatabase()
         driver = d
         db.transaction {
-            db.catalogQueries.upsertAlbum("plex:a1", "Album One", "Artist One", null, null, 0, null, null, null, null, null)
+            db.catalogQueries.upsertAlbum("plex:a1", "Album One", "Artist One", null, null, 0, null, null, null, null, null, 0)
             db.catalogQueries.upsertTrack(
                 id = "plex:t1",
                 title = "Angry Song",
@@ -422,7 +422,7 @@ class CatalogRepositoryRefreshDesktopTest {
         val (db, d) = newInMemoryPhoebeDatabase()
         driver = d
         db.transaction {
-            db.catalogQueries.upsertAlbum("plex:a1", "Album One", "Artist One", null, null, 0, null, null, null, null, null)
+            db.catalogQueries.upsertAlbum("plex:a1", "Album One", "Artist One", null, null, 0, null, null, null, null, null, 0)
             db.catalogQueries.upsertCollectionValue("Albums", "Mood", "Angry", "stale", "/library/sections/1/all?type=9&album.mood=stale", "album.mood", 0)
         }
         val engine = MockEngine { request ->
@@ -518,7 +518,7 @@ class CatalogRepositoryRefreshDesktopTest {
         val (db, d) = newInMemoryPhoebeDatabase()
         driver = d
         db.transaction {
-            db.catalogQueries.upsertAlbum("plex:a1", "Album One", "Artist One", null, null, 0, null, null, null, null, null)
+            db.catalogQueries.upsertAlbum("plex:a1", "Album One", "Artist One", null, null, 0, null, null, null, null, null, 0)
             db.catalogQueries.upsertCollectionValue("Albums", "Mood", "Angry", "999", null, "mood", 0)
         }
         val engine = MockEngine { request ->
@@ -563,7 +563,7 @@ class CatalogRepositoryRefreshDesktopTest {
         val (db, d) = newInMemoryPhoebeDatabase()
         driver = d
         db.transaction {
-            db.catalogQueries.upsertAlbum("plex:a1", "Album One", "Artist One", null, null, 0, null, null, null, null, null)
+            db.catalogQueries.upsertAlbum("plex:a1", "Album One", "Artist One", null, null, 0, null, null, null, null, null, 0)
             db.catalogQueries.upsertCollectionValue("Albums", "Mood", "Angry", "999", null, "mood", 1)
             db.catalogQueries.upsertCollectionTag("Albums", "Mood", "plex:track1", "Angry")
         }

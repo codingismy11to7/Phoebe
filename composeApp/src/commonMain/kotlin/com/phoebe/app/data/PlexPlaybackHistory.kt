@@ -17,3 +17,9 @@ data class PlexPlaybackHistoryEntry(
     val artist: String,
     val album: String,
 )
+
+data class PlexTrackPlaybackStat(
+    val ratingKey: String,
+    val viewCount: Long,
+    val lastViewedAtMs: Long?,
+)

@@ -14,17 +14,19 @@ Phoebe is a Compose Multiplatform Plex-first music player for Android, iOS, desk
 - **Lazy library loading** — Track lists load on demand for albums, artists, and playlists; opened detail views are preserved across catalog refreshes.
 - **Local music folders** — Add one or more local folder roots (desktop, Android, and iOS), enable or disable them individually, and merge them with your Plex catalog in one library. You can add a folder from the sign-in screen to use Phoebe without Plex.
 - **Unified catalog** — Plex (`plex:`-prefixed ids) and local tracks appear together in search, library views, and playback.
-- **Home** — Recently added songs, artists, and albums (7-day window), recently played and most-played rows, random artist/album picks, a **personal mix** seeded from your listening history, and a **decade mix** that shuffles tracks from a chosen decade.
+- **Home** — Configurable sections (mixes, collections, favorites, recents, listening history, random picks) with order controlled in Settings. Recently added songs, artists, and albums (7-day window), favorite playlist/artist/album rows, recently played and most-played panels, random artist/album picks, a **personal mix** seeded from listening history (including recent play-frequency signals), and a **decade mix** that shuffles tracks from a chosen era.
+- **Plex radio** — Start Plex library radio stations (for example Library Radio, Deep Cuts, and Random Album) from the Home mixes row; stations are loaded from the server when available with sensible defaults. **Artist Radio** for matched Plex artists from artist detail and library surfaces (availability is probed when needed).
 - **Collections** — Browse artists and albums grouped by **genre**, **mood**, or **style** (from Plex collection metadata and local tags), with grid/list sorting.
-- **Play history** — Dedicated screens for recently played and most played tracks; last-played timestamps and play counts surface in the library and home UI.
+- **Play history** — Dedicated screens for recently played and most played tracks; per-play events power smarter home mixes. Last-played timestamps and play counts surface in the library and home UI. Plex playback history sync can warm missing track metadata from the server.
 - **Rich library table** — Configurable columns (title, artist, album, year, genre, path, codec, bitrate, duration, rating, favorite, and related fields where available).
 - **Sorting and layout prefs** — Sort library and detail views; column visibility and sort preferences persist per platform.
 
-### Playlists, likes, and ratings
+### Playlists, likes, favorites, and ratings
 
 - **Plex playlists** — Create playlists, add tracks from the library, and drag a song onto a sidebar playlist row to append it.
 - **Local playlists** — Phoebe-only playlists for local audio (desktop, Android, iOS, and web logic); export to **M3U8**, plain text, or **CSV** (written under `exports/` in app storage on desktop).
 - **Liked Songs** — Heart tracks to sync with Plex’s Liked Songs playlist when signed in (with local fallback when offline or unsigned).
+- **Favorites** — Mark artists, albums, and playlists as favorites from detail views and the library table; favorite artists and albums sync to Plex’s Favorite Artists / Favorite Albums collections when signed in. Home and library surfaces include favorite rows and full-list screens; favorite playlist flags can be exported and imported as JSON under `exports/favorite-playlists.json` (desktop settings).
 - **Star ratings** — Half-star ratings on tracks, artists, albums, and playlists; synced to Plex when the server supports ratings.
 
 ### Playback and player
@@ -43,13 +45,13 @@ Phoebe is a Compose Multiplatform Plex-first music player for Android, iOS, desk
 ### Appearance and settings
 
 - **Appearance** — Album-art-inspired Material 3 UI with light and dark modes (preference stored in app storage).
-- **Settings** — Manage Plex sign-in, local folders, library options, downloads, and appearance (desktop settings shell includes additional category placeholders).
+- **Settings** — Manage Plex sign-in, local folders, library options, home section order, favorite-playlist export/import, downloads, and appearance (desktop settings shell includes additional category placeholders).
 
 ### System integration
 
 - **Volume** — OS system volume where supported; on Linux Flatpak, volume can be adjusted via host `pactl` when sandboxed.
 - **Global media keys** — Desktop play/pause (Space when no text field is focused), media-key shortcuts, and a macOS native bridge for hardware media keys.
-- **Chromecast (Android)** — Google Cast queue and transport when a Cast device is connected; volume keys route to Cast while casting.
+- **Chromecast (Android)** — Google Cast queue and transport when a Cast device is connected; volume keys route to Cast while casting. Unsupported codecs (for example FLAC) are sent through Plex’s universal MP3 transcode URL; local playback pauses only after the Cast load succeeds.
 - **Android Auto** — Media browse tree over the cached catalog for in-car browsing.
 - **CarPlay (iOS)** — Browse and play from the CarPlay template (requires the CarPlay audio entitlement on your App ID for distribution signing).
 - **Window chrome** — macOS unified title bar (full-window content, transparent title bar); Windows caption/border colors and immersive dark mode matched to the app theme via DWM.
@@ -76,7 +78,7 @@ Phoebe is a Compose Multiplatform Plex-first music player for Android, iOS, desk
 - Compose Multiplatform entry points for Android, iOS, desktop, and Wasm JS.
 - **Desktop layout** — Sidebar with Home, Search, Library, Lyrics, Playlists, and Settings; persistent player bar; drag-and-drop onto playlist rows.
 - **Mobile layout** — Tabbed library (albums, artists, playlists, downloads, settings), stack-based detail navigation, and system bar colors aligned to the theme.
-- Library table, home discovery rows, collection grids, play-history screens, lyrics, metadata editor, downloads, and now-playing surfaces.
+- Library table, configurable home discovery (mixes with Plex radio, favorites, recents, listening history), collection grids, play-history screens, lyrics, metadata editor, downloads, and now-playing surfaces.
 
 ### Plex integration
 
@@ -84,7 +86,9 @@ Phoebe is a Compose Multiplatform Plex-first music player for Android, iOS, desk
 - Fetching artists, albums, playlists, and tracks; lazy loading with merge logic so opened detail views survive refresh.
 - Stream URLs with tokenized asset URLs and optional original-file download (`download=1`).
 - Playlists via server `/identity` machine id and `server://…/library/metadata/…` URIs.
-- Metadata `PUT` for supported fields; likes and ratings pushed when the server allows.
+- Metadata `PUT` for supported fields; likes, ratings, and favorite artist/album collections pushed when the server allows.
+- Plex music stations and play queues for library and artist radio.
+- Playback history import with optional on-demand track metadata warming for history entries not yet in the catalog.
 - Collection facet values loaded from Plex where available, merged with local tag metadata.
 
 ### Local media and merged catalog

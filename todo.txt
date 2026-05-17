@@ -1,11 +1,10 @@
+compose multiplatform 1.11.0
+
 use correct icons
 
 predictive back / swipe to dismiss
 
 eq
-
-create a mix functionality
--improve
 
 web target 
 - continue to iterate on perf

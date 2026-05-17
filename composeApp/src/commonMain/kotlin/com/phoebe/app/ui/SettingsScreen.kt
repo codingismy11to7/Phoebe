@@ -4,6 +4,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ColumnScope
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -29,22 +31,31 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.phoebe.app.domain.HomeSection
+import com.phoebe.app.domain.LibraryUiPreferences
 import com.phoebe.app.platform.rememberPickDownloadDirectory
+import kotlin.math.roundToInt
 
 internal enum class SettingsCategory(
     val label: String,
@@ -67,9 +78,13 @@ internal fun SettingsDesktopView(
     onLightModeChange: (Boolean) -> Unit,
     downloadDirectory: String?,
     downloadCount: Int,
+    libraryUi: LibraryUiPreferences,
     defaultDownloadDirectoryLabel: String,
     onDownloadDirectory: (String?) -> Unit,
     onDeleteAllDownloads: () -> Unit,
+    onHomeSections: (List<HomeSection>) -> Unit,
+    onExportFavoritePlaylists: () -> Unit,
+    onImportFavoritePlaylists: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var category by remember { mutableStateOf(SettingsCategory.AudioQuality) }
@@ -112,8 +127,10 @@ internal fun SettingsDesktopView(
                     SettingsCategory.Appearance -> AppearanceSettingsCard(isLightMode, onLightModeChange)
                     SettingsCategory.AudioQuality -> AudioQualityPlaceholderCard()
                     SettingsCategory.Account -> AccountPlaceholderCard()
-                    SettingsCategory.Playback,
-                    SettingsCategory.Library,
+                    SettingsCategory.Library -> {
+                        HomeSettingsCard(libraryUi.homeSections, onHomeSections)
+                        FavoritePlaylistSettingsCard(onExportFavoritePlaylists, onImportFavoritePlaylists)
+                    }
                     SettingsCategory.Downloads -> DownloadsSettingsCard(
                         downloadDirectory = downloadDirectory,
                         downloadCount = downloadCount,
@@ -121,6 +138,7 @@ internal fun SettingsDesktopView(
                         onDownloadDirectory = onDownloadDirectory,
                         onDeleteAllDownloads = onDeleteAllDownloads,
                     )
+                    SettingsCategory.Playback,
                     SettingsCategory.Notifications,
                     SettingsCategory.Advanced,
                     -> GenericPlaceholderCard(category.label)
@@ -136,9 +154,13 @@ internal fun SettingsMobileView(
     onLightModeChange: (Boolean) -> Unit,
     downloadDirectory: String?,
     downloadCount: Int,
+    libraryUi: LibraryUiPreferences,
     defaultDownloadDirectoryLabel: String,
     onDownloadDirectory: (String?) -> Unit,
     onDeleteAllDownloads: () -> Unit,
+    onHomeSections: (List<HomeSection>) -> Unit,
+    onExportFavoritePlaylists: () -> Unit,
+    onImportFavoritePlaylists: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -150,6 +172,9 @@ internal fun SettingsMobileView(
     ) {
         SectionLabel("APPEARANCE", PhoebeUi.accentLight)
         AppearanceSettingsCard(isLightMode, onLightModeChange)
+        SectionLabel("HOME", PhoebeUi.accentLight)
+        HomeSettingsCard(libraryUi.homeSections, onHomeSections, compact = true)
+        FavoritePlaylistSettingsCard(onExportFavoritePlaylists, onImportFavoritePlaylists, compact = true)
         SectionLabel("AUDIO QUALITY", PhoebeUi.accentLight)
         AudioQualityPlaceholderCard(compact = true)
         SectionLabel("DOWNLOADS", PhoebeUi.accentLight)
@@ -472,6 +497,175 @@ private fun displayDownloadDirectory(uri: String): String =
         .replace("%20", " ")
         .substringAfterLast("tree/", uri)
         .ifBlank { uri }
+
+@Composable
+private fun HomeSettingsCard(
+    sections: List<HomeSection>,
+    onSections: (List<HomeSection>) -> Unit,
+    compact: Boolean = false,
+) {
+    var order by remember { mutableStateOf(normalizedHomeSections(sections)) }
+    var draggingSection by remember { mutableStateOf<HomeSection?>(null) }
+    var dragStartIndex by remember { mutableStateOf<Int?>(null) }
+    var dragTargetIndex by remember { mutableStateOf<Int?>(null) }
+    var dragOffsetPx by remember { mutableFloatStateOf(0f) }
+    val onSectionsUpdated = rememberUpdatedState(onSections)
+    val density = LocalDensity.current
+    val rowHeight = if (compact) 46.dp else 50.dp
+    val rowSpacing = 8.dp
+    val rowStepPx = with(density) { rowHeight.toPx() + rowSpacing.toPx() }
+    LaunchedEffect(sections) {
+        order = normalizedHomeSections(sections)
+    }
+    SettingsCard {
+        Text("Home", color = PhoebeUi.primaryText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Text("Drag sections into the order you want", color = PhoebeUi.mutedText, fontSize = 12.sp, modifier = Modifier.padding(bottom = 14.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(rowSpacing)) {
+            order.forEachIndexed { index, section ->
+                val isDragging = draggingSection == section
+                val startIndex = dragStartIndex
+                val targetIndex = dragTargetIndex
+                val rowOffsetPx = when {
+                    draggingSection == null || startIndex == null || targetIndex == null -> 0f
+                    isDragging -> dragOffsetPx
+                    targetIndex > startIndex && index in (startIndex + 1)..targetIndex -> -rowStepPx
+                    targetIndex < startIndex && index in targetIndex until startIndex -> rowStepPx
+                    else -> 0f
+                }
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(rowHeight)
+                        .offset { IntOffset(0, rowOffsetPx.roundToInt()) }
+                        .zIndex(if (isDragging) 1f else 0f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(if (isDragging) PhoebeUi.accent.copy(alpha = 0.14f) else PhoebeUi.subtleFill)
+                        .border(
+                            BorderStroke(1.dp, if (isDragging) PhoebeUi.accent.copy(alpha = 0.35f) else PhoebeUi.border),
+                            RoundedCornerShape(10.dp),
+                        )
+                        .padding(horizontal = 12.dp, vertical = if (compact) 8.dp else 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Box(
+                        Modifier
+                            .size(30.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .pointerInput(section, rowStepPx) {
+                                detectDragGestures(
+                                    onDragStart = {
+                                        draggingSection = section
+                                        dragStartIndex = index
+                                        dragTargetIndex = index
+                                        dragOffsetPx = 0f
+                                    },
+                                    onDragCancel = {
+                                        draggingSection = null
+                                        dragStartIndex = null
+                                        dragTargetIndex = null
+                                        dragOffsetPx = 0f
+                                    },
+                                    onDragEnd = {
+                                        val from = dragStartIndex
+                                        val to = dragTargetIndex
+                                        draggingSection = null
+                                        dragStartIndex = null
+                                        dragTargetIndex = null
+                                        dragOffsetPx = 0f
+                                        if (from != null && to != null && from != to) {
+                                            val nextOrder = order.moved(from, to)
+                                            order = nextOrder
+                                            onSectionsUpdated.value(nextOrder)
+                                        }
+                                    },
+                                    onDrag = { change, drag ->
+                                        change.consume()
+                                        val start = dragStartIndex ?: return@detectDragGestures
+                                        val minOffset = -start * rowStepPx
+                                        val maxOffset = (order.lastIndex - start) * rowStepPx
+                                        dragOffsetPx = (dragOffsetPx + drag.y).coerceIn(minOffset, maxOffset)
+                                        dragTargetIndex = (start + (dragOffsetPx / rowStepPx).roundToInt())
+                                            .coerceIn(0, order.lastIndex)
+                                    },
+                                )
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        PhoebeIconView(PhoebeIcon.Drag, tint = PhoebeUi.mutedText, modifier = Modifier.size(16.dp))
+                    }
+                    PhoebeIconView(section.icon, tint = PhoebeUi.accentLight, modifier = Modifier.size(15.dp))
+                    Text(section.label, color = PhoebeUi.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        TextButton(onClick = { onSections(HomeSection.defaultOrder) }) {
+            Text("Reset order", color = PhoebeUi.accentLight)
+        }
+    }
+}
+
+@Composable
+private fun FavoritePlaylistSettingsCard(
+    onExport: () -> Unit,
+    onImport: () -> Unit,
+    compact: Boolean = false,
+) {
+    SettingsCard {
+        Text("Favorite playlists", color = PhoebeUi.primaryText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Text(
+            "Export or import locally saved favorite playlist flags",
+            color = PhoebeUi.mutedText,
+            fontSize = 12.sp,
+            modifier = Modifier.padding(bottom = if (compact) 8.dp else 12.dp),
+        )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            TextButton(onClick = onExport) {
+                Text("Export", color = PhoebeUi.accentLight)
+            }
+            TextButton(onClick = onImport) {
+                Text("Import", color = PhoebeUi.accentLight)
+            }
+        }
+    }
+}
+
+private val HomeSection.icon: PhoebeIcon
+    get() = when (this) {
+        HomeSection.Mixes -> PhoebeIcon.Music
+        HomeSection.Collections -> PhoebeIcon.Library
+        HomeSection.Favorites -> PhoebeIcon.Heart
+        HomeSection.FavoritePlaylists -> PhoebeIcon.Heart
+        HomeSection.FavoriteArtists -> PhoebeIcon.Library
+        HomeSection.FavoriteAlbums -> PhoebeIcon.Grid
+        HomeSection.Recents -> PhoebeIcon.Bell
+        HomeSection.RecentSongs -> PhoebeIcon.Music
+        HomeSection.RecentArtists -> PhoebeIcon.Library
+        HomeSection.RecentAlbums -> PhoebeIcon.Grid
+        HomeSection.Played -> PhoebeIcon.Play
+        HomeSection.Random -> PhoebeIcon.Grid
+    }
+
+private fun <T> List<T>.moved(from: Int, to: Int): List<T> {
+    if (from !in indices || to !in indices) return this
+    val copy = toMutableList()
+    val item = copy.removeAt(from)
+    copy.add(to, item)
+    return copy
+}
+
+private fun normalizedHomeSections(sections: List<HomeSection>): List<HomeSection> =
+    sections
+        .flatMap { section ->
+            when (section) {
+                HomeSection.Favorites -> listOf(HomeSection.FavoritePlaylists, HomeSection.FavoriteArtists, HomeSection.FavoriteAlbums)
+                HomeSection.Recents -> listOf(HomeSection.RecentSongs, HomeSection.RecentArtists, HomeSection.RecentAlbums)
+                else -> listOf(section)
+            }
+        }
+        .filterNot { it == HomeSection.Favorites || it == HomeSection.Recents }
+        .let { (it + HomeSection.defaultOrder).distinct() }
 
 @Composable
 private fun BoxWithQualityMenu(

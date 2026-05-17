@@ -3,6 +3,8 @@ package com.phoebe.app
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.AppScreen
 import com.phoebe.app.domain.Artist
+import com.phoebe.app.domain.ArtistRadioAvailability
+import com.phoebe.app.domain.HomeSection
 import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryTab
@@ -10,6 +12,7 @@ import com.phoebe.app.domain.LyricsLoadState
 import com.phoebe.app.domain.MusicLibrary
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.PlexPin
+import com.phoebe.app.domain.PlexRadioStation
 import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.RepeatMode
@@ -19,10 +22,15 @@ import com.phoebe.app.domain.canAddToLocalPlaylist
 import com.phoebe.app.domain.canAddToPlexPlaylist
 import com.phoebe.app.domain.canTogglePlexLike
 import com.phoebe.app.domain.isLocalPlaylist
+import com.phoebe.app.domain.serverAuthToken
 import com.phoebe.app.domain.supportsPlexPlaylists
 import com.phoebe.app.domain.supportsPlexRatings
 import com.phoebe.app.data.DownloadBatchResult
+import com.phoebe.app.data.FavoriteSyncResult
+import com.phoebe.app.data.FavoritePlaylistsExport
 import com.phoebe.app.data.PlexPlayHistorySyncResult
+import com.phoebe.app.data.PlexClient
+import com.phoebe.app.data.defaultPlexRadioStations
 import com.phoebe.app.playlists.PlaylistExportFormat
 import com.phoebe.app.playlists.PlaylistExporter
 import com.phoebe.app.player.asPlayerState
@@ -39,6 +47,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -65,6 +74,7 @@ class AppState(
     val lastPlayedByAlbum = dependencies.playHistoryRepository.lastPlayedByAlbum
     val lastPlayedByTrack = dependencies.playHistoryRepository.lastPlayedByTrack
     val playCountsByTrack = dependencies.playHistoryRepository.playCountsByTrack
+    val playEventsByTrack = dependencies.playHistoryRepository.playEventsByTrack
     val defaultDownloadDirectoryLabel: String = dependencies.platformStorage.defaultDownloadDirectoryLabel()
 
     private val mutableScreen = MutableStateFlow(defaultBrowseScreen())
@@ -97,12 +107,22 @@ class AppState(
     private val mutableDecadeMixNotice = MutableStateFlow<String?>(null)
     val decadeMixNotice: StateFlow<String?> = mutableDecadeMixNotice
 
+    private val mutableRadioStations = MutableStateFlow<List<PlexRadioStation>>(emptyList())
+    val radioStations: StateFlow<List<PlexRadioStation>> = mutableRadioStations
+
+    private val mutableRadioStartingIds = MutableStateFlow<Set<String>>(emptySet())
+    val radioStartingIds: StateFlow<Set<String>> = mutableRadioStartingIds
+
+    private val mutableArtistRadioAvailability = MutableStateFlow<Map<String, ArtistRadioAvailability>>(emptyMap())
+    val artistRadioAvailability: StateFlow<Map<String, ArtistRadioAvailability>> = mutableArtistRadioAvailability
+
     private val mutableDownloadDirectory = MutableStateFlow<String?>(null)
     val downloadDirectory: StateFlow<String?> = mutableDownloadDirectory
 
     private val detailStack = ArrayDeque<AppScreen>()
     private var playRequestGeneration = 0
     private var recentAlbumWarmSignature: String? = null
+    private var playedAlbumWarmSignature: String? = null
     private var plexPlayHistorySyncJob: Job? = null
     private val activeDownloadJobs = mutableSetOf<Job>()
 
@@ -385,7 +405,13 @@ class AppState(
 
     private suspend fun syncPlexPlayHistory(showMessage: Boolean): PlexPlayHistorySyncResult? {
         return runCatching {
-            dependencies.plexPlayHistorySyncer.sync(session.value, catalog.value)
+            val currentSession = session.value
+            runCatching {
+                dependencies.catalogRepository.warmPlexHistoryTracks(currentSession)
+            }.onFailure { error ->
+                PhoebeLog.d("AppState") { "Plex history track warm failed: ${error.message}" }
+            }
+            dependencies.plexPlayHistorySyncer.sync(currentSession, catalog.value)
         }.onSuccess { result ->
             if (showMessage) {
                 mutableMessage.value = when (result) {
@@ -429,6 +455,9 @@ class AppState(
             is AppScreen.CollectionItems,
             is AppScreen.RecentlyAdded,
             is AppScreen.PlayHistory,
+            AppScreen.FavoritePlaylists,
+            AppScreen.FavoriteArtists,
+            AppScreen.FavoriteAlbums,
             is AppScreen.PlaylistDetail,
             -> {
                 val cur = mutableScreen.value
@@ -514,6 +543,24 @@ class AppState(
         }
     }
 
+    fun warmPlayedAlbumTracks(albumTitles: List<String>, maxAlbums: Int = 10) {
+        if (!session.value.canUsePlexBackgroundFetches()) return
+        val normalizedTitles = albumTitles
+            .asSequence()
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinctBy { it.lowercase() }
+            .take(maxAlbums)
+            .toList()
+        if (normalizedTitles.isEmpty()) return
+        val signature = normalizedTitles.joinToString("|") { it.lowercase() }
+        if (signature == playedAlbumWarmSignature) return
+        playedAlbumWarmSignature = signature
+        scope.launch {
+            dependencies.catalogRepository.warmAlbumTracksByTitle(session.value, normalizedTitles, maxAlbums)
+        }
+    }
+
     fun playDecadeMix(decade: Int) = scope.launch {
         mutableDecadeMixNotice.value = "Searching the ${decade}s…"
         val firstTracks = runCatching {
@@ -545,6 +592,97 @@ class AppState(
                 appendToQueue(moreTracks)
                 mutableMessage.value = "Added ${moreTracks.size} more songs from the ${decade}s."
             }
+        }
+    }
+
+    fun refreshRadioStations() = scope.launch {
+        val currentSession = session.value
+        val selectedLibrary = currentSession?.selectedLibrary
+        if (currentSession?.selectedServer == null || selectedLibrary == null || currentSession.serverAuthToken() == null) {
+            mutableRadioStations.value = emptyList()
+            return@launch
+        }
+        mutableRadioStations.value = defaultPlexRadioStations(selectedLibrary)
+        val stations = runCatching {
+            dependencies.catalogRepository.plexRadioStations(currentSession)
+        }.onFailure { error ->
+            PhoebeLog.d("AppState") { "Plex radio station load failed: ${error.message}" }
+        }.getOrDefault(defaultPlexRadioStations(selectedLibrary))
+        mutableRadioStations.value = stations
+    }
+
+    fun playRadioStation(station: PlexRadioStation) = scope.launch {
+        val radioId = station.key
+        if (radioId in mutableRadioStartingIds.value) return@launch
+        mutableRadioStartingIds.update { it + radioId }
+        try {
+            mutableMessage.value = "Starting ${station.title}..."
+            val tracks = runCatching {
+                dependencies.catalogRepository.playRadioStation(session.value, station)
+            }.getOrElse { error ->
+                val notice = error.message ?: "Couldn't start ${station.title}."
+                mutableMessage.value = notice
+                return@launch
+            }
+            if (tracks.isEmpty()) {
+                mutableMessage.value = "No songs found for ${station.title}."
+                return@launch
+            }
+            playTracks(tracks, 0)
+            open(AppScreen.Player)
+            mutableMessage.value = "Playing ${station.title}."
+        } finally {
+            mutableRadioStartingIds.update { it - radioId }
+        }
+    }
+
+    fun playArtistRadio(artist: Artist) = scope.launch {
+        if (!artist.id.startsWith("plex:")) {
+            mutableMessage.value = "Artist Radio is available for Plex artists."
+            return@launch
+        }
+        if (mutableArtistRadioAvailability.value[artist.id] == ArtistRadioAvailability.Unavailable) {
+            mutableMessage.value = "Artist Radio isn't available for ${artist.title}. Plex may need matched metadata and Popular Tracks enabled."
+            return@launch
+        }
+        if (artist.id in mutableRadioStartingIds.value) return@launch
+        mutableRadioStartingIds.update { it + artist.id }
+        try {
+            mutableMessage.value = "Starting ${artist.title} Radio..."
+            val tracks = runCatching {
+                dependencies.catalogRepository.playArtistRadio(session.value, artist)
+            }.getOrElse { error ->
+                val notice = error.message ?: "Couldn't start radio for ${artist.title}."
+                mutableMessage.value = notice
+                return@launch
+            }
+            if (tracks.isEmpty()) {
+                mutableArtistRadioAvailability.update { it + (artist.id to ArtistRadioAvailability.Unavailable) }
+                mutableMessage.value = "Artist Radio isn't available for ${artist.title}. Plex may need matched metadata and Popular Tracks enabled."
+                return@launch
+            }
+            mutableArtistRadioAvailability.update { it + (artist.id to ArtistRadioAvailability.Available) }
+            playTracks(tracks, 0)
+            open(AppScreen.Player)
+            mutableMessage.value = "Playing ${artist.title} Radio."
+        } finally {
+            mutableRadioStartingIds.update { it - artist.id }
+        }
+    }
+
+    fun probeArtistRadio(artist: Artist) = scope.launch {
+        if (!artist.id.startsWith("plex:")) {
+            mutableArtistRadioAvailability.update { it + (artist.id to ArtistRadioAvailability.Unavailable) }
+            return@launch
+        }
+        if (mutableArtistRadioAvailability.value[artist.id] == ArtistRadioAvailability.Available) return@launch
+        val available = runCatching {
+            dependencies.catalogRepository.artistRadioStation(session.value, artist) != null
+        }.onFailure { error ->
+            PhoebeLog.d("AppState") { "Artist radio probe failed for '${artist.title}': ${error.message}" }
+        }.getOrDefault(false)
+        mutableArtistRadioAvailability.update {
+            it + (artist.id to if (available) ArtistRadioAvailability.Available else ArtistRadioAvailability.Unavailable)
         }
     }
 
@@ -585,6 +723,9 @@ class AppState(
             is AppScreen.CollectionItems,
             is AppScreen.RecentlyAdded,
             is AppScreen.PlayHistory,
+            AppScreen.FavoritePlaylists,
+            AppScreen.FavoriteArtists,
+            AppScreen.FavoriteAlbums,
             is AppScreen.PlaylistDetail,
             -> true
         }
@@ -606,6 +747,9 @@ class AppState(
             is AppScreen.CollectionItems,
             is AppScreen.RecentlyAdded,
             is AppScreen.PlayHistory,
+            AppScreen.FavoritePlaylists,
+            AppScreen.FavoriteArtists,
+            AppScreen.FavoriteAlbums,
             is AppScreen.PlaylistDetail,
             -> popDetail()
         }
@@ -770,6 +914,10 @@ class AppState(
         scope.launch(Dispatchers.Default) {
             dependencies.libraryUiRepository.persistCurrentToDisk()
         }
+    }
+
+    fun setHomeSections(sections: List<HomeSection>) = scope.launch {
+        dependencies.libraryUiRepository.setHomeSections(sections)
     }
 
     fun download(track: Track) = launchDownload {
@@ -1047,6 +1195,89 @@ class AppState(
         mutableMessage.value = ratingMessage(result.savedLocally, result.plexAttempted, result.plexSynced)
     }
 
+    fun toggleFavoriteArtist(artist: Artist) = scope.launch {
+        mutableMessage.value = favoriteMessage(
+            label = "Artist",
+            result = dependencies.catalogRepository.toggleFavoriteArtist(session.value, artist),
+            plexUnavailableMessage = null,
+        )
+    }
+
+    fun toggleFavoriteAlbum(album: Album) = scope.launch {
+        mutableMessage.value = favoriteMessage(
+            label = "Album",
+            result = dependencies.catalogRepository.toggleFavoriteAlbum(session.value, album),
+            plexUnavailableMessage = null,
+        )
+    }
+
+    fun toggleFavoritePlaylist(playlist: Playlist) = scope.launch {
+        mutableMessage.value = favoriteMessage(
+            label = "Playlist",
+            result = dependencies.catalogRepository.toggleFavoritePlaylist(playlist),
+            plexUnavailableMessage = null,
+        )
+    }
+
+    fun exportFavoritePlaylists() = scope.launch {
+        val export = dependencies.catalogRepository.favoritePlaylistsExport()
+        if (export.playlists.isEmpty()) {
+            mutableMessage.value = "No favorite playlists to export."
+            return@launch
+        }
+        runCatching {
+            dependencies.platformStorage.writeText(
+                FavoritePlaylistsExportPath,
+                PlexClient.PlexJson.encodeToString(FavoritePlaylistsExport.serializer(), export),
+            )
+        }.onSuccess {
+            mutableMessage.value = "Exported ${export.playlists.size} favorite playlists."
+        }.onFailure { error ->
+            mutableMessage.value = error.message ?: "Couldn't export favorite playlists."
+        }
+    }
+
+    fun importFavoritePlaylists() = scope.launch {
+        val content = dependencies.platformStorage.readText(FavoritePlaylistsExportPath)
+        if (content.isNullOrBlank()) {
+            mutableMessage.value = "No favorite playlist export found."
+            return@launch
+        }
+        runCatching {
+            val export = PlexClient.PlexJson.decodeFromString(FavoritePlaylistsExport.serializer(), content)
+            dependencies.catalogRepository.importFavoritePlaylists(export)
+        }.onSuccess { imported ->
+            mutableMessage.value = if (imported > 0) {
+                "Imported $imported favorite playlists."
+            } else {
+                "No matching playlists found to import."
+            }
+        }.onFailure { error ->
+            mutableMessage.value = error.message ?: "Couldn't import favorite playlists."
+        }
+    }
+
+    private fun favoriteMessage(
+        label: String,
+        result: FavoriteSyncResult,
+        plexUnavailableMessage: String?,
+    ): String =
+        when (result.favorite) {
+            null -> "Couldn't find that item in the library."
+            true -> when {
+                result.plexAttempted && result.plexSynced -> "$label added to favorites and synced to Plex."
+                result.plexAttempted -> "$label added to favorites, but Plex sync failed."
+                plexUnavailableMessage != null -> "$label added to favorites. $plexUnavailableMessage"
+                else -> "$label added to favorites."
+            }
+            false -> when {
+                result.plexAttempted && result.plexSynced -> "$label removed from favorites and synced to Plex."
+                result.plexAttempted -> "$label removed from favorites, but Plex sync failed."
+                plexUnavailableMessage != null -> "$label removed from favorites. $plexUnavailableMessage"
+                else -> "$label removed from favorites."
+            }
+        }
+
     private fun ratingMessage(savedLocally: Boolean, plexAttempted: Boolean, plexSynced: Boolean): String =
         when {
             !savedLocally -> "Couldn't find that item in the library."
@@ -1127,3 +1358,5 @@ private fun PlexSession?.canUsePlexBackgroundFetches(): Boolean {
         server.advertisedConnectionUris.isNotEmpty() ||
         server.localConnectionUris.isNotEmpty()
 }
+
+private const val FavoritePlaylistsExportPath = "exports/favorite-playlists.json"

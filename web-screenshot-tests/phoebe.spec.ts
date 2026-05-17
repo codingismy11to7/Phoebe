@@ -2,9 +2,14 @@ import { expect, type Page, test } from '@playwright/test';
 
 const coreScenarios = [
   'Home',
+  'HomePlayedRows',
+  'FavoritePlaylists',
+  'FavoriteArtists',
+  'FavoriteAlbums',
   'Library',
   'Playlist',
   'Artist',
+  'ArtistRadio',
   'Album',
   'CollectionValues',
   'CollectionItems',

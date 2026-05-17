@@ -3,7 +3,10 @@ package com.phoebe.app
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.CatalogSnapshot
+import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.Track
+import com.phoebe.app.ui.HomePlayedTrack
+import com.phoebe.app.ui.HomeUiState
 import com.phoebe.app.ui.PlayHistorySnapshot
 import com.phoebe.app.ui.availableDecades
 import com.phoebe.app.ui.decadeMix
@@ -12,6 +15,7 @@ import com.phoebe.app.ui.deriveHomeUiState
 import com.phoebe.app.ui.personalMix
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class HomeUiStateTest {
     @Test
@@ -82,6 +86,31 @@ class HomeUiStateTest {
     }
 
     @Test
+    fun derivesFavoriteHomeSections() {
+        val catalog = CatalogSnapshot(
+            artists = listOf(
+                Artist("artist-b", "Beta", favorite = true),
+                Artist("artist-a", "Alpha", favorite = true),
+                Artist("artist-c", "Gamma"),
+            ),
+            albums = listOf(
+                Album("album-b", "Beta Album", "Artist", favorite = true),
+                Album("album-a", "Alpha Album", "Artist", favorite = true),
+            ),
+            playlists = listOf(
+                Playlist("playlist-b", "Beta Mix", 2, favorite = true),
+                Playlist("playlist-a", "Alpha Mix", 4, favorite = true),
+            ),
+        )
+
+        val state = deriveHomeUiState(catalog, PlayHistorySnapshot(), 1, 2, nowMs = 100L)
+
+        assertEquals(listOf("artist-a", "artist-b"), state.favoriteArtists.map { it.id })
+        assertEquals(listOf("album-a", "album-b"), state.favoriteAlbums.map { it.id })
+        assertEquals(listOf("playlist-a", "playlist-b"), state.favoritePlaylists.map { it.id })
+    }
+
+    @Test
     fun decadeMixUsesLoadedTrackYears() {
         val catalog = CatalogSnapshot(
             tracksByParent = mapOf(
@@ -112,5 +141,60 @@ class HomeUiStateTest {
         val state = deriveHomeUiState(catalog, PlayHistorySnapshot(), 1, 2, nowMs = 10L)
 
         assertEquals(tracks.map { it.id }.toSet(), personalMix(catalog, state, limit = 10).map { it.id }.toSet())
+    }
+
+    @Test
+    fun heavyRotationTracksUseRecentPlayFrequency() {
+        val nowMs = 1_000_000_000L
+        val tracks = (1..4).map {
+            Track("t$it", "Track $it", "Artist", "Album", 1_000L, "stream", "")
+        }
+        val catalog = CatalogSnapshot(tracksByParent = mapOf("all" to tracks))
+
+        val state = deriveHomeUiState(
+            catalog = catalog,
+            playHistory = PlayHistorySnapshot(
+                byTrack = mapOf("t1" to nowMs - 1_000L, "t2" to nowMs - 2_000L, "t3" to nowMs - 3_000L),
+                playCountByTrack = mapOf("t1" to 20L, "t2" to 50L, "t3" to 2L),
+                playEventsByTrack = mapOf(
+                    "t1" to listOf(nowMs - 1_000L, nowMs - 2_000L, nowMs - 3_000L),
+                    "t2" to listOf(nowMs - 2_000L, nowMs - 20L * 24L * 60L * 60L * 1000L),
+                    "t3" to listOf(nowMs - 3_000L, nowMs - 4_000L),
+                ),
+            ),
+            randomArtistSeed = 1,
+            randomAlbumSeed = 2,
+            nowMs = nowMs,
+        )
+
+        assertEquals(listOf("t1", "t3"), state.heavyRotationTracks.map { it.track.id })
+        assertEquals(listOf(3L, 2L), state.heavyRotationTracks.map { it.playCount })
+    }
+
+    @Test
+    fun personalMixStartsWithHeavyRotationAndLimitsDiscovery() {
+        val tracks = listOf(
+            Track("heavy1", "Heavy 1", "Comfort A", "Album", 1_000L, "stream", "", year = 2001, genre = "Rock"),
+            Track("heavy2", "Heavy 2", "Comfort B", "Album", 1_000L, "stream", "", year = 2002, genre = "Rock"),
+            Track("recent1", "Recent 1", "Comfort C", "Album", 1_000L, "stream", "", year = 2003, genre = "Rock"),
+            Track("recent2", "Recent 2", "Comfort D", "Album", 1_000L, "stream", "", year = 2004, genre = "Rock"),
+            Track("most1", "Most 1", "Comfort E", "Album", 1_000L, "stream", "", year = 2005, genre = "Rock"),
+            Track("most2", "Most 2", "Comfort F", "Album", 1_000L, "stream", "", year = 2006, genre = "Rock"),
+            Track("similar1", "Similar 1", "Comfort A", "Album", 1_000L, "stream", "", year = 2007, genre = "Rock"),
+            Track("similar2", "Similar 2", "Comfort B", "Album", 1_000L, "stream", "", year = 2008, genre = "Rock"),
+            Track("new1", "New 1", "Discovery", "Album", 1_000L, "stream", "", dateAddedMs = 10L),
+            Track("new2", "New 2", "Discovery", "Album", 1_000L, "stream", "", dateAddedMs = 9L),
+        )
+        val catalog = CatalogSnapshot(tracksByParent = mapOf("all" to tracks))
+        val state = HomeUiState(
+            heavyRotationTracks = tracks.take(2).map { HomePlayedTrack(it, playCount = 3L) },
+            recentlyPlayedTracks = tracks.slice(2..3).map { HomePlayedTrack(it, playCount = 1L) },
+            mostPlayedTracks = tracks.slice(4..5).map { HomePlayedTrack(it, playCount = 10L) },
+        )
+
+        val mix = personalMix(catalog, state, limit = 8).map { it.id }
+
+        assertEquals(setOf("heavy1", "heavy2"), mix.take(2).toSet())
+        assertTrue(mix.count { it.startsWith("new") } <= 1)
     }
 }
