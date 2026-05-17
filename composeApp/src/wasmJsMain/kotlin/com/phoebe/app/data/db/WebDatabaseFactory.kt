@@ -1,7 +1,6 @@
 package com.phoebe.app.data.db
 
 import app.cash.sqldelight.async.coroutines.awaitCreate
-import app.cash.sqldelight.async.coroutines.awaitMigrate
 import app.cash.sqldelight.db.QueryResult
 import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.db.SqlSchema
@@ -10,19 +9,16 @@ import kotlinx.browser.window
 import org.w3c.dom.Worker
 
 actual suspend fun createSqlDriver(schema: SqlSchema<QueryResult.AsyncValue<Unit>>): SqlDriver {
-    val driver = WebWorkerDriver(createPersistentSqlWorker())
     val schemaKey = "$LocalDbRevisionKey.web.async"
     val storedRevision = window.localStorage.getItem(schemaKey)?.toLongOrNull()
-    when {
-        storedRevision == null -> schema.awaitCreate(driver)
-        storedRevision < LocalDbRevision -> schema.awaitMigrate(driver, oldVersion = 1, newVersion = schema.version)
-    }
-    if (storedRevision != LocalDbRevision) {
+    val driver = WebWorkerDriver(createPersistentSqlWorker(LocalDbRevision))
+    if (storedRevision == null || storedRevision != LocalDbRevision) {
+        schema.awaitCreate(driver)
         window.localStorage.setItem(schemaKey, LocalDbRevision.toString())
     }
     return driver
 }
 
 @OptIn(ExperimentalWasmJsInterop::class)
-@JsFun("() => new Worker('/phoebe-sqljs.worker.js')")
-private external fun createPersistentSqlWorker(): Worker
+@JsFun("(revision) => new Worker('/phoebe-sqljs.worker.js?revision=' + revision)")
+private external fun createPersistentSqlWorker(revision: Long): Worker

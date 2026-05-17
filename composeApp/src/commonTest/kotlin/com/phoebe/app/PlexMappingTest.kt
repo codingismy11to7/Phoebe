@@ -3,6 +3,7 @@ package com.phoebe.app
 import com.phoebe.app.data.PlexClient
 import com.phoebe.app.data.PlexCollectionFacet
 import com.phoebe.app.data.PlexCollectionTarget
+import com.phoebe.app.data.PlexFilterChoice
 import com.phoebe.app.data.PlexDeviceDto
 import com.phoebe.app.data.PlexMediaContainerResponse
 import com.phoebe.app.domain.MusicLibrary
@@ -645,6 +646,77 @@ class PlexMappingTest {
         assertEquals("999", choice.key)
         assertEquals("album.mood", choice.filterField)
         assertEquals(listOf("a1"), items)
+    }
+
+    @Test
+    fun tracksForCollectionFacetPageUsesTrackFilterPaths() = runTest {
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/library/sections/1/all" -> {
+                    val mood = request.url.parameters["album.mood"] ?: request.url.parameters["mood"]
+                    if (request.url.parameters["type"] == "10" && mood == "Angry") {
+                        respond(
+                            content = """
+                                {
+                                  "MediaContainer": {
+                                    "offset": 0,
+                                    "size": 1,
+                                    "totalSize": 1,
+                                    "Metadata": [
+                                      {
+                                        "ratingKey": "t1",
+                                        "title": "Mood Song",
+                                        "type": "track",
+                                        "parentTitle": "Artist One",
+                                        "grandparentTitle": "Artist One",
+                                        "parentRatingKey": "a1",
+                                        "duration": 180000,
+                                        "Media": [
+                                          {
+                                            "Part": [
+                                              {
+                                                "key": "/library/parts/t1/file.flac"
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                }
+                            """.trimIndent(),
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    } else {
+                        respond("""{ "MediaContainer": { "Metadata": [] } }""", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+                    }
+                }
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val client = PlexClient(testHttpClient(engine))
+        val server = PlexServer("server", "Plex", "https://plex.example", owned = true)
+        val library = MusicLibrary("1", "Music")
+        val choice = PlexFilterChoice(
+            key = "Angry",
+            title = "Angry",
+            fastKey = null,
+            filterField = "album.mood",
+        )
+
+        val page = client.tracksForCollectionFacetPage(
+            server = server,
+            library = library,
+            token = "token",
+            facet = PlexCollectionFacet.Mood,
+            choice = choice,
+            start = 0,
+            size = 50,
+        )
+
+        assertEquals(1, page.tracks.size)
+        assertEquals("Mood Song", page.tracks.single().title)
     }
 
     @Test

@@ -1,3 +1,9 @@
 TEAM_ID=LVCF4PVSY3
 BUNDLE_ID=com.phoebe.app
 APP_NAME=Phoebe
+
+// Compose Multiplatform 1.11+ uses UIViewLayoutRegion (iOS 26 SDK). Requires Xcode 26+ to build.
+IPHONEOS_DEPLOYMENT_TARGET = 26.0
+
+EXCLUDED_ARCHS[sdk=iphonesimulator*] = i386 x86_64
+ARCHS[sdk=iphonesimulator*] = arm64

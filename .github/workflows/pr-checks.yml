@@ -79,12 +79,18 @@ jobs:
 
   ios-build:
     name: iOS build
-    runs-on: macos-latest
+    # Compose 1.11 links UIViewLayoutRegion (iOS 26 SDK); Xcode 16.x only supports deployment targets up to 18.5.
+    runs-on: macos-26
     timeout-minutes: 45
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Select Xcode 26
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '26'
 
       - name: Set up JDK
         uses: actions/setup-java@v4

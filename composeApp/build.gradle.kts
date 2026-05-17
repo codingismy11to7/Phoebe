@@ -33,6 +33,17 @@ val javaFxClassifier = when {
     else -> "linux"
 }
 
+val composeDesktopTarget = when {
+    System.getProperty("os.name").startsWith("Mac", ignoreCase = true) &&
+        System.getProperty("os.arch") == "aarch64" -> "macos-arm64"
+    System.getProperty("os.name").startsWith("Mac", ignoreCase = true) -> "macos-x64"
+    System.getProperty("os.name").startsWith("Windows", ignoreCase = true) &&
+        System.getProperty("os.arch") == "aarch64" -> "windows-arm64"
+    System.getProperty("os.name").startsWith("Windows", ignoreCase = true) -> "windows-x64"
+    System.getProperty("os.arch") == "aarch64" -> "linux-arm64"
+    else -> "linux-x64"
+}
+
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.androidApplication)
@@ -59,12 +70,13 @@ kotlin {
         binaries.executable()
     }
 
-    listOf(iosX64(), iosArm64(), iosSimulatorArm64()).forEach { iosTarget ->
+    listOf(iosArm64(), iosSimulatorArm64()).forEach { iosTarget ->
         iosTarget.binaries.framework {
             baseName = "ComposeApp"
             isStatic = true
         }
     }
+
 
     sourceSets {
         val commonTest by getting
@@ -76,10 +88,10 @@ kotlin {
             kotlin.srcDir("src/commonTest/kotlin")
         }
         commonMain.dependencies {
-            implementation(compose.runtime)
-            implementation(compose.foundation)
-            implementation(compose.material3)
-            implementation(compose.components.resources)
+            implementation(libs.compose.runtime)
+            implementation(libs.compose.foundation)
+            implementation(libs.compose.material3)
+            implementation(libs.compose.components.resources)
             implementation(libs.coroutines.core)
             implementation(libs.ktor.client.core)
             implementation(libs.ktor.client.content.negotiation)
@@ -99,7 +111,7 @@ kotlin {
             implementation(kotlin("test"))
             implementation(libs.junit)
             implementation(libs.coroutines.test)
-            implementation("org.jetbrains.compose.ui:ui-test-junit4:${libs.versions.compose.get()}")
+            implementation(libs.compose.ui.test.junit4)
             implementation(libs.roborazzi.compose.desktop)
             implementation(libs.ktor.client.mock)
             implementation(libs.ktor.client.cio)
@@ -131,9 +143,9 @@ kotlin {
             implementation(libs.sqldelight.async.extensions)
             implementation(libs.sqldelight.coroutines.extensions)
             implementation(libs.sqldelight.primitive.adapters)
-            implementation(compose.foundation)
-            implementation(compose.material3)
-            implementation(compose.runtime)
+            implementation(libs.compose.foundation)
+            implementation(libs.compose.material3)
+            implementation(libs.compose.runtime)
         }
         androidUnitTest.dependencies {
             implementation(kotlin("test"))
@@ -149,9 +161,9 @@ kotlin {
             implementation(libs.robolectric)
             implementation(libs.roborazzi.compose)
             implementation(libs.roborazzi.core)
-            implementation(compose.foundation)
-            implementation(compose.material3)
-            implementation(compose.runtime)
+            implementation(libs.compose.foundation)
+            implementation(libs.compose.material3)
+            implementation(libs.compose.runtime)
         }
         wasmJsTest.dependencies {
             implementation(kotlin("test"))
@@ -168,7 +180,7 @@ kotlin {
             implementation(libs.sqldelight.android.driver)
         }
         desktopMain.dependencies {
-            implementation(compose.desktop.currentOs)
+            implementation("org.jetbrains.compose.desktop:desktop-jvm-$composeDesktopTarget:${libs.versions.compose.get()}")
             implementation(libs.jnativehook)
             implementation(libs.jna)
             implementation(libs.coroutines.swing)

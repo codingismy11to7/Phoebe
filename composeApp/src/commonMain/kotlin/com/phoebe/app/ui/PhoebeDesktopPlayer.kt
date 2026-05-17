@@ -455,6 +455,7 @@ internal fun DesktopPlayer(
                                     CollectionsScreen(
                                         entry = targetScreen.entry,
                                         catalog = catalog,
+                                        searchQuery = searchQuery,
                                         modifier = Modifier.weight(1f).fillMaxWidth(),
                                         onBack = onPopDetail,
                                         onCollectionValue = { entry, value -> onCollectionValue(entry, value) },
@@ -466,6 +467,7 @@ internal fun DesktopPlayer(
                                         entry = targetScreen.entry,
                                         value = targetScreen.value,
                                         catalog = catalog,
+                                        searchQuery = searchQuery,
                                         modifier = Modifier.weight(1f).fillMaxWidth(),
                                         onBack = onPopDetail,
                                         onArtist = onArtist,

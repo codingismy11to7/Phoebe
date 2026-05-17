@@ -1,7 +1,8 @@
 [versions]
 agp = "8.9.3"
-compose = "1.10.0"
-kotlin = "2.2.21"
+compose = "1.11.0"
+composeMaterial3 = "1.11.0-alpha07"
+kotlin = "2.3.21"
 coroutines = "1.10.2"
 ktor = "3.3.2"
 serialization = "1.9.0"
@@ -27,6 +28,11 @@ robolectric = "4.16.1"
 roborazzi = "1.60.0"
 
 [libraries]
+compose-runtime = { module = "org.jetbrains.compose.runtime:runtime", version.ref = "compose" }
+compose-foundation = { module = "org.jetbrains.compose.foundation:foundation", version.ref = "compose" }
+compose-material3 = { module = "org.jetbrains.compose.material3:material3", version.ref = "composeMaterial3" }
+compose-components-resources = { module = "org.jetbrains.compose.components:components-resources", version.ref = "compose" }
+compose-ui-test-junit4 = { module = "org.jetbrains.compose.ui:ui-test-junit4", version.ref = "compose" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
 androidx-fragment = { module = "androidx.fragment:fragment", version.ref = "fragment" }
 androidx-documentfile = { module = "androidx.documentfile:documentfile", version.ref = "documentfile" }
