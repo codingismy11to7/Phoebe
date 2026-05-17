@@ -9,9 +9,10 @@ import java.io.File
 import java.util.Properties
 
 actual suspend fun createSqlDriver(schema: SqlSchema<QueryResult.AsyncValue<Unit>>): SqlDriver {
-    val root = File(System.getProperty("user.home"), ".phoebe").also { it.mkdirs() }
-    val dbFile = File(root, LocalDbName)
-    val revFile = File(root, "$LocalDbName.rev")
+    val root = desktopDatabaseRoot()
+    val dbFileName = localDatabaseFileName()
+    val dbFile = File(root, dbFileName)
+    val revFile = File(root, "$dbFileName.rev")
 
     wipeIfRevisionChanged(dbFile, revFile)
 
@@ -41,3 +42,7 @@ private fun wipeIfRevisionChanged(dbFile: File, revFile: File) {
     }
     revFile.writeText(LocalDbRevision.toString())
 }
+
+internal fun desktopDatabaseRoot(): File =
+    System.getProperty("phoebe.storage.root")?.let(::File)
+        ?: File(System.getProperty("user.home"), desktopDataDirectoryName()).also { it.mkdirs() }

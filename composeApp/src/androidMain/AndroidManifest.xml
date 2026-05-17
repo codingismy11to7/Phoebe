@@ -11,7 +11,7 @@
         android:appCategory="audio"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
-        android:label="Phoebe"
+        android:label="@string/app_name"
         android:theme="@style/AppTheme">
         <activity
             android:name=".MainActivity"
@@ -31,7 +31,7 @@
             android:name=".player.PlaybackService"
             android:exported="true"
             android:foregroundServiceType="mediaPlayback"
-            android:label="Phoebe">
+            android:label="@string/app_name">
             <intent-filter>
                 <action android:name="androidx.media3.session.MediaSessionService" />
                 <action android:name="androidx.media3.session.MediaLibraryService" />

@@ -29,8 +29,7 @@ actual fun createPlatformHttpClient(): HttpClient = HttpClient(CIO) {
 }
 
 private val storageRoot: File by lazy {
-    System.getProperty("phoebe.storage.root")?.let(::File)
-        ?: File(System.getProperty("user.home"), ".phoebe")
+    com.phoebe.app.data.db.desktopDatabaseRoot()
 }
 
 actual class PlatformStorage actual constructor() {

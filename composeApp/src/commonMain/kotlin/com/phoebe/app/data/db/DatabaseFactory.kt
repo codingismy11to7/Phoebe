@@ -19,9 +19,6 @@ suspend fun createPhoebeDatabase(): PhoebeDatabase =
 /** Opens [PhoebeDatabase] with an existing driver (in-memory JDBC, Android test context, etc.). */
 fun phoebeDatabaseFromDriver(driver: SqlDriver): PhoebeDatabase = PhoebeDatabase(driver)
 
-/** File name used by every platform's SQLite driver. */
-internal const val LocalDbName: String = "phoebe.db"
-
 /**
  * Pre-release schema revision. Bump this whenever a `.sq` file changes in a way that
  * requires existing tables/columns to be recreated. On launch, every platform driver
@@ -33,6 +30,3 @@ internal const val LocalDbName: String = "phoebe.db"
  * task) before any public release.
  */
 internal const val LocalDbRevision: Long = 12L
-
-/** Persistence key used to store [LocalDbRevision] alongside the database. */
-internal const val LocalDbRevisionKey: String = "phoebe.db.revision"

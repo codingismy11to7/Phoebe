@@ -134,6 +134,7 @@ import androidx.compose.ui.zIndex
 import kotlin.math.roundToInt
 import com.phoebe.app.AppState
 import com.phoebe.app.data.catalogAlbumsForArtist
+import com.phoebe.app.data.catalogArtistGenre
 import com.phoebe.app.data.catalogTracksForArtist
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.AppScreen
@@ -691,6 +692,161 @@ private fun DetailMetaRow(
     }
 }
 
+@Composable
+private fun PlayRadioActionButton(
+    starting: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    LibraryToolbarButton(
+        icon = PhoebeIcon.Play,
+        label = if (starting) "Starting Radio..." else "Play Radio",
+        modifier = modifier,
+        enabled = !starting,
+        iconTint = if (starting) PhoebeUi.mutedText else PhoebeUi.accentLight,
+        onClick = onClick,
+    )
+}
+
+@Composable
+private fun ArtistDetailStatRow(icon: PhoebeIcon, value: String, label: String) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Box(
+            Modifier
+                .size(32.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color.White.copy(alpha = 0.04f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            PhoebeIconView(icon, tint = PhoebeUi.accentLight, modifier = Modifier.size(15.dp))
+        }
+        Column {
+            Text(value, color = PhoebeUi.primaryText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Text(label, color = PhoebeUi.mutedText, fontSize = 11.sp)
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ArtistStatsPanel(
+    artist: Artist,
+    catalog: CatalogSnapshot,
+    artistThumbUrl: String?,
+    albums: List<Album>,
+    tracks: List<Track>,
+    artistRadioAvailability: ArtistRadioAvailability?,
+    artistRadioStarting: Boolean,
+    onPlayArtistRadio: () -> Unit,
+    onAlbum: (Album) -> Unit,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+    edgePadding: Dp = 36.dp,
+    topPadding: Dp = 36.dp,
+    alignBackIconToContentStart: Boolean = false,
+) {
+    val genre = remember(catalog, artist.title) { catalogArtistGenre(catalog, artist.title) ?: "—" }
+    val totalDuration = remember(tracks) { tracks.sumOf { it.durationMs } }
+    val playHistory = LocalPlayHistory.current
+    val nowMs = LocalNowMs.current
+    val lastPlayed = remember(tracks, playHistory.byTrack, playHistory.byArtist, artist.title) {
+        resolveArtistLastPlayed(artist.title, tracks, playHistory)
+    }
+    val lastPlayedLabel = remember(lastPlayed, nowMs) { formatLastPlayed(lastPlayed, nowMs) }
+    val albumWord = if (albums.size == 1) "album" else "albums"
+    val songWord = if (tracks.size == 1) "song" else "songs"
+    val scrollState = rememberScrollState()
+
+    Column(
+        modifier
+            .fillMaxSize()
+            .padding(start = edgePadding, end = edgePadding, top = topPadding, bottom = 24.dp)
+            .verticalScroll(scrollState),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        DetailSectionIntro(
+            onBack = onBack,
+            label = "Artist",
+            alignBackIconToContentStart = alignBackIconToContentStart,
+        )
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            ArtworkImage(
+                artist.title,
+                artistThumbUrl,
+                Modifier
+                    .size(116.dp)
+                    .sharedArtworkTransition("artist:${artist.id}")
+                    .clip(CircleShape),
+                radius = 58.dp,
+                elevated = false,
+            )
+        }
+        Column(
+            Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            Text(
+                artist.title.uppercase(),
+                color = PhoebeUi.primaryText,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 0.04.em,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.sharedBoundsTransition("artist:${artist.id}:title"),
+            )
+            Text(genre, color = PhoebeUi.mutedText, fontSize = 12.sp, textAlign = TextAlign.Center)
+        }
+        if (artistRadioAvailability == ArtistRadioAvailability.Available) {
+            PlayRadioActionButton(
+                starting = artistRadioStarting,
+                modifier = Modifier.fillMaxWidth(),
+                onClick = onPlayArtistRadio,
+            )
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            ArtistDetailStatRow(PhoebeIcon.Library, "${albums.size} $albumWord", "Albums")
+            ArtistDetailStatRow(PhoebeIcon.Music, "${tracks.size} $songWord", "Songs")
+            ArtistDetailStatRow(PhoebeIcon.ActiveDot, formatHoursMinutes(totalDuration), "Total Duration")
+            ArtistDetailStatRow(PhoebeIcon.Bell, lastPlayedLabel, "Last Played")
+        }
+        if (albums.isNotEmpty()) {
+            Spacer(Modifier.height(4.dp))
+            SectionLabel("Albums", PhoebeUi.primaryText)
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                albums.forEach { album ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onAlbum(album) }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Box(Modifier.size(32.dp)) {
+                            ArtworkImage(album.title, album.thumbUrl, Modifier.fillMaxSize(), radius = 6.dp)
+                        }
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                album.title,
+                                color = PhoebeUi.secondaryText,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            album.year?.let { Text(it.toString(), color = PhoebeUi.mutedText, fontSize = 10.sp) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun ArtistDetailPanel(
@@ -749,6 +905,7 @@ internal fun ArtistDetailPanel(
     LaunchedEffect(artist.id) {
         if (artist.id.startsWith("plex:")) onProbeArtistRadio(artist)
     }
+    var showStats by remember(artist.id) { mutableStateOf(false) }
 
     BoxWithConstraints(modifier.fillMaxSize()) {
         val useTable = maxWidth >= 640.dp
@@ -764,6 +921,23 @@ internal fun ArtistDetailPanel(
             visibleAlbums.chunked(albumGridColumns)
         }
         val listState = RetainedLazyListStates.remember("artist-detail:${artist.id}")
+        if (showStats) {
+            ArtistStatsPanel(
+                artist = artist,
+                catalog = catalog,
+                artistThumbUrl = artistThumbUrl,
+                albums = albums,
+                tracks = tracks,
+                artistRadioAvailability = artistRadioAvailability,
+                artistRadioStarting = artistRadioStarting,
+                onPlayArtistRadio = { onPlayArtistRadio(artist) },
+                onAlbum = onAlbum,
+                onBack = { showStats = false },
+                edgePadding = edgePadding,
+                topPadding = topPadding,
+                alignBackIconToContentStart = !useTable,
+            )
+        } else {
     LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize().padding(start = edgePadding, end = edgePadding, top = topPadding),
@@ -806,23 +980,31 @@ internal fun ArtistDetailPanel(
                 if (!useTable) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                         if (artistRadioAvailability == ArtistRadioAvailability.Available) {
-                            TextButton(enabled = !artistRadioStarting, onClick = { onPlayArtistRadio(artist) }) {
-                                Text(
-                                    if (artistRadioStarting) "Starting Radio..." else "Play Radio",
-                                    color = if (artistRadioStarting) PhoebeUi.mutedText else PhoebeUi.accentLight,
-                                )
-                            }
+                            PlayRadioActionButton(
+                                starting = artistRadioStarting,
+                                onClick = { onPlayArtistRadio(artist) },
+                            )
                         }
                         DownloadActionButton("Download Artist", tracks) { onDownloadArtist(artist) }
                     }
                 }
                 Spacer(Modifier.height(6.dp))
-                ArtworkImage(
-                    artist.title,
-                    artistThumbUrl,
-                    Modifier.size(120.dp).sharedArtworkTransition("artist:${artist.id}"),
-                    elevated = useTable,
-                )
+                Box(
+                    Modifier
+                        .size(120.dp)
+                        .sharedArtworkTransition("artist:${artist.id}")
+                        .clip(CircleShape)
+                        .clickable(onClick = { showStats = true }),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    ArtworkImage(
+                        artist.title,
+                        artistThumbUrl,
+                        Modifier.fillMaxSize(),
+                        radius = 60.dp,
+                        elevated = useTable,
+                    )
+                }
                 Spacer(Modifier.height(10.dp))
                 SectionLabel("Albums", PhoebeUi.primaryText)
             }
@@ -845,12 +1027,10 @@ internal fun ArtistDetailPanel(
                 actions = {
                     if (useTable) {
                         if (artistRadioAvailability == ArtistRadioAvailability.Available) {
-                            TextButton(enabled = !artistRadioStarting, onClick = { onPlayArtistRadio(artist) }) {
-                                Text(
-                                    if (artistRadioStarting) "Starting Radio..." else "Play Radio",
-                                    color = if (artistRadioStarting) PhoebeUi.mutedText else PhoebeUi.accentLight,
-                                )
-                            }
+                            PlayRadioActionButton(
+                                starting = artistRadioStarting,
+                                onClick = { onPlayArtistRadio(artist) },
+                            )
                         }
                         DownloadActionButton("Download Artist", tracks) { onDownloadArtist(artist) }
                     }
@@ -1002,6 +1182,7 @@ internal fun ArtistDetailPanel(
             }
         }
     }
+        }
     }
 }
 

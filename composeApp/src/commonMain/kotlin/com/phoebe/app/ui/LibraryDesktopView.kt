@@ -66,7 +66,6 @@ import com.phoebe.app.data.catalogTracksForAlbum
 import com.phoebe.app.data.catalogTracksForArtist
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.Artist
-import com.phoebe.app.domain.ArtistRadioAvailability
 import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.LibrarySortBy
@@ -99,7 +98,6 @@ internal fun FavoriteArtistsDesktopView(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var selectedArtistId by remember { mutableStateOf<String?>(null) }
     var viewMode by remember { mutableStateOf(LibraryViewMode.Grid) }
     val sortedArtists = remember(catalog, libraryUi.sortBy, libraryUi.ascending) {
         sortArtistsForLibrary(catalog, libraryUi.sortBy, libraryUi.ascending).filter { it.favorite }
@@ -107,9 +105,6 @@ internal fun FavoriteArtistsDesktopView(
     val visibleArtists = remember(sortedArtists, searchQuery) {
         val q = searchQuery.trim()
         if (q.isBlank()) sortedArtists else sortedArtists.filter { it.title.contains(q, ignoreCase = true) }
-    }
-    LaunchedEffect(visibleArtists.firstOrNull()?.id) {
-        if (selectedArtistId == null) selectedArtistId = visibleArtists.firstOrNull()?.id
     }
     FavoriteLibraryDesktopScaffold(
         title = "Favorite Artists",
@@ -132,10 +127,8 @@ internal fun FavoriteArtistsDesktopView(
         ArtistsContent(
             catalog = catalog,
             artists = visibleArtists,
-            selectedArtistId = selectedArtistId,
             viewMode = viewMode,
-            onSelect = { selectedArtistId = it.id },
-            onOpen = onArtist,
+            onArtist = onArtist,
             modifier = Modifier.fillMaxSize(),
         )
     }
@@ -327,10 +320,6 @@ internal fun LibraryDesktopView(
     onLibraryColumns: (LibraryColumnVisibility) -> Unit,
     onArtist: (Artist) -> Unit,
     onAlbum: (Album) -> Unit,
-    artistRadioAvailability: Map<String, ArtistRadioAvailability> = emptyMap(),
-    radioStartingIds: Set<String> = emptySet(),
-    onProbeArtistRadio: (Artist) -> Unit = {},
-    onPlayArtistRadio: (Artist) -> Unit,
     onPlayTracks: (List<Track>, Int) -> Unit,
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
@@ -339,7 +328,6 @@ internal fun LibraryDesktopView(
     searchQuery: String = "",
     onSearchQuery: (String) -> Unit = {},
 ) {
-    var selectedArtistId by remember { mutableStateOf<String?>(null) }
     var selectedAlbumId by remember { mutableStateOf<String?>(null) }
     var selectedTrackId by remember { mutableStateOf<String?>(null) }
     var libraryViewMode by remember { mutableStateOf(LibraryViewMode.Grid) }
@@ -394,17 +382,15 @@ internal fun LibraryDesktopView(
     }
 
     // Default selection when the catalog first arrives or tab changes.
-    LaunchedEffect(filter, sortedArtists.firstOrNull()?.id, sortedAlbums.firstOrNull()?.id, sortedTracks.firstOrNull()?.id) {
+    LaunchedEffect(filter, sortedAlbums.firstOrNull()?.id, sortedTracks.firstOrNull()?.id) {
         when (filter) {
-            LibraryFilterTab.Artists -> if (selectedArtistId == null) {
-                selectedArtistId = sortedArtists.firstOrNull()?.id
-            }
             LibraryFilterTab.Albums -> if (selectedAlbumId == null) {
                 selectedAlbumId = sortedAlbums.firstOrNull()?.id
             }
             LibraryFilterTab.Songs -> if (selectedTrackId == null) {
                 selectedTrackId = sortedTracks.firstOrNull()?.id
             }
+            LibraryFilterTab.Artists -> Unit
         }
     }
 
@@ -415,7 +401,12 @@ internal fun LibraryDesktopView(
                 Modifier
                     .weight(1f)
                     .fillMaxHeight()
-                    .padding(start = 36.dp, top = 32.dp, end = if (narrowPane) 28.dp else 0.dp, bottom = 24.dp),
+                    .padding(
+                        start = 36.dp,
+                        top = 32.dp,
+                        end = if (narrowPane || filter == LibraryFilterTab.Artists) 28.dp else 0.dp,
+                        bottom = 24.dp,
+                    ),
                 verticalArrangement = Arrangement.spacedBy(18.dp),
             ) {
                 LibraryHeader(filter, searchQuery, onSearchQuery, narrowPane)
@@ -438,10 +429,8 @@ internal fun LibraryDesktopView(
                     LibraryFilterTab.Artists -> ArtistsContent(
                         catalog = catalog,
                         artists = visibleArtists,
-                        selectedArtistId = selectedArtistId,
                         viewMode = libraryViewMode,
-                        onSelect = { selectedArtistId = it.id },
-                        onOpen = onArtist,
+                        onArtist = onArtist,
                         modifier = Modifier.weight(1f).fillMaxWidth(),
                     )
                     LibraryFilterTab.Albums -> AlbumsGrid(
@@ -466,7 +455,7 @@ internal fun LibraryDesktopView(
                 }
             }
 
-            if (!narrowPane) {
+            if (!narrowPane && filter != LibraryFilterTab.Artists) {
                 Column(
                     modifier = Modifier
                         .width(detailWidth)
@@ -474,24 +463,6 @@ internal fun LibraryDesktopView(
                         .padding(top = 32.dp, bottom = 24.dp, end = 28.dp),
                 ) {
                     when (filter) {
-                        LibraryFilterTab.Artists -> {
-                            val selected = visibleArtists.firstOrNull { it.id == selectedArtistId }
-                                ?: sortedArtists.firstOrNull { it.id == selectedArtistId }
-                            if (selected != null) {
-                                ArtistDetailSidebar(
-                                    artist = selected,
-                                    catalog = catalog,
-                                    onOpenAlbum = onAlbum,
-                                    artistRadioAvailability = artistRadioAvailability[selected.id],
-                                    artistRadioStarting = selected.id in radioStartingIds,
-                                    onProbeArtistRadio = onProbeArtistRadio,
-                                    onPlayArtistRadio = onPlayArtistRadio,
-                                    onPlayTrack = { tracks, index -> onPlayTracks(tracks, index) },
-                                )
-                            } else {
-                                LibraryEmptyDetail("Select an artist to see details.")
-                            }
-                        }
                         LibraryFilterTab.Albums -> {
                             val selected = visibleAlbums.firstOrNull { it.id == selectedAlbumId }
                                 ?: sortedAlbums.firstOrNull { it.id == selectedAlbumId }
@@ -914,10 +885,8 @@ internal fun LibraryLoadingStrip(modifier: Modifier = Modifier) {
 private fun ArtistsContent(
     catalog: CatalogSnapshot,
     artists: List<Artist>,
-    selectedArtistId: String?,
     viewMode: LibraryViewMode,
-    onSelect: (Artist) -> Unit,
-    onOpen: (Artist) -> Unit,
+    onArtist: (Artist) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     if (artists.isEmpty()) {
@@ -937,9 +906,7 @@ private fun ArtistsContent(
                 ArtistCard(
                     catalog = catalog,
                     artist = artist,
-                    selected = artist.id == selectedArtistId,
-                    onSelect = { onSelect(artist) },
-                    onOpen = { onOpen(artist) },
+                    onArtist = { onArtist(artist) },
                 )
             }
         }
@@ -950,9 +917,7 @@ private fun ArtistsContent(
                     ArtistRow(
                         catalog = catalog,
                         artist = artist,
-                        selected = artist.id == selectedArtistId,
-                        onSelect = { onSelect(artist) },
-                        onOpen = { onOpen(artist) },
+                        onArtist = { onArtist(artist) },
                     )
                 }
             }
@@ -964,19 +929,14 @@ private fun ArtistsContent(
 private fun ArtistCard(
     catalog: CatalogSnapshot,
     artist: Artist,
-    selected: Boolean,
-    onSelect: () -> Unit,
-    onOpen: () -> Unit,
+    onArtist: () -> Unit,
 ) {
     val genre = remember(catalog, artist.title) { catalogArtistGenre(catalog, artist.title) }
     val albumCount = remember(catalog, artist.title) { catalogAlbumsForArtist(catalog, artist.title).size }
-    val borderColor = if (selected) PhoebeUi.accent else Color.Transparent
     Column(
         Modifier
             .clip(RoundedCornerShape(14.dp))
-            .border(BorderStroke(1.dp, borderColor), RoundedCornerShape(14.dp))
-            .background(if (selected) PhoebeUi.accent.copy(alpha = 0.06f) else Color.Transparent)
-            .clickable(onClick = onSelect)
+            .clickable(onClick = onArtist)
             .padding(horizontal = 10.dp, vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -985,8 +945,7 @@ private fun ArtistCard(
             Modifier
                 .size(112.dp)
                 .sharedArtworkTransition("artist:${artist.id}")
-                .clip(CircleShape)
-                .clickable(onClick = onOpen),
+                .clip(CircleShape),
         ) {
             ArtworkImage(artist.title, artist.thumbUrl, Modifier.fillMaxSize(), radius = 56.dp)
         }
@@ -1037,9 +996,7 @@ private fun ArtistsTableHeader() {
 private fun ArtistRow(
     catalog: CatalogSnapshot,
     artist: Artist,
-    selected: Boolean,
-    onSelect: () -> Unit,
-    onOpen: () -> Unit,
+    onArtist: () -> Unit,
 ) {
     val genre = remember(catalog, artist.title) { catalogArtistGenre(catalog, artist.title) ?: "—" }
     val artistTracks = remember(catalog, artist.title) { catalogTracksForArtist(catalog, artist.title) }
@@ -1056,8 +1013,7 @@ private fun ArtistRow(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
-            .clickable(onClick = onSelect)
-            .background(if (selected) PhoebeUi.librarySelectedRow else PhoebeUi.libraryHoverRow)
+            .clickable(onClick = onArtist)
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -1066,16 +1022,15 @@ private fun ArtistRow(
                 Modifier
                     .size(42.dp)
                     .sharedArtworkTransition("artist:${artist.id}")
-                    .clip(CircleShape)
-                    .clickable(onClick = onOpen),
+                    .clip(CircleShape),
             ) {
                 ArtworkImage(artist.title, artist.thumbUrl, Modifier.fillMaxSize(), radius = 21.dp)
             }
             Text(
                 artist.title,
-                color = if (selected) PhoebeUi.primaryText else PhoebeUi.secondaryText,
+                color = PhoebeUi.secondaryText,
                 fontSize = 14.sp,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                fontWeight = FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.sharedBoundsTransition("artist:${artist.id}:title"),
@@ -1090,17 +1045,7 @@ private fun ArtistRow(
             modifier = Modifier.width(110.dp),
             color = if (lastPlayed != null) PhoebeUi.secondaryText else PhoebeUi.mutedText,
         )
-        Row(modifier = Modifier.width(40.dp), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-            PhoebeIconView(
-                PhoebeIcon.More,
-                tint = PhoebeUi.secondaryText,
-                modifier = Modifier
-                    .size(18.dp)
-                    .clip(CircleShape)
-                    .clickable(onClick = onOpen)
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-            )
-        }
+        Spacer(Modifier.width(40.dp))
     }
 }
 
@@ -1512,109 +1457,6 @@ internal fun SongRow(
 // =====================================================================
 // Detail sidebars
 // =====================================================================
-
-@Composable
-private fun ArtistDetailSidebar(
-    artist: Artist,
-    catalog: CatalogSnapshot,
-    onOpenAlbum: (Album) -> Unit,
-    artistRadioAvailability: ArtistRadioAvailability?,
-    artistRadioStarting: Boolean,
-    onProbeArtistRadio: (Artist) -> Unit,
-    onPlayArtistRadio: (Artist) -> Unit,
-    onPlayTrack: (List<Track>, Int) -> Unit,
-) {
-    val genre = remember(catalog, artist.title) { catalogArtistGenre(catalog, artist.title) ?: "—" }
-    val albums = remember(catalog, artist.title) { catalogAlbumsForArtist(catalog, artist.title) }
-    val tracks = remember(catalog, artist.title) { catalogTracksForArtist(catalog, artist.title) }
-    val totalDuration = remember(tracks) { tracks.sumOf { it.durationMs } }
-    val playHistory = LocalPlayHistory.current
-    val nowMs = LocalNowMs.current
-    val lastPlayed = remember(tracks, playHistory.byTrack, playHistory.byArtist, artist.title) {
-        resolveArtistLastPlayed(artist.title, tracks, playHistory)
-    }
-    val lastPlayedLabel = remember(lastPlayed, nowMs) { formatLastPlayed(lastPlayed, nowMs) }
-    LaunchedEffect(artist.id) {
-        if (artist.id.startsWith("plex:")) onProbeArtistRadio(artist)
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxHeight()
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        Text("Columns", color = PhoebeUi.mutedText, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.08.em, modifier = Modifier.padding(bottom = 6.dp))
-        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-            Box(Modifier.size(116.dp).clip(CircleShape)) {
-                ArtworkImage(artist.title, artist.thumbUrl, Modifier.fillMaxSize(), radius = 58.dp)
-            }
-        }
-        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(artist.title.uppercase(), color = PhoebeUi.primaryText, fontSize = 16.sp, fontWeight = FontWeight.Black, letterSpacing = 0.04.em, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(genre, color = PhoebeUi.mutedText, fontSize = 12.sp)
-        }
-        if (artistRadioAvailability == ArtistRadioAvailability.Available) {
-            LibraryToolbarButton(
-                icon = PhoebeIcon.Play,
-                label = if (artistRadioStarting) "Starting Radio..." else "Play Radio",
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !artistRadioStarting,
-                onClick = { onPlayArtistRadio(artist) },
-            )
-        }
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            ArtistStatRow(PhoebeIcon.Library, "${albums.size}", "Albums")
-            ArtistStatRow(PhoebeIcon.Music, "${tracks.size}", "Songs")
-            ArtistStatRow(PhoebeIcon.ActiveDot, formatHoursMinutes(totalDuration), "Total Duration")
-            ArtistStatRow(PhoebeIcon.Bell, lastPlayedLabel, "Last Played")
-        }
-        if (albums.isNotEmpty()) {
-            Spacer(Modifier.height(4.dp))
-            Text("Albums", color = PhoebeUi.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                albums.take(4).forEach { a ->
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { onOpenAlbum(a) }
-                            .padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        Box(Modifier.size(32.dp)) {
-                            ArtworkImage(a.title, a.thumbUrl, Modifier.fillMaxSize(), radius = 6.dp)
-                        }
-                        Column(Modifier.weight(1f)) {
-                            Text(a.title, color = PhoebeUi.secondaryText, fontSize = 12.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            a.year?.let { Text(it.toString(), color = PhoebeUi.mutedText, fontSize = 10.sp) }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ArtistStatRow(icon: PhoebeIcon, value: String, label: String) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Box(
-            Modifier
-                .size(32.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(Color.White.copy(alpha = 0.04f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            PhoebeIconView(icon, tint = PhoebeUi.accentLight, modifier = Modifier.size(15.dp))
-        }
-        Column {
-            Text(value, color = PhoebeUi.primaryText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-            Text(label, color = PhoebeUi.mutedText, fontSize = 11.sp)
-        }
-    }
-}
 
 @Composable
 private fun AlbumDetailSidebar(

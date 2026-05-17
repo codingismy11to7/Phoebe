@@ -40,7 +40,9 @@ actual class PlatformStorage actual constructor() {
     private val root: File
         get() {
             System.getProperty("phoebe.storage.root")?.let { return File(it).also { f -> f.mkdirs() } }
-            return AndroidContextHolder.application.filesDir.resolve("phoebe").also { it.mkdirs() }
+            return AndroidContextHolder.application.filesDir
+                .resolve(com.phoebe.app.data.db.localStorageDirectoryName())
+                .also { it.mkdirs() }
         }
 
     actual suspend fun readText(name: String): String? = withContext(Dispatchers.IO) {
