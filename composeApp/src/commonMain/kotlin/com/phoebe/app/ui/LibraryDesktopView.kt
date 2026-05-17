@@ -66,12 +66,15 @@ import com.phoebe.app.data.catalogTracksForAlbum
 import com.phoebe.app.data.catalogTracksForArtist
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.Artist
+import com.phoebe.app.domain.ArtistRadioAvailability
 import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryUiPreferences
+import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.canTogglePlexLike
+import com.phoebe.app.domain.isLikedSongsPlaylist
 import com.phoebe.app.domain.isPlexLibraryTrack
 
 internal enum class LibraryFilterTab { Artists, Albums, Songs }
@@ -83,6 +86,233 @@ internal enum class AlbumSortKey { RecentlyAdded, Name, Year, Artist }
 internal enum class SongFileFilter { All, Lossless, Lossy }
 
 internal enum class LibraryViewMode { Grid, List }
+
+@Composable
+internal fun FavoriteArtistsDesktopView(
+    catalog: CatalogSnapshot,
+    libraryUi: LibraryUiPreferences,
+    searchQuery: String,
+    onSearchQuery: (String) -> Unit,
+    onLibrarySortBy: (LibrarySortBy) -> Unit,
+    onLibraryAscending: (Boolean) -> Unit,
+    onArtist: (Artist) -> Unit,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var selectedArtistId by remember { mutableStateOf<String?>(null) }
+    var viewMode by remember { mutableStateOf(LibraryViewMode.Grid) }
+    val sortedArtists = remember(catalog, libraryUi.sortBy, libraryUi.ascending) {
+        sortArtistsForLibrary(catalog, libraryUi.sortBy, libraryUi.ascending).filter { it.favorite }
+    }
+    val visibleArtists = remember(sortedArtists, searchQuery) {
+        val q = searchQuery.trim()
+        if (q.isBlank()) sortedArtists else sortedArtists.filter { it.title.contains(q, ignoreCase = true) }
+    }
+    LaunchedEffect(visibleArtists.firstOrNull()?.id) {
+        if (selectedArtistId == null) selectedArtistId = visibleArtists.firstOrNull()?.id
+    }
+    FavoriteLibraryDesktopScaffold(
+        title = "Favorite Artists",
+        countLabel = "${sortedArtists.size} artists",
+        searchQuery = searchQuery,
+        onSearchQuery = onSearchQuery,
+        onBack = onBack,
+        toolbar = {
+            FavoriteLibraryToolbar(
+                filter = LibraryFilterTab.Artists,
+                prefs = libraryUi,
+                viewMode = viewMode,
+                onViewMode = { viewMode = it },
+                onSortBy = onLibrarySortBy,
+                onAscending = onLibraryAscending,
+            )
+        },
+        modifier = modifier,
+    ) {
+        ArtistsContent(
+            catalog = catalog,
+            artists = visibleArtists,
+            selectedArtistId = selectedArtistId,
+            viewMode = viewMode,
+            onSelect = { selectedArtistId = it.id },
+            onOpen = onArtist,
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+}
+
+@Composable
+internal fun FavoriteAlbumsDesktopView(
+    catalog: CatalogSnapshot,
+    libraryUi: LibraryUiPreferences,
+    searchQuery: String,
+    onSearchQuery: (String) -> Unit,
+    onLibrarySortBy: (LibrarySortBy) -> Unit,
+    onLibraryAscending: (Boolean) -> Unit,
+    onAlbum: (Album) -> Unit,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var selectedAlbumId by remember { mutableStateOf<String?>(null) }
+    var viewMode by remember { mutableStateOf(LibraryViewMode.Grid) }
+    val sortedAlbums = remember(catalog.albums, libraryUi.sortBy, libraryUi.ascending) {
+        sortAlbumsForLibrary(catalog.albums, libraryUi.sortBy, libraryUi.ascending).filter { it.favorite }
+    }
+    val visibleAlbums = remember(sortedAlbums, searchQuery) {
+        val q = searchQuery.trim()
+        if (q.isBlank()) sortedAlbums else sortedAlbums.filter {
+            it.title.contains(q, ignoreCase = true) || it.artist.contains(q, ignoreCase = true)
+        }
+    }
+    LaunchedEffect(visibleAlbums.firstOrNull()?.id) {
+        if (selectedAlbumId == null) selectedAlbumId = visibleAlbums.firstOrNull()?.id
+    }
+    FavoriteLibraryDesktopScaffold(
+        title = "Favorite Albums",
+        countLabel = "${sortedAlbums.size} albums",
+        searchQuery = searchQuery,
+        onSearchQuery = onSearchQuery,
+        onBack = onBack,
+        toolbar = {
+            FavoriteLibraryToolbar(
+                filter = LibraryFilterTab.Albums,
+                prefs = libraryUi,
+                viewMode = viewMode,
+                onViewMode = { viewMode = it },
+                onSortBy = onLibrarySortBy,
+                onAscending = onLibraryAscending,
+            )
+        },
+        modifier = modifier,
+    ) {
+        AlbumsGrid(
+            catalog = catalog,
+            albums = visibleAlbums,
+            selectedAlbumId = selectedAlbumId,
+            viewMode = viewMode,
+            onSelect = { selectedAlbumId = it.id },
+            onOpen = onAlbum,
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+}
+
+@Composable
+internal fun FavoritePlaylistsDesktopView(
+    playlists: List<Playlist>,
+    searchQuery: String,
+    onSearchQuery: (String) -> Unit,
+    onPlaylist: (Playlist) -> Unit,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val favoritePlaylists = remember(playlists) {
+        playlists.filter { it.favorite }.sortedBy { it.title.lowercase() }
+    }
+    val visiblePlaylists = remember(favoritePlaylists, searchQuery) {
+        filterPlaylistsByQuery(favoritePlaylists, searchQuery)
+    }
+    FavoriteLibraryDesktopScaffold(
+        title = "Favorite Playlists",
+        countLabel = "${favoritePlaylists.size} playlists",
+        searchQuery = searchQuery,
+        onSearchQuery = onSearchQuery,
+        onBack = onBack,
+        toolbar = {},
+        modifier = modifier,
+    ) {
+        if (favoritePlaylists.isEmpty()) {
+            Text("Favorite playlists will appear here.", color = PhoebeUi.mutedText, fontSize = 14.sp)
+        } else if (visiblePlaylists.isEmpty()) {
+            Text("No favorite playlists match \"$searchQuery\".", color = PhoebeUi.mutedText, fontSize = 14.sp)
+        } else {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxSize()) {
+                items(visiblePlaylists, key = { it.id }, contentType = { "favorite-playlist" }) { playlist ->
+                    val liked = playlist.isLikedSongsPlaylist()
+                    PlaylistRow(
+                        icon = if (liked) PhoebeIcon.Heart else null,
+                        title = playlist.title,
+                        subtitle = "${playlist.trackCount} songs",
+                        thumbUrl = playlist.thumbUrl,
+                        accent = liked,
+                        onClick = { onPlaylist(playlist) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FavoriteLibraryDesktopScaffold(
+    title: String,
+    countLabel: String,
+    searchQuery: String,
+    onSearchQuery: (String) -> Unit,
+    onBack: () -> Unit,
+    toolbar: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    Column(
+        modifier.fillMaxSize().padding(start = 36.dp, top = 32.dp, end = 28.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
+    ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            DetailBackButton(onBack = onBack)
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, color = PhoebeUi.primaryText, fontSize = 30.sp, fontWeight = FontWeight.Black)
+                Text(countLabel, color = PhoebeUi.mutedText, fontSize = 13.sp)
+            }
+            SearchPill(searchQuery, onSearchQuery, Modifier.width(380.dp))
+        }
+        toolbar()
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            content()
+        }
+    }
+}
+
+@Composable
+private fun FavoriteLibraryToolbar(
+    filter: LibraryFilterTab,
+    prefs: LibraryUiPreferences,
+    viewMode: LibraryViewMode,
+    onViewMode: (LibraryViewMode) -> Unit,
+    onSortBy: (LibrarySortBy) -> Unit,
+    onAscending: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.Start),
+    ) {
+        LibraryDropdown(label = "Sort by", value = sortLabelFor(filter, prefs.sortBy)) { close ->
+            when (filter) {
+                LibraryFilterTab.Artists -> {
+                    DropdownMenuItem(text = { Text("Artist name") }, onClick = { onSortBy(LibrarySortBy.Name); close() })
+                    DropdownMenuItem(text = { Text("Date added") }, onClick = { onSortBy(LibrarySortBy.DateAdded); close() })
+                }
+                LibraryFilterTab.Albums -> {
+                    DropdownMenuItem(text = { Text("Album name") }, onClick = { onSortBy(LibrarySortBy.Name); close() })
+                    DropdownMenuItem(text = { Text("Artist") }, onClick = { onSortBy(LibrarySortBy.Artist); close() })
+                    DropdownMenuItem(text = { Text("Release date") }, onClick = { onSortBy(LibrarySortBy.Year); close() })
+                    DropdownMenuItem(text = { Text("Date added") }, onClick = { onSortBy(LibrarySortBy.DateAdded); close() })
+                }
+                LibraryFilterTab.Songs -> Unit
+            }
+        }
+        LibraryDropdown(label = "Order", value = if (prefs.ascending) "A-Z" else "Desc") { close ->
+            DropdownMenuItem(text = { Text("A-Z") }, onClick = { onAscending(true); close() })
+            DropdownMenuItem(text = { Text("Z-A / Desc") }, onClick = { onAscending(false); close() })
+        }
+        LibraryDropdown(label = "View", value = if (viewMode == LibraryViewMode.Grid) "Grid" else "List") { close ->
+            DropdownMenuItem(text = { Text("Grid") }, onClick = { onViewMode(LibraryViewMode.Grid); close() })
+            DropdownMenuItem(text = { Text("List") }, onClick = { onViewMode(LibraryViewMode.List); close() })
+        }
+    }
+}
 
 /** Top-level desktop Library view: header, tabs, toolbar, content, and right detail sidebar. */
 @Composable
@@ -97,6 +327,10 @@ internal fun LibraryDesktopView(
     onLibraryColumns: (LibraryColumnVisibility) -> Unit,
     onArtist: (Artist) -> Unit,
     onAlbum: (Album) -> Unit,
+    artistRadioAvailability: Map<String, ArtistRadioAvailability> = emptyMap(),
+    radioStartingIds: Set<String> = emptySet(),
+    onProbeArtistRadio: (Artist) -> Unit = {},
+    onPlayArtistRadio: (Artist) -> Unit,
     onPlayTracks: (List<Track>, Int) -> Unit,
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
@@ -248,6 +482,10 @@ internal fun LibraryDesktopView(
                                     artist = selected,
                                     catalog = catalog,
                                     onOpenAlbum = onAlbum,
+                                    artistRadioAvailability = artistRadioAvailability[selected.id],
+                                    artistRadioStarting = selected.id in radioStartingIds,
+                                    onProbeArtistRadio = onProbeArtistRadio,
+                                    onPlayArtistRadio = onPlayArtistRadio,
                                     onPlayTrack = { tracks, index -> onPlayTracks(tracks, index) },
                                 )
                             } else {
@@ -1280,6 +1518,10 @@ private fun ArtistDetailSidebar(
     artist: Artist,
     catalog: CatalogSnapshot,
     onOpenAlbum: (Album) -> Unit,
+    artistRadioAvailability: ArtistRadioAvailability?,
+    artistRadioStarting: Boolean,
+    onProbeArtistRadio: (Artist) -> Unit,
+    onPlayArtistRadio: (Artist) -> Unit,
     onPlayTrack: (List<Track>, Int) -> Unit,
 ) {
     val genre = remember(catalog, artist.title) { catalogArtistGenre(catalog, artist.title) ?: "—" }
@@ -1292,6 +1534,9 @@ private fun ArtistDetailSidebar(
         resolveArtistLastPlayed(artist.title, tracks, playHistory)
     }
     val lastPlayedLabel = remember(lastPlayed, nowMs) { formatLastPlayed(lastPlayed, nowMs) }
+    LaunchedEffect(artist.id) {
+        if (artist.id.startsWith("plex:")) onProbeArtistRadio(artist)
+    }
 
     Column(
         modifier = Modifier
@@ -1308,6 +1553,15 @@ private fun ArtistDetailSidebar(
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(artist.title.uppercase(), color = PhoebeUi.primaryText, fontSize = 16.sp, fontWeight = FontWeight.Black, letterSpacing = 0.04.em, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(genre, color = PhoebeUi.mutedText, fontSize = 12.sp)
+        }
+        if (artistRadioAvailability == ArtistRadioAvailability.Available) {
+            LibraryToolbarButton(
+                icon = PhoebeIcon.Play,
+                label = if (artistRadioStarting) "Starting Radio..." else "Play Radio",
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !artistRadioStarting,
+                onClick = { onPlayArtistRadio(artist) },
+            )
         }
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             ArtistStatRow(PhoebeIcon.Library, "${albums.size}", "Albums")

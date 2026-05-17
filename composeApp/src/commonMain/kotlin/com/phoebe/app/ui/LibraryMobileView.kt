@@ -134,6 +134,113 @@ internal fun LibraryMobileView(
 }
 
 @Composable
+internal fun FavoriteArtistsMobileView(
+    catalog: CatalogSnapshot,
+    libraryUi: LibraryUiPreferences,
+    onLibrarySortBy: (LibrarySortBy) -> Unit,
+    onLibraryAscending: (Boolean) -> Unit,
+    onLibraryColumns: (LibraryColumnVisibility) -> Unit,
+    onArtist: (Artist) -> Unit,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var viewMode by remember { mutableStateOf(LibraryViewMode.Grid) }
+    val favoriteArtists = remember(catalog, libraryUi.sortBy, libraryUi.ascending) {
+        sortArtistsForLibrary(catalog, libraryUi.sortBy, libraryUi.ascending).filter { it.favorite }
+    }
+    Column(modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 18.dp)) {
+        FavoriteLibraryHeader(
+            title = "Favorite Artists",
+            count = favoriteArtists.size,
+            itemLabel = "artists",
+            onBack = onBack,
+        )
+        Spacer(Modifier.height(14.dp))
+        MobileLibraryToolbar(
+            prefs = libraryUi,
+            filter = LibraryFilterTab.Artists,
+            onSortBy = onLibrarySortBy,
+            onAscending = onLibraryAscending,
+            libraryViewMode = viewMode,
+            onLibraryViewMode = { viewMode = it },
+            onColumns = onLibraryColumns,
+        )
+        Spacer(Modifier.height(10.dp))
+        MobileArtistsContent(
+            artists = favoriteArtists,
+            viewMode = viewMode,
+            onArtist = onArtist,
+        )
+    }
+}
+
+@Composable
+internal fun FavoriteAlbumsMobileView(
+    catalog: CatalogSnapshot,
+    libraryUi: LibraryUiPreferences,
+    onLibrarySortBy: (LibrarySortBy) -> Unit,
+    onLibraryAscending: (Boolean) -> Unit,
+    onLibraryColumns: (LibraryColumnVisibility) -> Unit,
+    onAlbum: (Album) -> Unit,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var viewMode by remember { mutableStateOf(LibraryViewMode.Grid) }
+    val favoriteAlbums = remember(catalog.albums, libraryUi.sortBy, libraryUi.ascending) {
+        sortAlbumsForLibrary(catalog.albums, libraryUi.sortBy, libraryUi.ascending).filter { it.favorite }
+    }
+    Column(modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 18.dp)) {
+        FavoriteLibraryHeader(
+            title = "Favorite Albums",
+            count = favoriteAlbums.size,
+            itemLabel = "albums",
+            onBack = onBack,
+        )
+        Spacer(Modifier.height(14.dp))
+        MobileLibraryToolbar(
+            prefs = libraryUi,
+            filter = LibraryFilterTab.Albums,
+            onSortBy = onLibrarySortBy,
+            onAscending = onLibraryAscending,
+            libraryViewMode = viewMode,
+            onLibraryViewMode = { viewMode = it },
+            onColumns = onLibraryColumns,
+        )
+        Spacer(Modifier.height(10.dp))
+        MobileAlbumsContent(
+            catalog = catalog,
+            albums = favoriteAlbums,
+            viewMode = viewMode,
+            onAlbum = onAlbum,
+        )
+    }
+}
+
+@Composable
+private fun FavoriteLibraryHeader(
+    title: String,
+    count: Int,
+    itemLabel: String,
+    onBack: () -> Unit,
+) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        DetailBackButton(onBack = onBack)
+        Spacer(Modifier.width(14.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                "FAVORITES",
+                color = PhoebeUi.mutedText,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 0.08.em,
+            )
+            Text(title, color = PhoebeUi.primaryText, fontSize = 28.sp, fontWeight = FontWeight.Black)
+            Text("$count $itemLabel", color = PhoebeUi.secondaryText, fontSize = 13.sp)
+        }
+    }
+}
+
+@Composable
 private fun MobileLibraryTabs(filter: LibraryFilterTab, onFilter: (LibraryFilterTab) -> Unit) {
     Row(
         Modifier
@@ -814,6 +921,87 @@ internal fun MobileSongRow(
 }
 
 @Composable
+internal fun FavoritePlaylistsMobileView(
+    searchQuery: String,
+    onSearchQuery: (String) -> Unit,
+    onPlaylist: (Playlist) -> Unit,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val playlistActions = LocalPlaylistActions.current
+    val favoritePlaylists = remember(playlistActions.playlists) {
+        playlistActions.playlists.filter { it.favorite }.sortedBy { it.title.lowercase() }
+    }
+    val visiblePlaylists = remember(favoritePlaylists, searchQuery) {
+        filterPlaylistsByQuery(favoritePlaylists, searchQuery)
+    }
+
+    Column(modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 18.dp)) {
+        Row(
+            Modifier.fillMaxWidth().padding(bottom = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            DetailBackButton(onBack = onBack)
+            Spacer(Modifier.width(14.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    "FAVORITES",
+                    color = PhoebeUi.mutedText,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 0.08.em,
+                )
+                Text("Favorite Playlists", color = PhoebeUi.primaryText, fontSize = 28.sp, fontWeight = FontWeight.Black)
+                Text("${favoritePlaylists.size} playlists", color = PhoebeUi.secondaryText, fontSize = 13.sp)
+            }
+        }
+        SearchPill(
+            query = searchQuery,
+            onQueryChange = onSearchQuery,
+            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+            placeholder = "Search favorite playlists",
+        )
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 18.dp),
+        ) {
+            when {
+                favoritePlaylists.isEmpty() -> item(contentType = "empty") {
+                    Text(
+                        "Favorite playlists will appear here.",
+                        color = PhoebeUi.mutedText,
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp,
+                        modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
+                    )
+                }
+                visiblePlaylists.isEmpty() -> item(contentType = "empty-filter") {
+                    Text(
+                        "No favorite playlists match \"$searchQuery\".",
+                        color = PhoebeUi.mutedText,
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp,
+                        modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
+                    )
+                }
+                else -> items(visiblePlaylists, key = { it.id }, contentType = { "favorite-playlist" }) { playlist ->
+                    MobilePlaylistRow(
+                        icon = PhoebeIcon.Heart,
+                        title = playlist.title,
+                        subtitle = "${playlist.trackCount} songs",
+                        thumbUrl = playlist.thumbUrl,
+                        accent = true,
+                        onClick = { onPlaylist(playlist) },
+                        onLongClick = { playlistActions.onShufflePlaylist(playlist) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 internal fun PlaylistsMobileView(
     catalogRefreshing: Boolean,
     searchQuery: String,
@@ -914,7 +1102,7 @@ internal fun PlaylistsMobileView(
 }
 
 @Composable
-private fun MobilePlaylistRow(
+internal fun MobilePlaylistRow(
     icon: PhoebeIcon?,
     title: String,
     subtitle: String?,

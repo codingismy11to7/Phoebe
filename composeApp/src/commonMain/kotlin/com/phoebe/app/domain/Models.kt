@@ -76,6 +76,7 @@ data class Artist(
     val style: String? = null,
     /** User rating normalized to 0..5 stars. Plex stores this as 0..10. */
     val rating: Float? = null,
+    val favorite: Boolean = false,
 )
 
 @Serializable
@@ -91,6 +92,7 @@ data class Album(
     val style: String? = null,
     /** User rating normalized to 0..5 stars. Plex stores this as 0..10. */
     val rating: Float? = null,
+    val favorite: Boolean = false,
 )
 
 @Serializable
@@ -102,7 +104,30 @@ data class Playlist(
     val thumbUrl: String? = null,
     /** User rating normalized to 0..5 stars. Plex stores this as 0..10. */
     val rating: Float? = null,
+    val favorite: Boolean = false,
 )
+
+@Serializable
+data class PlexRadioStation(
+    val id: String,
+    val title: String,
+    val subtitle: String,
+    val key: String,
+    val thumbUrl: String? = null,
+    val category: PlexRadioStationCategory = PlexRadioStationCategory.Library,
+)
+
+@Serializable
+enum class PlexRadioStationCategory {
+    Library,
+    Artist,
+}
+
+@Serializable
+enum class ArtistRadioAvailability {
+    Available,
+    Unavailable,
+}
 
 @Serializable
 data class Track(
@@ -158,17 +183,17 @@ enum class LibrarySortBy {
 
 @Serializable
 data class LibraryColumnVisibility(
-    val year: Boolean = true,
-    val genre: Boolean = true,
+    val year: Boolean = false,
+    val genre: Boolean = false,
     val filepath: Boolean = false,
     val audioCodec: Boolean = false,
     val bitrate: Boolean = false,
-    val duration: Boolean = true,
-    val sampleRate: Boolean = true,
-    val fileType: Boolean = true,
-    val dateAdded: Boolean = true,
-    val rating: Boolean = true,
-    val favorite: Boolean = true,
+    val duration: Boolean = false,
+    val sampleRate: Boolean = false,
+    val fileType: Boolean = false,
+    val dateAdded: Boolean = false,
+    val rating: Boolean = false,
+    val favorite: Boolean = false,
 )
 
 @Serializable
@@ -176,7 +201,42 @@ data class LibraryUiPreferences(
     val sortBy: LibrarySortBy = LibrarySortBy.Name,
     val ascending: Boolean = true,
     val columns: LibraryColumnVisibility = LibraryColumnVisibility(),
+    val homeSections: List<HomeSection> = HomeSection.defaultOrder,
 )
+
+@Serializable
+enum class HomeSection(val label: String) {
+    Mixes("Mixes"),
+    Collections("Collections"),
+    /** Kept only to migrate older saved preferences into the split favorite sections. */
+    Favorites("Favorites"),
+    FavoritePlaylists("Favorite playlists"),
+    FavoriteArtists("Favorite artists"),
+    FavoriteAlbums("Favorite albums"),
+    /** Kept only to migrate older saved preferences into the split recent sections. */
+    Recents("Recents"),
+    RecentSongs("Recent songs"),
+    RecentArtists("Recent artists"),
+    RecentAlbums("Recent albums"),
+    Played("Listening history"),
+    Random("Random picks");
+
+    companion object {
+        val defaultOrder: List<HomeSection> =
+            listOf(
+                Mixes,
+                Collections,
+                FavoritePlaylists,
+                FavoriteArtists,
+                FavoriteAlbums,
+                RecentSongs,
+                RecentArtists,
+                RecentAlbums,
+                Played,
+                Random,
+            )
+    }
+}
 
 @Serializable
 data class CatalogSnapshot(
@@ -282,6 +342,9 @@ sealed interface AppScreen {
     data class Lyrics(val track: Track? = null) : AppScreen
     data class RecentlyAdded(val kind: RecentlyAddedKind) : AppScreen
     data class PlayHistory(val kind: PlayHistoryKind) : AppScreen
+    data object FavoritePlaylists : AppScreen
+    data object FavoriteArtists : AppScreen
+    data object FavoriteAlbums : AppScreen
     data class PlaylistDetail(val playlist: Playlist) : AppScreen
     data object Player : AppScreen
 }

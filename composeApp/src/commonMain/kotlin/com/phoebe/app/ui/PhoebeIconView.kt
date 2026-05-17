@@ -243,6 +243,10 @@ internal fun PhoebeIconView(
                 line(0.25f, 0.38f, 0.50f, 0.62f)
                 line(0.50f, 0.62f, 0.75f, 0.38f)
             }
+            PhoebeIcon.ChevronRight -> {
+                line(0.38f, 0.25f, 0.62f, 0.50f)
+                line(0.62f, 0.50f, 0.38f, 0.75f)
+            }
             PhoebeIcon.Bell -> {
                 val body = Path().apply {
                     moveTo(s * 0.30f, s * 0.68f)

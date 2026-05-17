@@ -318,6 +318,7 @@ internal fun DesktopContent(
 ) {
     val selectedPlaylist = catalog.playlists.firstOrNull { it.id == selectedPlaylistId }
     val playlistTracks = selectedPlaylistId?.let { catalog.tracksByParent[it].orEmpty() }.orEmpty()
+    val favoriteActions = LocalFavoriteActions.current
 
     Column(
         modifier.padding(
@@ -353,15 +354,25 @@ internal fun DesktopContent(
             }
             val titleBlock: @Composable () -> Unit = {
                 SectionLabel(sectionLabel, PhoebeUi.accentLight)
-                Text(
-                    headline,
-                    color = PhoebeUi.primaryText,
-                    fontSize = headlineFontSize,
-                    lineHeight = headlineLineHeight,
-                    fontWeight = FontWeight.Black,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        headline,
+                        color = PhoebeUi.primaryText,
+                        fontSize = headlineFontSize,
+                        lineHeight = headlineLineHeight,
+                        fontWeight = FontWeight.Black,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    selectedPlaylist?.let { playlist ->
+                        LikeButton(
+                            liked = favoriteActions.isFavorite(playlist),
+                            enabled = true,
+                            onClick = { favoriteActions.onTogglePlaylist(playlist) },
+                        )
+                    }
+                }
             }
             if (maxWidth < 640.dp) {
                 Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {

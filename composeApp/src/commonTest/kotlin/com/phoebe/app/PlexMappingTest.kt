@@ -272,6 +272,58 @@ class PlexMappingTest {
     }
 
     @Test
+    fun mapsManagedCollectionTagsOntoArtistAndAlbumFavorites() = runTest {
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/library/sections/1/all" -> respond(
+                    content = """
+                        {
+                          "MediaContainer": {
+                            "Directory": [
+                              {
+                                "ratingKey": "artist1",
+                                "key": "/library/metadata/artist1",
+                                "title": "Favorite Artist",
+                                "leafCount": 1,
+                                "Collection": [ { "tag": "Favorite Artists" } ]
+                              }
+                            ]
+                          }
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+                "/library/sections/1/albums" -> respond(
+                    content = """
+                        {
+                          "MediaContainer": {
+                            "Metadata": [
+                              {
+                                "ratingKey": "album1",
+                                "title": "Favorite Album",
+                                "parentTitle": "Favorite Artist",
+                                "Collection": [ { "tag": "Phoebe Favorite Albums" } ]
+                              }
+                            ]
+                          }
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val client = PlexClient(testHttpClient(engine))
+        val server = PlexServer("server", "Plex", "https://plex.example", owned = true)
+        val library = MusicLibrary("1", "Music")
+
+        assertEquals(true, client.artists(server, library, "token").single().favorite)
+        assertEquals(true, client.albums(server, library, "token").single().favorite)
+    }
+
+    @Test
     fun mapsPlexMoodAndStyleOntoArtistsFromMetadata() = runTest {
         val engine = MockEngine { request ->
             when (request.url.encodedPath) {

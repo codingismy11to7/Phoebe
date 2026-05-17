@@ -12,7 +12,8 @@ CREATE TABLE ArtistRow (
     genre TEXT,
     mood TEXT,
     style TEXT,
-    rating REAL
+    rating REAL,
+    favorite INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE AlbumRow (
@@ -26,7 +27,8 @@ CREATE TABLE AlbumRow (
     genre TEXT,
     mood TEXT,
     style TEXT,
-    rating REAL
+    rating REAL,
+    favorite INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE PlaylistRow (
@@ -36,7 +38,8 @@ CREATE TABLE PlaylistRow (
     plKey TEXT,
     thumbUrl TEXT,
     sortKey INTEGER NOT NULL DEFAULT 0,
-    rating REAL
+    rating REAL,
+    favorite INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE TrackRow (
@@ -150,16 +153,16 @@ WHERE tp.parentId = ?
 ORDER BY tp.position;
 
 upsertArtist:
-INSERT OR REPLACE INTO ArtistRow(id, title, thumbUrl, albumCount, songCount, sortKey, dateAddedMs, genre, mood, style, rating)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT OR REPLACE INTO ArtistRow(id, title, thumbUrl, albumCount, songCount, sortKey, dateAddedMs, genre, mood, style, rating, favorite)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 upsertAlbum:
-INSERT OR REPLACE INTO AlbumRow(id, title, artist, year, thumbUrl, sortKey, dateAddedMs, genre, mood, style, rating)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT OR REPLACE INTO AlbumRow(id, title, artist, year, thumbUrl, sortKey, dateAddedMs, genre, mood, style, rating, favorite)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 upsertPlaylist:
-INSERT OR REPLACE INTO PlaylistRow(id, title, trackCount, plKey, thumbUrl, sortKey, rating)
-VALUES (?, ?, ?, ?, ?, ?, ?);
+INSERT OR REPLACE INTO PlaylistRow(id, title, trackCount, plKey, thumbUrl, sortKey, rating, favorite)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?);
 
 upsertTrack:
 INSERT OR REPLACE INTO TrackRow(

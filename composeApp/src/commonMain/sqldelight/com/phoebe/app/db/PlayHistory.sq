@@ -91,5 +91,11 @@ SELECT track_id, COUNT(*) AS playCount
 FROM PlayHistoryRow
 GROUP BY track_id;
 
+selectLatestPlayEventsByTrack:
+SELECT track_id, played_at_ms
+FROM PlayHistoryRow
+ORDER BY played_at_ms DESC
+LIMIT 2000;
+
 clearAll:
 DELETE FROM PlayHistoryRow;

@@ -185,6 +185,7 @@ internal enum class PhoebeIcon {
     Heart,
     ChevronUp,
     ChevronDown,
+    ChevronRight,
     Bell,
     Back,
     Forward,
@@ -215,6 +216,9 @@ internal val FullTrackMetadataColumns = LibraryColumnVisibility(
     audioCodec = true,
     bitrate = true,
     duration = true,
+    sampleRate = true,
+    fileType = true,
+    dateAdded = true,
     rating = true,
     favorite = true,
 )
