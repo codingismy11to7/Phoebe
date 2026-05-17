@@ -1,6 +1,6 @@
-compose multiplatform 1.11.0
-
 use correct icons
+
+jellyfin / navidrome?
 
 predictive back / swipe to dismiss
 
@@ -16,5 +16,3 @@ ios
 settings page
 
 tv
-
-sync recently played / most played between devices (backend?)

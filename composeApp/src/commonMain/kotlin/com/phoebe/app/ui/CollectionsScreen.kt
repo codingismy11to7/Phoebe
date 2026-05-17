@@ -52,6 +52,7 @@ internal fun CollectionsScreen(
     entry: CollectionEntry,
     catalog: CatalogSnapshot,
     modifier: Modifier = Modifier,
+    searchQuery: String = "",
     onBack: () -> Unit,
     onCollectionValue: (CollectionEntry, String) -> Unit,
 ) {
@@ -63,8 +64,12 @@ internal fun CollectionsScreen(
     var sortBy by rememberSaveable(entry.target.name, entry.facet.name) { mutableStateOf(LibrarySortBy.Name) }
     var ascending by rememberSaveable(entry.target.name, entry.facet.name) { mutableStateOf(true) }
     var viewMode by rememberSaveable(entry.target.name, entry.facet.name) { mutableStateOf(LibraryViewMode.Grid) }
-    val visibleBuckets = remember(buckets, sortBy, ascending) {
-        sortCollectionBuckets(buckets, sortBy, ascending)
+    val visibleBuckets = remember(buckets, sortBy, ascending, searchQuery) {
+        sortCollectionBuckets(
+            filterCollectionBucketsByQuery(buckets, searchQuery),
+            sortBy,
+            ascending,
+        )
     }
     PhoebeLog.d("PlexCollections") {
         val values = catalog.collectionValues.filter { it.target == entry.target.name && it.facet == entry.facet.name }
@@ -109,6 +114,7 @@ internal fun CollectionsScreen(
                 entry = entry,
                 buckets = visibleBuckets,
                 loading = loading,
+                searchQuery = searchQuery,
                 compact = maxWidth < 700.dp,
                 viewMode = viewMode,
                 state = gridState,
@@ -125,6 +131,7 @@ internal fun CollectionItemsScreen(
     value: String,
     catalog: CatalogSnapshot,
     modifier: Modifier = Modifier,
+    searchQuery: String = "",
     onBack: () -> Unit,
     onArtist: (Artist) -> Unit,
     onAlbum: (Album) -> Unit,
@@ -141,12 +148,17 @@ internal fun CollectionItemsScreen(
                 it.value.equals(value, ignoreCase = true)
         }
     }
-    val loading = collectionValue?.itemsLoaded == false && items.isEmpty()
+    val loading = items.isEmpty() && collectionValue?.itemsLoaded != true
     var sortBy by rememberSaveable(entry.target.name, entry.facet.name, value) { mutableStateOf(LibrarySortBy.Name) }
     var ascending by rememberSaveable(entry.target.name, entry.facet.name, value) { mutableStateOf(true) }
     var viewMode by rememberSaveable(entry.target.name, entry.facet.name, value) { mutableStateOf(LibraryViewMode.Grid) }
-    val visibleItems = remember(items, entry, sortBy, ascending) {
-        sortCollectionItems(items, entry.target, sortBy, ascending)
+    val visibleItems = remember(items, entry, sortBy, ascending, searchQuery) {
+        sortCollectionItems(
+            filterCollectionItemsByQuery(items, searchQuery),
+            entry.target,
+            sortBy,
+            ascending,
+        )
     }
     val gridState = rememberSaveable(
         entry.target.name,
@@ -186,6 +198,7 @@ internal fun CollectionItemsScreen(
                 items = visibleItems,
                 compact = maxWidth < 700.dp,
                 loading = loading,
+                searchQuery = searchQuery,
                 viewMode = viewMode,
                 state = gridState,
                 onArtist = onArtist,
@@ -235,6 +248,7 @@ private fun CollectionValuesGrid(
     entry: CollectionEntry,
     buckets: List<CollectionBucket>,
     loading: Boolean,
+    searchQuery: String,
     compact: Boolean,
     viewMode: LibraryViewMode,
     state: LazyGridState,
@@ -246,7 +260,13 @@ private fun CollectionValuesGrid(
         return
     }
     if (buckets.isEmpty()) {
-        RecentlyAddedEmpty("No ${entry.facet.singular.lowercase()} tags are available for ${entry.target.itemPlural.lowercase()} yet.", modifier)
+        val query = searchQuery.trim()
+        val message = if (query.isNotBlank()) {
+            "No ${entry.facet.plural.lowercase()} match \"$query\"."
+        } else {
+            "No ${entry.facet.singular.lowercase()} tags are available for ${entry.target.itemPlural.lowercase()} yet."
+        }
+        RecentlyAddedEmpty(message, modifier)
         return
     }
     LazyVerticalGrid(
@@ -295,6 +315,7 @@ private fun CollectionItemsGrid(
     items: List<CollectionItem>,
     compact: Boolean,
     loading: Boolean,
+    searchQuery: String,
     viewMode: LibraryViewMode,
     state: LazyGridState,
     onArtist: (Artist) -> Unit,
@@ -306,7 +327,13 @@ private fun CollectionItemsGrid(
         return
     }
     if (items.isEmpty()) {
-        RecentlyAddedEmpty("Nothing is in this ${entry.facet.singular.lowercase()} yet.", modifier)
+        val query = searchQuery.trim()
+        val message = if (query.isNotBlank()) {
+            "No ${entry.target.itemPlural.lowercase()} in this ${entry.facet.singular.lowercase()} match \"$query\"."
+        } else {
+            "Nothing is in this ${entry.facet.singular.lowercase()} yet."
+        }
+        RecentlyAddedEmpty(message, modifier)
         return
     }
     LazyVerticalGrid(
@@ -535,6 +562,23 @@ private fun List<CollectionItem>.toBuckets(valueLabels: List<String>): List<Coll
         .map { label -> CollectionBucket(label = label, items = emptyList()) }
     return (bucketsByLabel.values + unloadedBuckets)
         .sortedWith(compareByDescending<CollectionBucket> { it.items.size }.thenBy { it.label.lowercase() })
+}
+
+private fun filterCollectionBucketsByQuery(buckets: List<CollectionBucket>, query: String): List<CollectionBucket> {
+    val trimmed = query.trim()
+    if (trimmed.isBlank()) return buckets
+    return buckets.filter { it.label.contains(trimmed, ignoreCase = true) }
+}
+
+private fun filterCollectionItemsByQuery(items: List<CollectionItem>, query: String): List<CollectionItem> {
+    val trimmed = query.trim()
+    if (trimmed.isBlank()) return items
+    return items.filter { item ->
+        item.artist?.title?.contains(trimmed, ignoreCase = true) == true ||
+            item.album?.title?.contains(trimmed, ignoreCase = true) == true ||
+            item.album?.artist?.contains(trimmed, ignoreCase = true) == true ||
+            item.subtitle.contains(trimmed, ignoreCase = true)
+    }
 }
 
 private fun sortCollectionBuckets(

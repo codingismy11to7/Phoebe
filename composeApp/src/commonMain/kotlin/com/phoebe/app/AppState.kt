@@ -3,6 +3,7 @@ package com.phoebe.app
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.AppScreen
 import com.phoebe.app.domain.Artist
+import com.phoebe.app.domain.CollectionFacet
 import com.phoebe.app.domain.ArtistRadioAvailability
 import com.phoebe.app.domain.HomeSection
 import com.phoebe.app.domain.LibraryColumnVisibility
@@ -121,6 +122,7 @@ class AppState(
 
     private val detailStack = ArrayDeque<AppScreen>()
     private var playRequestGeneration = 0
+    private var collectionMixGeneration = 0
     private var recentAlbumWarmSignature: String? = null
     private var playedAlbumWarmSignature: String? = null
     private var plexPlayHistorySyncJob: Job? = null
@@ -766,6 +768,7 @@ class AppState(
 
     fun playTracks(tracks: List<Track>, index: Int = 0) {
         val requestGeneration = ++playRequestGeneration
+        collectionMixGeneration++
         val track = tracks.getOrNull(index)
         if (dependencies.castController.state.value.isConnected) {
             if (!tracks.isChromecastPlayableQueue()) {
@@ -780,6 +783,9 @@ class AppState(
         }
         if (track?.localUri.isNullOrBlank()) {
             dependencies.audioPlayer.play(tracks, index)
+            collectionMixFromDetailStack()?.let { mix ->
+                scheduleCollectionMix(mix, tracks.map { it.id }.toSet())
+            }
             return
         }
 
@@ -795,6 +801,53 @@ class AppState(
             }
         }
     }
+
+    private fun scheduleCollectionMix(mix: CollectionMix, queuedTrackIds: Set<String>) {
+        if (!session.value.canUsePlexBackgroundFetches()) return
+        val mixGeneration = collectionMixGeneration
+        scope.launch {
+            appendCollectionMix(mix, queuedTrackIds, mixGeneration)
+        }
+    }
+
+    private fun collectionMixFromDetailStack(): CollectionMix? {
+        val screens = detailStack.toList() + mutableScreen.value
+        val items = screens.filterIsInstance<AppScreen.CollectionItems>().lastOrNull() ?: return null
+        if (items.entry.facet != CollectionFacet.Mood && items.entry.facet != CollectionFacet.Style) return null
+        val value = items.value.trim()
+        if (value.isBlank()) return null
+        return CollectionMix(items.entry.facet, value)
+    }
+
+    private suspend fun appendCollectionMix(
+        mix: CollectionMix,
+        queuedTrackIds: Set<String>,
+        mixGeneration: Int,
+    ) {
+        if (mixGeneration != collectionMixGeneration) return
+        val excludeIds = queuedTrackIds.toMutableSet()
+        val firstTracks = runCatching {
+            dependencies.catalogRepository.firstTracksForCollectionFacet(session.value, mix.facet, mix.value)
+                .filterNot { it.id in excludeIds }
+                .shuffled()
+        }.getOrDefault(emptyList())
+        if (mixGeneration != collectionMixGeneration) return
+        if (firstTracks.isNotEmpty()) {
+            appendToQueue(firstTracks)
+            excludeIds += firstTracks.map { it.id }
+        }
+        val moreTracks = runCatching {
+            dependencies.catalogRepository.tracksForCollectionFacet(session.value, mix.facet, mix.value)
+                .filterNot { it.id in excludeIds }
+                .shuffled()
+        }.getOrDefault(emptyList())
+        if (mixGeneration != collectionMixGeneration) return
+        if (moreTracks.isNotEmpty()) {
+            appendToQueue(moreTracks)
+        }
+    }
+
+    private data class CollectionMix(val facet: CollectionFacet, val value: String)
 
     fun togglePlayPause() {
         if (dependencies.castController.state.value.isConnected) {

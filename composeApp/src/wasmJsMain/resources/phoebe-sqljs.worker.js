@@ -2,7 +2,8 @@ importScripts("/kotlin/sql-wasm.js");
 
 const databaseName = "phoebe-sql";
 const storeName = "databases";
-const databaseKey = "phoebe.db.v3.async";
+const revisionParam = new URL(self.location.href).searchParams.get("revision") ?? "0";
+const databaseKey = `phoebe.db.v${revisionParam}.async`;
 
 let db = null;
 let transactionDepth = 0;

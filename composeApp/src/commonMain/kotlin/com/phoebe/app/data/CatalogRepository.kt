@@ -390,119 +390,117 @@ class CatalogRepository(
     }
 
     suspend fun ensureCollectionItems(session: PlexSession?, entry: CollectionEntry, value: String) {
-        val server = session?.selectedServer ?: return
-        val library = session.selectedLibrary ?: return
-        val token = session.serverAuthToken() ?: return
-        ensureCollectionValues(session, entry)
-        val current = mutableCatalog.value
         val normalizedValue = value.trim()
-        val matchingTags = current.collectionTags.filter {
-            it.target == entry.target.name &&
-                it.facet == entry.facet.name &&
-                it.value.equals(normalizedValue, ignoreCase = true)
-        }
-        val existingTargetIds = current.collectionTargetIds(entry.target)
-        val alreadyLoaded = matchingTags.any { it.itemId.toPlexCatalogId() in existingTargetIds }
-        PhoebeLog.d("PlexCollections") {
-            "lazy item state target=${entry.target.name} facet=${entry.facet.name} value='$normalizedValue' tags=${matchingTags.size} usable=$alreadyLoaded targetIds=${existingTargetIds.size} sample=${matchingTags.take(10).map { it.itemId }}"
-        }
-        if (alreadyLoaded) {
-            markCollectionValueItemsLoaded(entry, normalizedValue)
-            return
-        }
-        val collectionValue = current.collectionValues.firstOrNull {
-            it.target == entry.target.name &&
-                it.facet == entry.facet.name &&
-                it.value.equals(normalizedValue, ignoreCase = true)
-        } ?: return
-        if (collectionValue.itemsLoaded) {
-            markCollectionValueItemsLoading(entry, normalizedValue)
-        }
-        val target = entry.target.toPlexCollectionTarget()
-        val facet = entry.facet.toPlexCollectionFacet()
-        PhoebeLog.d("PlexCollections") {
-            "lazy load target=${entry.target.name} facet=${entry.facet.name} value='${collectionValue.value}'"
-        }
-        val cachedChoice = PlexFilterChoice(
-            key = collectionValue.key,
-            title = collectionValue.value,
-            fastKey = collectionValue.fastKey,
-            filterField = collectionValue.filterField,
-        )
-        var resolvedChoice = cachedChoice
-        var plexItemIds = plexClient.collectionFilterItems(
-            server = server,
-            library = library,
-            target = target,
-            facet = facet,
-            choice = cachedChoice,
-            token = token,
-        )
-        if (plexItemIds.isEmpty()) {
-            val refreshedChoice = plexClient.collectionFilterChoices(
+        if (normalizedValue.isBlank()) return
+        try {
+            val server = session?.selectedServer ?: return
+            val library = session.selectedLibrary ?: return
+            val token = session.serverAuthToken() ?: return
+            ensureCollectionValues(session, entry)
+            val current = mutableCatalog.value
+            val matchingTags = current.collectionTags.filter {
+                it.target == entry.target.name &&
+                    it.facet == entry.facet.name &&
+                    it.value.equals(normalizedValue, ignoreCase = true)
+            }
+            val existingTargetIds = current.collectionTargetIds(entry.target)
+            val alreadyLoaded = matchingTags.any { it.itemId.toPlexCatalogId() in existingTargetIds }
+            PhoebeLog.d("PlexCollections") {
+                "lazy item state target=${entry.target.name} facet=${entry.facet.name} value='$normalizedValue' tags=${matchingTags.size} usable=$alreadyLoaded targetIds=${existingTargetIds.size} sample=${matchingTags.take(10).map { it.itemId }}"
+            }
+            if (alreadyLoaded) return
+            val collectionValue = current.collectionValues.firstOrNull {
+                it.target == entry.target.name &&
+                    it.facet == entry.facet.name &&
+                    it.value.equals(normalizedValue, ignoreCase = true)
+            } ?: return
+            val target = entry.target.toPlexCollectionTarget()
+            val facet = entry.facet.toPlexCollectionFacet()
+            PhoebeLog.d("PlexCollections") {
+                "lazy load target=${entry.target.name} facet=${entry.facet.name} value='${collectionValue.value}'"
+            }
+            val cachedChoice = PlexFilterChoice(
+                key = collectionValue.key,
+                title = collectionValue.value,
+                fastKey = collectionValue.fastKey,
+                filterField = collectionValue.filterField,
+            )
+            var resolvedChoice = cachedChoice
+            var plexItemIds = plexClient.collectionFilterItems(
                 server = server,
                 library = library,
                 target = target,
                 facet = facet,
+                choice = cachedChoice,
                 token = token,
-            ).firstOrNull { it.title.equals(collectionValue.value, ignoreCase = true) }
-            if (refreshedChoice != null && refreshedChoice != cachedChoice) {
-                PhoebeLog.d("PlexCollections") {
-                    "lazy choice refreshed target=${entry.target.name} facet=${entry.facet.name} value='${collectionValue.value}' oldKey='${cachedChoice.key}' newKey='${refreshedChoice.key}' oldField='${cachedChoice.filterField}' newField='${refreshedChoice.filterField}'"
-                }
-                resolvedChoice = refreshedChoice
-                plexItemIds = plexClient.collectionFilterItems(
+            )
+            if (plexItemIds.isEmpty()) {
+                val refreshedChoice = plexClient.collectionFilterChoices(
                     server = server,
                     library = library,
                     target = target,
                     facet = facet,
-                    choice = refreshedChoice,
                     token = token,
-                )
-            }
-        }
-        val itemIds = plexItemIds.ifEmpty {
-            current.collectionItemIdsFromIndexedMetadata(entry, collectionValue.value)
-        }
-        val loadedTags = itemIds.map { itemId ->
-            CatalogCollectionTag(
-                target = entry.target.name,
-                facet = entry.facet.name,
-                itemId = itemId.toPlexCatalogId(),
-                value = collectionValue.value,
-            )
-        }
-        catalogMergeMutex.withLock {
-            val latest = mutableCatalog.value
-            val retained = latest.collectionTags.filterNot {
-                it.target == entry.target.name &&
-                    it.facet == entry.facet.name &&
-                    it.value.equals(collectionValue.value, ignoreCase = true)
-            }
-            val values = latest.collectionValues.map {
-                if (it.target == entry.target.name &&
-                    it.facet == entry.facet.name &&
-                    it.value.equals(collectionValue.value, ignoreCase = true)
-                ) {
-                    it.copy(
-                        key = resolvedChoice.key,
-                        fastKey = resolvedChoice.fastKey,
-                        filterField = resolvedChoice.filterField,
-                        itemsLoaded = true,
+                ).firstOrNull { it.title.equals(collectionValue.value, ignoreCase = true) }
+                if (refreshedChoice != null && refreshedChoice != cachedChoice) {
+                    PhoebeLog.d("PlexCollections") {
+                        "lazy choice refreshed target=${entry.target.name} facet=${entry.facet.name} value='${collectionValue.value}' oldKey='${cachedChoice.key}' newKey='${refreshedChoice.key}' oldField='${cachedChoice.filterField}' newField='${refreshedChoice.filterField}'"
+                    }
+                    resolvedChoice = refreshedChoice
+                    plexItemIds = plexClient.collectionFilterItems(
+                        server = server,
+                        library = library,
+                        target = target,
+                        facet = facet,
+                        choice = refreshedChoice,
+                        token = token,
                     )
-                } else {
-                    it
                 }
             }
-            val updated = latest.copy(
-                collectionValues = values,
-                collectionTags = (retained + loadedTags).distinct(),
-            )
-            mutableCatalog.value = updated
-            persistAsync(updated)
-        }
-        PhoebeLog.d("PlexCollections") {
-            "lazy loaded target=${entry.target.name} facet=${entry.facet.name} value='${collectionValue.value}' plexItems=${plexItemIds.size} items=${loadedTags.size}"
+            val itemIds = plexItemIds.ifEmpty {
+                current.collectionItemIdsFromIndexedMetadata(entry, collectionValue.value)
+            }
+            val loadedTags = itemIds.map { itemId ->
+                CatalogCollectionTag(
+                    target = entry.target.name,
+                    facet = entry.facet.name,
+                    itemId = itemId.toPlexCatalogId(),
+                    value = collectionValue.value,
+                )
+            }
+            catalogMergeMutex.withLock {
+                val latest = mutableCatalog.value
+                val retained = latest.collectionTags.filterNot {
+                    it.target == entry.target.name &&
+                        it.facet == entry.facet.name &&
+                        it.value.equals(collectionValue.value, ignoreCase = true)
+                }
+                val values = latest.collectionValues.map {
+                    if (it.target == entry.target.name &&
+                        it.facet == entry.facet.name &&
+                        it.value.equals(collectionValue.value, ignoreCase = true)
+                    ) {
+                        it.copy(
+                            key = resolvedChoice.key,
+                            fastKey = resolvedChoice.fastKey,
+                            filterField = resolvedChoice.filterField,
+                        )
+                    } else {
+                        it
+                    }
+                }
+                val updated = latest.copy(
+                    collectionValues = values,
+                    collectionTags = (retained + loadedTags).distinct(),
+                )
+                mutableCatalog.value = updated
+                persistAsync(updated)
+            }
+            PhoebeLog.d("PlexCollections") {
+                "lazy loaded target=${entry.target.name} facet=${entry.facet.name} value='${collectionValue.value}' plexItems=${plexItemIds.size} items=${loadedTags.size}"
+            }
+        } finally {
+            markCollectionValueItemsLoaded(entry, normalizedValue)
         }
     }
 
@@ -598,16 +596,30 @@ class CatalogRepository(
     private suspend fun markCollectionValueItemsLoaded(entry: CollectionEntry, value: String) {
         catalogMergeMutex.withLock {
             val latest = mutableCatalog.value
-            val values = latest.collectionValues.map {
-                if (it.target == entry.target.name &&
+            val hasMatch = latest.collectionValues.any {
+                it.target == entry.target.name &&
                     it.facet == entry.facet.name &&
-                    it.value.equals(value, ignoreCase = true) &&
-                    !it.itemsLoaded
-                ) {
-                    it.copy(itemsLoaded = true)
-                } else {
-                    it
+                    it.value.equals(value, ignoreCase = true)
+            }
+            val values = if (hasMatch) {
+                latest.collectionValues.map {
+                    if (it.target == entry.target.name &&
+                        it.facet == entry.facet.name &&
+                        it.value.equals(value, ignoreCase = true)
+                    ) {
+                        it.copy(itemsLoaded = true)
+                    } else {
+                        it
+                    }
                 }
+            } else {
+                latest.collectionValues + CatalogCollectionValue(
+                    target = entry.target.name,
+                    facet = entry.facet.name,
+                    value = value,
+                    key = value,
+                    itemsLoaded = true,
+                )
             }
             if (values != latest.collectionValues) {
                 val updated = latest.copy(collectionValues = values)
@@ -1383,6 +1395,151 @@ class CatalogRepository(
             .flatten()
             .distinctBy { it.id }
             .filter { it.year?.let { year -> year in start..end } == true }
+            .toList()
+    }
+
+    suspend fun collectionFilterChoiceForValue(
+        session: PlexSession?,
+        facet: CollectionFacet,
+        value: String,
+    ): PlexFilterChoice? {
+        if (facet != CollectionFacet.Mood && facet != CollectionFacet.Style) return null
+        val server = session?.selectedServer ?: return null
+        val library = session.selectedLibrary ?: return null
+        val token = session.serverAuthToken() ?: return null
+        val normalizedValue = value.trim()
+        if (normalizedValue.isBlank()) return null
+        val entry = CollectionEntry(CollectionTarget.Albums, facet)
+        ensureCollectionValues(session, entry)
+        val cached = mutableCatalog.value.collectionValues.firstOrNull {
+            it.facet == facet.name && it.value.equals(normalizedValue, ignoreCase = true)
+        }
+        if (cached != null) {
+            return PlexFilterChoice(
+                key = cached.key,
+                title = cached.value,
+                fastKey = cached.fastKey,
+                filterField = cached.filterField,
+            )
+        }
+        val plexFacet = facet.toPlexCollectionFacet()
+        return plexClient.collectionFilterChoices(
+            server = server,
+            library = library,
+            target = PlexCollectionTarget.Albums,
+            facet = plexFacet,
+            token = token,
+        ).firstOrNull { it.title.equals(normalizedValue, ignoreCase = true) }
+    }
+
+    suspend fun tracksForCollectionFacet(
+        session: PlexSession?,
+        facet: CollectionFacet,
+        value: String,
+    ): List<Track> {
+        if (facet != CollectionFacet.Mood && facet != CollectionFacet.Style) return emptyList()
+        val server = session?.selectedServer
+        val library = session?.selectedLibrary
+        val token = session.serverAuthToken()
+        if (server != null && library != null && token != null) {
+            val choice = collectionFilterChoiceForValue(session, facet, value) ?: return emptyList()
+            val plexFacet = facet.toPlexCollectionFacet()
+            val firstPage = runCatching {
+                plexClient.tracksForCollectionFacetPage(
+                    server = server,
+                    library = library,
+                    token = token,
+                    facet = plexFacet,
+                    choice = choice,
+                    start = 0,
+                    size = CollectionFacetTrackPageSize,
+                    limit = CollectionFacetTrackLimit,
+                )
+            }.getOrNull()
+            if (firstPage != null && firstPage.tracks.isNotEmpty()) {
+                val pages = mutableListOf(firstPage)
+                var offset = firstPage.nextOffset
+                var pageCount = 1
+                while (firstPage.hasMore && pageCount < MaxCollectionFacetTrackPages) {
+                    val page = runCatching {
+                        plexClient.tracksForCollectionFacetPage(
+                            server = server,
+                            library = library,
+                            token = token,
+                            facet = plexFacet,
+                            choice = choice,
+                            start = offset,
+                            size = CollectionFacetTrackPageSize,
+                            limit = CollectionFacetTrackLimit,
+                        )
+                    }.getOrNull() ?: break
+                    if (page.tracks.isEmpty()) break
+                    pages += page
+                    if (!page.hasMore) break
+                    offset = page.nextOffset
+                    pageCount++
+                }
+                val directTracks = pages
+                    .flatMap { it.tracks }
+                    .map { it.withPlexPrefix() }
+                    .distinctBy { it.id }
+                if (directTracks.isNotEmpty()) {
+                    publishIndexedPlexTracks(directTracks)
+                    return directTracks
+                }
+            }
+        }
+        return cachedTracksForCollectionFacet(facet, value)
+    }
+
+    suspend fun firstTracksForCollectionFacet(
+        session: PlexSession?,
+        facet: CollectionFacet,
+        value: String,
+    ): List<Track> {
+        if (facet != CollectionFacet.Mood && facet != CollectionFacet.Style) return emptyList()
+        val cached = cachedTracksForCollectionFacet(facet, value)
+        if (cached.isNotEmpty()) return cached.shuffled().take(CollectionFacetFirstPageSize)
+
+        val server = session?.selectedServer
+        val library = session?.selectedLibrary
+        val token = session.serverAuthToken()
+        if (server == null || library == null || token == null) return emptyList()
+        val choice = collectionFilterChoiceForValue(session, facet, value) ?: return emptyList()
+        val directTracks = runCatching {
+            plexClient.tracksForCollectionFacetPage(
+                server = server,
+                library = library,
+                token = token,
+                facet = facet.toPlexCollectionFacet(),
+                choice = choice,
+                start = 0,
+                size = CollectionFacetFirstPageSize,
+                limit = CollectionFacetTrackLimit,
+            ).tracks
+                .map { it.withPlexPrefix() }
+                .distinctBy { it.id }
+        }.onFailure { error ->
+            PhoebeLog.d("CatalogRepository") {
+                "first collection facet page failed facet=${facet.name} value='$value': ${error.message}"
+            }
+        }.getOrDefault(emptyList())
+        if (directTracks.isNotEmpty()) {
+            publishIndexedPlexTracks(directTracks)
+        }
+        return directTracks
+    }
+
+    private fun cachedTracksForCollectionFacet(facet: CollectionFacet, value: String): List<Track> {
+        val normalized = value.trim()
+        if (normalized.isBlank()) return emptyList()
+        return mutableCatalog.value.tracksByParent.values
+            .asSequence()
+            .flatten()
+            .distinctBy { it.id }
+            .filter { track ->
+                track.collectionLabel(facet).matchesCollectionValue(normalized)
+            }
             .toList()
     }
 
@@ -2921,6 +3078,10 @@ class CatalogRepository(
         const val DecadeTrackLimit = 500
         const val ArtistStationLookupTimeoutMs = 8_000L
         const val MaxDecadeTrackPages = 4
+        const val CollectionFacetTrackPageSize = 250
+        const val CollectionFacetFirstPageSize = 80
+        const val CollectionFacetTrackLimit = 500
+        const val MaxCollectionFacetTrackPages = 4
     }
 }
 

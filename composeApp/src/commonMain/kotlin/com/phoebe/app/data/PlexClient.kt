@@ -710,6 +710,106 @@ class PlexClient(
     }
 
     /**
+     * Paginated tracks matching a Plex collection facet value (mood, style, etc.) via filter API paths.
+     * Tries track-scoped filter fields until a path returns results.
+     */
+    suspend fun tracksForCollectionFacetPage(
+        server: PlexServer,
+        library: MusicLibrary,
+        token: String,
+        facet: PlexCollectionFacet,
+        choice: PlexFilterChoice,
+        start: Int,
+        size: Int,
+        limit: Int? = null,
+    ): PlexTrackPage {
+        val paths = collectionFacetTrackFilterPaths(library, facet, choice)
+        for (path in paths) {
+            val page = runCatching {
+                tracksForFilterPathPage(server, token, path, start, size, limit)
+            }.onFailure { error ->
+                PhoebeLog.d("PlexCollections") {
+                    "collection track page failed facet=${facet.name} choice='${choice.title}' path=$path error=${error.message}"
+                }
+            }.getOrNull() ?: continue
+            if (page.tracks.isNotEmpty() || page.hasMore) {
+                PhoebeLog.d("PlexCollections") {
+                    "collection track page facet=${facet.name} choice='${choice.title}' path=$path tracks=${page.tracks.size} offset=${page.offset}"
+                }
+                return page
+            }
+        }
+        return PlexTrackPage(tracks = emptyList(), offset = start, size = 0, totalSize = start)
+    }
+
+    private suspend fun tracksForFilterPathPage(
+        server: PlexServer,
+        token: String,
+        path: String,
+        start: Int,
+        size: Int,
+        limit: Int? = null,
+    ): PlexTrackPage {
+        val response: PlexMediaContainerResponse = withReachableBase(server) { base ->
+            val response = httpClient.get("$base$path") {
+                plexServerAuth(token)
+                header(HttpHeaders.Accept, "application/json")
+                header("X-Plex-Container-Start", start.toString())
+                header("X-Plex-Container-Size", size.toString())
+                parameter("X-Plex-Container-Start", start)
+                parameter("X-Plex-Container-Size", size)
+                limit?.let { parameter("limit", it) }
+            }
+            if (!response.status.isSuccess()) {
+                val body = response.bodyAsText()
+                error("Plex collection track page failed (${response.status.value}) via $base: ${body.take(200)}")
+            }
+            response.body()
+        }
+        return response.toTrackPage(server, token, requestedStart = start, requestedSize = size)
+    }
+
+    private fun collectionFacetTrackFilterPaths(
+        library: MusicLibrary,
+        facet: PlexCollectionFacet,
+        choice: PlexFilterChoice,
+    ): List<String> {
+        val field = choice.filterField?.takeIf { it.isNotBlank() } ?: facet.filterField
+        val scopedFields = listOf(
+            field,
+            "track.${facet.filterField}",
+            "album.${facet.filterField}",
+            facet.filterField,
+        ).distinct()
+        val normalizedKey = choice.key.filterChoiceValue()
+        val values = listOf(normalizedKey, choice.key, choice.title)
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+        val typedPaths = scopedFields.flatMap { candidateField ->
+            values.flatMap { candidateValue ->
+                val encoded = candidateValue.encodeURLParameter()
+                buildList {
+                    add("/library/sections/${library.key}/all?type=$PlexTrackType&$candidateField=$encoded")
+                    if (candidateField.startsWith("track.") || candidateField == facet.filterField) {
+                        add("/library/sections/${library.key}/all?type=$PlexTrackType&${facet.filterField}=$encoded")
+                    }
+                }
+            }
+        }
+        val fastKeyPaths = listOfNotNull(
+            choice.fastKey
+                ?.takeIf { it.isNotBlank() }
+                ?.takeIf { key ->
+                    key.contains("type=$PlexTrackType") ||
+                        key.contains("type=10") ||
+                        key.contains("all?")
+                },
+        )
+        return (typedPaths + fastKeyPaths).distinct()
+    }
+
+    /**
      * Fetches the server's *canonical* machine identifier via `/identity`. This is the value
      * Plex expects inside playlist URIs of the form `server://{X}/com.plexapp.plugins.library/…`.
      *
