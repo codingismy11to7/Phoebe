@@ -1,7 +1,15 @@
 package com.phoebe.app
 
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.res.loadImageBitmap
 import androidx.compose.ui.res.useResource
@@ -13,10 +21,13 @@ import androidx.compose.ui.window.rememberWindowState
 import com.phoebe.app.platform.PhoebeLog
 import com.phoebe.app.platform.appDisplayName
 import com.phoebe.app.platform.isDebugBuild
+import com.phoebe.app.ui.DesktopWindowTitleBar
+import com.phoebe.app.ui.LocalDesktopMergesTitleBar
 import com.phoebe.app.ui.RegisterDesktopWindowKeyDispatcher
 import com.sun.jna.Library
 import com.sun.jna.Native
 import com.sun.jna.Pointer
+import java.awt.Component
 import java.awt.EventQueue
 import java.awt.Image
 import java.awt.event.HierarchyEvent
@@ -33,6 +44,7 @@ fun main() {
         PhoebeLog.d("Phoebe") { "desktop launched (debug=${isDebugBuild()})" }
         val windowState = rememberWindowState(width = 1480.dp, height = 880.dp)
         val isMacOs = isMacOs()
+        val useCustomWindowsTitleBar = isWindows()
         // macOS bakes the squircle shape into app icons (unlike iOS/Android, which auto-mask),
         // so on Mac we use a pre-rounded variant. Other desktops keep the full-bleed square.
         val debugSuffix = if (isDebugBuild()) "-debug" else ""
@@ -42,19 +54,34 @@ fun main() {
             "icon$debugSuffix.png"
         }
         val icon = useResource(iconResource) { BitmapPainter(loadImageBitmap(it)) }
+        var useLightAppearance by remember { mutableStateOf(false) }
         Window(
             onCloseRequest = ::exitApplication,
-            title = if (isMacOs) "" else appDisplayName(),
+            title = if (isMacOs || useCustomWindowsTitleBar) "" else appDisplayName(),
             state = windowState,
             icon = icon,
+            undecorated = useCustomWindowsTitleBar,
         ) {
             RegisterDesktopWindowKeyDispatcher(window)
             ApplyDesktopWindowChrome()
-            App(
-                onAppearanceChange = { useLightAppearance ->
-                    WindowsWindowChrome.apply(window, useLightAppearance)
-                },
-            )
+            Column(Modifier.fillMaxSize()) {
+                if (useCustomWindowsTitleBar) {
+                    DesktopWindowTitleBar(
+                        useLightAppearance = useLightAppearance,
+                        onClose = ::exitApplication,
+                    )
+                }
+                CompositionLocalProvider(LocalDesktopMergesTitleBar provides useCustomWindowsTitleBar) {
+                    App(
+                        onAppearanceChange = { light ->
+                            useLightAppearance = light
+                            if (useCustomWindowsTitleBar) {
+                                WindowsWindowChrome.apply(window, light)
+                            }
+                        },
+                    )
+                }
+            }
         }
     }
 }
@@ -100,7 +127,9 @@ private fun WindowScope.ApplyDesktopWindowChrome() {
 
     DisposableEffect(window) {
         MacWindowChrome.apply(window)
-        WindowsWindowChrome.apply(window, useLightAppearance = false)
+        if (isWindows()) {
+            WindowsWindowChrome.apply(window, useLightAppearance = false)
+        }
         onDispose {}
     }
 }
@@ -120,26 +149,39 @@ private object WindowsWindowChrome {
     private const val DWMWA_USE_IMMERSIVE_DARK_MODE = 20
     private const val DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1 = 19
     private const val DWMWA_BORDER_COLOR = 34
-    private const val DWMWA_CAPTION_COLOR = 35
-    private const val DWMWA_TEXT_COLOR = 36
 
-    private const val DARK_SHELL_TOP = 0xFF151A27.toInt()
-    private const val DARK_PRIMARY_TEXT = 0xFFF4F5F7.toInt()
-    private const val LIGHT_SHELL_TOP = 0xFFFFFFFF.toInt()
-    private const val LIGHT_PRIMARY_TEXT = 0xFF181B22.toInt()
+    private const val GA_ROOT = 2
+    private const val SWP_NOSIZE = 0x0001
+    private const val SWP_NOMOVE = 0x0002
+    private const val SWP_NOZORDER = 0x0004
+    private const val SWP_NOACTIVATE = 0x0010
+    private const val SWP_FRAMECHANGED = 0x0020
 
-    fun apply(window: java.awt.Window, useLightAppearance: Boolean) {
+    private const val DARK_BORDER = 0xFF0A0D14.toInt()
+    private const val LIGHT_BORDER = 0xFFE5E7EC.toInt()
+    private const val MAX_APPLY_ATTEMPTS = 12
+
+    fun apply(
+        window: java.awt.Window,
+        useLightAppearance: Boolean,
+        attempt: Int = 0,
+        deferred: Boolean = false,
+    ) {
         if (!isWindows()) return
 
         if (!EventQueue.isDispatchThread()) {
-            EventQueue.invokeLater { apply(window, useLightAppearance) }
+            EventQueue.invokeLater { apply(window, useLightAppearance, attempt, deferred = true) }
+            return
+        }
+        if (window.isShowing && !deferred) {
+            EventQueue.invokeLater { apply(window, useLightAppearance, attempt, deferred = true) }
             return
         }
         if (!window.isShowing) {
             window.addWindowListener(object : WindowAdapter() {
                 override fun windowOpened(event: WindowEvent) {
                     window.removeWindowListener(this)
-                    apply(window, useLightAppearance)
+                    apply(window, useLightAppearance, attempt)
                 }
             })
             window.addHierarchyListener(object : HierarchyListener {
@@ -147,45 +189,83 @@ private object WindowsWindowChrome {
                     val showingChanged = event.changeFlags and HierarchyEvent.SHOWING_CHANGED.toLong() != 0L
                     if (!showingChanged || !window.isShowing) return
                     window.removeHierarchyListener(this)
-                    apply(window, useLightAppearance)
+                    apply(window, useLightAppearance, attempt)
                 }
             })
             return
         }
 
-        applyDwmAttributes(window, useLightAppearance)
-        EventQueue.invokeLater { applyDwmAttributes(window, useLightAppearance) }
-        window.addWindowListener(object : WindowAdapter() {
-            override fun windowActivated(event: WindowEvent) {
-                window.removeWindowListener(this)
-                applyDwmAttributes(window, useLightAppearance)
-            }
-        })
-    }
-
-    private fun applyDwmAttributes(window: java.awt.Window, useLightAppearance: Boolean) {
-        runCatching {
-            val shellTop = if (useLightAppearance) LIGHT_SHELL_TOP else DARK_SHELL_TOP
-            val primaryText = if (useLightAppearance) LIGHT_PRIMARY_TEXT else DARK_PRIMARY_TEXT
-            val hwnd = Native.getComponentPointer(window)
-            val darkModeResult = setBooleanAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, !useLightAppearance)
-            val legacyDarkModeResult = if (darkModeResult != 0) {
-                setBooleanAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1, !useLightAppearance)
-            } else {
-                0
-            }
-            val captionResult = setColorAttribute(hwnd, DWMWA_CAPTION_COLOR, shellTop)
-            val borderResult = setColorAttribute(hwnd, DWMWA_BORDER_COLOR, shellTop)
-            val textResult = setColorAttribute(hwnd, DWMWA_TEXT_COLOR, primaryText)
-            if (darkModeResult != 0 || legacyDarkModeResult != 0 || captionResult != 0 || borderResult != 0 || textResult != 0) {
-                PhoebeLog.d("Phoebe") {
-                    "Windows title bar DWM results: " +
-                        "dark=$darkModeResult, legacyDark=$legacyDarkModeResult, " +
-                        "caption=$captionResult, border=$borderResult, text=$textResult"
+        when (applyDwmAttributes(window, useLightAppearance)) {
+            ApplyResult.Applied -> Unit
+            ApplyResult.HwndNotReady -> {
+                if (attempt < MAX_APPLY_ATTEMPTS) {
+                    EventQueue.invokeLater {
+                        apply(window, useLightAppearance, attempt + 1, deferred = true)
+                    }
                 }
             }
+            ApplyResult.Failed -> Unit
+        }
+    }
+
+    private enum class ApplyResult {
+        Applied,
+        HwndNotReady,
+        Failed,
+    }
+
+    private fun applyDwmAttributes(window: java.awt.Window, useLightAppearance: Boolean): ApplyResult {
+        val hwnd = resolveHwnd(window) ?: return ApplyResult.HwndNotReady
+        return runCatching {
+            val border = if (useLightAppearance) LIGHT_BORDER else DARK_BORDER
+            val useDarkChrome = !useLightAppearance
+            setBooleanAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, useDarkChrome)
+            setBooleanAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1, useDarkChrome)
+            setColorAttribute(hwnd, DWMWA_BORDER_COLOR, border)
+            refreshWindowFrame(hwnd)
+            ApplyResult.Applied
         }.onFailure { error ->
-            PhoebeLog.d("Phoebe") { "Windows title bar appearance unavailable: ${error.message}" }
+            PhoebeLog.d("Phoebe") { "Windows window chrome unavailable: ${error.message}" }
+        }.getOrDefault(ApplyResult.Failed)
+    }
+
+    private fun resolveHwnd(window: java.awt.Window): Pointer? {
+        val componentPointer = runCatching { Native.getComponentPointer(window) }
+            .getOrNull()
+            ?.takeIf { it != Pointer.NULL }
+        if (componentPointer != null) {
+            return rootHwnd(componentPointer)
+        }
+        return awtPeerHwnd(window)?.let(::rootHwnd)
+    }
+
+    private fun rootHwnd(hwnd: Pointer): Pointer {
+        val root = runCatching { WinUser32.INSTANCE.GetAncestor(hwnd, GA_ROOT) }.getOrNull()
+        return root?.takeIf { it != Pointer.NULL } ?: hwnd
+    }
+
+    private fun awtPeerHwnd(window: java.awt.Window): Pointer? = runCatching {
+        val peerField = Component::class.java.getDeclaredField("peer")
+        peerField.isAccessible = true
+        val peer = peerField.get(window) ?: return@runCatching null
+        val hwndMethod = peer.javaClass.methods.firstOrNull { method ->
+            method.name == "getHWnd" && method.parameterCount == 0
+        } ?: return@runCatching null
+        val hwnd = (hwndMethod.invoke(peer) as Number).toLong()
+        if (hwnd == 0L) null else Pointer(hwnd)
+    }.getOrNull()
+
+    private fun refreshWindowFrame(hwnd: Pointer) {
+        runCatching {
+            WinUser32.INSTANCE.SetWindowPos(
+                hwnd,
+                null,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE or SWP_NOSIZE or SWP_NOZORDER or SWP_NOACTIVATE or SWP_FRAMECHANGED,
+            )
         }
     }
 
@@ -211,6 +291,23 @@ private object WindowsWindowChrome {
 
         companion object {
             val INSTANCE: DwmApi = Native.load("dwmapi", DwmApi::class.java)
+        }
+    }
+
+    private interface WinUser32 : Library {
+        fun GetAncestor(hwnd: Pointer, flags: Int): Pointer
+        fun SetWindowPos(
+            hwnd: Pointer,
+            hwndInsertAfter: Pointer?,
+            x: Int,
+            y: Int,
+            cx: Int,
+            cy: Int,
+            flags: Int,
+        ): Boolean
+
+        companion object {
+            val INSTANCE: WinUser32 = Native.load("user32", WinUser32::class.java)
         }
     }
 }

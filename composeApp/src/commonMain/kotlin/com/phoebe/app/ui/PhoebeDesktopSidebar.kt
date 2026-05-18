@@ -203,12 +203,13 @@ internal fun Sidebar(
         }
     val regularPlaylists = playlistActions.playlists.filterNot { it.isLikedSongsPlaylist() }
 
+    val sidebarTopPadding = if (LocalDesktopMergesTitleBar.current) 16.dp else 54.dp
     Column(
         modifier = Modifier
             .width(236.dp)
             .fillMaxHeight()
             .background(PhoebeUi.sidebar)
-            .padding(start = 14.dp, top = 54.dp, end = 24.dp, bottom = 24.dp),
+            .padding(start = 14.dp, top = sidebarTopPadding, end = 24.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(26.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {

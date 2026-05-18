@@ -20,6 +20,8 @@
 # DWM bridge so release packages can still style the Windows title bar.
 -keep class com.sun.jna.** { *; }
 -keep class com.phoebe.app.MainKt$WindowsWindowChrome** { *; }
+-keep class com.phoebe.app.MainKt$WindowsWindowChrome$WinUser32** { *; }
+-keep class com.phoebe.app.MainKt$WindowsWindowChrome$DwmApi** { *; }
 
 -keep class com.sun.glass.** {
     *;

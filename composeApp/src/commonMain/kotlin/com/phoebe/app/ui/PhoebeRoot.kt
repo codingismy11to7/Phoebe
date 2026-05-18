@@ -52,6 +52,8 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -614,12 +616,20 @@ fun PhoebeRoot(
             val compact = maxWidth < 900.dp
             val wideDesktop = maxWidth >= 1280.dp
             CompositionLocalProvider(LocalPlaylistDragEnabled provides !compact) {
+            val mergesTitleBar = LocalDesktopMergesTitleBar.current
             val shellModifier = if (compact) {
                 Modifier
                     .fillMaxSize()
                     .background(PhoebeUi.shellTop)
                     .statusBarsPadding()
             } else {
+                val shellInsets = if (mergesTitleBar) {
+                    WindowInsets.safeDrawing.only(
+                        WindowInsetsSides.Start + WindowInsetsSides.End + WindowInsetsSides.Bottom,
+                    )
+                } else {
+                    WindowInsets.safeDrawing
+                }
                 Modifier
                     .fillMaxSize()
                     .background(
@@ -629,7 +639,7 @@ fun PhoebeRoot(
                             radius = 960f,
                         ),
                     )
-                    .windowInsetsPadding(WindowInsets.safeDrawing)
+                    .windowInsetsPadding(shellInsets)
             }
             Box(modifier = shellModifier) {
             if (compact) {
