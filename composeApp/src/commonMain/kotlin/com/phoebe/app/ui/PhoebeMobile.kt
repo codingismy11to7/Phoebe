@@ -150,6 +150,8 @@ import com.phoebe.app.domain.AppScreen
 import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.ArtistRadioAvailability
 import com.phoebe.app.domain.HomeSection
+import com.phoebe.app.domain.JellyfinLibraryPageKind
+import com.phoebe.app.domain.JellyfinSyncMode
 import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryUiPreferences
@@ -164,9 +166,13 @@ import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.PlexRadioStation
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
+import com.phoebe.app.domain.defaultCollectionEntries
 import com.phoebe.app.player.CastState
+import com.phoebe.app.domain.isEmbyFamily
 import com.phoebe.app.domain.isLocalMediaPlayback
-import com.phoebe.app.domain.isPlexLibraryTrack
+import com.phoebe.app.domain.isJellyfin
+import com.phoebe.app.domain.isNavidrome
+import com.phoebe.app.domain.isRemoteLibraryTrack
 import com.phoebe.app.domain.supportsPlexPlaylists
 import com.phoebe.app.platform.createPlatformHttpClient
 import com.phoebe.app.platform.currentTimeMs
@@ -406,6 +412,7 @@ internal fun MobileBrowseShell(
     onRecentlyPlayed: () -> Unit,
     onMostPlayed: () -> Unit,
     onCollections: (CollectionEntry) -> Unit,
+    supportedCollectionEntries: Set<CollectionEntry> = defaultCollectionEntries.toSet(),
     onRefreshRandomArtists: () -> Unit,
     onRefreshRandomAlbums: () -> Unit,
     onPrefetchHomeArtist: (Artist) -> Unit = {},
@@ -427,6 +434,7 @@ internal fun MobileBrowseShell(
     onSignOut: () -> Unit,
     onAddLocalFolder: (String?) -> Unit,
     onRefreshLibrary: () -> Unit,
+    onJellyfinPage: (JellyfinLibraryPageKind, Int) -> Unit = { _, _ -> },
     onLibrarySortBy: (LibrarySortBy) -> Unit,
     onLibraryAscending: (Boolean) -> Unit,
     onLibraryColumns: (LibraryColumnVisibility) -> Unit,
@@ -569,6 +577,7 @@ internal fun MobileBrowseShell(
                     onAddToUpNext = onAddToUpNext,
                     onDownload = onDownload,
                     homeSections = libraryUi.homeSections,
+                    supportedCollectionEntries = supportedCollectionEntries,
                 )
                 }
                 section == DesktopSection.Library && selectedPlaylistId == null -> LibraryMobileView(
@@ -576,6 +585,8 @@ internal fun MobileBrowseShell(
                     catalogRefreshing = catalogRefreshing,
                     filter = libraryFilter,
                     libraryUi = libraryUi,
+                    jellyfinPagination = (session.isEmbyFamily() || session.isNavidrome()) && session?.jellyfinSyncMode == JellyfinSyncMode.Quick,
+                    onJellyfinPage = onJellyfinPage,
                     onFilter = onLibraryFilter,
                     onLibrarySortBy = onLibrarySortBy,
                     onLibraryAscending = onLibraryAscending,
@@ -609,6 +620,8 @@ internal fun MobileBrowseShell(
                 else -> DesktopContent(
                     catalog = catalog,
                     catalogRefreshing = catalogRefreshing,
+                    jellyfinPagination = (session.isEmbyFamily() || session.isNavidrome()) && session?.jellyfinSyncMode == JellyfinSyncMode.Quick,
+                    onJellyfinPage = onJellyfinPage,
                     section = section,
                     selectedPlaylistId = selectedPlaylistId,
                     searchQuery = searchQuery,
@@ -868,6 +881,7 @@ internal fun MobilePlayer(
     positionMs: Long,
     @Suppress("UNUSED_PARAMETER") currentIndex: Int,
     castState: CastState = CastState(),
+    remotePlaybackTarget: String? = null,
     onToggle: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
@@ -1104,6 +1118,15 @@ internal fun MobilePlayer(
                                         modifier = Modifier.clickable {
                                             trackNavigationActions.onOpenAlbumForTrack(track)
                                         },
+                                    )
+                                }
+                                if (remotePlaybackTarget != null) {
+                                    Text(
+                                        "Music Assistant: $remotePlaybackTarget",
+                                        color = PhoebeUi.accentLight,
+                                        fontSize = 12.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
                                     )
                                 }
                             }

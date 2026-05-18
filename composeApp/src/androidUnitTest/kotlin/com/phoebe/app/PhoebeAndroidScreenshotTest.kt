@@ -33,6 +33,11 @@ class PhoebeAndroidPhoneScreenshotTest {
     @Test fun phonePlayerUpNextExpandedDark() = capturePhone("player-upnext-expanded", PhoebeScreenshotScenario.PlayerUpNextExpanded)
     @Test fun phoneSettingsDark() = capturePhone("settings", PhoebeScreenshotScenario.Settings)
     @Test fun phoneSignInDark() = capturePhone("signin", PhoebeScreenshotScenario.SignIn)
+    @Test fun phoneSignInProvidersDark() = capturePhone(
+        slug = "signin-providers",
+        scenario = PhoebeScreenshotScenario.SignInProviders,
+        heightDp = 1380,
+    )
 
     @Test fun phoneHomeLight() = capturePhone("home", PhoebeScreenshotScenario.Home, useLightAppearance = true)
     @Test fun phoneLibraryLight() = capturePhone("library", PhoebeScreenshotScenario.Library, useLightAppearance = true)
@@ -62,11 +67,12 @@ private fun capturePhone(
     slug: String,
     scenario: PhoebeScreenshotScenario,
     useLightAppearance: Boolean = false,
+    heightDp: Int = 932,
 ) = capture(
     name = "android-phone-$slug-${if (useLightAppearance) "light" else "dark"}",
     scenario = scenario,
     widthDp = 430,
-    heightDp = 932,
+    heightDp = heightDp,
     useLightAppearance = useLightAppearance,
 )
 

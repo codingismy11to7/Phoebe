@@ -155,7 +155,8 @@ import com.phoebe.app.domain.canTogglePlexLike
 import com.phoebe.app.domain.isLocalMediaPlayback
 import com.phoebe.app.domain.isLocalPlaylist
 import com.phoebe.app.domain.isLikedSongsPlaylist
-import com.phoebe.app.domain.isPlexLibraryTrack
+import com.phoebe.app.domain.isRemoteLibraryTrack
+import com.phoebe.app.domain.isRemoteProviderPlaylist
 import com.phoebe.app.domain.supportsPlexPlaylists
 import com.phoebe.app.platform.createPlatformHttpClient
 import com.phoebe.app.platform.currentTimeMs
@@ -384,7 +385,7 @@ internal fun ContentTrackRow(
             } else {
                 Spacer(Modifier.width(8.dp))
             }
-            if (cols.rating && ratingActions.ratingsEnabled && track.isPlexLibraryTrack()) {
+            if (cols.rating && ratingActions.ratingsEnabled && track.isRemoteLibraryTrack()) {
                 RatingStars(
                     rating = rating,
                     enabled = true,
@@ -570,7 +571,7 @@ internal fun TrackActionMenu(
                     },
                 )
             }
-            if (ratingActions.ratingsEnabled && track.isPlexLibraryTrack()) {
+            if (ratingActions.ratingsEnabled && track.isRemoteLibraryTrack()) {
                 DropdownMenuItem(
                     text = {
                         Row(
@@ -777,7 +778,7 @@ internal fun AddToPlaylistMenuItems(
     val eligiblePlaylists = actions.playlists.filter { playlist ->
         when {
             playlist.isLocalPlaylist() -> isLocal
-            playlist.id.startsWith("plex:") -> isPlex
+            playlist.isRemoteProviderPlaylist() -> isPlex
             else -> false
         }
     }

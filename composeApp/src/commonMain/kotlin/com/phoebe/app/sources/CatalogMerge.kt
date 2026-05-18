@@ -12,18 +12,27 @@ object CatalogMerge {
     fun withPrefix(prefix: String, snapshot: CatalogSnapshot): CatalogSnapshot {
         val p = "$prefix$Sep"
         return CatalogSnapshot(
-            artists = snapshot.artists.map { it.copy(id = p + it.id) },
-            albums = snapshot.albums.map { it.copy(id = p + it.id) },
-            playlists = snapshot.playlists.map { it.copy(id = p + it.id) },
-            tracksByParent = snapshot.tracksByParent.mapKeys { (k, _) -> p + k }.mapValues { (_, tracks) ->
-                tracks.map { t -> t.copy(id = p + t.id) }
+            artists = snapshot.artists.map { it.copy(id = it.id.withPrefix(p)) },
+            albums = snapshot.albums.map { it.copy(id = it.id.withPrefix(p)) },
+            playlists = snapshot.playlists.map { it.copy(id = it.id.withPrefix(p)) },
+            tracksByParent = snapshot.tracksByParent.mapKeys { (k, _) -> k.withPrefix(p) }.mapValues { (_, tracks) ->
+                tracks.map { t ->
+                    t.copy(
+                        id = t.id.withPrefix(p),
+                        parentAlbumId = t.parentAlbumId?.let { if (it.startsWith(p)) it else p + it },
+                    )
+                }
             },
             collectionValues = snapshot.collectionValues,
             collectionValueLoads = snapshot.collectionValueLoads,
             collectionTags = snapshot.collectionTags.map { it.copy(itemId = p + it.itemId) },
             downloads = snapshot.downloads,
+            remotePageInfo = snapshot.remotePageInfo,
         )
     }
+
+    private fun String.withPrefix(prefix: String): String =
+        if (startsWith(prefix)) this else prefix + this
 
     fun merge(first: CatalogSnapshot, vararg rest: CatalogSnapshot): CatalogSnapshot {
         if (rest.isEmpty()) return first
@@ -37,6 +46,8 @@ object CatalogMerge {
             collectionValueLoads = all.flatMap { it.collectionValueLoads }.distinct(),
             collectionTags = all.flatMap { it.collectionTags }.distinct(),
             downloads = all.flatMap { it.downloads }.distinctBy { it.trackId },
+            remotePageInfo = all.asReversed().firstOrNull { it.remotePageInfo.hasAny }?.remotePageInfo
+                ?: first.remotePageInfo,
         )
     }
 

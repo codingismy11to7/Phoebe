@@ -3,9 +3,14 @@ package com.phoebe.app.data
 import app.cash.sqldelight.async.coroutines.awaitAsOneOrNull
 import com.phoebe.app.db.PhoebeDatabase
 import com.phoebe.app.domain.MusicLibrary
+import com.phoebe.app.domain.JellyfinSyncMode
+import com.phoebe.app.domain.MediaProviderType
 import com.phoebe.app.domain.PlexPin
 import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.PlexSession
+import com.phoebe.app.domain.isEmbyFamily
+import com.phoebe.app.domain.isJellyfin
+import com.phoebe.app.domain.isPlex
 import com.phoebe.app.platform.PhoebeLog
 import com.phoebe.app.platform.PlatformStorage
 import kotlinx.coroutines.Dispatchers
@@ -14,12 +19,21 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
+import io.ktor.client.HttpClient
 
 class SessionRepository(
     private val plexClient: PlexClient,
+    private val jellyfinClient: JellyfinClient = JellyfinClient(HttpClient()),
+    private val providerRegistry: MusicProviderRegistry = MusicProviderRegistry(emptyList()),
     private val database: PhoebeDatabase,
     private val storage: PlatformStorage,
 ) {
+    constructor(
+        plexClient: PlexClient,
+        database: PhoebeDatabase,
+        storage: PlatformStorage,
+    ) : this(plexClient, JellyfinClient(HttpClient()), MusicProviderRegistry(emptyList()), database, storage)
+
     private val json = PlexClient.PlexJson
     private val mutableSession = MutableStateFlow<PlexSession?>(null)
     val session: StateFlow<PlexSession?> = mutableSession
@@ -52,6 +66,7 @@ class SessionRepository(
         val current = mutableSession.value ?: return
         val selected = current.selectedServer ?: return
         if (current.token.isBlank()) return
+        if (!current.isPlex()) return
         PhoebeLog.v("SessionRepository") { "refreshSelectedServerConnections for '${selected.name}'" }
         val fresh = runCatching { plexClient.servers(current.token) }.getOrNull()
             ?.find { it.id == selected.id }
@@ -66,7 +81,7 @@ class SessionRepository(
 
     suspend fun completePin(pin: PlexPin): Boolean {
         val token = plexClient.pollPin(pin.id) ?: return false
-        val session = PlexSession(token = token, userName = plexClient.userName(token))
+        val session = PlexSession(token = token, userName = plexClient.userName(token), providerType = MediaProviderType.Plex)
         save(session)
         return true
     }
@@ -83,18 +98,70 @@ class SessionRepository(
                 runCatching { plexClient.userName(token) }.getOrNull() ?: "Plex listener"
             }
             val serversDeferred = async { plexClient.servers(token) }
-            save(PlexSession(token = token, userName = userNameDeferred.await()))
+            save(PlexSession(token = token, userName = userNameDeferred.await(), providerType = MediaProviderType.Plex))
             serversDeferred.await()
         }
     }
 
+    suspend fun signInJellyfin(serverUrl: String, username: String, password: String): PlexServer {
+        val session = providerRegistry.adapterFor(MediaProviderType.Jellyfin)
+            ?.signIn(serverUrl, username, password)
+            ?: run {
+                val auth = jellyfinClient.authenticate(serverUrl, username, password)
+                PlexSession(
+                    token = auth.token,
+                    userName = auth.userName,
+                    selectedServer = auth.server,
+                    providerType = MediaProviderType.Jellyfin,
+                    userId = auth.userId,
+                )
+            }
+        save(session)
+        return session.selectedServer ?: error("Jellyfin did not return a server.")
+    }
+
+    suspend fun signInProvider(type: MediaProviderType, serverUrl: String, username: String, password: String): PlexServer {
+        val adapter = providerRegistry.adapterFor(type) ?: error("${type.name} is not available.")
+        val session = adapter.signIn(serverUrl, username, password)
+        save(session)
+        return session.selectedServer ?: error("${type.name} did not return a server.")
+    }
+
+    suspend fun startJellyfinQuickConnect(serverUrl: String): JellyfinQuickConnectResult =
+        jellyfinClient.initiateQuickConnect(serverUrl)
+
+    suspend fun completeJellyfinQuickConnect(serverUrl: String, secret: String): PlexServer {
+        val auth = jellyfinClient.authenticateQuickConnect(serverUrl, secret)
+        save(
+            PlexSession(
+                token = auth.token,
+                userName = auth.userName,
+                selectedServer = auth.server,
+                providerType = MediaProviderType.Jellyfin,
+                userId = auth.userId,
+            ),
+        )
+        return auth.server
+    }
+
     suspend fun servers(): List<PlexServer> {
-        val token = mutableSession.value?.token ?: return emptyList()
+        val session = mutableSession.value ?: return emptyList()
+        if (!session.isPlex()) return providerRegistry.adapterFor(session)?.servers(session) ?: listOfNotNull(session.selectedServer)
+        val token = session.token
         return plexClient.servers(token)
     }
 
     suspend fun libraries(server: PlexServer): List<MusicLibrary> {
-        val token = mutableSession.value?.token ?: return emptyList()
+        val current = mutableSession.value ?: return emptyList()
+        if (!current.isPlex()) {
+            providerRegistry.adapterFor(current)?.let { return it.libraries(current, server) }
+            if (current.isEmbyFamily()) {
+                val userId = current.userId ?: return emptyList()
+                return jellyfinClient.libraries(server, current.token, userId)
+            }
+            return emptyList()
+        }
+        val token = current.token
         val resolved = mutableSession.value?.selectedServer?.takeIf { it.id == server.id } ?: server
         runCatching { plexClient.resolveFastestBase(resolved, resolved.authToken(token)) }
         return plexClient.musicLibraries(resolved, resolved.authToken(token))
@@ -107,9 +174,16 @@ class SessionRepository(
         return mutableSession.value?.selectedServer ?: server
     }
 
-    suspend fun selectLibrary(library: MusicLibrary) {
+    suspend fun selectLibrary(library: MusicLibrary, jellyfinSyncMode: JellyfinSyncMode? = null) {
         PhoebeLog.d("SessionRepository") { "selectLibrary '${library.title}'" }
-        mutableSession.value?.let { save(it.copy(selectedLibrary = library)) }
+        mutableSession.value?.let { session ->
+            save(
+                session.copy(
+                    selectedLibrary = library,
+                    jellyfinSyncMode = jellyfinSyncMode ?: session.jellyfinSyncMode,
+                ),
+            )
+        }
     }
 
     suspend fun signOut() {
@@ -133,8 +207,10 @@ class SessionRepository(
         val server = session.selectedServer
         val library = session.selectedLibrary
             database.sessionQueries.upsert(
+                providerType = session.providerType.name,
                 token = session.token,
                 userName = session.userName,
+                userId = session.userId,
                 selectedServerId = server?.id,
                 selectedServerName = server?.name,
                 selectedServerUri = server?.uri,
@@ -146,10 +222,12 @@ class SessionRepository(
                 selectedServerHttpsRequired = server?.httpsRequired?.toDb(),
                 selectedLibraryKey = library?.key,
                 selectedLibraryTitle = library?.title,
+                jellyfinSyncMode = session.jellyfinSyncMode.name,
             )
     }
 
     private fun com.phoebe.app.db.SessionRow.toSession(): PlexSession {
+        val provider = runCatching { MediaProviderType.valueOf(providerType) }.getOrDefault(MediaProviderType.Plex)
         val server = if (selectedServerId != null && selectedServerName != null && selectedServerUri != null) {
             PlexServer(
                 id = selectedServerId,
@@ -175,6 +253,9 @@ class SessionRepository(
             userName = userName,
             selectedServer = server,
             selectedLibrary = library,
+            providerType = provider,
+            userId = userId,
+            jellyfinSyncMode = runCatching { JellyfinSyncMode.valueOf(jellyfinSyncMode) }.getOrDefault(JellyfinSyncMode.Quick),
         )
     }
 

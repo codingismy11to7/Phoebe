@@ -137,6 +137,7 @@ import com.phoebe.app.data.catalogTracksForArtist
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.AppScreen
 import com.phoebe.app.domain.Artist
+import com.phoebe.app.domain.JellyfinLibraryPageKind
 import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryUiPreferences
@@ -151,7 +152,7 @@ import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.isLocalMediaPlayback
 import com.phoebe.app.domain.isLikedSongsPlaylist
-import com.phoebe.app.domain.isPlexLibraryTrack
+import com.phoebe.app.domain.isRemoteLibraryTrack
 import com.phoebe.app.domain.supportsPlexPlaylists
 import com.phoebe.app.platform.createPlatformHttpClient
 import com.phoebe.app.platform.currentTimeMs
@@ -293,6 +294,7 @@ internal fun EmptyNowPlayingArtworkSlot(modifier: Modifier = Modifier, glyphSp: 
 internal fun DesktopContent(
     catalog: CatalogSnapshot,
     catalogRefreshing: Boolean,
+    jellyfinPagination: Boolean = false,
     section: DesktopSection,
     selectedPlaylistId: String?,
     searchQuery: String,
@@ -315,6 +317,7 @@ internal fun DesktopContent(
     headlineLineHeight: TextUnit = 35.sp,
     searchPillModifier: Modifier = Modifier.width(270.dp),
     onDownloadPlaylist: (Playlist) -> Unit = {},
+    onJellyfinPage: (JellyfinLibraryPageKind, Int) -> Unit = { _, _ -> },
 ) {
     val selectedPlaylist = catalog.playlists.firstOrNull { it.id == selectedPlaylistId }
     val playlistTracks = selectedPlaylistId?.let { catalog.tracksByParent[it].orEmpty() }.orEmpty()
@@ -343,7 +346,7 @@ internal fun DesktopContent(
                 DesktopSection.Search -> "Find your sound"
                 DesktopSection.Library -> "Albums, artists, and songs"
                 DesktopSection.Lyrics -> "Follow along"
-                DesktopSection.Playlists -> "Your Plex playlists"
+                DesktopSection.Playlists -> "Your playlists"
                 DesktopSection.Settings -> "Customize your listening experience"
                 DesktopSection.Home -> "Now playing"
             }
@@ -484,6 +487,7 @@ internal fun DesktopContent(
             section == DesktopSection.Library -> LibraryPanel(
                 catalog,
                 catalogRefreshing,
+                jellyfinPagination,
                 libraryFilter,
                 libraryUi,
                 onLibraryFilter,
@@ -496,6 +500,7 @@ internal fun DesktopContent(
                 onPlayTracks,
                 onAddToUpNext,
                 onDownload,
+                onJellyfinPage,
             )
             section == DesktopSection.Playlists -> {
                 val playlistActions = LocalPlaylistActions.current
@@ -506,7 +511,7 @@ internal fun DesktopContent(
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (!playlistActions.playlistsEnabled) {
                         Text(
-                            "Sign in to Plex or add a local music folder to use playlists.",
+                            "Sign in to Plex or Jellyfin, or add a local music folder to use playlists.",
                             color = PhoebeUi.mutedText,
                             fontSize = 14.sp,
                         )

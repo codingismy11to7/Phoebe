@@ -152,7 +152,7 @@ import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.canTogglePlexLike
 import com.phoebe.app.player.CastState
 import com.phoebe.app.domain.isLocalMediaPlayback
-import com.phoebe.app.domain.isPlexLibraryTrack
+import com.phoebe.app.domain.isRemoteLibraryTrack
 import com.phoebe.app.domain.supportsPlexPlaylists
 import com.phoebe.app.platform.createPlatformHttpClient
 import com.phoebe.app.platform.currentTimeMs
@@ -179,6 +179,7 @@ internal fun DesktopTransport(
     repeat: RepeatMode,
     volume: Float,
     castState: CastState = CastState(),
+    remotePlaybackTarget: String? = null,
     compact: Boolean,
     lyricsVisible: Boolean = false,
     upNextVisible: Boolean,
@@ -229,13 +230,15 @@ internal fun DesktopTransport(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                track?.artist?.takeIf { it.isNotBlank() } ?: "Pick a track to begin",
-                color = if (hasTrack) PhoebeUi.secondaryText else PhoebeUi.mutedText,
+                remotePlaybackTarget?.let { "Music Assistant: $it" }
+                    ?: track?.artist?.takeIf { it.isNotBlank() }
+                    ?: "Pick a track to begin",
+                color = if (remotePlaybackTarget != null) PhoebeUi.accentLight else if (hasTrack) PhoebeUi.secondaryText else PhoebeUi.mutedText,
                 fontSize = 12.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.clickable(
-                    enabled = track != null && track.artist.isNotBlank(),
+                    enabled = remotePlaybackTarget == null && track != null && track.artist.isNotBlank(),
                 ) {
                     track?.let { trackNavigationActions.onOpenArtistForTrack(it) }
                 },

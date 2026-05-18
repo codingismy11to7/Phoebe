@@ -156,7 +156,7 @@ import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.isLocalMediaPlayback
-import com.phoebe.app.domain.isPlexLibraryTrack
+import com.phoebe.app.domain.isRemoteLibraryTrack
 import com.phoebe.app.domain.supportsPlexPlaylists
 import com.phoebe.app.playlists.PlaylistExportFormat
 import com.phoebe.app.platform.currentTimeMs
@@ -318,6 +318,7 @@ internal val LocalTrackNavigationActions = compositionLocalOf { TrackNavigationA
 private fun equivalentTrackIds(id: String): Set<String> {
     if (id.isBlank()) return emptySet()
     if (id.startsWith("plex:")) return setOf(id, id.removePrefix("plex:"))
+    if (id.startsWith("jellyfin:")) return setOf(id, id.removePrefix("jellyfin:"))
     return if (':' in id) setOf(id) else setOf(id, "plex:$id")
 }
 

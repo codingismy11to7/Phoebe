@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -119,6 +120,7 @@ internal fun DesktopHomeScreen(
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
     homeSections: List<HomeSection> = HomeSection.defaultOrder,
+    supportedCollectionEntries: Set<CollectionEntry> = allCollectionEntries().toSet(),
 ) {
     var showDecadeMix by remember { mutableStateOf(false) }
     if (showDecadeMix) {
@@ -151,7 +153,9 @@ internal fun DesktopHomeScreen(
     }
     LazyColumn(
         state = listState,
-        modifier = modifier.fillMaxSize().padding(horizontal = 32.dp, vertical = 28.dp),
+        modifier = modifier.fillMaxSize().padding(
+            PaddingValues(start = 36.dp, end = 28.dp, top = 32.dp, bottom = 24.dp),
+        ),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item("header") {
@@ -169,7 +173,7 @@ internal fun DesktopHomeScreen(
                 HomeSection.Collections -> item("collections") {
                     HomePanel(Modifier.fillMaxWidth()) {
                         SectionLabel("COLLECTIONS", PhoebeUi.mutedText)
-                        DesktopCollectionsGrid(onCollections)
+                        DesktopCollectionsGrid(supportedCollectionEntries, onCollections)
                     }
                 }
                 HomeSection.Favorites -> {
@@ -232,6 +236,7 @@ internal fun MobileHomeScreen(
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
     homeSections: List<HomeSection> = HomeSection.defaultOrder,
+    supportedCollectionEntries: Set<CollectionEntry> = allCollectionEntries().toSet(),
 ) {
     var showDecadeMix by remember { mutableStateOf(false) }
     if (showDecadeMix) {
@@ -274,7 +279,7 @@ internal fun MobileHomeScreen(
                         showDecadeMix = true
                     }
                 }
-                HomeSection.Collections -> item("collections") { MobileCollectionsSection(onCollections) }
+                HomeSection.Collections -> item("collections") { MobileCollectionsSection(supportedCollectionEntries, onCollections) }
                 HomeSection.Favorites -> {
                     item("favorite-playlists") { MobileFavoritePlaylistsSection(state.favoritePlaylists, onPlaylist, onFavoritePlaylists) }
                     item("favorite-artists") { MobileFavoriteArtistsSection(catalog.artists.filter { it.favorite }.sortedBy { it.title.lowercase() }, artistThumbs, onArtist, onFavoriteArtists) }
@@ -350,10 +355,13 @@ private fun artistThumbsFor(artists: List<Artist>, albums: List<Album>): Map<Str
 }
 
 @Composable
-private fun MobileCollectionsSection(onCollections: (CollectionEntry) -> Unit) {
+private fun MobileCollectionsSection(
+    supportedCollectionEntries: Set<CollectionEntry>,
+    onCollections: (CollectionEntry) -> Unit,
+) {
     SectionLabel("COLLECTIONS", PhoebeUi.mutedText)
     Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-        collectionEntryRows().forEach { row ->
+        collectionEntryRows(supportedCollectionEntries).forEach { row ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                 row.forEach { entry ->
                     MobileActionCard(entry.mobileTitle, entry.icon, Modifier.weight(1f)) {
@@ -896,10 +904,16 @@ private data class HomeCollectionEntry(
     val icon: PhoebeIcon,
 )
 
-private fun collectionEntryRows(): List<List<HomeCollectionEntry>> =
-    collectionEntries().chunked(2)
+private fun collectionEntryRows(supportedCollectionEntries: Set<CollectionEntry>): List<List<HomeCollectionEntry>> =
+    collectionEntries(supportedCollectionEntries).chunked(2)
 
-private fun collectionEntries(): List<HomeCollectionEntry> =
+private fun collectionEntries(supportedCollectionEntries: Set<CollectionEntry>): List<HomeCollectionEntry> =
+    allHomeCollectionEntries().filter { it.collectionEntry in supportedCollectionEntries }
+
+private fun allCollectionEntries(): List<CollectionEntry> =
+    allHomeCollectionEntries().map { it.collectionEntry }
+
+private fun allHomeCollectionEntries(): List<HomeCollectionEntry> =
     listOf(
         HomeCollectionEntry(
             collectionEntry = CollectionEntry(CollectionTarget.Artists, CollectionFacet.Mood),
@@ -946,11 +960,14 @@ private fun collectionEntries(): List<HomeCollectionEntry> =
     )
 
 @Composable
-private fun DesktopCollectionsGrid(onCollections: (CollectionEntry) -> Unit) {
+private fun DesktopCollectionsGrid(
+    supportedCollectionEntries: Set<CollectionEntry>,
+    onCollections: (CollectionEntry) -> Unit,
+) {
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val columns = if (maxWidth >= 760.dp) 3 else 2
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            collectionEntries().chunked(columns).forEach { row ->
+            collectionEntries(supportedCollectionEntries).chunked(columns).forEach { row ->
                 Row(Modifier.fillMaxWidth().height(82.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     row.forEach { entry ->
                         HomeActionCard(

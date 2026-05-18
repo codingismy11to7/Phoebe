@@ -19,6 +19,8 @@ class DatabaseWiperDesktopTest {
                 database.sessionQueries.upsert(
                     token = "token",
                     userName = "Listener",
+                    providerType = "Plex",
+                    userId = null,
                     selectedServerId = null,
                     selectedServerName = null,
                     selectedServerUri = null,
@@ -30,6 +32,7 @@ class DatabaseWiperDesktopTest {
                     selectedServerHttpsRequired = null,
                     selectedLibraryKey = null,
                     selectedLibraryTitle = null,
+                    jellyfinSyncMode = "Quick",
                 )
                 database.mediaSourcesQueries.insertOrReplace("lf1", "file:///music", "Music", 1L)
                 database.libraryPrefsQueries.upsert("Name", 1L, 1L, 1L, 1L, 1L, 1L, 1L, 1L, 1L, 1L, 1L, 1L, "Mixes,Collections,FavoritePlaylists,FavoriteArtists,FavoriteAlbums,RecentSongs,RecentArtists,RecentAlbums,Played,Random")
@@ -108,6 +111,41 @@ class DatabaseWiperDesktopTest {
                 emptyList(),
                 database.catalogQueries.selectLocalFileMetadataCacheForFolder("lf1").awaitAsList(),
             )
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun clearAllAppDataCanPreservePlayHistoryForSignOut() = runBlocking {
+        val (database, driver) = newInMemoryPhoebeDatabase()
+        try {
+            database.transaction {
+                database.sessionQueries.upsert(
+                    token = "token",
+                    userName = "Listener",
+                    providerType = "Navidrome",
+                    userId = null,
+                    selectedServerId = null,
+                    selectedServerName = null,
+                    selectedServerUri = null,
+                    selectedServerOwned = null,
+                    selectedServerConnectionUris = null,
+                    selectedServerAdvertisedConnectionUris = null,
+                    selectedServerLocalConnectionUris = null,
+                    selectedServerAccessToken = null,
+                    selectedServerHttpsRequired = null,
+                    selectedLibraryKey = null,
+                    selectedLibraryTitle = null,
+                    jellyfinSyncMode = "Quick",
+                )
+                database.playHistoryQueries.recordPlay("navidrome:track", "Artist", "Album", 123L)
+            }
+
+            database.clearAllAppData(clearPlayHistory = false)
+
+            assertNull(database.sessionQueries.selectCurrent().awaitAsOneOrNull())
+            assertEquals(1L, database.playHistoryQueries.selectPlayCountsByTrack().awaitAsList().single().playCount)
         } finally {
             driver.close()
         }

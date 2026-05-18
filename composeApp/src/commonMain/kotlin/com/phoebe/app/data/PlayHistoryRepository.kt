@@ -121,6 +121,11 @@ class PlayHistoryRepository(
             database.playHistoryQueries.selectMaxImportedPlexPlayedAt(serverId).awaitAsOneOrNull()?.lastPlayed
         }
 
+    suspend fun maxImportedRemotePlayedAt(source: String, serverId: String): Long? =
+        withContext(Dispatchers.Default) {
+            database.playHistoryQueries.selectMaxImportedRemotePlayedAt(source, serverId).awaitAsOneOrNull()?.lastPlayed
+        }
+
     suspend fun importPlexPlay(
         track: Track,
         serverId: String,
@@ -191,6 +196,43 @@ class PlayHistoryRepository(
                     mergeWindowMs = 0L,
                 )
             ) {
+                imported += 1
+            }
+        }
+        return imported
+    }
+
+    suspend fun importRemotePlayCountFallback(
+        track: Track,
+        source: String,
+        serverId: String,
+        lastPlayedAtMs: Long,
+        playCount: Long,
+        importedAtMs: Long,
+    ): Int {
+        val cappedCount = playCount.coerceIn(0L, 500L).toInt()
+        if (track.id.isBlank() || source.isBlank() || serverId.isBlank() || cappedCount <= 0) return 0
+        val cleanArtist = track.artist.ifBlank { "Unknown Artist" }
+        val cleanAlbum = track.album.ifBlank { "Unknown Album" }
+        var imported = 0
+        withContext(Dispatchers.Default) {
+            repeat(cappedCount) { index ->
+                val playedAtMs = (lastPlayedAtMs - index).coerceAtLeast(0L)
+                val historyKey = "$source-stats:$serverId:${track.id}:$index"
+                val alreadyImported = database.playHistoryQueries
+                    .selectImportedPlexHistoryKey(historyKey)
+                    .awaitAsOneOrNull() != null
+                if (alreadyImported) return@repeat
+                database.playHistoryQueries.insertImportedRemotePlay(
+                    track_id = track.id,
+                    artist = cleanArtist,
+                    album = cleanAlbum,
+                    played_at_ms = playedAtMs,
+                    source = source,
+                    plex_server_id = serverId,
+                    plex_history_key = historyKey,
+                    plex_imported_at_ms = importedAtMs,
+                )
                 imported += 1
             }
         }

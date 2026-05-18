@@ -3,6 +3,7 @@ package com.phoebe.app.platform
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import com.phoebe.app.data.PlexClient
+import com.phoebe.app.domain.PlexServer
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.js.Js
 import io.ktor.client.plugins.HttpTimeout
@@ -20,6 +21,8 @@ actual fun createPlatformHttpClient(): HttpClient = HttpClient(Js) {
         json(PlexClient.PlexJson)
     }
 }
+
+actual suspend fun discoverJellyfinServers(): List<PlexServer> = emptyList()
 
 actual class PlatformStorage actual constructor() {
     actual suspend fun readText(name: String): String? =

@@ -155,7 +155,7 @@ import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.isLocalMediaPlayback
 import com.phoebe.app.domain.isLocalPlaylist
-import com.phoebe.app.domain.isPlexLibraryTrack
+import com.phoebe.app.domain.isRemoteLibraryTrack
 import com.phoebe.app.domain.supportsPlexPlaylists
 import com.phoebe.app.playlists.PlaylistExportFormat
 import com.phoebe.app.platform.createPlatformHttpClient
@@ -381,7 +381,7 @@ private fun SongDetailText(
             Text(track.artist, color = PhoebeUi.secondaryText, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(track.album, color = PhoebeUi.mutedText, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        if (ratingActions.ratingsEnabled && track.isPlexLibraryTrack()) {
+        if (ratingActions.ratingsEnabled && track.isRemoteLibraryTrack()) {
             RatingStars(
                 rating = ratingActions.ratingFor(track),
                 enabled = true,
@@ -903,7 +903,7 @@ internal fun ArtistDetailPanel(
     val ratingActions = LocalRatingActions.current
     val favoriteActions = LocalFavoriteActions.current
     LaunchedEffect(artist.id) {
-        if (artist.id.startsWith("plex:")) onProbeArtistRadio(artist)
+        if (artist.id.startsWith("plex:") || artist.id.startsWith("jellyfin:")) onProbeArtistRadio(artist)
     }
     var showStats by remember(artist.id) { mutableStateOf(false) }
 
@@ -967,7 +967,7 @@ internal fun ArtistDetailPanel(
                         enabled = true,
                         onClick = { favoriteActions.onToggleArtist(artist) },
                     )
-                    if (ratingActions.ratingsEnabled && artist.id.startsWith("plex:")) {
+                    if (ratingActions.ratingsEnabled && (artist.id.startsWith("plex:") || artist.id.startsWith("jellyfin:"))) {
                         RatingStars(
                             rating = ratingActions.ratingFor(artist),
                             enabled = true,
@@ -1640,7 +1640,7 @@ private fun AlbumDetailHeaderText(
                 enabled = true,
                 onClick = { favoriteActions.onToggleAlbum(album) },
             )
-            if (ratingActions.ratingsEnabled && album.id.startsWith("plex:")) {
+            if (ratingActions.ratingsEnabled && (album.id.startsWith("plex:") || album.id.startsWith("jellyfin:"))) {
                 RatingStars(
                     rating = ratingActions.ratingFor(album),
                     enabled = true,
@@ -1770,7 +1770,7 @@ internal fun PlaylistDetailPanel(
                         enabled = true,
                         onClick = { favoriteActions.onTogglePlaylist(playlist) },
                     )
-                    if (ratingActions.ratingsEnabled && playlist.id.startsWith("plex:")) {
+                    if (ratingActions.ratingsEnabled && (playlist.id.startsWith("plex:") || playlist.id.startsWith("jellyfin:"))) {
                         RatingStars(
                             rating = ratingActions.ratingFor(playlist),
                             enabled = true,

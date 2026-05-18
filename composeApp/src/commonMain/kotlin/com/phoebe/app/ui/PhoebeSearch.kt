@@ -148,7 +148,7 @@ import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.isLocalMediaPlayback
-import com.phoebe.app.domain.isPlexLibraryTrack
+import com.phoebe.app.domain.isRemoteLibraryTrack
 import com.phoebe.app.domain.supportsPlexPlaylists
 import com.phoebe.app.platform.createPlatformHttpClient
 import com.phoebe.app.platform.currentTimeMs
@@ -246,156 +246,138 @@ internal fun SearchDesktopView(
         resultScope = SearchResultScope.Overview
     }
     BoxWithConstraints(modifier) {
-        val narrowPane = maxWidth < 760.dp
-        val contentPadding = if (narrowPane) {
-            PaddingValues(start = 24.dp, end = 24.dp, top = 28.dp, bottom = 24.dp)
+        val compactPane = maxWidth < 900.dp
+        val contentPadding = if (compactPane) {
+            PaddingValues(start = 36.dp, end = 28.dp, top = 32.dp, bottom = 24.dp)
         } else {
             PaddingValues(start = 36.dp, end = 28.dp, top = 32.dp, bottom = 24.dp)
         }
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(contentPadding),
-            horizontalArrangement = Arrangement.spacedBy(28.dp),
+                .padding(contentPadding)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(22.dp),
         ) {
-            Column(
-                modifier = Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(22.dp),
-            ) {
-                if (narrowPane) {
-                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                        Column {
-                            Text("Search", color = PhoebeUi.primaryText, fontSize = 30.sp, fontWeight = FontWeight.Black)
-                            Text("Find your favorite music", color = PhoebeUi.mutedText, fontSize = 13.sp)
-                        }
-                        SearchPill(searchQuery, onSearchQuery, Modifier.fillMaxWidth())
+            if (compactPane) {
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Column {
+                        Text("Search", color = PhoebeUi.primaryText, fontSize = 30.sp, fontWeight = FontWeight.Black)
+                        Text("Find your favorite music", color = PhoebeUi.mutedText, fontSize = 13.sp)
                     }
-                } else {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Search", color = PhoebeUi.primaryText, fontSize = 30.sp, fontWeight = FontWeight.Black)
-                            Text("Find your favorite music", color = PhoebeUi.mutedText, fontSize = 13.sp)
-                        }
-                        SearchPill(searchQuery, onSearchQuery, Modifier.width(380.dp))
+                    SearchPill(searchQuery, onSearchQuery, Modifier.fillMaxWidth())
+                }
+            } else {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Search", color = PhoebeUi.primaryText, fontSize = 30.sp, fontWeight = FontWeight.Black)
+                        Text("Find your favorite music", color = PhoebeUi.mutedText, fontSize = 13.sp)
                     }
+                    SearchPill(searchQuery, onSearchQuery, Modifier.width(380.dp))
                 }
-                if (catalogRefreshing) {
-                    CatalogLoadingStrip()
-                }
-                if (hasQuery && resultScope != SearchResultScope.Overview) {
-                    SearchAllResultsPanel(
-                        scope = resultScope,
-                        results = results,
+            }
+            if (catalogRefreshing) {
+                CatalogLoadingStrip()
+            }
+            if (hasQuery && resultScope != SearchResultScope.Overview) {
+                SearchAllResultsPanel(
+                    scope = resultScope,
+                    results = results,
+                    catalog = catalog,
+                    compact = compactPane,
+                    onBack = { resultScope = SearchResultScope.Overview },
+                    onArtist = onArtist,
+                    onAlbum = onAlbum,
+                    onPlayTracks = onPlayTracks,
+                    onAddToUpNext = onAddToUpNext,
+                    onDownload = onDownload,
+                )
+            } else {
+                SearchTopResultSection(
+                    results = results,
+                    catalog = catalog,
+                    onAlbum = onAlbum,
+                    onArtist = onArtist,
+                    onPlayTracks = onPlayTracks,
+                    compact = compactPane,
+                )
+            }
+            if (hasQuery && resultScope == SearchResultScope.Overview) {
+                SearchSongsSection(
+                    tracks = results.tracks.take(5),
+                    allTracks = results.tracks,
+                    compact = compactPane,
+                    onSeeAll = if (results.tracks.size > 5) {
+                        { resultScope = SearchResultScope.Songs }
+                    } else {
+                        null
+                    },
+                    onPlayTracks = onPlayTracks,
+                    onAddToUpNext = onAddToUpNext,
+                    onDownload = onDownload,
+                )
+                if (compactPane) {
+                    SearchAlbumsSection(
+                        albums = results.albums.take(6),
                         catalog = catalog,
-                        compact = narrowPane,
-                        onBack = { resultScope = SearchResultScope.Overview },
-                        onArtist = onArtist,
                         onAlbum = onAlbum,
-                        onPlayTracks = onPlayTracks,
-                        onAddToUpNext = onAddToUpNext,
-                        onDownload = onDownload,
-                    )
-                } else {
-                    SearchTopResultSection(
-                        results = results,
-                        catalog = catalog,
-                        onAlbum = onAlbum,
-                        onArtist = onArtist,
-                        onPlayTracks = onPlayTracks,
-                        compact = narrowPane,
-                    )
-                }
-                if (hasQuery && resultScope == SearchResultScope.Overview) {
-                    SearchSongsSection(
-                        tracks = results.tracks.take(5),
-                        allTracks = results.tracks,
-                        compact = narrowPane,
-                        onSeeAll = if (results.tracks.size > 5) {
-                            { resultScope = SearchResultScope.Songs }
+                        compact = true,
+                        onSeeAll = if (results.albums.size > 6) {
+                            { resultScope = SearchResultScope.Albums }
                         } else {
                             null
                         },
-                        onPlayTracks = onPlayTracks,
-                        onAddToUpNext = onAddToUpNext,
-                        onDownload = onDownload,
                     )
-                    if (narrowPane) {
+                    SearchArtistsSection(
+                        artists = results.artists.take(4),
+                        catalog = catalog,
+                        onArtist = onArtist,
+                        compact = true,
+                        onSeeAll = if (results.artists.size > 4) {
+                            { resultScope = SearchResultScope.Artists }
+                        } else {
+                            null
+                        },
+                    )
+                } else {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
                         SearchAlbumsSection(
-                            albums = results.albums.take(6),
+                            albums = results.albums.take(5),
                             catalog = catalog,
                             onAlbum = onAlbum,
-                            compact = true,
-                            onSeeAll = if (results.albums.size > 6) {
+                            modifier = Modifier.weight(1.15f),
+                            compact = false,
+                            onSeeAll = if (results.albums.size > 5) {
                                 { resultScope = SearchResultScope.Albums }
                             } else {
                                 null
                             },
                         )
                         SearchArtistsSection(
-                            artists = results.artists.take(4),
+                            artists = results.artists.take(3),
                             catalog = catalog,
                             onArtist = onArtist,
-                            compact = true,
-                            onSeeAll = if (results.artists.size > 4) {
+                            modifier = Modifier.weight(0.85f),
+                            compact = false,
+                            onSeeAll = if (results.artists.size > 3) {
                                 { resultScope = SearchResultScope.Artists }
                             } else {
                                 null
                             },
                         )
-                    } else {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                            SearchAlbumsSection(
-                                albums = results.albums.take(5),
-                                catalog = catalog,
-                                onAlbum = onAlbum,
-                                modifier = Modifier.weight(1.15f),
-                                compact = false,
-                                onSeeAll = if (results.albums.size > 5) {
-                                    { resultScope = SearchResultScope.Albums }
-                                } else {
-                                    null
-                                },
-                            )
-                            SearchArtistsSection(
-                                artists = results.artists.take(3),
-                                catalog = catalog,
-                                onArtist = onArtist,
-                                modifier = Modifier.weight(0.85f),
-                                compact = false,
-                                onSeeAll = if (results.artists.size > 3) {
-                                    { resultScope = SearchResultScope.Artists }
-                                } else {
-                                    null
-                                },
-                            )
-                        }
                     }
                 }
-                if (narrowPane) {
-                    SearchRecentPanel(
-                        searches = searchHistory.recentSearches,
-                        onSearch = { search ->
-                            searchHistory.commitSearch(search)
-                            onSearchQuery(search)
-                        },
-                        onRemoveSearch = searchHistory.removeSearch,
-                        onClearSearches = searchHistory.clearSearches,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
             }
-            if (!narrowPane) {
-                SearchRecentPanel(
-                    searches = searchHistory.recentSearches,
-                    onSearch = { search ->
-                        searchHistory.commitSearch(search)
-                        onSearchQuery(search)
-                    },
-                    onRemoveSearch = searchHistory.removeSearch,
-                    onClearSearches = searchHistory.clearSearches,
-                    modifier = Modifier.width(250.dp).padding(top = 78.dp),
-                )
-            }
+            SearchRecentPanel(
+                searches = searchHistory.recentSearches,
+                onSearch = { search ->
+                    searchHistory.commitSearch(search)
+                    onSearchQuery(search)
+                },
+                onRemoveSearch = searchHistory.removeSearch,
+                onClearSearches = searchHistory.clearSearches,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 }

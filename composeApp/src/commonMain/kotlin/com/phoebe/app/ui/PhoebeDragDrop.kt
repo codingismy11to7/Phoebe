@@ -153,7 +153,8 @@ import com.phoebe.app.domain.canAddToLocalPlaylist
 import com.phoebe.app.domain.canAddToPlexPlaylist
 import com.phoebe.app.domain.isLocalMediaPlayback
 import com.phoebe.app.domain.isLocalPlaylist
-import com.phoebe.app.domain.isPlexLibraryTrack
+import com.phoebe.app.domain.isRemoteLibraryTrack
+import com.phoebe.app.domain.isRemoteProviderPlaylist
 import com.phoebe.app.domain.supportsPlexPlaylists
 import com.phoebe.app.platform.createPlatformHttpClient
 import com.phoebe.app.platform.currentTimeMs
@@ -219,7 +220,7 @@ internal fun Modifier.draggablePlaylist(
     val controller = LocalDragDrop.current ?: return@composed this
     if (!LocalPlaylistDragEnabled.current) return@composed this
     val actions = LocalPlaylistActions.current
-    val allowDrag = enabled && actions.playlistsEnabled && playlist.id.startsWith("plex:")
+    val allowDrag = enabled && actions.playlistsEnabled && playlist.isRemoteProviderPlaylist()
     if (!allowDrag) return@composed this
     var origin by remember { mutableStateOf(Offset.Zero) }
     this
