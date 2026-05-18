@@ -63,6 +63,7 @@ fun CastState.asPlayerState(fallback: PlayerState): PlayerState =
         isPlaying = isPlaying,
         isBuffering = isBuffering,
         positionMs = positionMs,
+        bufferedPositionMs = fallback.bufferedPositionMs,
         durationMs = durationMs.takeIf { it > 0L } ?: currentTrack?.durationMs ?: fallback.durationMs,
     )
 

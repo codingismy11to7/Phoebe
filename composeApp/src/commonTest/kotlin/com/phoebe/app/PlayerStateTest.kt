@@ -155,6 +155,75 @@ class PlayerStateTest {
         assertFalse(player.state.value.isBuffering)
         assertEquals(60_000, player.state.value.positionMs)
     }
+
+    @Test
+    fun bufferedPositionIsClampedToPositionAndDuration() {
+        val player = PlatformStateTestPlayer()
+        val tracks = listOf(
+            Track("t1", "One", "Artist", "Album", 60_000, "http://a", ""),
+        )
+
+        player.play(tracks, 0)
+        player.platformPlayback(positionMs = 20_000, durationMs = 60_000, bufferedPositionMs = 10_000)
+
+        assertEquals(20_000, player.state.value.bufferedPositionMs)
+
+        player.platformPlayback(positionMs = 25_000, durationMs = 60_000, bufferedPositionMs = 90_000)
+
+        assertEquals(60_000, player.state.value.bufferedPositionMs)
+    }
+
+    @Test
+    fun newTrackResetsBufferedPosition() {
+        val player = PlatformStateTestPlayer()
+        val tracks = listOf(
+            Track("t1", "One", "Artist", "Album", 60_000, "http://a", ""),
+            Track("t2", "Two", "Artist", "Album", 90_000, "http://b", ""),
+        )
+
+        player.play(tracks, 0)
+        player.platformPlayback(positionMs = 10_000, durationMs = 60_000, bufferedPositionMs = 50_000)
+        assertEquals(50_000, player.state.value.bufferedPositionMs)
+
+        player.play(tracks, 1)
+
+        assertEquals(0L, player.state.value.bufferedPositionMs)
+    }
+
+    @Test
+    fun bufferedPositionDoesNotMoveBackwardForCurrentTrack() {
+        val player = PlatformStateTestPlayer()
+        val tracks = listOf(
+            Track("t1", "One", "Artist", "Album", 60_000, "http://a", ""),
+        )
+
+        player.play(tracks, 0)
+        player.platformPlayback(positionMs = 10_000, durationMs = 60_000, bufferedPositionMs = 50_000)
+        player.platformPlayback(positionMs = 20_000, durationMs = 60_000, bufferedPositionMs = 30_000)
+
+        assertEquals(50_000, player.state.value.bufferedPositionMs)
+    }
+
+    @Test
+    fun playbackFailurePublishesOneShotErrorSignal() {
+        val player = PlatformStateTestPlayer()
+        val tracks = listOf(
+            Track("t1", "One", "Artist", "Album", 60_000, "http://a", ""),
+        )
+
+        player.play(tracks, 0)
+        player.failPlayback("Nope")
+
+        assertFalse(player.state.value.isPlaying)
+        assertFalse(player.state.value.isBuffering)
+        assertEquals(1, player.state.value.playbackErrorSerial)
+        assertEquals("Nope", player.state.value.playbackErrorMessage)
+
+        player.play(tracks, 0)
+
+        assertEquals(1, player.state.value.playbackErrorSerial)
+        assertEquals(null, player.state.value.playbackErrorMessage)
+    }
 }
 
 private class TestPlayer : SimpleAudioPlayer() {
@@ -230,5 +299,23 @@ private class PositionTrackingTestPlayer : SimpleAudioPlayer() {
 
     fun finishPendingLoad() {
         markPlaybackReady(generation = activePlayGeneration)
+    }
+}
+
+private class PlatformStateTestPlayer : SimpleAudioPlayer() {
+    override fun playUri(uri: String) = Unit
+
+    fun platformPlayback(positionMs: Long, durationMs: Long, bufferedPositionMs: Long) {
+        applyPlatformPlayback(
+            positionMs = positionMs,
+            durationMs = durationMs,
+            isPlaying = true,
+            isBuffering = false,
+            bufferedPositionMs = bufferedPositionMs,
+        )
+    }
+
+    fun failPlayback(message: String? = null) {
+        markPlaybackFailed(message = message)
     }
 }

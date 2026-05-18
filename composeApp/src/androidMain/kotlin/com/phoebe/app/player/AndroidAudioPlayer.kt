@@ -9,8 +9,12 @@ import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.phoebe.app.AndroidContextHolder
+import com.phoebe.app.data.PlexClient
 import com.phoebe.app.domain.Track
 import com.phoebe.app.platform.PhoebeLog
+import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -50,6 +54,10 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
     private var platformLoadJob: Job? = null
     private var seekJob: Job? = null
     private var bufferingTimeoutJob: Job? = null
+    private var fullTrackBufferJob: Job? = null
+    private var retryJob: Job? = null
+    private var retryGeneration = -1
+    private var retryCount = 0
     private val controllerMutex = Mutex()
     private var loadedQueueIds: List<String>? = null
 
@@ -69,7 +77,7 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
         override fun onPlayerError(error: PlaybackException) {
             PhoebeLog.d("AndroidAudioPlayer") { "playback failed: ${error.message}" }
             stopBufferingTimeout()
-            markPlaybackFailed()
+            schedulePlaybackRetry(error, activePlayGeneration)
             stopPositionSyncLoop()
         }
     }
@@ -106,6 +114,7 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
                 player.mediaItemCount == queue.size &&
                 targetIndex < player.mediaItemCount
             ) {
+                startFullTrackBufferProbe(track, generation)
                 player.pause()
                 player.seekTo(targetIndex, 0L)
                 player.volume = effectiveOutputVolume()
@@ -113,7 +122,7 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
                     player.play()
                 }
             } else {
-                loadQueueOnPlayer(player, queue, targetIndex, queueIds)
+                loadQueueOnPlayer(player, queue, targetIndex, queueIds, generation)
             }
         }
     }
@@ -125,7 +134,7 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
         generation: Int,
     ) {
         runPlatformLoad(generation) { player ->
-            loadQueueOnPlayer(player, queue, startIndex.coerceIn(queue.indices), queue.map { it.id })
+            loadQueueOnPlayer(player, queue, startIndex.coerceIn(queue.indices), queue.map { it.id }, generation)
         }
     }
 
@@ -133,6 +142,8 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
         platformLoadJob?.cancel()
         platformLoadJob = null
         stopBufferingTimeout()
+        stopFullTrackBufferProbe()
+        stopRetry()
         loadedQueueIds = null
         scope.launch {
             controllerMutex.withLock {
@@ -213,6 +224,8 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
         platformLoadJob?.cancel()
         seekJob?.cancel()
         stopBufferingTimeout()
+        stopRetry()
+        resetRetries(generation)
         platformLoadJob = scope.launch {
             try {
                 startPlaybackService()
@@ -240,6 +253,7 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
         queue: List<Track>,
         targetIndex: Int,
         queueIds: List<String>,
+        generation: Int,
     ) {
         player.pause()
         player.stop()
@@ -248,9 +262,80 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
         player.setMediaItems(queue.map { playbackMediaItem(it, inAppPlayback = true) }, targetIndex, 0L)
         player.prepare()
         loadedQueueIds = queueIds
+        queue.getOrNull(targetIndex)?.let { startFullTrackBufferProbe(it, generation) }
         if (playWhenReady) {
             player.play()
         }
+    }
+
+    private fun startFullTrackBufferProbe(track: Track, generation: Int) {
+        stopFullTrackBufferProbe()
+        val durationMs = track.durationMs.takeIf { it > 0L } ?: return
+        val uri = track.localUri ?: track.streamUrl
+        if (uri.isBlank()) return
+        if (!uri.startsWith("http://", ignoreCase = true) && !uri.startsWith("https://", ignoreCase = true)) {
+            updateBufferedPosition(durationMs, generation)
+            return
+        }
+        val estimatedBitrateBytesPerSecond = ((track.bitrateKbps ?: FallbackBitrateKbps).coerceAtLeast(64) * 1_000L) / 8L
+        fullTrackBufferJob = scope.launch(Dispatchers.IO) {
+            var connection: HttpURLConnection? = null
+            var temp: File? = null
+            try {
+                connection = (URL(uri).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 15_000
+                    readTimeout = 45_000
+                    instanceFollowRedirects = true
+                    setRequestProperty("User-Agent", "Phoebe/0.1.0 (https://github.com/phoebe)")
+                    setRequestProperty("X-Plex-Client-Identifier", PlexClient.ClientIdentifier)
+                }
+                val status = connection.responseCode
+                if (status !in 200..299) return@launch
+                val contentLength = connection.contentLengthLong.takeIf { it > 0L }
+                val buffer = ByteArray(64 * 1024)
+                var bytesReadTotal = 0L
+                var lastReportMs = 0L
+                temp = File.createTempFile("phoebe-android-buffer-", ".audio", appContext.cacheDir)
+                connection.inputStream.use { input ->
+                    temp.outputStream().use { output ->
+                        while (isActive && isPlayRequestCurrent(generation)) {
+                            val read = input.read(buffer)
+                            if (read < 0) break
+                            output.write(buffer, 0, read)
+                            bytesReadTotal += read
+                            val bufferedMs = if (contentLength != null) {
+                                val bufferedMs = ((bytesReadTotal.toDouble() / contentLength.toDouble()) * durationMs)
+                                    .toLong()
+                                    .coerceIn(0L, durationMs)
+                                bufferedMs
+                            } else {
+                                ((bytesReadTotal * 1_000L) / estimatedBitrateBytesPerSecond)
+                                    .coerceIn(0L, durationMs)
+                            }
+                            if (bufferedMs - lastReportMs >= BufferProbeReportIntervalMs || bufferedMs == durationMs) {
+                                lastReportMs = bufferedMs
+                                updateBufferedPosition(bufferedMs, generation)
+                            }
+                        }
+                    }
+                }
+                if (isActive && isPlayRequestCurrent(generation)) {
+                    updateBufferedPosition(durationMs, generation)
+                }
+            } catch (error: Throwable) {
+                if (error is CancellationException) throw error
+                PhoebeLog.d("AndroidAudioPlayer") { "full-track buffer probe stopped: ${error.message}" }
+            } finally {
+                connection?.disconnect()
+                temp?.delete()
+            }
+        }
+    }
+
+    private fun stopFullTrackBufferProbe() {
+        fullTrackBufferJob?.cancel()
+        fullTrackBufferJob = null
     }
 
     private fun startPlaybackService() {
@@ -297,10 +382,12 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
             durationMs = player.duration.coerceAtLeast(0L),
             isPlaying = player.isPlaying && !buffering,
             isBuffering = buffering,
+            bufferedPositionMs = player.bufferedPosition.coerceAtLeast(controllerPosition).coerceAtLeast(0L),
             generation = generation,
         )
         if (player.isPlaying && playWhenReady) {
             stopBufferingTimeout()
+            resetRetries(generation)
             startPositionSyncLoop(generation)
         } else {
             stopPositionSyncLoop()
@@ -332,6 +419,9 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
                     durationMs = player.duration.coerceAtLeast(0L),
                     isPlaying = true,
                     isBuffering = false,
+                    bufferedPositionMs = player.bufferedPosition
+                        .coerceAtLeast(player.currentPosition)
+                        .coerceAtLeast(0L),
                     generation = generation,
                 )
             }
@@ -349,10 +439,7 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
             delay(PlaybackBufferingTimeoutMs)
             if (!isPlayRequestCurrent(generation) || !state.value.isBuffering) return@launch
             PhoebeLog.d("AndroidAudioPlayer") { "playback timed out while buffering" }
-            controllerMutex.withLock {
-                controller?.stop()
-            }
-            markPlaybackFailed(generation)
+            schedulePlaybackRetry(null, generation)
         }
     }
 
@@ -360,6 +447,67 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
         bufferingTimeoutJob?.cancel()
         bufferingTimeoutJob = null
     }
+
+    private fun schedulePlaybackRetry(error: PlaybackException?, generation: Int) {
+        if (!isPlayRequestCurrent(generation) || !playWhenReady) return
+        if (error != null && !error.isRecoverableStreamError()) {
+            markPlaybackFailed(generation)
+            return
+        }
+        if (retryGeneration != generation) {
+            retryGeneration = generation
+            retryCount = 0
+        }
+        if (retryCount >= MaxStreamRetryCount) {
+            PhoebeLog.d("AndroidAudioPlayer") { "stream retry exhausted" }
+            markPlaybackFailed(generation)
+            return
+        }
+        retryCount++
+        retryJob?.cancel()
+        val delayMs = StreamRetryBaseDelayMs * retryCount
+        retryJob = scope.launch {
+            val player = controller ?: return@launch
+            val positionMs = player.currentPosition.coerceAtLeast(0L)
+            applyPlatformPlayback(
+                positionMs = positionMs,
+                durationMs = player.duration.coerceAtLeast(0L),
+                isPlaying = false,
+                isBuffering = true,
+                bufferedPositionMs = player.bufferedPosition.coerceAtLeast(positionMs).coerceAtLeast(0L),
+                generation = generation,
+            )
+            delay(delayMs)
+            if (!isPlayRequestCurrent(generation) || !playWhenReady) return@launch
+            controllerMutex.withLock {
+                val retryPlayer = controller ?: return@withLock
+                retryPlayer.seekTo(positionMs)
+                retryPlayer.prepare()
+                retryPlayer.play()
+            }
+            syncFromController(generation)
+        }
+    }
+
+    private fun resetRetries(generation: Int) {
+        retryGeneration = generation
+        retryCount = 0
+        retryJob?.cancel()
+        retryJob = null
+    }
+
+    private fun stopRetry() {
+        retryJob?.cancel()
+        retryJob = null
+        retryGeneration = -1
+        retryCount = 0
+    }
+
+    private fun PlaybackException.isRecoverableStreamError(): Boolean =
+        errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
+            errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ||
+            errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ||
+            errorCode == PlaybackException.ERROR_CODE_IO_UNSPECIFIED
 
     private suspend fun <T> com.google.common.util.concurrent.ListenableFuture<T>.await(): T =
         suspendCancellableCoroutine { continuation ->
@@ -377,5 +525,9 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
 
     private companion object {
         const val PlaybackBufferingTimeoutMs = 30_000L
+        const val MaxStreamRetryCount = 5
+        const val StreamRetryBaseDelayMs = 1_000L
+        const val BufferProbeReportIntervalMs = 1_000L
+        const val FallbackBitrateKbps = 256
     }
 }

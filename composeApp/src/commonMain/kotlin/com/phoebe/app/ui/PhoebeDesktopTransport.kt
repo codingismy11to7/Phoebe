@@ -175,6 +175,7 @@ internal fun DesktopTransport(
     isPlaying: Boolean,
     isBuffering: Boolean = false,
     positionMs: Long,
+    bufferedPositionMs: Long,
     shuffle: Boolean,
     repeat: RepeatMode,
     volume: Float,
@@ -260,10 +261,11 @@ internal fun DesktopTransport(
                 RepeatIcon(mode = repeat, onClick = onRepeat)
             }
             ProgressLine(
-                positionMs,
-                track?.durationMs ?: 0L,
+                positionMs = positionMs,
+                bufferedPositionMs = bufferedPositionMs,
+                durationMs = track?.durationMs ?: 0L,
                 waveformSeed = track?.let(::trackWaveformSeed) ?: "",
-                Modifier.width(if (compact) 320.dp else 460.dp),
+                modifier = Modifier.width(if (compact) 320.dp else 460.dp),
                 onSeek = if (hasTrack) onSeek else null,
             )
         }

@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 
 actual fun createCastController(audioPlayer: AudioPlayer): CastController =
     AndroidCastControllerHolder.instance.also { it.bindAudioPlayer(audioPlayer) }
@@ -64,14 +65,20 @@ private class AndroidCastController : CastController {
             syncRemotePlayback()
         }
 
-        override fun onMetadataUpdated() = Unit
+        override fun onMetadataUpdated() {
+            syncRemotePlayback()
+        }
         override fun onQueueStatusUpdated() = Unit
         override fun onPreloadStatusUpdated() = Unit
     }
 
     private val sessionListener = object : SessionManagerListener<CastSession> {
-        override fun onSessionStarted(session: CastSession, sessionId: String) = connect(session)
-        override fun onSessionResumed(session: CastSession, wasSuspended: Boolean) = connect(session)
+        override fun onSessionStarted(session: CastSession, sessionId: String) =
+            connect(session, castLocalQueueIfReceiverEmpty = true)
+
+        override fun onSessionResumed(session: CastSession, wasSuspended: Boolean) =
+            connect(session, castLocalQueueIfReceiverEmpty = false)
+
         override fun onSessionEnded(session: CastSession, error: Int) = disconnectState()
         override fun onSessionSuspended(session: CastSession, reason: Int) {
             mutableState.update { it.copy(isBuffering = true) }
@@ -97,6 +104,7 @@ private class AndroidCastController : CastController {
         AndroidPlaybackBridge.onCastPause = { pauseCast() }
         AndroidPlaybackBridge.onCastSkipNext = { next() }
         AndroidPlaybackBridge.onCastSkipPrevious = { previous() }
+        AndroidPlaybackBridge.onCastSeekTo = { positionMs -> seekTo(positionMs) }
         AndroidPlaybackBridge.onCastVolume = { volume -> applyCastVolume(volume) }
         AndroidPlaybackBridge.readCastVolume = { readCastVolumeNormalized() }
         AndroidPlaybackBridge.applyCastVolume = { volume -> applyCastVolume(volume) }
@@ -270,9 +278,11 @@ private class AndroidCastController : CastController {
         mutableState.update { it.copy(positionMs = positionMs.coerceAtLeast(0L)) }
     }
 
-    private fun connect(session: CastSession) {
+    private fun connect(session: CastSession, castLocalQueueIfReceiverEmpty: Boolean) {
         ensurePlaybackServiceRunning()
-        session.remoteMediaClient?.registerCallback(remoteMediaClientListener)
+        val client = session.remoteMediaClient
+        client?.registerCallback(remoteMediaClientListener)
+        client?.requestStatus()
         mutableState.update {
             it.copy(
                 isAvailable = true,
@@ -282,9 +292,11 @@ private class AndroidCastController : CastController {
                 message = null,
             )
         }
-        castCurrentLocalQueueIfPossible()
-        syncCastVolumeFromLocalMusicStream()
         syncRemotePlayback()
+        if (castLocalQueueIfReceiverEmpty && client?.mediaInfo == null) {
+            castCurrentLocalQueueIfPossible()
+        }
+        syncCastVolumeFromLocalMusicStream()
         startPositionSync()
     }
 
@@ -314,6 +326,7 @@ private class AndroidCastController : CastController {
                 message = null,
             )
         }
+        AndroidPlaybackBridge.onCastMediaSessionState?.invoke(null)
     }
 
     private fun syncRemotePlayback() {
@@ -321,16 +334,32 @@ private class AndroidCastController : CastController {
         val previous = mutableState.value
         val isPlaying = client.isPlaying
         val isBuffering = client.isBuffering
+        val remoteTrack = client.mediaInfo?.toTrack()
+        val reusingPreviousQueue = remoteTrack != null &&
+            previous.queue.getOrNull(previous.currentIndex)?.streamUrl == remoteTrack.streamUrl
+        val queue = remoteTrack?.let { track ->
+            if (reusingPreviousQueue) previous.queue else listOf(track)
+        } ?: previous.queue
+        val currentIndex = when {
+            queue.isEmpty() -> previous.currentIndex
+            reusingPreviousQueue -> previous.currentIndex.coerceIn(queue.indices)
+            else -> 0
+        }
         val positionMs = client.approximateStreamPosition.coerceAtLeast(0L)
         val durationMs = client.streamDuration.coerceAtLeast(0L).takeIf { duration -> duration > 0L }
+            ?: remoteTrack?.durationMs?.takeIf { it > 0L }
             ?: previous.durationMs
         if (previous.isPlaying != isPlaying ||
             previous.isBuffering != isBuffering ||
+            previous.queue != queue ||
+            previous.currentIndex != currentIndex ||
             previous.durationMs != durationMs ||
             kotlin.math.abs(previous.positionMs - positionMs) > 750L
         ) {
             mutableState.update {
                 it.copy(
+                    queue = queue,
+                    currentIndex = currentIndex,
                     isPlaying = isPlaying,
                     isBuffering = isBuffering,
                     positionMs = positionMs,
@@ -338,6 +367,7 @@ private class AndroidCastController : CastController {
                 )
             }
         }
+        publishCastMediaSessionState()
         val localPlayer = audioPlayer
         if (client.isPlaying && localPlayer?.state?.value?.isPlaying == true) {
             localPlayer.togglePlayPause()
@@ -345,6 +375,20 @@ private class AndroidCastController : CastController {
         if (AndroidPlaybackBridge.servicePlayer?.isPlaying == true) {
             suspendLocalPlayback()
         }
+    }
+
+    private fun publishCastMediaSessionState() {
+        val state = mutableState.value
+        val track = state.currentTrack ?: return
+        AndroidPlaybackBridge.onCastMediaSessionState?.invoke(
+            CastMediaSessionState(
+                track = track,
+                isPlaying = state.isPlaying,
+                isBuffering = state.isBuffering,
+                positionMs = state.positionMs,
+                durationMs = state.durationMs.takeIf { it > 0L } ?: track.durationMs,
+            ),
+        )
     }
 
     private fun suspendLocalPlayback() {
@@ -370,7 +414,9 @@ private class AndroidCastController : CastController {
         context.sessionManager.addSessionManagerListener(sessionListener, CastSession::class.java)
         sessionListenerRegistered = true
         mutableState.update { it.copy(isAvailable = true, message = null) }
-        context.sessionManager.currentCastSession?.let(::connect)
+        context.sessionManager.currentCastSession?.let { session ->
+            connect(session, castLocalQueueIfReceiverEmpty = false)
+        }
     }
 
     private fun restoreLocalPlayback(handoff: PendingCastHandoff) {
@@ -468,7 +514,54 @@ private class AndroidCastController : CastController {
             .setContentType(contentType)
             .setMetadata(metadata)
             .setStreamDuration(durationMs)
+            .setCustomData(toCastCustomData(mediaUrl))
             .build()
+    }
+
+    private fun Track.toCastCustomData(mediaUrl: String): JSONObject =
+        JSONObject().apply {
+            put(CAST_TRACK_ID, id)
+            put(CAST_TRACK_TITLE, title)
+            put(CAST_TRACK_ARTIST, artist)
+            put(CAST_TRACK_ALBUM, album)
+            put(CAST_TRACK_DURATION_MS, durationMs)
+            put(CAST_TRACK_STREAM_URL, streamUrl)
+            put(CAST_TRACK_CAST_URL, mediaUrl)
+            put(CAST_TRACK_DOWNLOAD_URL, downloadUrl)
+            thumbUrl?.let { put(CAST_TRACK_THUMB_URL, it) }
+            filepath?.let { put(CAST_TRACK_FILEPATH, it) }
+            audioCodec?.let { put(CAST_TRACK_AUDIO_CODEC, it) }
+        }
+
+    private fun MediaInfo.toTrack(): Track {
+        val data = customData
+        val remoteMetadata = metadata
+        val title = data?.optString(CAST_TRACK_TITLE).takeUnless { it.isNullOrBlank() }
+            ?: remoteMetadata?.getString(MediaMetadata.KEY_TITLE).orEmpty()
+        val artist = data?.optString(CAST_TRACK_ARTIST).takeUnless { it.isNullOrBlank() }
+            ?: remoteMetadata?.getString(MediaMetadata.KEY_ARTIST).orEmpty()
+        val album = data?.optString(CAST_TRACK_ALBUM).takeUnless { it.isNullOrBlank() }
+            ?: remoteMetadata?.getString(MediaMetadata.KEY_ALBUM_TITLE).orEmpty()
+        val streamUrl = data?.optString(CAST_TRACK_STREAM_URL).takeUnless { it.isNullOrBlank() }
+            ?: contentId.orEmpty()
+        val thumbUrl = data?.optString(CAST_TRACK_THUMB_URL).takeUnless { it.isNullOrBlank() }
+            ?: remoteMetadata?.images?.firstOrNull()?.url?.toString()
+        val durationMs = data?.optLong(CAST_TRACK_DURATION_MS, 0L)?.takeIf { it > 0L }
+            ?: streamDuration.takeIf { it > 0L }
+            ?: 0L
+        return Track(
+            id = data?.optString(CAST_TRACK_ID).takeUnless { it.isNullOrBlank() }
+                ?: "cast:${streamUrl.hashCode()}",
+            title = title.ifBlank { "Chromecast audio" },
+            artist = artist,
+            album = album,
+            durationMs = durationMs,
+            streamUrl = streamUrl,
+            downloadUrl = data?.optString(CAST_TRACK_DOWNLOAD_URL).orEmpty(),
+            thumbUrl = thumbUrl,
+            filepath = data?.optString(CAST_TRACK_FILEPATH).takeUnless { it.isNullOrBlank() },
+            audioCodec = data?.optString(CAST_TRACK_AUDIO_CODEC).takeUnless { it.isNullOrBlank() },
+        )
     }
 
     private fun Track.chromecastMediaUrl(): String {
@@ -536,5 +629,16 @@ private class AndroidCastController : CastController {
 
     private companion object {
         const val LOAD_TIMEOUT_MS = 30_000L
+        const val CAST_TRACK_ID = "phoebeTrackId"
+        const val CAST_TRACK_TITLE = "title"
+        const val CAST_TRACK_ARTIST = "artist"
+        const val CAST_TRACK_ALBUM = "album"
+        const val CAST_TRACK_DURATION_MS = "durationMs"
+        const val CAST_TRACK_STREAM_URL = "streamUrl"
+        const val CAST_TRACK_CAST_URL = "castUrl"
+        const val CAST_TRACK_DOWNLOAD_URL = "downloadUrl"
+        const val CAST_TRACK_THUMB_URL = "thumbUrl"
+        const val CAST_TRACK_FILEPATH = "filepath"
+        const val CAST_TRACK_AUDIO_CODEC = "audioCodec"
     }
 }

@@ -15,6 +15,7 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
+import java.time.Duration
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -39,8 +40,9 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
     private var player: MediaPlayer? = null
     private var sampledClip: Clip? = null
     private var remoteSampledFile: File? = null
-    private val isLinuxDesktop = System.getProperty("os.name").orEmpty().lowercase().contains("linux")
+    private var fullyBufferedPlayback = false
     private val httpClient = HttpClient.newBuilder()
+        .connectTimeout(Duration.ofSeconds(15))
         .followRedirects(HttpClient.Redirect.NORMAL)
         .build()
     private val playbackExecutor = Executors.newSingleThreadExecutor { r ->
@@ -96,6 +98,7 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
                         }
                         sampledClip = clip
                         applyVolumesFromState()
+                        updateBufferedPosition(trackDurationOrClipDuration(generation, clip), generation)
                         markPlaybackReady(generation = generation)
                         return@execute
                     }
@@ -117,6 +120,7 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
                         }
                         sampledClip = clip
                         applyVolumesFromState()
+                        updateBufferedPosition(trackDurationOrClipDuration(generation, clip), generation)
                         markPlaybackReady(generation = generation)
                         return@execute
                     }
@@ -124,7 +128,8 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
                 }
                 if (!isPlayRequestCurrent(generation)) return@execute
                 val playbackUri = file?.toURI()?.toString() ?: uri
-                if (!playJavaFxSync(playbackUri, generation)) {
+                fullyBufferedPlayback = file != null
+                if (!playJavaFxWithRetries(playbackUri, generation)) {
                     markPlaybackFailed(generation = generation)
                     return@execute
                 }
@@ -249,12 +254,11 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
     }
 
     /**
-     * JavaFX streaming from Plex/Jellyfin URLs is unreliable on Linux (GStreamer / redirect /
-     * codec issues). Buffer to a temp file first so playback uses the same local paths as
-     * downloaded folders.
+     * JavaFX direct HTTP streaming can hang indefinitely around redirects, codecs, or network
+     * stalls. Buffer remote tracks to a temp file first so startup either reaches local playback
+     * or fails under the request timeout instead of leaving the UI spinning.
      */
     private fun shouldBufferRemotePlayback(uri: String): Boolean {
-        if (!isLinuxDesktop) return false
         return uri.startsWith("http://", ignoreCase = true) || uri.startsWith("https://", ignoreCase = true)
     }
 
@@ -438,6 +442,7 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
     private fun downloadRemoteAudio(uri: String, extension: String): File {
         val request = HttpRequest.newBuilder(URI(uri))
             .GET()
+            .timeout(Duration.ofSeconds(45))
             .header("User-Agent", "Phoebe/0.1.0 (https://github.com/phoebe)")
             .header("X-Plex-Client-Identifier", PlexClient.ClientIdentifier)
             .build()
@@ -483,6 +488,7 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
             runCatching { temp.delete() }
         }
         remoteSampledFile = null
+        fullyBufferedPlayback = false
     }
 
     private fun disposeJavaFxBlocking() {
@@ -529,9 +535,20 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
                     if (latch.count > 0L) latch.countDown()
                 }
                 mediaPlayer.setOnPlaying {
+                    syncJavaFxPlayback(mediaPlayer, generation, isBuffering = false)
                     if (latch.count > 0L) latch.countDown()
                 }
+                mediaPlayer.setOnStalled {
+                    syncJavaFxPlayback(mediaPlayer, generation, isBuffering = true)
+                }
                 mediaPlayer.setOnReady {
+                    syncJavaFxPlayback(mediaPlayer, generation, isBuffering = false)
+                    mediaPlayer.bufferProgressTimeProperty().addListener { _, _, _ ->
+                        syncJavaFxPlayback(mediaPlayer, generation, isBuffering = false)
+                    }
+                    mediaPlayer.currentTimeProperty().addListener { _, _, _ ->
+                        syncJavaFxPlayback(mediaPlayer, generation, isBuffering = false)
+                    }
                     mediaPlayer.play()
                 }
                 player = mediaPlayer
@@ -541,8 +558,54 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
                 if (latch.count > 0L) latch.countDown()
             }
         }
-        val signaled = latch.await(45, TimeUnit.SECONDS)
+        val signaled = latch.await(JavaFxStartupTimeoutSeconds, TimeUnit.SECONDS)
         return signaled && !failed.get() && isPlayRequestCurrent(generation)
+    }
+
+    private fun playJavaFxWithRetries(uri: String, generation: Int): Boolean {
+        var attempt = 0
+        while (isPlayRequestCurrent(generation)) {
+            if (playJavaFxSync(uri, generation)) return true
+            if (!isRemoteUri(uri) || attempt >= MaxStreamRetryCount) return false
+            disposeJavaFxBlocking()
+            attempt++
+            val current = state.value
+            applyPlatformPlayback(
+                positionMs = current.positionMs,
+                durationMs = current.durationMs,
+                isPlaying = false,
+                isBuffering = true,
+                bufferedPositionMs = current.bufferedPositionMs,
+                generation = generation,
+            )
+            Thread.sleep(StreamRetryBaseDelayMs * attempt)
+        }
+        return false
+    }
+
+    private fun isRemoteUri(uri: String): Boolean =
+        uri.startsWith("http://", ignoreCase = true) || uri.startsWith("https://", ignoreCase = true)
+
+    private fun syncJavaFxPlayback(mediaPlayer: MediaPlayer, generation: Int, isBuffering: Boolean) {
+        if (!isPlayRequestCurrent(generation)) return
+        val positionMs = mediaPlayer.currentTime.toMillis().toLong().coerceAtLeast(0L)
+        val durationMs = mediaPlayer.media.duration.toMillis().toLong().coerceAtLeast(0L)
+        val platformBufferedMs = mediaPlayer.bufferProgressTime.toMillis().toLong().coerceAtLeast(positionMs)
+        val bufferedMs = if (fullyBufferedPlayback && durationMs > 0L) durationMs else platformBufferedMs
+        applyPlatformPlayback(
+            positionMs = positionMs,
+            durationMs = durationMs,
+            isPlaying = mediaPlayer.status == MediaPlayer.Status.PLAYING,
+            isBuffering = isBuffering,
+            bufferedPositionMs = bufferedMs,
+            generation = generation,
+        )
+    }
+
+    private fun trackDurationOrClipDuration(generation: Int, clip: Clip): Long {
+        val stateDuration = state.value.durationMs.takeIf { it > 0L }
+        if (stateDuration != null && isPlayRequestCurrent(generation)) return stateDuration
+        return (clip.microsecondLength / 1_000L).coerceAtLeast(0L)
     }
 
     private fun extensionFromContentType(contentType: String): String? = when {
@@ -558,6 +621,12 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
     private fun logPlaybackFailure(error: Throwable) {
         val message = error.message ?: error::class.simpleName.orEmpty()
         PhoebeLog.d("DesktopAudioPlayer") { "playback error: $message" }
+    }
+
+    private companion object {
+        const val MaxStreamRetryCount = 2
+        const val StreamRetryBaseDelayMs = 1_000L
+        const val JavaFxStartupTimeoutSeconds = 15L
     }
 }
 

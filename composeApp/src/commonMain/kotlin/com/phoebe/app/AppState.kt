@@ -102,6 +102,7 @@ class AppState(
                 queue = musicAssistantRemote.tracks,
                 currentIndex = musicAssistantRemote.index,
                 isPlaying = true,
+                bufferedPositionMs = musicAssistantRemote.tracks.getOrNull(musicAssistantRemote.index)?.durationMs ?: 0L,
                 durationMs = musicAssistantRemote.tracks.getOrNull(musicAssistantRemote.index)?.durationMs ?: 0L,
                 volume = audio.volume,
             )
@@ -151,6 +152,9 @@ class AppState(
 
     private val mutableMessage = MutableStateFlow("Sign in to Plex or Jellyfin, or add a local music folder to get started.")
     val message: StateFlow<String> = mutableMessage
+
+    private val mutablePlaybackSnackbar = MutableStateFlow<String?>(null)
+    val playbackSnackbar: StateFlow<String?> = mutablePlaybackSnackbar.asStateFlow()
 
     private val mutableDecadeMixNotice = MutableStateFlow<String?>(null)
     val decadeMixNotice: StateFlow<String?> = mutableDecadeMixNotice
@@ -212,7 +216,28 @@ class AppState(
         }
         bindSystemVolume()
         recordPlaybackHistory()
+        surfacePlaybackFailures()
         dependencies.plexPlaybackReporter.start(scope)
+    }
+
+    private fun surfacePlaybackFailures() {
+        scope.launch {
+            var lastSerial = dependencies.audioPlayer.state.value.playbackErrorSerial
+            dependencies.audioPlayer.state.collect { state ->
+                if (state.playbackErrorSerial == lastSerial) return@collect
+                lastSerial = state.playbackErrorSerial
+                val title = state.currentTrack?.title?.takeIf { it.isNotBlank() }
+                val notice = state.playbackErrorMessage
+                    ?: title?.let { "Couldn't play $it." }
+                    ?: "Couldn't play that song."
+                mutableMessage.value = notice
+                mutablePlaybackSnackbar.value = notice
+            }
+        }
+    }
+
+    fun dismissPlaybackSnackbar() {
+        mutablePlaybackSnackbar.value = null
     }
 
     /**

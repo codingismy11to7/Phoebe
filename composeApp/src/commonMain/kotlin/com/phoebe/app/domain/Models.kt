@@ -662,7 +662,10 @@ data class PlayerState(
     /** True while the platform player is preparing the next track after a switch. */
     val isBuffering: Boolean = false,
     val positionMs: Long = 0L,
+    val bufferedPositionMs: Long = 0L,
     val durationMs: Long = 0L,
+    val playbackErrorSerial: Int = 0,
+    val playbackErrorMessage: String? = null,
     val shuffle: Boolean = false,
     val repeat: RepeatMode = RepeatMode.Off,
     val volume: Float = 0.7f,
