@@ -233,6 +233,7 @@ fun PhoebeRoot(
     val serversLoading by state.serversLoading.collectAsState()
     val librariesLoading by state.librariesLoading.collectAsState()
     val message by state.message.collectAsState()
+    val playbackSnackbar by state.playbackSnackbar.collectAsState()
     val decadeMixNotice by state.decadeMixNotice.collectAsState()
     val radioStations by state.radioStations.collectAsState()
     val radioStartingIds by state.radioStartingIds.collectAsState()
@@ -831,7 +832,6 @@ fun PhoebeRoot(
                         onBack = state::popDetail,
                         onPlaylist = { playlist ->
                             selectedPlaylistId = playlist.id
-                            browseSection = DesktopSection.Playlists
                             state.open(AppScreen.PlaylistDetail(playlist))
                         },
                     )
@@ -882,6 +882,7 @@ fun PhoebeRoot(
                         shuffle = player.shuffle,
                         repeat = player.repeat,
                         positionMs = player.positionMs,
+                        bufferedPositionMs = player.bufferedPositionMs,
                         currentIndex = currentIndex,
                         castState = cast,
                         remotePlaybackTarget = musicAssistantRemotePlayback?.target,
@@ -950,7 +951,6 @@ fun PhoebeRoot(
                         onLibraryFilter = { libraryFilter = it },
                         onPlaylist = { playlist ->
                             selectedPlaylistId = playlist.id
-                            browseSection = DesktopSection.Playlists
                             state.open(AppScreen.PlaylistDetail(playlist))
                         },
                         onArtist = { state.open(AppScreen.ArtistDetail(it)) },
@@ -1022,6 +1022,7 @@ fun PhoebeRoot(
                     isPlaying = player.isPlaying,
                     isBuffering = player.isBuffering,
                     positionMs = player.positionMs,
+                    bufferedPositionMs = player.bufferedPositionMs,
                     currentIndex = currentIndex,
                     lyricsTrack = lyricsTrack,
                     lyricsState = lyricsState,
@@ -1073,7 +1074,6 @@ fun PhoebeRoot(
                     onLibraryFilter = { libraryFilter = it },
                     onPlaylist = { playlist ->
                         selectedPlaylistId = playlist.id
-                        browseSection = DesktopSection.Library
                         state.open(AppScreen.PlaylistDetail(playlist))
                     },
                     onArtist = { state.open(AppScreen.ArtistDetail(it)) },
@@ -1222,12 +1222,66 @@ fun PhoebeRoot(
                 }
             }
         }
+        PlaybackFailureSnackbar(
+            message = playbackSnackbar,
+            onDismiss = state::dismissPlaybackSnackbar,
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
             }
     }
     // Drag-ghost overlay — must be the LAST child of the wrapper Box so it draws above the
     // rest of the UI. Renders nothing until a drag is in flight.
     DragGhost()
     }
+    }
+}
+
+@Composable
+private fun PlaybackFailureSnackbar(
+    message: String?,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    LaunchedEffect(message) {
+        if (message != null) {
+            delay(5_000L)
+            onDismiss()
+        }
+    }
+    AnimatedVisibility(
+        visible = message != null,
+        enter = slideInVertically(tween(180, easing = FastOutSlowInEasing)) { it / 2 } + fadeIn(tween(180)),
+        exit = slideOutVertically(tween(160, easing = FastOutSlowInEasing)) { it / 2 } + fadeOut(tween(160)),
+        modifier = modifier
+            .navigationBarsPadding()
+            .padding(horizontal = 18.dp, vertical = 18.dp)
+            .zIndex(20f),
+    ) {
+        Surface(
+            color = PhoebeUi.panel.copy(alpha = 0.96f),
+            contentColor = PhoebeUi.primaryText,
+            shape = RoundedCornerShape(8.dp),
+            border = BorderStroke(1.dp, PhoebeUi.border),
+            shadowElevation = 12.dp,
+            modifier = Modifier.widthIn(max = 520.dp),
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            ) {
+                Text(
+                    text = message.orEmpty(),
+                    color = PhoebeUi.primaryText,
+                    fontSize = 14.sp,
+                    lineHeight = 19.sp,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onDismiss) {
+                    Text("Dismiss")
+                }
+            }
+        }
     }
 }
 

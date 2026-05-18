@@ -10,6 +10,7 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
@@ -287,8 +288,24 @@ class PlaybackService : MediaLibraryService() {
         setMediaNotificationProvider(notificationProvider)
         val player = ExoPlayer.Builder(this)
             .setAudioAttributes(AudioAttributes.DEFAULT, /* handleAudioFocus= */ true)
+            .setLoadControl(
+                DefaultLoadControl.Builder()
+                    .setBufferDurationsMs(
+                        60_000,
+                        1_800_000,
+                        2_500,
+                        7_500,
+                    )
+                    .setPrioritizeTimeOverSizeThresholds(true)
+                    .build(),
+            )
             .setWakeMode(C.WAKE_MODE_LOCAL)
             .build()
+        val sessionPlayer = CastMediaSessionPlayer(player)
+        AndroidPlaybackBridge.onCastMediaSessionState = { state ->
+            sessionPlayer.updateCastState(state)
+            updateLikeButton(state?.track)
+        }
         AndroidPlaybackBridge.attachServicePlayer(player, servicePlayerListener)
 
         val openAppIntent = PendingIntent.getActivity(
@@ -298,7 +315,7 @@ class PlaybackService : MediaLibraryService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
 
-        mediaLibrarySession = MediaLibrarySession.Builder(this, player, librarySessionCallback)
+        mediaLibrarySession = MediaLibrarySession.Builder(this, sessionPlayer, librarySessionCallback)
             .setSessionActivity(openAppIntent)
             .setCustomLayout(likeButtonLayout())
             .setMediaButtonPreferences(likeButtonLayout())
@@ -320,6 +337,7 @@ class PlaybackService : MediaLibraryService() {
     override fun onDestroy() {
         serviceScope.cancel()
         mediaLibrarySession?.player?.let { player ->
+            AndroidPlaybackBridge.onCastMediaSessionState = null
             AndroidPlaybackBridge.detachServicePlayer(servicePlayerListener)
             player.release()
         }

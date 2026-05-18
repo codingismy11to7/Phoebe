@@ -9,14 +9,18 @@ import platform.AVFAudio.setActive
 import platform.AVFoundation.AVPlayer
 import platform.AVFoundation.AVPlayerItem
 import platform.AVFoundation.AVPlayerItemDidPlayToEndTimeNotification
+import platform.AVFoundation.AVPlayerItemFailedToPlayToEndTimeNotification
+import platform.AVFoundation.AVPlayerItemPlaybackStalledNotification
 import platform.AVFoundation.AVPlayerTimeControlStatusPlaying
 import platform.AVFoundation.AVPlayerTimeControlStatusWaitingToPlayAtSpecifiedRate
+import platform.AVFoundation.automaticallyWaitsToMinimizeStalling
 import platform.AVFoundation.addPeriodicTimeObserverForInterval
 import platform.AVFoundation.currentItem
 import platform.AVFoundation.duration
 import platform.AVFoundation.isPlaybackLikelyToKeepUp
 import platform.AVFoundation.pause
 import platform.AVFoundation.play
+import platform.AVFoundation.preferredForwardBufferDuration
 import platform.AVFoundation.rate
 import platform.AVFoundation.removeTimeObserver
 import platform.AVFoundation.replaceCurrentItemWithPlayerItem
@@ -29,6 +33,12 @@ import platform.Foundation.NSNotificationCenter
 import platform.Foundation.NSOperationQueue
 import platform.Foundation.NSURL
 import platform.darwin.NSEC_PER_SEC
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 actual fun createAudioPlayer(): AudioPlayer = IosAudioPlayer()
 
@@ -37,7 +47,15 @@ private class IosAudioPlayer : SimpleAudioPlayer() {
     private var player: AVPlayer? = null
     private var timeObserver: Any? = null
     private var endObserver: Any? = null
+    private var stalledObserver: Any? = null
+    private var failedObserver: Any? = null
     private var observedGeneration = -1
+    private var currentUri: String? = null
+    private var lastKnownPositionMs = 0L
+    private var retryGeneration = -1
+    private var retryCount = 0
+    private var retryJob: Job? = null
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     override val useProgressTicker: Boolean = false
 
@@ -46,6 +64,7 @@ private class IosAudioPlayer : SimpleAudioPlayer() {
     }
 
     override fun stopCurrentPlaybackImmediately() {
+        retryJob?.cancel()
         player?.pause()
     }
 
@@ -60,9 +79,15 @@ private class IosAudioPlayer : SimpleAudioPlayer() {
             markPlaybackFailed(generation)
             return
         }
+        currentUri = uri
+        retryGeneration = generation
+        retryCount = 0
+        retryJob?.cancel()
         clearObservers()
         val item = AVPlayerItem(uRL = url)
+        item.preferredForwardBufferDuration = PreferredForwardBufferSeconds
         val avPlayer = player ?: AVPlayer().also { player = it }
+        avPlayer.automaticallyWaitsToMinimizeStalling = true
         avPlayer.replaceCurrentItemWithPlayerItem(item)
         observePlayback(avPlayer, item, generation)
         if (playWhenReady) {
@@ -71,6 +96,7 @@ private class IosAudioPlayer : SimpleAudioPlayer() {
     }
 
     override fun pause() {
+        retryJob?.cancel()
         player?.pause()
     }
 
@@ -103,6 +129,7 @@ private class IosAudioPlayer : SimpleAudioPlayer() {
         timeObserver = avPlayer.addPeriodicTimeObserverForInterval(interval, queue = null) { time ->
             if (!isPlayRequestCurrent(generation)) return@addPeriodicTimeObserverForInterval
             val positionMs = cmTimeToMs(time)
+            lastKnownPositionMs = positionMs
             val durationMs = avPlayer.currentItem?.let { currentItem ->
                 cmTimeToMs(CMTimeGetSeconds(currentItem.duration))
             } ?: 0L
@@ -110,11 +137,17 @@ private class IosAudioPlayer : SimpleAudioPlayer() {
             val playing = avPlayer.timeControlStatus == AVPlayerTimeControlStatusPlaying
             val likelyReady = avPlayer.currentItem?.isPlaybackLikelyToKeepUp() == true
             val isBuffering = playWhenReady && waiting && !likelyReady
+            if (playing && playWhenReady) {
+                retryCount = 0
+                retryJob?.cancel()
+                retryJob = null
+            }
             applyPlatformPlayback(
                 positionMs = positionMs,
                 durationMs = durationMs,
                 isPlaying = playing && playWhenReady,
                 isBuffering = isBuffering,
+                bufferedPositionMs = estimatedBufferedPositionMs(positionMs, durationMs, likelyReady),
                 generation = generation,
             )
         }
@@ -126,6 +159,20 @@ private class IosAudioPlayer : SimpleAudioPlayer() {
             if (!isPlayRequestCurrent(generation)) return@addObserverForName
             next()
         }
+        stalledObserver = NSNotificationCenter.defaultCenter.addObserverForName(
+            name = AVPlayerItemPlaybackStalledNotification,
+            `object` = item,
+            queue = NSOperationQueue.mainQueue,
+        ) { _ ->
+            scheduleRetry(generation)
+        }
+        failedObserver = NSNotificationCenter.defaultCenter.addObserverForName(
+            name = AVPlayerItemFailedToPlayToEndTimeNotification,
+            `object` = item,
+            queue = NSOperationQueue.mainQueue,
+        ) { _ ->
+            scheduleRetry(generation)
+        }
     }
 
     private fun clearObservers() {
@@ -133,7 +180,55 @@ private class IosAudioPlayer : SimpleAudioPlayer() {
         timeObserver = null
         endObserver?.let { token -> NSNotificationCenter.defaultCenter.removeObserver(token) }
         endObserver = null
+        stalledObserver?.let { token -> NSNotificationCenter.defaultCenter.removeObserver(token) }
+        stalledObserver = null
+        failedObserver?.let { token -> NSNotificationCenter.defaultCenter.removeObserver(token) }
+        failedObserver = null
         observedGeneration = -1
+    }
+
+    private fun scheduleRetry(generation: Int) {
+        if (!isPlayRequestCurrent(generation) || !playWhenReady) return
+        if (retryGeneration != generation) {
+            retryGeneration = generation
+            retryCount = 0
+        }
+        if (retryCount >= MaxStreamRetryCount) {
+            markPlaybackFailed(generation)
+            return
+        }
+        retryCount++
+        val avPlayer = player ?: return
+        val positionMs = lastKnownPositionMs
+        val durationMs = avPlayer.currentItem?.let { cmTimeToMs(CMTimeGetSeconds(it.duration)) } ?: state.value.durationMs
+        applyPlatformPlayback(
+            positionMs = positionMs,
+            durationMs = durationMs,
+            isPlaying = false,
+            isBuffering = true,
+            bufferedPositionMs = state.value.bufferedPositionMs.coerceAtLeast(positionMs),
+            generation = generation,
+        )
+        retryJob?.cancel()
+        retryJob = scope.launch {
+            delay(StreamRetryBaseDelayMs * retryCount)
+            if (!isPlayRequestCurrent(generation) || !playWhenReady) return@launch
+            val uri = currentUri ?: return@launch
+            val url = NSURL.URLWithString(uri) ?: return@launch
+            clearObservers()
+            val item = AVPlayerItem(uRL = url)
+            item.preferredForwardBufferDuration = PreferredForwardBufferSeconds
+            avPlayer.replaceCurrentItemWithPlayerItem(item)
+            observePlayback(avPlayer, item, generation)
+            avPlayer.seekToTime(CMTimeMakeWithSeconds(positionMs.toDouble() / 1000.0, NSEC_PER_SEC.toInt()))
+            avPlayer.play()
+        }
+    }
+
+    private fun estimatedBufferedPositionMs(positionMs: Long, durationMs: Long, likelyReady: Boolean): Long {
+        if (!likelyReady) return state.value.bufferedPositionMs.coerceAtLeast(positionMs)
+        val target = positionMs + (PreferredForwardBufferSeconds * 1000.0).toLong()
+        return if (durationMs > 0L) target.coerceAtMost(durationMs) else target
     }
 
     private fun cmTimeToMs(seconds: Double): Long {
@@ -142,4 +237,10 @@ private class IosAudioPlayer : SimpleAudioPlayer() {
     }
 
     private fun cmTimeToMs(time: CValue<CMTime>): Long = cmTimeToMs(CMTimeGetSeconds(time))
+
+    private companion object {
+        const val PreferredForwardBufferSeconds = 1_800.0
+        const val MaxStreamRetryCount = 5
+        const val StreamRetryBaseDelayMs = 1_000L
+    }
 }

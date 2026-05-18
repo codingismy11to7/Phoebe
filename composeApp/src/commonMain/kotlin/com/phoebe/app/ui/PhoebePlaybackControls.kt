@@ -452,12 +452,15 @@ internal fun WaveformDurationBar(
     seed: String,
     durationMs: Long,
     progress: Float?,
+    bufferedProgress: Float?,
     contentDescription: String,
     modifier: Modifier = Modifier,
     isScrubbing: Boolean = false,
 ) {
     val p = progress?.coerceIn(0f, 1f)
+    val bp = bufferedProgress?.coerceIn(0f, 1f)
     val playedColor = PhoebeUi.accentLight
+    val bufferedColor = PhoebeUi.primaryText.copy(alpha = 0.34f)
     val unplayedBase = PhoebeUi.waveformUnplayed
     val playheadColor = PhoebeUi.waveformPlayhead
     Canvas(
@@ -483,6 +486,7 @@ internal fun WaveformDurationBar(
                     unplayedBase.copy(alpha = a)
                 }
                 frac <= p -> played
+                bp != null && frac <= bp -> bufferedColor
                 else -> queued
             }
             drawRoundRect(
@@ -513,12 +517,20 @@ internal fun WaveformDurationBar(
 }
 
 @Composable
-internal fun ProgressLine(positionMs: Long, durationMs: Long, waveformSeed: String, modifier: Modifier, onSeek: ((Long) -> Unit)? = null) {
+internal fun ProgressLine(
+    positionMs: Long,
+    bufferedPositionMs: Long,
+    durationMs: Long,
+    waveformSeed: String,
+    modifier: Modifier,
+    onSeek: ((Long) -> Unit)? = null,
+) {
     val safeDuration = max(durationMs, 1L)
     var scrubPositionMs by remember { mutableStateOf<Long?>(null) }
     val isScrubbing = scrubPositionMs != null
     val displayPositionMs = scrubPositionMs ?: positionMs
     val progressFrac = (displayPositionMs.toFloat() / safeDuration).coerceIn(0f, 1f)
+    val bufferedFrac = (bufferedPositionMs.toFloat() / safeDuration).coerceIn(progressFrac, 1f)
 
     LaunchedEffect(waveformSeed, durationMs) {
         scrubPositionMs = null
@@ -558,6 +570,7 @@ internal fun ProgressLine(positionMs: Long, durationMs: Long, waveformSeed: Stri
             seed = waveformSeed,
             durationMs = durationMs,
             progress = if (durationMs > 0L) progressFrac else null,
+            bufferedProgress = if (durationMs > 0L) bufferedFrac else null,
             isScrubbing = isScrubbing,
             contentDescription = if (durationMs > 0L) {
                 "Playback progress, ${formatDuration(displayPositionMs)} of ${formatDuration(durationMs)}"

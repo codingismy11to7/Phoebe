@@ -22,12 +22,14 @@ object AndroidPlaybackBridge {
     var onCastPause: (() -> Unit)? = null
     var onCastSkipNext: (() -> Unit)? = null
     var onCastSkipPrevious: (() -> Unit)? = null
+    var onCastSeekTo: ((Long) -> Unit)? = null
     var onCastVolume: ((Float) -> Unit)? = null
     var onEnsureLocalPlaybackPaused: (() -> Unit)? = null
     var readCastVolume: (() -> Float)? = null
     var applyCastVolume: ((Float) -> Unit)? = null
     var adjustCastVolumeStep: ((up: Boolean) -> Boolean)? = null
     var onCastVolumeChanged: ((Float) -> Unit)? = null
+    var onCastMediaSessionState: ((CastMediaSessionState?) -> Unit)? = null
 
     @Volatile
     private var suspendingLocalPlayback = false
@@ -70,3 +72,11 @@ object AndroidPlaybackBridge {
         servicePlayer = null
     }
 }
+
+data class CastMediaSessionState(
+    val track: Track,
+    val isPlaying: Boolean,
+    val isBuffering: Boolean,
+    val positionMs: Long,
+    val durationMs: Long,
+)

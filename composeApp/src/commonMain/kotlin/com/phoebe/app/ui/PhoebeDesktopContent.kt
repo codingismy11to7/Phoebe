@@ -235,6 +235,7 @@ internal fun MainFeature(track: Track?, modifier: Modifier) {
                             seed = trackWaveformSeed(track),
                             durationMs = track.durationMs,
                             progress = null,
+                            bufferedProgress = null,
                             contentDescription = "Track length ${formatDuration(track.durationMs)}",
                             modifier = Modifier.width(132.dp).height(22.dp),
                         )

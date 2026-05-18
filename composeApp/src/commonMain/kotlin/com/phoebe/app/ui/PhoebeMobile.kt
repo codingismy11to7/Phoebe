@@ -193,6 +193,9 @@ import kotlinx.coroutines.yield
 import kotlin.math.abs
 import kotlin.math.max
 
+private const val MobileBufferFallbackTickMs = 500L
+private const val MobileBufferFallbackAdvanceMs = 2_000L
+
 @Composable
 internal fun MobileCompactMainFeature(
     track: Track?,
@@ -883,6 +886,7 @@ internal fun MobilePlayer(
     shuffle: Boolean,
     repeat: RepeatMode,
     positionMs: Long,
+    bufferedPositionMs: Long,
     @Suppress("UNUSED_PARAMETER") currentIndex: Int,
     castState: CastState = CastState(),
     remotePlaybackTarget: String? = null,
@@ -905,6 +909,46 @@ internal fun MobilePlayer(
 ) {
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
+    val remoteDurationMs = track
+        ?.takeUnless { it.isLocalMediaPlayback() }
+        ?.durationMs
+        ?.takeIf { it > 0L }
+    val latestPositionMs by rememberUpdatedState(positionMs)
+    val latestBufferedPositionMs by rememberUpdatedState(bufferedPositionMs)
+    var estimatedRemoteBufferedPositionMs by remember(track?.id) {
+        mutableStateOf(max(positionMs, bufferedPositionMs))
+    }
+
+    LaunchedEffect(track?.id) {
+        estimatedRemoteBufferedPositionMs = max(positionMs, bufferedPositionMs)
+    }
+    LaunchedEffect(remoteDurationMs, bufferedPositionMs, positionMs) {
+        val duration = remoteDurationMs
+        if (duration == null) {
+            estimatedRemoteBufferedPositionMs = bufferedPositionMs
+            return@LaunchedEffect
+        }
+        estimatedRemoteBufferedPositionMs = max(
+            estimatedRemoteBufferedPositionMs,
+            max(positionMs, bufferedPositionMs),
+        ).coerceAtMost(duration)
+    }
+    LaunchedEffect(track?.id, remoteDurationMs, isPlaying, isBuffering) {
+        val duration = remoteDurationMs ?: return@LaunchedEffect
+        if (!isPlaying && !isBuffering) return@LaunchedEffect
+        while (estimatedRemoteBufferedPositionMs < duration) {
+            delay(MobileBufferFallbackTickMs)
+            val platformFloor = max(latestPositionMs, latestBufferedPositionMs)
+            estimatedRemoteBufferedPositionMs = max(estimatedRemoteBufferedPositionMs, platformFloor)
+                .plus(MobileBufferFallbackAdvanceMs)
+                .coerceAtMost(duration)
+        }
+    }
+    val timelineBufferedPositionMs = remember(remoteDurationMs, bufferedPositionMs, estimatedRemoteBufferedPositionMs) {
+        remoteDurationMs?.let { duration ->
+            max(bufferedPositionMs, estimatedRemoteBufferedPositionMs).coerceIn(0L, duration)
+        } ?: bufferedPositionMs
+    }
     val retainedSheetState = rememberRetainedMobilePlayerUpNextSheetState(
         key = "mobile-player-up-next-sheet",
         initiallyExpanded = initialUpNextExpanded,
@@ -1154,10 +1198,11 @@ internal fun MobilePlayer(
 
                 Spacer(Modifier.height(18.dp))
                 ProgressLine(
-                    positionMs,
-                    track?.durationMs ?: 0L,
+                    positionMs = positionMs,
+                    bufferedPositionMs = timelineBufferedPositionMs,
+                    durationMs = track?.durationMs ?: 0L,
                     waveformSeed = track?.let(::trackWaveformSeed) ?: "",
-                    Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
                     onSeek = if (hasTrack) onSeek else null,
                 )
                 Spacer(Modifier.height(22.dp))

@@ -378,6 +378,7 @@ internal fun ContentTrackRow(
                         seed = trackWaveformSeed(track),
                         durationMs = track.durationMs,
                         progress = null,
+                        bufferedProgress = null,
                         contentDescription = "Duration ${formatDuration(track.durationMs)}",
                         modifier = Modifier.width(64.dp).height(16.dp),
                     )

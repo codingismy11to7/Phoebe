@@ -46,7 +46,7 @@ abstract class SimpleAudioPlayer : AudioPlayer {
             if (!previous.isPlaying && !previous.isBuffering) {
                 playGeneration++
                 playWhenReady = true
-                mutableState.value = previous.copy(isPlaying = true)
+                mutableState.value = previous.copy(isPlaying = true, playbackErrorMessage = null)
                 resume()
                 startProgressTicker()
             }
@@ -66,7 +66,9 @@ abstract class SimpleAudioPlayer : AudioPlayer {
             isPlaying = false,
             isBuffering = track != null,
             positionMs = 0L,
+            bufferedPositionMs = 0L,
             durationMs = track?.durationMs ?: 0L,
+            playbackErrorMessage = null,
         )
         setOutputVolume(effectiveOutputVolume())
         if (track != null) {
@@ -168,6 +170,7 @@ abstract class SimpleAudioPlayer : AudioPlayer {
                         isPlaying = false,
                         isBuffering = false,
                         positionMs = state.durationMs.takeIf { it > 0L } ?: state.positionMs,
+                        bufferedPositionMs = state.durationMs.takeIf { it > 0L } ?: state.bufferedPositionMs,
                     )
                     stopProgressTicker()
                 }
@@ -243,6 +246,7 @@ abstract class SimpleAudioPlayer : AudioPlayer {
             isPlaying = isPlaying && track != null,
             isBuffering = false,
             positionMs = 0L,
+            bufferedPositionMs = 0L,
             durationMs = track?.durationMs ?: 0L,
         )
         if (isPlaying && track != null && useProgressTicker) {
@@ -260,14 +264,23 @@ abstract class SimpleAudioPlayer : AudioPlayer {
         durationMs: Long,
         isPlaying: Boolean,
         isBuffering: Boolean = false,
+        bufferedPositionMs: Long = mutableState.value.bufferedPositionMs,
         generation: Int = playGeneration,
     ) {
         if (!isPlayRequestCurrent(generation)) return
         val current = mutableState.value
         val effectivePlaying = isPlaying && playWhenReady
+        val effectiveDurationMs = if (durationMs > 0L) durationMs else current.durationMs
+        val effectiveBufferedPositionMs = bufferedPositionMs
+            .coerceAtLeast(positionMs)
+            .coerceAtLeast(current.bufferedPositionMs)
+            .let { buffered ->
+                if (effectiveDurationMs > 0L) buffered.coerceAtMost(effectiveDurationMs) else buffered
+            }
         mutableState.value = current.copy(
             positionMs = positionMs,
-            durationMs = if (durationMs > 0L) durationMs else current.durationMs,
+            bufferedPositionMs = effectiveBufferedPositionMs,
+            durationMs = effectiveDurationMs,
             isPlaying = effectivePlaying,
             isBuffering = isBuffering && playWhenReady,
         )
@@ -285,15 +298,39 @@ abstract class SimpleAudioPlayer : AudioPlayer {
         if (!isPlayRequestCurrent(generation)) return
         val current = mutableState.value
         val effectivePlaying = isPlaying && playWhenReady
-        mutableState.value = current.copy(isBuffering = false, isPlaying = effectivePlaying)
+        mutableState.value = current.copy(
+            isBuffering = false,
+            isPlaying = effectivePlaying,
+            bufferedPositionMs = current.bufferedPositionMs.coerceAtLeast(current.positionMs),
+            playbackErrorMessage = null,
+        )
         if (effectivePlaying && useProgressTicker) {
             startProgressTicker()
         }
     }
 
-    protected fun markPlaybackFailed(generation: Int = playGeneration) {
+    protected fun updateBufferedPosition(bufferedPositionMs: Long, generation: Int = playGeneration) {
         if (!isPlayRequestCurrent(generation)) return
-        mutableState.value = mutableState.value.copy(isBuffering = false, isPlaying = false)
+        val current = mutableState.value
+        val boundedBufferedPositionMs = bufferedPositionMs
+            .coerceAtLeast(current.positionMs)
+            .let { buffered ->
+                if (current.durationMs > 0L) buffered.coerceAtMost(current.durationMs) else buffered
+            }
+        if (boundedBufferedPositionMs != current.bufferedPositionMs) {
+            mutableState.value = current.copy(bufferedPositionMs = boundedBufferedPositionMs)
+        }
+    }
+
+    protected fun markPlaybackFailed(generation: Int = playGeneration, message: String? = null) {
+        if (!isPlayRequestCurrent(generation)) return
+        val current = mutableState.value
+        mutableState.value = current.copy(
+            isBuffering = false,
+            isPlaying = false,
+            playbackErrorSerial = current.playbackErrorSerial + 1,
+            playbackErrorMessage = message,
+        )
         stopProgressTicker()
     }
 
