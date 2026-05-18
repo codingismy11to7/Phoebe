@@ -408,3 +408,6 @@ internal val LocalContinuousMotionEnabled = compositionLocalOf { true }
 internal val LocalSharedTransitionScope = compositionLocalOf<SharedTransitionScope?> { null }
 
 internal val LocalAnimatedVisibilityScope = compositionLocalOf<AnimatedVisibilityScope?> { null }
+
+/** Windows desktop: app content draws under the native caption; insets omit the top safe area. */
+internal val LocalDesktopMergesTitleBar = compositionLocalOf { false }
