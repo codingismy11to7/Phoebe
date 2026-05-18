@@ -258,7 +258,7 @@ internal fun MobileBottomNavigation(
         DesktopSection.Home to (PhoebeIcon.Home to "Home"),
         DesktopSection.Search to (PhoebeIcon.Search to "Search"),
         DesktopSection.Library to (PhoebeIcon.Library to "Library"),
-        DesktopSection.Playlists to (PhoebeIcon.Queue to "Playlists"),
+        DesktopSection.Playlists to (PhoebeIcon.PlaylistPlay to "Playlists"),
     )
     val topShape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
     Column(

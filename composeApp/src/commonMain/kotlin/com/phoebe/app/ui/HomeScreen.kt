@@ -56,6 +56,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -560,7 +561,7 @@ private fun DesktopMixesPanel(
                 HomeActionCard(
                     "Personal Mix",
                     "Recent favorites, familiar anchors, and a little discovery",
-                    PhoebeIcon.Music,
+                    PhoebeIcon.Person,
                     Modifier.width(260.dp),
                 ) {
                     val tracks = personalMix(catalog, state)
@@ -571,7 +572,7 @@ private fun DesktopMixesPanel(
                 HomeActionCard(
                     "Decade Mix",
                     "Queue a shuffled era from your library",
-                    PhoebeIcon.Grid,
+                    PhoebeIcon.Calendar,
                     Modifier.width(260.dp),
                 ) {
                     onClearDecadeMixNotice()
@@ -583,7 +584,7 @@ private fun DesktopMixesPanel(
                 HomeActionCard(
                     title = station.title,
                     subtitle = if (starting) "Starting radio..." else station.subtitle,
-                    icon = PhoebeIcon.Play,
+                    icon = station.homeRadioIcon(),
                     modifier = Modifier.width(220.dp),
                     enabled = !starting,
                 ) {
@@ -608,20 +609,20 @@ private fun MobileMixesSection(
     SectionLabel("CREATE A MIX", PhoebeUi.mutedText)
     LazyRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
         item("personal-mix", contentType = "mobile-mix-action") {
-            MobileActionCard("Personal", PhoebeIcon.Music, Modifier.width(126.dp)) {
+            MobileActionCard("Personal", PhoebeIcon.Person, Modifier.width(126.dp)) {
                 val tracks = personalMix(catalog, state)
                 if (tracks.isNotEmpty()) onPlayTracks(tracks, 0)
             }
         }
         item("decade-mix", contentType = "mobile-mix-action") {
-            MobileActionCard("Decade", PhoebeIcon.Grid, Modifier.width(126.dp)) {
+            MobileActionCard("Decade", PhoebeIcon.Calendar, Modifier.width(126.dp)) {
                 onClearDecadeMixNotice()
                 onShowDecadeMix()
             }
         }
         items(radioStations, key = { "radio:${it.id}:${it.key}" }, contentType = { "mobile-plex-radio-station" }) { station ->
             val starting = station.key in radioStartingIds
-            MobileActionCard(if (starting) "Starting..." else station.title, PhoebeIcon.Play, Modifier.width(156.dp), enabled = !starting) {
+            MobileActionCard(if (starting) "Starting..." else station.title, station.homeRadioIcon(), Modifier.width(156.dp), enabled = !starting) {
                 onPlayRadioStation(station)
             }
         }
@@ -920,42 +921,42 @@ private fun allHomeCollectionEntries(): List<HomeCollectionEntry> =
             homeTitle = "Artist Mood",
             homeSubtitle = "Browse artist mood tags",
             mobileTitle = "Artist Mood",
-            icon = PhoebeIcon.Library,
+            icon = PhoebeIcon.MoodFace,
         ),
         HomeCollectionEntry(
             collectionEntry = CollectionEntry(CollectionTarget.Albums, CollectionFacet.Mood),
             homeTitle = "Album Mood",
             homeSubtitle = "Browse album mood tags",
             mobileTitle = "Album Mood",
-            icon = PhoebeIcon.Grid,
+            icon = PhoebeIcon.MoodFace,
         ),
         HomeCollectionEntry(
             collectionEntry = CollectionEntry(CollectionTarget.Artists, CollectionFacet.Style),
             homeTitle = "Artist Style",
             homeSubtitle = "Browse artist style tags",
             mobileTitle = "Artist Style",
-            icon = PhoebeIcon.Library,
+            icon = PhoebeIcon.SunglassesFace,
         ),
         HomeCollectionEntry(
             collectionEntry = CollectionEntry(CollectionTarget.Albums, CollectionFacet.Style),
             homeTitle = "Album Style",
             homeSubtitle = "Browse album style tags",
             mobileTitle = "Album Style",
-            icon = PhoebeIcon.Grid,
+            icon = PhoebeIcon.SunglassesFace,
         ),
         HomeCollectionEntry(
             collectionEntry = CollectionEntry(CollectionTarget.Artists, CollectionFacet.Genre),
             homeTitle = "Artist Genre",
             homeSubtitle = "Browse artist genres",
             mobileTitle = "Artist Genre",
-            icon = PhoebeIcon.Library,
+            icon = PhoebeIcon.GenreMasks,
         ),
         HomeCollectionEntry(
             collectionEntry = CollectionEntry(CollectionTarget.Albums, CollectionFacet.Genre),
             homeTitle = "Album Genre",
             homeSubtitle = "Browse album genres",
             mobileTitle = "Album Genre",
-            icon = PhoebeIcon.Grid,
+            icon = PhoebeIcon.GenreMasks,
         ),
     )
 
@@ -1086,15 +1087,59 @@ private fun DecadeMixDialog(
 
 @Composable
 private fun HomeActionIcon(icon: PhoebeIcon, size: androidx.compose.ui.unit.Dp) {
+    val palette = homeIconPalette(icon)
+    val shape = RoundedCornerShape(8.dp)
     Box(
         Modifier
             .size(size)
-            .clip(RoundedCornerShape(8.dp))
-            .background(PhoebeUi.accentLight.copy(alpha = 0.14f))
-            .border(BorderStroke(1.dp, PhoebeUi.accentLight.copy(alpha = 0.22f)), RoundedCornerShape(8.dp)),
+            .clip(shape)
+            .background(
+                Brush.linearGradient(
+                    listOf(
+                        palette.first.copy(alpha = 0.34f),
+                        palette.second.copy(alpha = 0.20f),
+                    ),
+                ),
+            )
+            .border(BorderStroke(1.dp, palette.first.copy(alpha = 0.30f)), shape),
         contentAlignment = Alignment.Center,
     ) {
-        PhoebeIconView(icon, tint = PhoebeUi.accentLight, modifier = Modifier.size(size * 0.44f))
+        Box(
+            Modifier
+                .size(size * 0.70f)
+                .clip(CircleShape)
+                .background(palette.second.copy(alpha = 0.22f)),
+        )
+        PhoebeIconView(icon, tint = palette.foreground, modifier = Modifier.size(size * 0.48f))
+    }
+}
+
+private data class HomeIconPalette(
+    val first: Color,
+    val second: Color,
+    val foreground: Color,
+)
+
+@Composable
+private fun homeIconPalette(icon: PhoebeIcon): HomeIconPalette = when (icon) {
+    PhoebeIcon.Person -> HomeIconPalette(Color(0xFF8B5CF6), Color(0xFF22D3EE), Color(0xFFDDE7FF))
+    PhoebeIcon.Calendar -> HomeIconPalette(Color(0xFFFF4D7D), Color(0xFFFFC857), Color(0xFFFFE4ED))
+    PhoebeIcon.Book -> HomeIconPalette(Color(0xFF14B8A6), Color(0xFF7C3AED), Color(0xFFD8FFF8))
+    PhoebeIcon.Knife -> HomeIconPalette(Color(0xFFFF6B35), Color(0xFFEF4444), Color(0xFFFFECE3))
+    PhoebeIcon.InterwovenArrows -> HomeIconPalette(Color(0xFF3B82F6), Color(0xFFA3E635), Color(0xFFE5F0FF))
+    PhoebeIcon.MoodFace -> HomeIconPalette(Color(0xFFF97316), Color(0xFFFACC15), Color(0xFFFFF2D6))
+    PhoebeIcon.SunglassesFace -> HomeIconPalette(Color(0xFF06B6D4), Color(0xFFA855F7), Color(0xFFE3FAFF))
+    PhoebeIcon.GenreMasks -> HomeIconPalette(Color(0xFFFF3D6E), Color(0xFFFACC15), Color(0xFFFFE1EA))
+    else -> HomeIconPalette(PhoebeUi.accentLight, Color(0xFF5EEAD4), PhoebeUi.accentLight)
+}
+
+private fun PlexRadioStation.homeRadioIcon(): PhoebeIcon {
+    val normalized = title.lowercase()
+    return when {
+        "deep" in normalized && "cut" in normalized -> PhoebeIcon.Knife
+        "random" in normalized && "album" in normalized -> PhoebeIcon.InterwovenArrows
+        "library" in normalized -> PhoebeIcon.Book
+        else -> PhoebeIcon.Play
     }
 }
 

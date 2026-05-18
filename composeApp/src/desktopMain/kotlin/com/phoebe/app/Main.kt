@@ -19,6 +19,8 @@ import com.sun.jna.Native
 import com.sun.jna.Pointer
 import java.awt.EventQueue
 import java.awt.Image
+import java.awt.event.HierarchyEvent
+import java.awt.event.HierarchyListener
 import java.awt.event.WindowAdapter
 import java.awt.event.WindowEvent
 import javax.imageio.ImageIO
@@ -140,19 +142,48 @@ private object WindowsWindowChrome {
                     apply(window, useLightAppearance)
                 }
             })
+            window.addHierarchyListener(object : HierarchyListener {
+                override fun hierarchyChanged(event: HierarchyEvent) {
+                    val showingChanged = event.changeFlags and HierarchyEvent.SHOWING_CHANGED.toLong() != 0L
+                    if (!showingChanged || !window.isShowing) return
+                    window.removeHierarchyListener(this)
+                    apply(window, useLightAppearance)
+                }
+            })
             return
         }
 
+        applyDwmAttributes(window, useLightAppearance)
+        EventQueue.invokeLater { applyDwmAttributes(window, useLightAppearance) }
+        window.addWindowListener(object : WindowAdapter() {
+            override fun windowActivated(event: WindowEvent) {
+                window.removeWindowListener(this)
+                applyDwmAttributes(window, useLightAppearance)
+            }
+        })
+    }
+
+    private fun applyDwmAttributes(window: java.awt.Window, useLightAppearance: Boolean) {
         runCatching {
             val shellTop = if (useLightAppearance) LIGHT_SHELL_TOP else DARK_SHELL_TOP
             val primaryText = if (useLightAppearance) LIGHT_PRIMARY_TEXT else DARK_PRIMARY_TEXT
             val hwnd = Native.getComponentPointer(window)
-            if (setBooleanAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, !useLightAppearance) != 0) {
+            val darkModeResult = setBooleanAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, !useLightAppearance)
+            val legacyDarkModeResult = if (darkModeResult != 0) {
                 setBooleanAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1, !useLightAppearance)
+            } else {
+                0
             }
-            setColorAttribute(hwnd, DWMWA_CAPTION_COLOR, shellTop)
-            setColorAttribute(hwnd, DWMWA_BORDER_COLOR, shellTop)
-            setColorAttribute(hwnd, DWMWA_TEXT_COLOR, primaryText)
+            val captionResult = setColorAttribute(hwnd, DWMWA_CAPTION_COLOR, shellTop)
+            val borderResult = setColorAttribute(hwnd, DWMWA_BORDER_COLOR, shellTop)
+            val textResult = setColorAttribute(hwnd, DWMWA_TEXT_COLOR, primaryText)
+            if (darkModeResult != 0 || legacyDarkModeResult != 0 || captionResult != 0 || borderResult != 0 || textResult != 0) {
+                PhoebeLog.d("Phoebe") {
+                    "Windows title bar DWM results: " +
+                        "dark=$darkModeResult, legacyDark=$legacyDarkModeResult, " +
+                        "caption=$captionResult, border=$borderResult, text=$textResult"
+                }
+            }
         }.onFailure { error ->
             PhoebeLog.d("Phoebe") { "Windows title bar appearance unavailable: ${error.message}" }
         }
@@ -163,9 +194,9 @@ private object WindowsWindowChrome {
         return DwmApi.INSTANCE.DwmSetWindowAttribute(hwnd, attribute, value, Int.SIZE_BYTES)
     }
 
-    private fun setColorAttribute(hwnd: Pointer, attribute: Int, argb: Int) {
+    private fun setColorAttribute(hwnd: Pointer, attribute: Int, argb: Int): Int {
         val value = intArrayOf(argb.toColorRef())
-        DwmApi.INSTANCE.DwmSetWindowAttribute(hwnd, attribute, value, Int.SIZE_BYTES)
+        return DwmApi.INSTANCE.DwmSetWindowAttribute(hwnd, attribute, value, Int.SIZE_BYTES)
     }
 
     private fun Int.toColorRef(): Int {

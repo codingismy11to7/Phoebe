@@ -416,9 +416,10 @@ private fun CollectionIcon(entry: CollectionEntry, modifier: Modifier = Modifier
             .border(BorderStroke(1.dp, PhoebeUi.accentLight.copy(alpha = 0.20f)), RoundedCornerShape(8.dp)),
         contentAlignment = Alignment.Center,
     ) {
-        val icon = when (entry.target) {
-            CollectionTarget.Artists -> PhoebeIcon.Library
-            CollectionTarget.Albums -> PhoebeIcon.Grid
+        val icon = when (entry.facet) {
+            CollectionFacet.Mood -> PhoebeIcon.MoodFace
+            CollectionFacet.Style -> PhoebeIcon.SunglassesFace
+            CollectionFacet.Genre -> PhoebeIcon.GenreMasks
         }
         PhoebeIconView(icon, tint = PhoebeUi.accentLight, modifier = Modifier.size(17.dp))
     }
