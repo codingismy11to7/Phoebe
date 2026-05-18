@@ -17,7 +17,10 @@ import com.phoebe.app.ui.RegisterDesktopWindowKeyDispatcher
 import com.sun.jna.Library
 import com.sun.jna.Native
 import com.sun.jna.Pointer
+import java.awt.EventQueue
 import java.awt.Image
+import java.awt.event.WindowAdapter
+import java.awt.event.WindowEvent
 import javax.imageio.ImageIO
 import javax.swing.RootPaneContainer
 
@@ -95,6 +98,7 @@ private fun WindowScope.ApplyDesktopWindowChrome() {
 
     DisposableEffect(window) {
         MacWindowChrome.apply(window)
+        WindowsWindowChrome.apply(window, useLightAppearance = false)
         onDispose {}
     }
 }
@@ -124,6 +128,20 @@ private object WindowsWindowChrome {
 
     fun apply(window: java.awt.Window, useLightAppearance: Boolean) {
         if (!isWindows()) return
+
+        if (!EventQueue.isDispatchThread()) {
+            EventQueue.invokeLater { apply(window, useLightAppearance) }
+            return
+        }
+        if (!window.isShowing) {
+            window.addWindowListener(object : WindowAdapter() {
+                override fun windowOpened(event: WindowEvent) {
+                    window.removeWindowListener(this)
+                    apply(window, useLightAppearance)
+                }
+            })
+            return
+        }
 
         runCatching {
             val shellTop = if (useLightAppearance) LIGHT_SHELL_TOP else DARK_SHELL_TOP

@@ -13,8 +13,16 @@ val phoebeVersionCode = providers.gradleProperty("phoebe.versionCode")
     .map(String::toInt)
     .orElse(1)
 
-val phoebeDesktopPackageVersion = phoebeVersionName.map { version ->
-    if (version.substringBefore(".").toIntOrNull() == 0) "1.0.0" else version
+val phoebeWindowsMsiPackageVersion = phoebeVersionName.map { version ->
+    val parts = version.split(".")
+    val major = parts.firstOrNull()?.toIntOrNull()
+    if (major != null && parts.size == 3) {
+        // Early Windows packages were all published as 1.0.0. Keep the MSI
+        // ProductVersion monotonic while the public app version remains semver.
+        "${major + 1}.${parts[1]}.${parts[2]}"
+    } else {
+        version
+    }
 }
 
 val phoebeDebugDistribution = providers.gradleProperty("phoebe.debugDistribution")
@@ -313,7 +321,7 @@ compose.desktop {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             modules("java.instrument", "java.management", "java.net.http", "java.sql", "jdk.jfr", "jdk.unsupported")
             packageName = if (phoebeDebugDistribution.get()) "Phoebe Debug" else "Phoebe"
-            packageVersion = phoebeDesktopPackageVersion.get()
+            packageVersion = phoebeVersionName.get()
             val iconsDir = project.layout.projectDirectory.dir(
                 if (phoebeDebugDistribution.get()) {
                     "src/desktopMain/resources/icons-debug"
@@ -333,6 +341,12 @@ compose.desktop {
             }
             windows {
                 iconFile.set(iconsDir.file("icon.ico").asFile)
+                msiPackageVersion = phoebeWindowsMsiPackageVersion.get()
+                upgradeUuid = if (phoebeDebugDistribution.get()) {
+                    "17D3846B-2D54-4AB4-A692-B1A3889D6D62"
+                } else {
+                    "2C1E8421-2A6D-42AA-8C59-C82BE282E92F"
+                }
             }
             linux {
                 iconFile.set(iconsDir.file("icon.png").asFile)
