@@ -37,10 +37,29 @@ INSERT OR IGNORE INTO PlayHistoryRow(
 )
 VALUES (?, ?, ?, ?, 'plex', ?, ?, ?);
 
+insertImportedRemotePlay:
+INSERT OR IGNORE INTO PlayHistoryRow(
+    track_id,
+    artist,
+    album,
+    played_at_ms,
+    source,
+    plex_server_id,
+    plex_history_key,
+    plex_imported_at_ms
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+
 selectMaxImportedPlexPlayedAt:
 SELECT MAX(played_at_ms) AS lastPlayed
 FROM PlayHistoryRow
 WHERE source = 'plex'
+AND plex_server_id = ?;
+
+selectMaxImportedRemotePlayedAt:
+SELECT MAX(played_at_ms) AS lastPlayed
+FROM PlayHistoryRow
+WHERE source = ?
 AND plex_server_id = ?;
 
 selectImportedPlexHistoryKey:

@@ -3,7 +3,11 @@ package com.phoebe.app.data
 import com.phoebe.app.domain.PlayerState
 import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.Track
+import com.phoebe.app.domain.catalogPrefix
+import com.phoebe.app.domain.isEmbyFamily
+import com.phoebe.app.domain.isPlex
 import com.phoebe.app.domain.isPlexLibraryTrack
+import com.phoebe.app.domain.isRemoteLibraryTrack
 import com.phoebe.app.domain.serverAuthToken
 import com.phoebe.app.player.AudioPlayer
 import com.phoebe.app.platform.PhoebeLog
@@ -22,6 +26,8 @@ import kotlinx.coroutines.launch
  */
 class PlexPlaybackReporter(
     private val plexClient: PlexClient,
+    private val jellyfinClient: JellyfinClient,
+    private val providerRegistry: MusicProviderRegistry = MusicProviderRegistry(emptyList()),
     private val audioPlayer: AudioPlayer,
     private val session: StateFlow<PlexSession?>,
 ) {
@@ -45,7 +51,7 @@ class PlexPlaybackReporter(
         combine(audioPlayer.state, session) { player, sess -> player to sess }
             .collect { (player, sess) ->
                 val track = player.currentTrack
-                if (track == null || !track.isPlexLibraryTrack()) {
+                if (track == null || !track.isRemoteLibraryTrack()) {
                     if (lastTrack != null) {
                         reportStopped(lastTrack!!, lastPositionMs, sess, continuing = false)
                     }
@@ -79,13 +85,14 @@ class PlexPlaybackReporter(
             delay(TimelineIntervalMs)
             val player = audioPlayer.state.value
             val track = player.currentTrack ?: continue
-            if (!player.isPlaying || !track.isPlexLibraryTrack()) continue
+            if (!player.isPlaying || !track.isRemoteLibraryTrack()) continue
             ensurePlayQueue(session.value, player)
             reportTimeline(session.value, track, player, PlexTimelineState.Playing)
         }
     }
 
     private suspend fun ensurePlayQueue(sess: PlexSession?, player: PlayerState) {
+        if (!sess.isPlex()) return
         runCatching {
             val server = sess?.selectedServer ?: return@runCatching
             val token = sess.serverAuthToken() ?: return@runCatching
@@ -141,11 +148,30 @@ class PlexPlaybackReporter(
         sess: PlexSession?,
         continuing: Boolean,
     ) {
+        val durationMs = track.durationMs.coerceAtLeast(0L)
+        val timeMs = if (durationMs > 0L) positionMs.coerceAtMost(durationMs) else positionMs
+        if (sess.isEmbyFamily()) {
+            val server = sess?.selectedServer ?: return
+            val prefix = sess.providerType.catalogPrefix
+            runCatching {
+                val adapter = providerRegistry.adapterFor(sess)
+                if (adapter != null && prefix != "jellyfin") {
+                    adapter.reportPlayback(sess, track, timeMs, isPaused = false, event = JellyfinPlaybackEvent.Stop)
+                } else {
+                    jellyfinClient.reportPlayback(server, sess.token, track.id.removePrefix("$prefix:"), timeMs, isPaused = false, event = JellyfinPlaybackEvent.Stop)
+                }
+            }
+            return
+        }
+        if (sess != null && !sess.isPlex()) {
+            runCatching {
+                providerRegistry.adapterFor(sess)?.reportPlayback(sess, track, timeMs, isPaused = false, event = JellyfinPlaybackEvent.Stop)
+            }
+            return
+        }
         val ratingKey = plexRatingKey(track.id) ?: return
         val server = sess?.selectedServer ?: return
         val token = sess.serverAuthToken() ?: return
-        val durationMs = track.durationMs.coerceAtLeast(0L)
-        val timeMs = if (durationMs > 0L) positionMs.coerceAtMost(durationMs) else positionMs
         runCatching {
             plexClient.reportTimeline(
                 server = server,
@@ -169,6 +195,36 @@ class PlexPlaybackReporter(
         player: PlayerState,
         state: PlexTimelineState,
     ) {
+        if (sess.isEmbyFamily()) {
+            val server = sess?.selectedServer ?: return
+            val prefix = sess.providerType.catalogPrefix
+            runCatching {
+                val event = if (state == PlexTimelineState.Playing && player.positionMs < 2_000L) JellyfinPlaybackEvent.Start else JellyfinPlaybackEvent.Progress
+                val adapter = providerRegistry.adapterFor(sess)
+                if (adapter != null && prefix != "jellyfin") {
+                    adapter.reportPlayback(sess, track, player.positionMs, state != PlexTimelineState.Playing, event)
+                } else {
+                    jellyfinClient.reportPlayback(
+                        server = server,
+                        token = sess.token,
+                        itemId = track.id.removePrefix("$prefix:"),
+                        positionMs = player.positionMs,
+                        isPaused = state != PlexTimelineState.Playing,
+                        event = event,
+                    )
+                }
+            }.onFailure { e ->
+                PhoebeLog.d("PlexPlaybackReporter") { "${sess.providerType.name} playback report failed: ${e.message}" }
+            }
+            return
+        }
+        if (sess != null && !sess.isPlex()) {
+            runCatching {
+                val event = if (state == PlexTimelineState.Playing && player.positionMs < 2_000L) JellyfinPlaybackEvent.Start else JellyfinPlaybackEvent.Progress
+                providerRegistry.adapterFor(sess)?.reportPlayback(sess, track, player.positionMs, state != PlexTimelineState.Playing, event)
+            }
+            return
+        }
         val ratingKey = plexRatingKey(track.id) ?: return
         val server = sess?.selectedServer ?: return
         val token = sess.serverAuthToken() ?: return

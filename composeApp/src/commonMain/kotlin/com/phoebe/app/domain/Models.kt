@@ -3,15 +3,84 @@ package com.phoebe.app.domain
 import kotlinx.serialization.Serializable
 
 @Serializable
+enum class MediaProviderType {
+    Plex,
+    Jellyfin,
+    Emby,
+    Navidrome,
+    MusicAssistant,
+}
+
+@Serializable
+enum class JellyfinSyncMode {
+    Quick,
+    Full,
+}
+
+enum class JellyfinLibraryPageKind {
+    Artists,
+    Albums,
+    Tracks,
+}
+
+@Serializable
 data class PlexSession(
     val token: String,
     val userName: String = "Plex listener",
     val selectedServer: PlexServer? = null,
     val selectedLibrary: MusicLibrary? = null,
+    val providerType: MediaProviderType = MediaProviderType.Plex,
+    val userId: String? = null,
+    val jellyfinSyncMode: JellyfinSyncMode = JellyfinSyncMode.Quick,
 )
+
+typealias ProviderSession = PlexSession
+typealias ProviderServer = PlexServer
+typealias ProviderLibrary = MusicLibrary
+
+@Serializable
+data class ProviderAuthState(
+    val providerType: MediaProviderType,
+    val serverUrl: String,
+    val userName: String = "",
+    val token: String = "",
+    val userId: String? = null,
+)
+
+val MediaProviderType.catalogPrefix: String
+    get() = when (this) {
+        MediaProviderType.Plex -> "plex"
+        MediaProviderType.Jellyfin -> "jellyfin"
+        MediaProviderType.Emby -> "emby"
+        MediaProviderType.Navidrome -> "navidrome"
+        MediaProviderType.MusicAssistant -> "music-assistant"
+    }
+
+val MediaProviderType.displayName: String
+    get() = when (this) {
+        MediaProviderType.Plex -> "Plex"
+        MediaProviderType.Jellyfin -> "Jellyfin"
+        MediaProviderType.Emby -> "Emby"
+        MediaProviderType.Navidrome -> "Subsonic (Navidrome, etc)"
+        MediaProviderType.MusicAssistant -> "Music Assistant"
+    }
+
+fun MediaProviderType.usesServerTokenAsAuth(): Boolean =
+    this == MediaProviderType.Plex
+
+fun MediaProviderType.isEmbyFamily(): Boolean =
+    this == MediaProviderType.Jellyfin || this == MediaProviderType.Emby
 
 /** Plex playlists (create/add) require token, server, and music library. */
 fun PlexSession?.supportsPlexPlaylists(): Boolean {
+    val s = this ?: return false
+    return s.providerType == MediaProviderType.Plex &&
+        s.token.isNotBlank() &&
+        s.selectedServer != null &&
+        s.selectedLibrary != null
+}
+
+fun PlexSession?.supportsRemotePlaylists(): Boolean {
     val s = this ?: return false
     return s.token.isNotBlank() && s.selectedServer != null && s.selectedLibrary != null
 }
@@ -19,8 +88,74 @@ fun PlexSession?.supportsPlexPlaylists(): Boolean {
 /** Plex ratings require token and a selected server; they apply to metadata rating keys. */
 fun PlexSession?.supportsPlexRatings(): Boolean {
     val s = this ?: return false
-    return s.token.isNotBlank() && s.selectedServer != null
+    return s.providerType == MediaProviderType.Plex && s.token.isNotBlank() && s.selectedServer != null
 }
+
+fun PlexSession?.supportsRemoteRatings(): Boolean {
+    val s = this ?: return false
+    return s.providerType != MediaProviderType.MusicAssistant && s.token.isNotBlank() && s.selectedServer != null
+}
+
+fun PlexSession?.isJellyfin(): Boolean = this?.providerType == MediaProviderType.Jellyfin
+
+fun PlexSession?.isEmby(): Boolean = this?.providerType == MediaProviderType.Emby
+
+fun PlexSession?.isEmbyFamily(): Boolean = this?.providerType?.isEmbyFamily() == true
+
+fun PlexSession?.isNavidrome(): Boolean = this?.providerType == MediaProviderType.Navidrome
+
+fun PlexSession?.isMusicAssistant(): Boolean = this?.providerType == MediaProviderType.MusicAssistant
+
+fun PlexSession?.isPlex(): Boolean = this?.providerType == MediaProviderType.Plex
+
+fun PlexSession?.providerLabel(): String = when (this?.providerType) {
+    null -> "Plex"
+    else -> this.providerType.displayName
+}
+
+data class ProviderFeatureSet(
+    val collectionFacetsByTarget: Map<CollectionTarget, Set<CollectionFacet>>,
+) {
+    fun supports(entry: CollectionEntry): Boolean =
+        collectionFacetsByTarget[entry.target]?.contains(entry.facet) == true
+
+    fun collectionEntries(): List<CollectionEntry> =
+        CollectionTarget.entries.flatMap { target ->
+            CollectionFacet.entries
+                .filter { facet -> collectionFacetsByTarget[target]?.contains(facet) == true }
+                .map { facet -> CollectionEntry(target, facet) }
+        }
+}
+
+val MediaProviderType.featureSet: ProviderFeatureSet
+    get() = when (this) {
+        MediaProviderType.Plex -> ProviderFeatureSet(
+            collectionFacetsByTarget = CollectionTarget.entries.associateWith {
+                setOf(CollectionFacet.Mood, CollectionFacet.Style, CollectionFacet.Genre)
+            },
+        )
+        MediaProviderType.Jellyfin,
+        MediaProviderType.Emby,
+        MediaProviderType.Navidrome,
+        MediaProviderType.MusicAssistant,
+        -> ProviderFeatureSet(
+            collectionFacetsByTarget = CollectionTarget.entries.associateWith {
+                setOf(CollectionFacet.Genre)
+            },
+        )
+    }
+
+fun PlexSession?.providerFeatureSet(): ProviderFeatureSet =
+    this?.providerType?.featureSet ?: MediaProviderType.Plex.featureSet
+
+fun PlexSession?.supportsCollectionEntry(entry: CollectionEntry): Boolean =
+    providerFeatureSet().supports(entry)
+
+fun PlexSession?.supportedCollectionEntries(): List<CollectionEntry> =
+    providerFeatureSet().collectionEntries()
+
+val defaultCollectionEntries: List<CollectionEntry>
+    get() = MediaProviderType.Plex.featureSet.collectionEntries()
 
 @Serializable
 data class PlexPin(
@@ -248,7 +383,23 @@ data class CatalogSnapshot(
     val collectionValueLoads: List<CatalogCollectionValueLoad> = emptyList(),
     val collectionTags: List<CatalogCollectionTag> = emptyList(),
     val downloads: List<DownloadItem> = emptyList(),
+    val remotePageInfo: CatalogPageInfo = CatalogPageInfo(),
 )
+
+@Serializable
+data class CatalogPageInfo(
+    val pageSize: Int = 100,
+    val artistTotal: Int? = null,
+    val albumTotal: Int? = null,
+    val trackTotal: Int? = null,
+    val loadedArtistPages: Set<Int> = emptySet(),
+    val loadedAlbumPages: Set<Int> = emptySet(),
+    val loadedTrackPages: Set<Int> = emptySet(),
+) {
+    val hasAny: Boolean
+        get() = artistTotal != null || albumTotal != null || trackTotal != null ||
+            loadedArtistPages.isNotEmpty() || loadedAlbumPages.isNotEmpty() || loadedTrackPages.isNotEmpty()
+}
 
 @Serializable
 data class CatalogCollectionValueLoad(
@@ -451,6 +602,24 @@ fun Track.isLocalMediaPlayback(): Boolean = !localUri.isNullOrBlank()
 /** True when this row came from the Plex music library slice of the merged catalog. */
 fun Track.isPlexLibraryTrack(): Boolean = id.startsWith("plex:")
 
+fun Track.isJellyfinLibraryTrack(): Boolean = id.startsWith("jellyfin:")
+
+fun Track.isEmbyLibraryTrack(): Boolean = id.startsWith("emby:")
+
+fun Track.isNavidromeLibraryTrack(): Boolean = id.startsWith("navidrome:")
+
+fun Track.isMusicAssistantLibraryTrack(): Boolean = id.startsWith("music-assistant:")
+
+fun Track.remoteProviderPrefix(): String? =
+    id.substringBefore(':', missingDelimiterValue = "").takeIf { prefix ->
+        MediaProviderType.entries.any { it.catalogPrefix == prefix }
+    }
+
+fun Track.isRemoteLibraryTrack(): Boolean = remoteProviderPrefix() != null
+
+fun Track.belongsToProvider(providerType: MediaProviderType): Boolean =
+    id.startsWith("${providerType.catalogPrefix}:")
+
 const val LOCAL_PLAYLIST_ID_PREFIX = "local:playlist:"
 const val LIKED_SONGS_PLAYLIST_TITLE = "Liked Songs"
 const val PENDING_LIKED_SONGS_PLAYLIST_ID = "plex:liked-songs-pending"
@@ -464,8 +633,18 @@ fun Playlist.isLikedSongsPlaylist(): Boolean =
 /** Local playlists accept on-device audio files only. */
 fun Track.canAddToLocalPlaylist(): Boolean = isLocalMediaPlayback()
 
-/** Plex playlists accept anything with a Plex identity, including downloaded Plex songs. */
-fun Track.canAddToPlexPlaylist(): Boolean = isPlexLibraryTrack()
+/** Remote playlists accept anything with a provider identity, including downloaded remote songs. */
+fun Track.canAddToPlexPlaylist(): Boolean = isRemoteLibraryTrack()
 
 /** Liked Songs syncs by Plex identity, so downloaded Plex songs are still eligible. */
-fun Track.canTogglePlexLike(): Boolean = isPlexLibraryTrack()
+fun Track.canTogglePlexLike(): Boolean = isRemoteLibraryTrack()
+
+fun Playlist.remoteProviderPrefix(): String? =
+    id.substringBefore(':', missingDelimiterValue = "").takeIf { prefix ->
+        MediaProviderType.entries.any { it.catalogPrefix == prefix }
+    }
+
+fun Playlist.isRemoteProviderPlaylist(): Boolean = remoteProviderPrefix() != null
+
+fun Playlist.belongsToProvider(providerType: MediaProviderType): Boolean =
+    id.startsWith("${providerType.catalogPrefix}:")

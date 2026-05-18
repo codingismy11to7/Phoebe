@@ -26,6 +26,23 @@ class CatalogMergeTest {
     }
 
     @Test
+    fun withPrefixDoesNotDoublePrefixIds() {
+        val inner = CatalogSnapshot(
+            artists = listOf(Artist("jellyfin:a1", "A", null, 1)),
+            albums = listOf(Album("jellyfin:al1", "Al", "A", null, null)),
+            playlists = emptyList(),
+            tracksByParent = mapOf("jellyfin:al1" to listOf(Track("jellyfin:t1", "T", "A", "Al", 1L, "", ""))),
+            downloads = emptyList(),
+        )
+
+        val prefixed = CatalogMerge.withPrefix("jellyfin", inner)
+
+        assertEquals("jellyfin:a1", prefixed.artists.single().id)
+        assertEquals("jellyfin:al1", prefixed.albums.single().id)
+        assertEquals("jellyfin:t1", prefixed.tracksByParent.values.single().single().id)
+    }
+
+    @Test
     fun mergeCombinesChildrenAndDownloadsDedupesByTrackId() {
         val a = CatalogSnapshot(
             artists = listOf(Artist("1", "One", null, 0)),

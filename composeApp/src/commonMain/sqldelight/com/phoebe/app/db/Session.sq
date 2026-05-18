@@ -2,8 +2,10 @@
 
 CREATE TABLE SessionRow (
     id INTEGER NOT NULL PRIMARY KEY CHECK (id = 1) DEFAULT 1,
+    providerType TEXT NOT NULL DEFAULT 'Plex',
     token TEXT NOT NULL,
     userName TEXT NOT NULL,
+    userId TEXT,
     selectedServerId TEXT,
     selectedServerName TEXT,
     selectedServerUri TEXT,
@@ -14,7 +16,8 @@ CREATE TABLE SessionRow (
     selectedServerAccessToken TEXT,
     selectedServerHttpsRequired INTEGER,
     selectedLibraryKey TEXT,
-    selectedLibraryTitle TEXT
+    selectedLibraryTitle TEXT,
+    jellyfinSyncMode TEXT NOT NULL DEFAULT 'Quick'
 );
 
 selectCurrent:
@@ -22,12 +25,12 @@ SELECT * FROM SessionRow WHERE id = 1;
 
 upsert:
 INSERT OR REPLACE INTO SessionRow(
-    id, token, userName,
+    id, providerType, token, userName, userId,
     selectedServerId, selectedServerName, selectedServerUri, selectedServerOwned,
     selectedServerConnectionUris, selectedServerAdvertisedConnectionUris,
     selectedServerLocalConnectionUris, selectedServerAccessToken, selectedServerHttpsRequired,
-    selectedLibraryKey, selectedLibraryTitle
-) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    selectedLibraryKey, selectedLibraryTitle, jellyfinSyncMode
+) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 clear:
 DELETE FROM SessionRow;

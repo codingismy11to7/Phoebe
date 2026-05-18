@@ -7,6 +7,7 @@ import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.CatalogCollectionValue
 import com.phoebe.app.domain.CatalogCollectionValueLoad
 import com.phoebe.app.domain.CatalogCollectionTag
+import com.phoebe.app.domain.CatalogPageInfo
 import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.CatalogSyncPhase
 import com.phoebe.app.domain.CatalogSyncState
@@ -15,6 +16,8 @@ import com.phoebe.app.domain.CollectionFacet
 import com.phoebe.app.domain.CollectionTarget
 import com.phoebe.app.domain.DownloadItem
 import com.phoebe.app.domain.DownloadState
+import com.phoebe.app.domain.JellyfinLibraryPageKind
+import com.phoebe.app.domain.JellyfinSyncMode
 import com.phoebe.app.domain.MusicLibrary
 import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.PlexSession
@@ -29,13 +32,24 @@ import com.phoebe.app.domain.TrackMetadataUpdate
 import com.phoebe.app.domain.canAddToLocalPlaylist
 import com.phoebe.app.domain.canAddToPlexPlaylist
 import com.phoebe.app.domain.canTogglePlexLike
+import com.phoebe.app.domain.catalogPrefix
+import com.phoebe.app.domain.belongsToProvider
 import com.phoebe.app.domain.isLocalMediaPlayback
 import com.phoebe.app.domain.isLocalPlaylist
 import com.phoebe.app.domain.isLikedSongsPlaylist
+import com.phoebe.app.domain.isEmbyFamily
+import com.phoebe.app.domain.isJellyfin
+import com.phoebe.app.domain.isJellyfinLibraryTrack
+import com.phoebe.app.domain.isPlex
 import com.phoebe.app.domain.isPlexLibraryTrack
+import com.phoebe.app.domain.isRemoteLibraryTrack
+import com.phoebe.app.domain.remoteProviderPrefix
 import com.phoebe.app.domain.serverAuthToken
 import com.phoebe.app.domain.supportsPlexPlaylists
 import com.phoebe.app.domain.supportsPlexRatings
+import com.phoebe.app.domain.supportsCollectionEntry
+import com.phoebe.app.domain.supportsRemotePlaylists
+import com.phoebe.app.domain.supportsRemoteRatings
 import com.phoebe.app.platform.PlatformStorage
 import com.phoebe.app.platform.PhoebeLog
 import com.phoebe.app.platform.catalogTrackPrefetchParallelism
@@ -100,6 +114,9 @@ data class FavoritePlaylistExportEntry(
 
 class CatalogRepository(
     private val plexClient: PlexClient,
+    private val jellyfinClient: JellyfinClient = JellyfinClient(HttpClient()),
+    private val embyClient: EmbyClient = EmbyClient(HttpClient()),
+    private val providerRegistry: MusicProviderRegistry = MusicProviderRegistry(emptyList()),
     private val database: PhoebeDatabase,
     private val storage: PlatformStorage,
     private val httpClient: HttpClient,
@@ -210,6 +227,14 @@ class CatalogRepository(
     }
 
     suspend fun refreshAggregated(session: PlexSession?) {
+        if (session.isEmbyFamily()) {
+            refreshJellyfinAggregated(session)
+            return
+        }
+        if (session != null && !session.isPlex()) {
+            refreshAdapterAggregated(session)
+            return
+        }
         PhoebeLog.d("CatalogRepository") {
             "refreshAggregated start → plex=${session?.selectedServer?.name ?: "none"}, " +
                 "localFolders=${mediaSourcesRepository.state.value.localFolders.count { it.enabled }}"
@@ -329,6 +354,7 @@ class CatalogRepository(
                 mutableCatalog.value = finalSnapshot
                 finalSnapshot
             } catch (error: Throwable) {
+                if (error is CancellationException) throw error
                 mutableCatalogSyncState.value = CatalogSyncState(
                     phase = CatalogSyncPhase.Failed,
                     message = error.message ?: "Sync failed.",
@@ -377,6 +403,7 @@ class CatalogRepository(
                     "${mutableCatalog.value.tracksByParent.values.sumOf { it.size }} tracks, persist=$persistSnapshot"
             }
         } catch (error: Throwable) {
+            if (error is CancellationException) throw error
             mutableCatalogSyncState.value = CatalogSyncState(
                 phase = CatalogSyncPhase.Failed,
                 message = error.message ?: "Sync failed.",
@@ -389,7 +416,507 @@ class CatalogRepository(
         }
     }
 
+    private suspend fun refreshAdapterAggregated(session: PlexSession) {
+        val adapter = providerRegistry.adapterFor(session) ?: return
+        if (adapter.capabilities.pagedCatalog && session.jellyfinSyncMode == JellyfinSyncMode.Quick) {
+            refreshPagedAdapterAggregated(session, adapter)
+            return
+        }
+        PhoebeLog.d("CatalogRepository") {
+            "refreshAggregated start → ${session.providerType.name}=${session.selectedServer?.name ?: "none"}, " +
+                "localFolders=${mediaSourcesRepository.state.value.localFolders.count { it.enabled }}"
+        }
+        val snapshot = try {
+            refreshMutex.withLock {
+                withCatalogRefreshing {
+                    mutableCatalogSyncState.value = CatalogSyncState(
+                        phase = CatalogSyncPhase.LoadingLibrary,
+                        message = if (mutableCatalog.value.isNotEmpty()) "Refreshing library…" else "Loading your library…",
+                        blocking = mutableCatalog.value.isNotEmpty().not(),
+                    )
+                    val previous = mutableCatalog.value
+                    val ctx = SourceBuildContext(
+                        session = session,
+                        plexClient = plexClient,
+                        httpClient = httpClient,
+                        localFolders = mediaSourcesRepository.state.value.localFolders,
+                        localFileMetadataCache = localFileMetadataCache,
+                    )
+                    val (localRaw, remoteRaw) = coroutineScope {
+                        val localDeferred = async { LocalFolderMusicSourcePlugin.buildCatalog(ctx) }
+                        val remoteDeferred = async { adapter.buildCatalog(session) }
+                        localDeferred.await() to remoteDeferred.await()
+                    }
+                    val merged = CatalogMerge.merge(
+                        CatalogSnapshot(),
+                        CatalogMerge.withPrefix(session.providerType.catalogPrefix, remoteRaw),
+                        localRaw,
+                    ).copy(downloads = previous.downloads)
+                    mutableCatalog.value = merged
+                    mutableCatalogSyncState.value = CatalogSyncState(
+                        phase = CatalogSyncPhase.Persisting,
+                        message = "Saving library…",
+                        loadedAlbums = merged.albums.size,
+                        loadedTracks = merged.tracksByParent.values.sumOf { it.size },
+                        blocking = false,
+                    )
+                    persistAsync(merged)
+                    mutableCatalogSyncState.value = CatalogSyncState(
+                        phase = CatalogSyncPhase.Complete,
+                        message = "Library refreshed.",
+                        loadedAlbums = merged.albums.size,
+                        loadedTracks = merged.tracksByParent.values.sumOf { it.size },
+                    )
+                    merged
+                }
+            }
+        } catch (error: Throwable) {
+            if (error is CancellationException) throw error
+            mutableCatalogSyncState.value = CatalogSyncState(
+                phase = CatalogSyncPhase.Failed,
+                message = error.message ?: "${session.providerType.name} sync failed.",
+            )
+            throw error
+        }
+        PhoebeLog.d("CatalogRepository") {
+            "refreshAggregated complete → ${snapshot.albums.size} albums, " +
+                "${snapshot.tracksByParent.values.sumOf { it.size }} tracks"
+        }
+    }
+
+    private suspend fun refreshPagedAdapterAggregated(session: PlexSession, adapter: MusicProviderAdapter) {
+        PhoebeLog.d("CatalogRepository") {
+            "refreshAggregated start → ${session.providerType.name}=${session.selectedServer?.name ?: "none"} mode=quick, " +
+                "localFolders=${mediaSourcesRepository.state.value.localFolders.count { it.enabled }}"
+        }
+        val snapshot = try {
+            refreshMutex.withLock {
+                withCatalogRefreshing {
+                    mutableCatalogSyncState.value = CatalogSyncState(
+                        phase = CatalogSyncPhase.LoadingLibrary,
+                        message = if (mutableCatalog.value.isNotEmpty()) "Refreshing library…" else "Loading your library…",
+                        blocking = mutableCatalog.value.isNotEmpty().not(),
+                    )
+                    val previous = mutableCatalog.value
+                    val ctx = SourceBuildContext(
+                        session = session,
+                        plexClient = plexClient,
+                        httpClient = httpClient,
+                        localFolders = mediaSourcesRepository.state.value.localFolders,
+                        localFileMetadataCache = localFileMetadataCache,
+                    )
+                    val localRaw = LocalFolderMusicSourcePlugin.buildCatalog(ctx)
+                    val quickRaw = adapter.quickCatalog(session) ?: adapter.buildCatalog(session)
+                    val merged = CatalogMerge.merge(
+                        CatalogSnapshot(),
+                        CatalogMerge.withPrefix(session.providerType.catalogPrefix, quickRaw),
+                        localRaw,
+                    ).copy(downloads = previous.downloads)
+                    mutableCatalog.value = merged
+                    mutableCatalogSyncState.value = CatalogSyncState(
+                        phase = CatalogSyncPhase.Persisting,
+                        message = "Saving library…",
+                        loadedAlbums = merged.albums.size,
+                        loadedTracks = merged.tracksByParent.values.sumOf { it.size },
+                        blocking = false,
+                    )
+                    persistAsync(merged)
+                    mutableCatalogSyncState.value = CatalogSyncState(
+                        phase = CatalogSyncPhase.Complete,
+                        message = "Library refreshed.",
+                        loadedAlbums = merged.albums.size,
+                        loadedTracks = merged.tracksByParent.values.sumOf { it.size },
+                    )
+                    merged
+                }
+            }
+        } catch (error: Throwable) {
+            if (error is CancellationException) throw error
+            mutableCatalogSyncState.value = CatalogSyncState(
+                phase = CatalogSyncPhase.Failed,
+                message = error.message ?: "${session.providerType.name} sync failed.",
+            )
+            throw error
+        }
+        PhoebeLog.d("CatalogRepository") {
+            "refreshAggregated complete → ${snapshot.albums.size} albums, " +
+                "${snapshot.tracksByParent.values.sumOf { it.size }} tracks"
+        }
+    }
+
+    private suspend fun refreshJellyfinAggregated(session: PlexSession?) {
+        val remoteClient = if (session?.providerType?.catalogPrefix == "emby") embyClient else jellyfinClient
+        val remotePrefix = session?.providerType?.catalogPrefix ?: "jellyfin"
+        val remoteLabel = session?.providerType?.name ?: "Jellyfin"
+        PhoebeLog.d("CatalogRepository") {
+            "refreshAggregated start → $remotePrefix=${session?.selectedServer?.name ?: "none"}, " +
+                "localFolders=${mediaSourcesRepository.state.value.localFolders.count { it.enabled }}"
+        }
+        val snapshot = try {
+            refreshMutex.withLock {
+                withCatalogRefreshing {
+                    mutableCatalogSyncState.value = CatalogSyncState(
+                        phase = CatalogSyncPhase.LoadingLibrary,
+                        message = if (mutableCatalog.value.isNotEmpty()) "Refreshing library…" else "Loading your library…",
+                        blocking = mutableCatalog.value.isNotEmpty().not(),
+                    )
+                    val previous = mutableCatalog.value
+                    val ctx = SourceBuildContext(
+                        session = session,
+                        plexClient = plexClient,
+                        httpClient = httpClient,
+                        localFolders = mediaSourcesRepository.state.value.localFolders,
+                        localFileMetadataCache = localFileMetadataCache,
+                    )
+                    val server = session?.selectedServer
+                    val library = session?.selectedLibrary
+                    val token = session?.token?.takeIf { it.isNotBlank() }
+                    val userId = session?.userId?.takeIf { it.isNotBlank() }
+                    val localRaw = LocalFolderMusicSourcePlugin.buildCatalog(ctx)
+                    var remoteRaw = CatalogSnapshot()
+                    var merged = CatalogMerge.merge(CatalogSnapshot(), localRaw).copy(downloads = previous.downloads)
+
+                    suspend fun publishJellyfinProgress(raw: CatalogSnapshot, message: String, persistProgress: Boolean = true) {
+                        remoteRaw = raw
+                        val currentMerged = mutableCatalog.value
+                        val newMerged = CatalogMerge.merge(
+                            CatalogSnapshot(),
+                            CatalogMerge.withPrefix(remotePrefix, remoteRaw),
+                            localRaw,
+                        )
+                        merged = newMerged.copy(
+                            downloads = previous.downloads,
+                            tracksByParent = currentMerged.tracksByParent + newMerged.tracksByParent,
+                        )
+                        mutableCatalog.value = merged
+                        mutableCatalogSyncState.value = CatalogSyncState(
+                            phase = CatalogSyncPhase.LoadingSongs,
+                            message = message,
+                            loadedAlbums = merged.albums.size,
+                            loadedTracks = merged.tracksByParent.values.sumOf { it.size },
+                            blocking = false,
+                        )
+                        if (persistProgress) {
+                            persistAsync(merged)
+                        }
+                        yield()
+                    }
+
+                    if (server != null && library != null && token != null && userId != null && session.jellyfinSyncMode == JellyfinSyncMode.Quick) {
+                        mutableCatalogSyncState.value = CatalogSyncState(
+                            phase = CatalogSyncPhase.LoadingLibrary,
+                            message = "Loading first $remoteLabel pages…",
+                            blocking = mutableCatalog.value.isNotEmpty().not(),
+                        )
+                        val artistPage = remoteClient.artistPage(server, library, token, userId, pageIndex = 0)
+                        val pageInfoAfterArtists = CatalogPageInfo(
+                            pageSize = artistPage.pageSize,
+                            artistTotal = artistPage.total,
+                            loadedArtistPages = if (artistPage.items.isNotEmpty()) setOf(0) else emptySet(),
+                        )
+                        publishJellyfinProgress(
+                            CatalogSnapshot(artists = artistPage.items, remotePageInfo = pageInfoAfterArtists),
+                            "Loaded first $remoteLabel artist page…",
+                        )
+
+                        val albumPage = remoteClient.albumPage(server, library, token, userId, pageIndex = 0)
+                        val pageInfoAfterAlbums = pageInfoAfterArtists.copy(
+                            albumTotal = albumPage.total,
+                            loadedAlbumPages = if (albumPage.items.isNotEmpty()) setOf(0) else emptySet(),
+                        )
+                        val enrichedArtists = enrichArtistAlbumCountsOnly(enrichArtistArtwork(artistPage.items, albumPage.items), albumPage.items)
+                        publishJellyfinProgress(
+                            CatalogSnapshot(
+                                artists = enrichedArtists,
+                                albums = albumPage.items,
+                                remotePageInfo = pageInfoAfterAlbums,
+                            ),
+                            "Loaded first $remoteLabel album page…",
+                        )
+
+                        val trackPage = remoteClient.trackPage(server, library, token, userId, pageIndex = 0)
+                        val albumsById = albumPage.items.associateBy { it.id }
+                        val tracks = trackPage.items.map { track ->
+                            val album = track.parentAlbumId?.let(albumsById::get)
+                            if (album == null) {
+                                track
+                            } else {
+                                track.copy(
+                                    album = track.album.takeUnless { it == "Unknown album" } ?: album.title,
+                                    artist = track.artist.takeUnless { it == "Unknown artist" } ?: album.artist,
+                                    thumbUrl = track.thumbUrl ?: album.thumbUrl,
+                                )
+                            }
+                        }
+                        val tracksByAlbum = tracks
+                            .groupBy { it.parentAlbumId?.takeIf { id -> id.isNotBlank() } ?: jellyfinAlbumIdByTitle(albumPage.items, it) }
+                            .filterKeys { it.isNotBlank() }
+                        val pageInfoAfterTracks = pageInfoAfterAlbums.copy(
+                            trackTotal = trackPage.total,
+                            loadedTrackPages = if (trackPage.items.isNotEmpty()) setOf(0) else emptySet(),
+                        )
+                        publishJellyfinProgress(
+                            CatalogSnapshot(
+                                artists = enrichedArtists,
+                                albums = albumPage.items,
+                                tracksByParent = tracksByAlbum,
+                                remotePageInfo = pageInfoAfterTracks,
+                            ),
+                            "Loaded first $remoteLabel song page…",
+                        )
+
+                        val playlists = remoteClient.playlists(server, library, token, userId)
+                        remoteRaw = CatalogSnapshot(
+                            artists = enrichedArtists,
+                            albums = albumPage.items,
+                            playlists = playlists,
+                            tracksByParent = tracksByAlbum,
+                            remotePageInfo = pageInfoAfterTracks,
+                        )
+                    } else if (server != null && library != null && token != null && userId != null) {
+                        mutableCatalogSyncState.value = CatalogSyncState(
+                            phase = CatalogSyncPhase.LoadingLibrary,
+                            message = "Loading $remoteLabel metadata…",
+                            blocking = mutableCatalog.value.isNotEmpty().not(),
+                        )
+                        var albumsLoaded = 0
+                        val albums = remoteClient.albums(server, library, token, userId) { page ->
+                            albumsLoaded += page.size
+                            mutableCatalogSyncState.value = CatalogSyncState(
+                                phase = CatalogSyncPhase.LoadingLibrary,
+                                message = "Loaded $albumsLoaded $remoteLabel albums…",
+                                loadedAlbums = albumsLoaded,
+                                loadedTracks = mutableCatalog.value.tracksByParent.values.sumOf { it.size },
+                                blocking = false,
+                            )
+                        }
+                        val enrichedArtists = enrichArtistAlbumCountsOnly(
+                            enrichArtistArtwork(jellyfinArtistsFromAlbums(albums), albums),
+                            albums,
+                        )
+                        publishJellyfinProgress(
+                            CatalogSnapshot(artists = enrichedArtists, albums = albums),
+                            "Loaded $remoteLabel metadata, indexing songs…",
+                            persistProgress = false,
+                        )
+
+                        val albumsById = albums.associateBy { it.id }
+                        var currentTracksByAlbum = emptyMap<String, List<Track>>()
+                        var totalTracksLoaded = 0
+                        var totalTracksPublished = 0
+                        remoteClient.tracks(server, library, token, userId, includeMediaDetails = false) { page ->
+                            val enrichedPage = page.map { track ->
+                                val album = track.parentAlbumId?.let(albumsById::get)
+                                if (album == null) track else track.copy(
+                                    album = track.album.takeUnless { it == "Unknown album" } ?: album.title,
+                                    artist = track.artist.takeUnless { it == "Unknown artist" } ?: album.artist,
+                                    thumbUrl = track.thumbUrl ?: album.thumbUrl,
+                                )
+                            }
+                            totalTracksLoaded += enrichedPage.size
+                            val pageGrouped = enrichedPage
+                                .groupBy { it.parentAlbumId?.takeIf { id -> id.isNotBlank() } ?: jellyfinAlbumIdByTitle(albums, it) }
+                                .filterKeys { it.isNotBlank() }
+
+                            val nextMap = currentTracksByAlbum.toMutableMap()
+                            for ((albumId, tracks) in pageGrouped) {
+                                nextMap[albumId] = nextMap.getOrElse(albumId) { emptyList() } + tracks
+                            }
+                            currentTracksByAlbum = nextMap
+
+                            val shouldPublishProgress =
+                                totalTracksPublished == 0 ||
+                                    totalTracksLoaded - totalTracksPublished >= JellyfinFullSyncProgressTrackInterval
+                            if (shouldPublishProgress) {
+                                publishJellyfinProgress(
+                                    CatalogSnapshot(artists = enrichedArtists, albums = albums, tracksByParent = currentTracksByAlbum),
+                                    "Loaded $totalTracksLoaded $remoteLabel songs…",
+                                    persistProgress = false,
+                                )
+                                totalTracksPublished = totalTracksLoaded
+                            }
+                        }
+                        if (totalTracksPublished != totalTracksLoaded) {
+                            publishJellyfinProgress(
+                                CatalogSnapshot(artists = enrichedArtists, albums = albums, tracksByParent = currentTracksByAlbum),
+                                "Loaded $totalTracksLoaded $remoteLabel songs…",
+                                persistProgress = false,
+                            )
+                        }
+
+                        val playlists = remoteClient.playlists(server, library, token, userId)
+                        remoteRaw = CatalogSnapshot(
+                            artists = enrichedArtists,
+                            albums = albums,
+                            playlists = playlists,
+                            tracksByParent = currentTracksByAlbum,
+                        )
+                    }
+                    merged = CatalogMerge.merge(
+                        CatalogSnapshot(),
+                        CatalogMerge.withPrefix(remotePrefix, remoteRaw),
+                        localRaw,
+                    ).copy(downloads = previous.downloads)
+                    mutableCatalog.value = merged
+                    mutableCatalogSyncState.value = CatalogSyncState(
+                        phase = CatalogSyncPhase.Persisting,
+                        message = "Saving library…",
+                        loadedAlbums = merged.albums.size,
+                        loadedTracks = merged.tracksByParent.values.sumOf { it.size },
+                        blocking = false,
+                    )
+                    persistAsync(merged)
+                    mutableCatalogSyncState.value = CatalogSyncState(
+                        phase = CatalogSyncPhase.Complete,
+                        message = "Library refreshed.",
+                        loadedAlbums = merged.albums.size,
+                        loadedTracks = merged.tracksByParent.values.sumOf { it.size },
+                    )
+                    merged
+                }
+            }
+        } catch (error: Throwable) {
+            if (error is CancellationException) throw error
+            mutableCatalogSyncState.value = CatalogSyncState(
+                phase = CatalogSyncPhase.Failed,
+                message = error.message ?: "$remoteLabel sync failed.",
+            )
+            throw error
+        }
+        PhoebeLog.d("CatalogRepository") {
+            "refreshAggregated complete → ${snapshot.albums.size} albums, " +
+                "${snapshot.tracksByParent.values.sumOf { it.size }} tracks"
+        }
+    }
+
+    suspend fun loadJellyfinLibraryPage(session: PlexSession?, kind: JellyfinLibraryPageKind, pageIndex: Int) {
+        if (session == null || session.jellyfinSyncMode != JellyfinSyncMode.Quick || pageIndex < 0) return
+        if (!session.isEmbyFamily()) {
+            loadAdapterLibraryPage(session, kind, pageIndex)
+            return
+        }
+        val remoteClient = if (session.providerType.catalogPrefix == "emby") embyClient else jellyfinClient
+        val remotePrefix = session.providerType.catalogPrefix
+        val remoteLabel = session.providerType.name
+        val server = session.selectedServer ?: return
+        val library = session.selectedLibrary ?: return
+        val token = session.token.takeIf { it.isNotBlank() } ?: return
+        val userId = session.userId?.takeIf { it.isNotBlank() } ?: return
+        refreshMutex.withLock {
+            val current = mutableCatalog.value
+            val info = current.remotePageInfo
+            val alreadyLoaded = when (kind) {
+                JellyfinLibraryPageKind.Artists -> pageIndex in info.loadedArtistPages
+                JellyfinLibraryPageKind.Albums -> pageIndex in info.loadedAlbumPages
+                JellyfinLibraryPageKind.Tracks -> pageIndex in info.loadedTrackPages
+            }
+            if (alreadyLoaded) return
+
+            mutableCatalogSyncState.value = CatalogSyncState(
+                phase = CatalogSyncPhase.LoadingLibrary,
+                message = "Loading $remoteLabel ${kind.name.lowercase()} page ${pageIndex + 1}…",
+                loadedAlbums = current.albums.size,
+                loadedTracks = current.tracksByParent.values.sumOf { it.size },
+                blocking = false,
+            )
+
+            val updated = when (kind) {
+                JellyfinLibraryPageKind.Artists -> {
+                    val page = remoteClient.artistPage(server, library, token, userId, pageIndex)
+                    val prefixed = CatalogMerge.withPrefix(remotePrefix, CatalogSnapshot(artists = page.items)).artists
+                    current.copy(
+                        artists = (current.artists + prefixed).distinctBy { it.id },
+                        remotePageInfo = info.copy(
+                            pageSize = page.pageSize,
+                            artistTotal = page.total,
+                            loadedArtistPages = info.loadedArtistPages + pageIndex,
+                        ),
+                    )
+                }
+                JellyfinLibraryPageKind.Albums -> {
+                    val page = remoteClient.albumPage(server, library, token, userId, pageIndex)
+                    val prefixed = CatalogMerge.withPrefix(remotePrefix, CatalogSnapshot(albums = page.items)).albums
+                    val nextAlbums = (current.albums + prefixed).distinctBy { it.id }
+                    current.copy(
+                        albums = nextAlbums,
+                        artists = enrichArtistAlbumCountsOnly(enrichArtistArtwork(current.artists, nextAlbums), nextAlbums),
+                        remotePageInfo = info.copy(
+                            pageSize = page.pageSize,
+                            albumTotal = page.total,
+                            loadedAlbumPages = info.loadedAlbumPages + pageIndex,
+                        ),
+                    )
+                }
+                JellyfinLibraryPageKind.Tracks -> {
+                    val page = remoteClient.trackPage(server, library, token, userId, pageIndex)
+                    val rawTracksByAlbum = page.items
+                        .groupBy { it.parentAlbumId?.takeIf { id -> id.isNotBlank() } ?: jellyfinAlbumIdByTitle(emptyList(), it) }
+                        .filterKeys { it.isNotBlank() }
+                    val prefixedTracks = CatalogMerge.withPrefix(remotePrefix, CatalogSnapshot(tracksByParent = rawTracksByAlbum)).tracksByParent
+                    current.copy(
+                        tracksByParent = mergeTrackParents(current.tracksByParent, prefixedTracks),
+                        remotePageInfo = info.copy(
+                            pageSize = page.pageSize,
+                            trackTotal = page.total,
+                            loadedTrackPages = info.loadedTrackPages + pageIndex,
+                        ),
+                    )
+                }
+            }
+
+            mutableCatalog.value = updated
+            persistAsync(updated)
+            mutableCatalogSyncState.value = CatalogSyncState(
+                phase = CatalogSyncPhase.Complete,
+                message = "Loaded $remoteLabel ${kind.name.lowercase()} page ${pageIndex + 1}.",
+                loadedAlbums = updated.albums.size,
+                loadedTracks = updated.tracksByParent.values.sumOf { it.size },
+            )
+        }
+    }
+
+    private suspend fun loadAdapterLibraryPage(session: PlexSession, kind: JellyfinLibraryPageKind, pageIndex: Int) {
+        if (kind != JellyfinLibraryPageKind.Albums) return
+        val adapter = providerRegistry.adapterFor(session)?.takeIf { it.capabilities.pagedCatalog } ?: return
+        refreshMutex.withLock {
+            val current = mutableCatalog.value
+            val info = current.remotePageInfo
+            if (pageIndex in info.loadedAlbumPages) return
+
+            mutableCatalogSyncState.value = CatalogSyncState(
+                phase = CatalogSyncPhase.LoadingLibrary,
+                message = "Loading ${session.providerType.name} albums page ${pageIndex + 1}…",
+                loadedAlbums = current.albums.size,
+                loadedTracks = current.tracksByParent.values.sumOf { it.size },
+                blocking = false,
+            )
+            val (rawSnapshot, page) = adapter.albumPageCatalog(session, pageIndex) ?: return
+            val prefixed = CatalogMerge.withPrefix(session.providerType.catalogPrefix, rawSnapshot)
+            val updated = current.copy(
+                albums = (current.albums + prefixed.albums).distinctBy { it.id },
+                tracksByParent = mergeTrackParents(current.tracksByParent, prefixed.tracksByParent),
+                remotePageInfo = info.copy(
+                    pageSize = page.pageSize,
+                    albumTotal = page.total,
+                    loadedAlbumPages = info.loadedAlbumPages + pageIndex,
+                ),
+            )
+            mutableCatalog.value = updated
+            persistAsync(updated)
+            mutableCatalogSyncState.value = CatalogSyncState(
+                phase = CatalogSyncPhase.Complete,
+                message = "Loaded ${session.providerType.name} albums page ${pageIndex + 1}.",
+                loadedAlbums = updated.albums.size,
+                loadedTracks = updated.tracksByParent.values.sumOf { it.size },
+            )
+        }
+    }
+
     suspend fun ensureCollectionItems(session: PlexSession?, entry: CollectionEntry, value: String) {
+        if (!session.supportsCollectionEntry(entry)) {
+            PhoebeLog.d("PlexCollections") { "lazy items skipped target=${entry.target.name} facet=${entry.facet.name}: unsupported provider facet" }
+            return
+        }
         val normalizedValue = value.trim()
         if (normalizedValue.isBlank()) return
         try {
@@ -630,6 +1157,10 @@ class CatalogRepository(
     }
 
     suspend fun ensureCollectionValues(session: PlexSession?, entry: CollectionEntry) {
+        if (!session.supportsCollectionEntry(entry)) {
+            PhoebeLog.d("PlexCollections") { "lazy values skipped target=${entry.target.name} facet=${entry.facet.name}: unsupported provider facet" }
+            return
+        }
         val server = session?.selectedServer
         if (server == null) {
             PhoebeLog.d("PlexCollections") { "lazy values skipped target=${entry.target.name} facet=${entry.facet.name}: no selected server" }
@@ -859,6 +1390,16 @@ class CatalogRepository(
         }
     }
 
+    private fun mergeTrackParents(
+        existing: Map<String, List<Track>>,
+        incoming: Map<String, List<Track>>,
+    ): Map<String, List<Track>> =
+        incoming.entries.fold(existing) { acc, (parentId, tracks) ->
+            val merged = (acc[parentId].orEmpty() + preserveTrackDateAdded(acc[parentId].orEmpty(), tracks))
+                .distinctBy { it.id }
+            acc + (parentId to merged)
+        }
+
     private suspend fun removeMissingLocalArtworkReferences(snapshot: CatalogSnapshot): CatalogSnapshot {
         val checked = mutableMapOf<String, Boolean>()
         suspend fun available(url: String?): Boolean {
@@ -974,6 +1515,57 @@ class CatalogRepository(
         showRefreshing: Boolean = true,
     ) {
         val fetch: suspend () -> Unit = fetch@{
+            val providerPrefix = session?.providerType?.catalogPrefix
+            if (session != null && providerPrefix != null && playlist.id.startsWith("$providerPrefix:") && !session.isPlex()) {
+                val server = session?.selectedServer ?: return@fetch
+                val token = session.token
+                val adapter = providerRegistry.adapterFor(session)
+                if (adapter != null && !session.isEmbyFamily()) {
+                    val tracks = adapter.playlistTracks(session, playlist.copy(id = playlist.id.removePrefix("$providerPrefix:")))
+                        .map { it.withProviderPrefix(providerPrefix) }
+                        .let { preserveTrackDateAdded(mutableCatalog.value.tracksByParent[playlist.id].orEmpty(), it) }
+                    val next = mutableCatalog.value.copy(
+                        tracksByParent = mutableCatalog.value.tracksByParent + (playlist.id to tracks),
+                        playlists = mutableCatalog.value.playlists.map { p ->
+                            if (p.id == playlist.id) {
+                                p.copy(
+                                    trackCount = tracks.size,
+                                    thumbUrl = p.thumbUrl ?: tracks.firstNotNullOfOrNull { it.thumbUrl },
+                                )
+                            } else p
+                        },
+                    )
+                    publish(next, persist = false)
+                    persistPlaylistTracksAsync(next, playlist.id)
+                    return@fetch
+                }
+                val userId = session.userId ?: return@fetch
+                val remotePlaylist = playlist.copy(
+                    id = if (playlist.id == JellyfinClient.JellyfinLikedSongsPlaylistId) {
+                        playlist.id
+                    } else {
+                        playlist.id.removePrefix("$providerPrefix:")
+                    },
+                )
+                val remoteClient = if (session.providerType.catalogPrefix == "emby") embyClient else jellyfinClient
+                val tracks = remoteClient.playlistTracks(server, remotePlaylist, token, userId)
+                    .map { it.withProviderPrefix(providerPrefix) }
+                    .let { preserveTrackDateAdded(mutableCatalog.value.tracksByParent[playlist.id].orEmpty(), it) }
+                val next = mutableCatalog.value.copy(
+                    tracksByParent = mutableCatalog.value.tracksByParent + (playlist.id to tracks),
+                    playlists = mutableCatalog.value.playlists.map { p ->
+                        if (p.id == playlist.id) {
+                            p.copy(
+                                trackCount = tracks.size,
+                                thumbUrl = p.thumbUrl ?: tracks.firstNotNullOfOrNull { it.thumbUrl },
+                            )
+                        } else p
+                    },
+                )
+                publish(next, persist = false)
+                persistPlaylistTracksAsync(next, playlist.id)
+                return@fetch
+            }
             val rating = plexRatingKey(playlist.id) ?: return@fetch
             val server = session?.selectedServer ?: return@fetch
             val token = session.serverAuthToken() ?: return@fetch
@@ -1004,7 +1596,7 @@ class CatalogRepository(
     suspend fun warmPlaylistTracks(session: PlexSession?) {
         val playlists = mutableCatalog.value.playlists
             .filter { playlist ->
-                playlist.id.startsWith("plex:") &&
+                playlist.remoteProviderPrefix() != null &&
                     playlist.trackCount > 0 &&
                     mutableCatalog.value.tracksByParent[playlist.id].isNullOrEmpty()
             }
@@ -1026,6 +1618,30 @@ class CatalogRepository(
     suspend fun tracksForAlbum(session: PlexSession?, album: Album): List<Track> {
         val existing = mutableCatalog.value.tracksByParent[album.id]
         if (!existing.isNullOrEmpty()) return existing
+        val providerPrefix = session?.providerType?.catalogPrefix
+        if (session != null && providerPrefix != null && album.id.startsWith("$providerPrefix:") && !session.isPlex()) {
+            val server = session?.selectedServer ?: return emptyList()
+            val token = session.token
+            return withCatalogRefreshing {
+                val adapter = providerRegistry.adapterFor(session)
+                val tracks = if (adapter != null && !session.isEmbyFamily()) {
+                    adapter.albumTracks(session, album.copy(id = album.id.removePrefix("$providerPrefix:")))
+                } else {
+                    val userId = session.userId ?: return@withCatalogRefreshing emptyList()
+                    val remoteClient = if (session.providerType.catalogPrefix == "emby") embyClient else jellyfinClient
+                    remoteClient.albumTracks(server, album.copy(id = album.id.removePrefix("$providerPrefix:")), token, userId)
+                }
+                    .map { it.withProviderPrefix(providerPrefix) }
+                    .let { preserveTrackDateAdded(mutableCatalog.value.tracksByParent[album.id].orEmpty(), it) }
+                publish(
+                    mutableCatalog.value.copy(
+                        tracksByParent = mutableCatalog.value.tracksByParent + (album.id to tracks),
+                    ),
+                    persist = true,
+                )
+                mutableCatalog.value.tracksByParent[album.id].orEmpty()
+            }
+        }
         val rating = plexRatingKey(album.id) ?: return mutableCatalog.value.tracksByParent[album.id].orEmpty()
         val server = session?.selectedServer ?: return emptyList()
         session.selectedLibrary ?: return emptyList()
@@ -1050,6 +1666,56 @@ class CatalogRepository(
     suspend fun ensureTracksForArtistAlbums(session: PlexSession?, artistTitle: String) {
         val server = session?.selectedServer ?: return
         val token = session.serverAuthToken() ?: return
+        
+        if (session.isEmbyFamily()) {
+            val userId = session.userId ?: return
+            val library = session.selectedLibrary ?: return
+            val remoteClient = if (session.providerType.catalogPrefix == "emby") embyClient else jellyfinClient
+            val providerPrefix = session.providerType.catalogPrefix
+            
+            val artistId = mutableCatalog.value.artists.find { it.title.equals(artistTitle, ignoreCase = true) }?.id?.removePrefix("$providerPrefix:")
+                ?: return
+            
+            withCatalogRefreshing {
+                runCatching {
+                    val albums = remoteClient.albumsForArtist(server, library, token, userId, artistId)
+                        .map { it.withProviderPrefix(providerPrefix) }
+                    
+                    val existingAlbums = mutableCatalog.value.albums
+                    val newAlbums = albums.filter { a -> existingAlbums.none { it.id == a.id } }
+                    
+                    if (newAlbums.isNotEmpty()) {
+                        catalogMergeMutex.withLock {
+                            val cur = mutableCatalog.value
+                            publish(cur.copy(albums = cur.albums + newAlbums), persist = false)
+                        }
+                    }
+                    
+                    coroutineScope {
+                        albums.map { album ->
+                            async {
+                                runCatching {
+                                    val snap = mutableCatalog.value
+                                    val existing = snap.tracksByParent[album.id]
+                                    if (!existing.isNullOrEmpty()) return@runCatching
+                                    
+                                    val tracks = remoteClient.albumTracks(server, album.copy(id = album.id.removePrefix("$providerPrefix:")), token, userId)
+                                        .map { it.withProviderPrefix(providerPrefix) }
+                                    
+                                    catalogMergeMutex.withLock {
+                                        val cur = mutableCatalog.value
+                                        publish(cur.copy(tracksByParent = cur.tracksByParent + (album.id to tracks)), persist = false)
+                                    }
+                                }
+                            }
+                        }.awaitAll()
+                    }
+                }
+                publish(mutableCatalog.value, persist = true)
+            }
+            return
+        }
+
         val albums = catalogAlbumsForArtist(mutableCatalog.value, artistTitle)
             .filter { plexRatingKey(it.id) != null }
         val albumsToFetch = albums.filter { album ->
@@ -1403,6 +2069,7 @@ class CatalogRepository(
         facet: CollectionFacet,
         value: String,
     ): PlexFilterChoice? {
+        if (!session.supportsCollectionEntry(CollectionEntry(CollectionTarget.Albums, facet))) return null
         if (facet != CollectionFacet.Mood && facet != CollectionFacet.Style) return null
         val server = session?.selectedServer ?: return null
         val library = session.selectedLibrary ?: return null
@@ -1437,6 +2104,7 @@ class CatalogRepository(
         facet: CollectionFacet,
         value: String,
     ): List<Track> {
+        if (!session.supportsCollectionEntry(CollectionEntry(CollectionTarget.Albums, facet))) return emptyList()
         if (facet != CollectionFacet.Mood && facet != CollectionFacet.Style) return emptyList()
         val server = session?.selectedServer
         val library = session?.selectedLibrary
@@ -1497,6 +2165,7 @@ class CatalogRepository(
         facet: CollectionFacet,
         value: String,
     ): List<Track> {
+        if (!session.supportsCollectionEntry(CollectionEntry(CollectionTarget.Albums, facet))) return emptyList()
         if (facet != CollectionFacet.Mood && facet != CollectionFacet.Style) return emptyList()
         val cached = cachedTracksForCollectionFacet(facet, value)
         if (cached.isNotEmpty()) return cached.shuffled().take(CollectionFacetFirstPageSize)
@@ -1598,11 +2267,33 @@ class CatalogRepository(
     }
 
     suspend fun playArtistRadio(session: PlexSession?, artist: Artist): List<Track> {
+        val providerPrefix = session?.providerType?.catalogPrefix
+        if (session.isEmbyFamily() && providerPrefix != null && artist.id.startsWith("$providerPrefix:")) {
+            val server = session?.selectedServer ?: return emptyList()
+            val userId = session.userId ?: return emptyList()
+            val remoteClient = if (providerPrefix == "emby") embyClient else jellyfinClient
+            return remoteClient.instantMix(server, session.token, userId, artist.id.removePrefix("$providerPrefix:"))
+                .map { it.withProviderPrefix(providerPrefix) }
+                .also { tracks ->
+                    if (tracks.isNotEmpty()) publishIndexedJellyfinTracks(tracks)
+                }
+        }
         val station = artistRadioStation(session, artist) ?: return emptyList()
         return playRadioStation(session, station)
     }
 
     suspend fun artistRadioStation(session: PlexSession?, artist: Artist): PlexRadioStation? {
+        val providerPrefix = session?.providerType?.catalogPrefix
+        if (session.isEmbyFamily() && providerPrefix != null && artist.id.startsWith("$providerPrefix:")) {
+            return PlexRadioStation(
+                id = "$providerPrefix-artist-radio-${artist.id}",
+                title = "${artist.title} Radio",
+                subtitle = "${session.providerType.name} Instant Mix",
+                key = artist.id,
+                thumbUrl = artist.thumbUrl,
+                category = PlexRadioStationCategory.Artist,
+            )
+        }
         val ratingKey = plexRatingKey(artist.id) ?: return null
         val server = session?.selectedServer ?: return null
         session.selectedLibrary ?: return null
@@ -1623,6 +2314,24 @@ class CatalogRepository(
             .distinctBy { it.id }
             .filter { it.year?.let { year -> year in start..end } == true }
             .toList()
+
+    private suspend fun publishIndexedJellyfinTracks(tracks: List<Track>) {
+        val tracksByAlbum = tracks
+            .groupBy { track -> track.parentAlbumId?.takeIf { it.isNotBlank() } ?: resolveJellyfinTrackParentId(track, mutableCatalog.value) }
+            .filterKeys { it != null }
+            .mapKeys { it.key!! }
+        if (tracksByAlbum.isEmpty()) return
+        catalogMergeMutex.withLock {
+            val cur = mutableCatalog.value
+            mutableCatalog.value = cur.copy(tracksByParent = cur.tracksByParent + tracksByAlbum)
+        }
+    }
+
+    private fun resolveJellyfinTrackParentId(track: Track, snapshot: CatalogSnapshot): String? =
+        snapshot.albums.firstOrNull {
+            it.title.equals(track.album, ignoreCase = true) &&
+                it.artist.equals(track.artist, ignoreCase = true)
+        }?.id
 
     suspend fun tracksForPlaylist(session: PlexSession?, playlist: Playlist): List<Track> {
         if (playlist.isLocalPlaylist()) {
@@ -1699,6 +2408,7 @@ class CatalogRepository(
     }
 
     suspend fun syncLikedSongsPlaylist(session: PlexSession?): Boolean {
+        if (session.isEmbyFamily()) return true
         if (session?.supportsPlexPlaylists() != true) return false
         val remotePlaylist = mutableCatalog.value.playlists.firstOrNull {
             it.isLikedSongsPlaylist() && it.id != PENDING_LIKED_SONGS_PLAYLIST_ID
@@ -1746,6 +2456,24 @@ class CatalogRepository(
         track: Track,
         liked: Boolean,
     ): Boolean {
+        if (session != null && !session.isPlex()) {
+            val server = session?.selectedServer ?: return false
+            val prefix = session.providerType.catalogPrefix
+            val itemId = providerItemId(track.id, prefix) ?: return false
+            return runCatching {
+                val adapter = providerRegistry.adapterFor(session)
+                if (adapter != null) {
+                    adapter.setFavorite(session, itemId, liked, ProviderItemKind.Track)
+                } else {
+                    val userId = session.userId ?: return false
+                    val remoteClient = if (prefix == "emby") embyClient else jellyfinClient
+                    remoteClient.setFavorite(server, session.token, userId, itemId, liked)
+                    true
+                }
+            }.onFailure { error ->
+                PhoebeLog.d("CatalogRepository") { "Liked Songs ${session.providerType.name} favorite sync failed: ${error.message}" }
+            }.getOrDefault(false)
+        }
         if (session?.supportsPlexPlaylists() != true || !track.canTogglePlexLike()) return false
         val remotePlaylist = mutableCatalog.value.playlists.firstOrNull {
             it.isLikedSongsPlaylist() && it.id != PENDING_LIKED_SONGS_PLAYLIST_ID
@@ -1809,6 +2537,11 @@ class CatalogRepository(
     }
 
     suspend fun toggleLikedTrackRemote(session: PlexSession?, track: Track): Boolean {
+        if (session != null && !session.isPlex()) {
+            val liked = toggleLikedTrackLocally(track)
+            syncLikedTrackChange(session, track, liked)
+            return liked
+        }
         if (!track.canTogglePlexLike()) return false
         val playlist = findOrCreateLikedSongsPlaylist(session) ?: return false
         val fresh = runCatching {
@@ -1889,6 +2622,35 @@ class CatalogRepository(
         val cleanTitle = title.trim()
         if (cleanTitle.isEmpty()) return null
         val s = session ?: return null
+        if (!s.isPlex()) {
+            val prefix = s.providerType.catalogPrefix
+            if (!s.supportsRemotePlaylists()) return null
+            if (initialTracks.any { it.isLocalMediaPlayback() || !it.belongsToProvider(s.providerType) }) return null
+            val created = runCatching {
+                val adapter = providerRegistry.adapterFor(s)
+                if (adapter != null && !s.isEmbyFamily()) {
+                    adapter.createPlaylist(s, cleanTitle, initialTracks)
+                } else {
+                    val server = s.selectedServer ?: return null
+                    val userId = s.userId ?: return null
+                    val seedIds = initialTracks.map { it.id.removePrefix("$prefix:") }
+                    val remoteClient = if (prefix == "emby") embyClient else jellyfinClient
+                    remoteClient.createPlaylist(server, s.token, userId, cleanTitle, seedIds)
+                }
+            }.onFailure { error ->
+                PhoebeLog.d("CatalogRepository") { "create${s.providerType.name}Playlist '$cleanTitle' failed: ${error.message}" }
+            }.getOrNull() ?: return null
+            val prefixedPlaylist = created.copy(id = if (created.id.startsWith("$prefix:")) created.id else "$prefix:${created.id}")
+            val snapshot = mutableCatalog.value
+            publish(
+                snapshot.copy(
+                    playlists = snapshot.playlists.filterNot { it.id == prefixedPlaylist.id } + prefixedPlaylist,
+                    tracksByParent = if (initialTracks.isEmpty()) snapshot.tracksByParent else snapshot.tracksByParent + (prefixedPlaylist.id to initialTracks),
+                ),
+                persist = true,
+            )
+            return prefixedPlaylist
+        }
         if (!s.supportsPlexPlaylists()) return null
         if (initialTracks.any { it.isLocalMediaPlayback() || !it.isPlexLibraryTrack() }) return null
         val server = s.selectedServer ?: return null
@@ -1983,6 +2745,54 @@ class CatalogRepository(
         if (tracks.isEmpty()) return
         if (playlist.isLocalPlaylist()) {
             addTracksToLocalPlaylist(playlist, tracks)
+            return
+        }
+        val remotePrefix = playlist.remoteProviderPrefix()
+        if (remotePrefix != null && remotePrefix != "plex") {
+            if (session?.providerType?.catalogPrefix != remotePrefix || session.supportsRemotePlaylists() != true) {
+                PhoebeLog.d("CatalogRepository") { "addTracksToPlaylist: ${remotePrefix} session not ready" }
+                return
+            }
+            var snapshot = mutableCatalog.value
+            val playlistMeta = snapshot.playlists.find { it.id == playlist.id } ?: playlist
+            var existing = snapshot.tracksByParent[playlist.id].orEmpty()
+            if (existing.size < playlistMeta.trackCount) {
+                runCatching { refetchPlaylistTracksFromPlex(session, playlistMeta) }
+                snapshot = mutableCatalog.value
+                existing = snapshot.tracksByParent[playlist.id].orEmpty()
+            }
+            val existingIds = existing.map { it.id }.toHashSet()
+            val toAdd = tracks
+                .filterNot { it.id in existingIds }
+                .filter { !it.isLocalMediaPlayback() && it.id.startsWith("$remotePrefix:") }
+            if (toAdd.isEmpty()) return
+            runCatching {
+                val adapter = providerRegistry.adapterFor(session)
+                if (adapter != null && !session.isEmbyFamily()) {
+                    adapter.addTracksToPlaylist(session, playlist, toAdd)
+                } else {
+                    val server = session.selectedServer ?: return
+                    val userId = session.userId ?: return
+                    val remoteClient = if (remotePrefix == "emby") embyClient else jellyfinClient
+                    remoteClient.addTracksToPlaylist(
+                        server = server,
+                        token = session.token,
+                        userId = userId,
+                        playlistId = playlist.id.removePrefix("$remotePrefix:"),
+                        itemIds = toAdd.map { it.id.removePrefix("$remotePrefix:") },
+                    )
+                }
+            }.onFailure { error ->
+                PhoebeLog.d("CatalogRepository") { "addTracksToPlaylist $remotePrefix failed for '${playlist.title}': ${error.message}" }
+            }
+            val updated = toAdd + existing
+            publish(
+                snapshot.copy(
+                    playlists = snapshot.playlists.map { if (it.id == playlist.id) it.copy(trackCount = updated.size) else it },
+                    tracksByParent = snapshot.tracksByParent + (playlist.id to updated),
+                ),
+                persist = true,
+            )
             return
         }
         if (!playlist.id.startsWith("plex:")) {
@@ -2091,10 +2901,21 @@ class CatalogRepository(
         var plexAttempted = false
         var plexSynced = false
         val rating = plexRatingKey(cleanUpdate.trackId)
+        val remotePrefix = session?.providerType?.catalogPrefix
+        val remoteItemId = remotePrefix?.let { providerItemId(cleanUpdate.trackId, it) }
         val server = session?.selectedServer
         val library = session?.selectedLibrary
         val token = session?.token?.takeIf { it.isNotBlank() }
         val hasPlexEditableChanges = cleanUpdate.title != existing.title || cleanUpdate.artist != existing.artist
+        if (session.isEmbyFamily() && remoteItemId != null && server != null && token != null) {
+            plexAttempted = true
+            plexSynced = runCatching {
+                val remoteClient = if (remotePrefix == "emby") embyClient else jellyfinClient
+                remoteClient.editTrackMetadata(server, token, remoteItemId, existing, cleanUpdate)
+            }.onFailure { error ->
+                PhoebeLog.d("CatalogRepository") { "updateTrackMetadata ${session?.providerType?.name} sync failed for '${existing.title}': ${error.message}" }
+            }.isSuccess
+        } else
         if (hasPlexEditableChanges && rating != null && server != null && library != null && token != null) {
             plexAttempted = true
             plexSynced = runCatching {
@@ -2236,7 +3057,7 @@ class CatalogRepository(
         ).copy(favorite = favorite)
     }
 
-    suspend fun toggleFavoritePlaylist(playlist: Playlist): FavoriteSyncResult {
+    suspend fun toggleFavoritePlaylist(session: PlexSession?, playlist: Playlist): FavoriteSyncResult {
         val snapshot = mutableCatalog.value
         var nextFavorite: Boolean? = null
         val playlists = snapshot.playlists.map {
@@ -2249,7 +3070,7 @@ class CatalogRepository(
         }
         val favorite = nextFavorite ?: return FavoriteSyncResult()
         publish(snapshot.copy(playlists = playlists), persist = true)
-        return FavoriteSyncResult(favorite = favorite)
+        return syncRemoteFavorite(session, playlist.id, favorite, "playlist '${playlist.title}'").copy(favorite = favorite)
     }
 
     fun favoritePlaylistsExport(): FavoritePlaylistsExport =
@@ -2297,6 +3118,30 @@ class CatalogRepository(
         rating: Float?,
         label: String,
     ): RatingSyncResult {
+        val providerPrefix = session?.providerType?.catalogPrefix
+        val remoteId = providerPrefix?.let { providerItemId(id, it) }
+        if (session != null && !session.isPlex() && remoteId != null) {
+            val server = session?.selectedServer
+            val token = session?.token
+            if (!session.supportsRemoteRatings() || server == null || token.isNullOrBlank()) {
+                return RatingSyncResult(savedLocally = false, plexAttempted = false, plexSynced = false)
+            }
+            val synced = runCatching {
+                val adapter = providerRegistry.adapterFor(session)
+                if (adapter != null && !session.isEmbyFamily()) {
+                    adapter.rateItem(session, remoteId, rating)
+                } else {
+                    val remoteClient = if (providerPrefix == "emby") embyClient else jellyfinClient
+                    val userId = session.userId
+                    if (userId != null) remoteClient.rateItem(server, token, userId, remoteId, rating)
+                    else remoteClient.rateItem(server, token, remoteId, rating)
+                    true
+                }
+            }.onFailure { error ->
+                PhoebeLog.d("CatalogRepository") { "rateItem ${session.providerType.name} sync failed for $label: ${error.message}" }
+            }.getOrDefault(false)
+            return RatingSyncResult(savedLocally = false, plexAttempted = true, plexSynced = synced)
+        }
         val ratingKey = plexRatingKey(id)
         val server = session?.selectedServer
         val token = session?.serverAuthToken()
@@ -2318,6 +3163,9 @@ class CatalogRepository(
         label: String,
         sync: suspend (PlexServer, String, MusicLibrary, String) -> Unit,
     ): FavoriteSyncResult {
+        if (session != null && !session.isPlex()) {
+            return syncRemoteFavorite(session, id, favorite, label)
+        }
         val ratingKey = plexRatingKey(id)
         val server = session?.selectedServer
         val library = session?.selectedLibrary
@@ -2331,6 +3179,44 @@ class CatalogRepository(
             PhoebeLog.d("CatalogRepository") { "favorite collection Plex sync failed for $label: ${error.message}" }
         }.isSuccess
         return FavoriteSyncResult(favorite = favorite, plexAttempted = true, plexSynced = synced)
+    }
+
+    private suspend fun syncRemoteFavorite(
+        session: PlexSession?,
+        id: String,
+        favorite: Boolean,
+        label: String,
+    ): FavoriteSyncResult {
+        val prefix = session?.providerType?.catalogPrefix ?: return FavoriteSyncResult(favorite = favorite)
+        val itemId = providerItemId(id, prefix) ?: return FavoriteSyncResult(favorite = favorite)
+        val server = session?.selectedServer ?: return FavoriteSyncResult(favorite = favorite)
+        val token = session.token.takeIf { it.isNotBlank() } ?: return FavoriteSyncResult(favorite = favorite)
+        val synced = runCatching {
+            val adapter = providerRegistry.adapterFor(session)
+            if (adapter != null && !session.isEmbyFamily()) {
+                adapter.setFavorite(session, itemId, favorite, providerItemKindFor(id))
+            } else {
+                val remoteClient = if (prefix == "emby") embyClient else jellyfinClient
+                val userId = session.userId
+                if (userId != null) remoteClient.setFavorite(server, token, userId, itemId, favorite)
+                else remoteClient.setFavorite(server, token, itemId, favorite)
+                true
+            }
+        }.onFailure { error ->
+            PhoebeLog.d("CatalogRepository") { "favorite ${session.providerType.name} sync failed for $label: ${error.message}" }
+        }.getOrDefault(false)
+        return FavoriteSyncResult(favorite = favorite, plexAttempted = true, plexSynced = synced)
+    }
+
+    private fun providerItemKindFor(id: String): ProviderItemKind {
+        val snapshot = mutableCatalog.value
+        return when {
+            snapshot.artists.any { it.id == id } -> ProviderItemKind.Artist
+            snapshot.albums.any { it.id == id } -> ProviderItemKind.Album
+            snapshot.playlists.any { it.id == id } -> ProviderItemKind.Playlist
+            snapshot.tracksByParent.values.asSequence().flatten().any { it.id == id } -> ProviderItemKind.Track
+            else -> ProviderItemKind.Unknown
+        }
     }
 
     suspend fun download(track: Track): DownloadBatchResult =
@@ -3063,8 +3949,52 @@ class CatalogRepository(
     private fun Track.withPlexPrefix(): Track =
         if (id.startsWith("plex:")) this else copy(id = "plex:$id")
 
+    private fun Track.withJellyfinPrefix(): Track =
+        if (id.startsWith("jellyfin:")) this else copy(
+            id = "jellyfin:$id",
+            parentAlbumId = parentAlbumId?.let { if (it.startsWith("jellyfin:")) it else "jellyfin:$it" },
+        )
+
+    private fun Track.withProviderPrefix(prefix: String): Track =
+        if (id.startsWith("$prefix:")) this else copy(
+            id = "$prefix:$id",
+            parentAlbumId = parentAlbumId?.let { if (it.startsWith("$prefix:")) it else "$prefix:$it" },
+        )
+
+    private fun Album.withProviderPrefix(prefix: String): Album =
+        if (id.startsWith("$prefix:")) this else copy(id = "$prefix:$id")
+
+    private fun providerItemId(id: String, prefix: String): String? =
+        id.removePrefix("$prefix:").takeIf { id.startsWith("$prefix:") && it.isNotBlank() }
+
+    private fun jellyfinItemId(id: String): String? =
+        id.removePrefix("jellyfin:").takeIf { id.startsWith("jellyfin:") && it.isNotBlank() }
+
+    private fun jellyfinAlbumIdByTitle(albums: List<Album>, track: Track): String =
+        albums.firstOrNull {
+            it.title.equals(track.album, ignoreCase = true) &&
+                it.artist.equals(track.artist, ignoreCase = true)
+        }?.id.orEmpty()
+
+    private fun jellyfinArtistsFromAlbums(albums: List<Album>): List<Artist> =
+        albums
+            .groupBy { it.artist.ifBlank { "Unknown artist" } }
+            .values
+            .map { artistAlbums ->
+                val first = artistAlbums.first()
+                Artist(
+                    id = "album-artist-${first.id}",
+                    title = first.artist.ifBlank { "Unknown artist" },
+                    thumbUrl = first.thumbUrl,
+                    albumCount = artistAlbums.size,
+                    genre = artistAlbums.firstNotNullOfOrNull { it.genre },
+                    rating = artistAlbums.firstNotNullOfOrNull { it.rating },
+                    favorite = artistAlbums.any { it.favorite },
+                )
+            }
+
     private fun Track.shouldPreserveAcrossPlexRefresh(currentToken: String?): Boolean {
-        if (isLocalMediaPlayback() || !isPlexLibraryTrack()) return true
+        if (isLocalMediaPlayback() || (isRemoteLibraryTrack() && !isPlexLibraryTrack()) || !isPlexLibraryTrack()) return true
         return currentToken != null && streamUrl.contains(currentToken)
     }
 
@@ -3082,6 +4012,7 @@ class CatalogRepository(
         const val CollectionFacetFirstPageSize = 80
         const val CollectionFacetTrackLimit = 500
         const val MaxCollectionFacetTrackPages = 4
+        const val JellyfinFullSyncProgressTrackInterval = 2_500
     }
 }
 

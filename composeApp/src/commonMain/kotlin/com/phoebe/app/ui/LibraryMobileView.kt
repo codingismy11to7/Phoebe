@@ -30,6 +30,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,6 +48,7 @@ import com.phoebe.app.data.catalogTracksForAlbum
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.CatalogSnapshot
+import com.phoebe.app.domain.JellyfinLibraryPageKind
 import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryUiPreferences
@@ -55,7 +57,7 @@ import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.canTogglePlexLike
 import com.phoebe.app.domain.isLocalMediaPlayback
 import com.phoebe.app.domain.isLikedSongsPlaylist
-import com.phoebe.app.domain.isPlexLibraryTrack
+import com.phoebe.app.domain.isRemoteLibraryTrack
 
 @Composable
 internal fun LibraryMobileView(
@@ -73,8 +75,11 @@ internal fun LibraryMobileView(
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
     modifier: Modifier = Modifier,
+    jellyfinPagination: Boolean = false,
+    onJellyfinPage: (JellyfinLibraryPageKind, Int) -> Unit = { _, _ -> },
 ) {
     var libraryViewMode by remember { mutableStateOf(LibraryViewMode.Grid) }
+    var pageIndex by remember(filter) { mutableStateOf(0) }
 
     val ascending = libraryUi.ascending
     val sortBy = libraryUi.sortBy
@@ -90,6 +95,20 @@ internal fun LibraryMobileView(
     }
     val sortedTracks = remember(allTracks, sortBy, ascending) {
         sortTracksForLibrary(allTracks, sortBy, ascending)
+    }
+    val artistTotal = catalog.remotePageInfo.artistTotal
+    val albumTotal = catalog.remotePageInfo.albumTotal
+    val trackTotal = catalog.remotePageInfo.trackTotal
+    val artistPage = remember(sortedArtists, jellyfinPagination, pageIndex, artistTotal) { libraryPage(sortedArtists, jellyfinPagination, pageIndex, artistTotal) }
+    val albumPage = remember(sortedAlbums, jellyfinPagination, pageIndex, albumTotal) { libraryPage(sortedAlbums, jellyfinPagination, pageIndex, albumTotal) }
+    val trackPage = remember(sortedTracks, jellyfinPagination, pageIndex, trackTotal) { libraryPage(sortedTracks, jellyfinPagination, pageIndex, trackTotal) }
+    LaunchedEffect(filter, sortedArtists.size, sortedAlbums.size, sortedTracks.size) {
+        val pageCount = when (filter) {
+            LibraryFilterTab.Artists -> artistPage.pageCount
+            LibraryFilterTab.Albums -> albumPage.pageCount
+            LibraryFilterTab.Songs -> trackPage.pageCount
+        }
+        if (pageIndex > pageCount - 1) pageIndex = (pageCount - 1).coerceAtLeast(0)
     }
 
     Column(modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp)) {
@@ -108,23 +127,37 @@ internal fun LibraryMobileView(
         if (catalogRefreshing) {
             LibraryLoadingStrip(Modifier.padding(bottom = 6.dp))
         }
+        when (filter) {
+            LibraryFilterTab.Artists -> LibraryPaginationControls(artistPage, onPage = {
+                if (jellyfinPagination) onJellyfinPage(filter.toJellyfinPageKind(), it)
+                pageIndex = it
+            })
+            LibraryFilterTab.Albums -> LibraryPaginationControls(albumPage, onPage = {
+                if (jellyfinPagination) onJellyfinPage(filter.toJellyfinPageKind(), it)
+                pageIndex = it
+            })
+            LibraryFilterTab.Songs -> LibraryPaginationControls(trackPage, onPage = {
+                if (jellyfinPagination) onJellyfinPage(filter.toJellyfinPageKind(), it)
+                pageIndex = it
+            })
+        }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (filter) {
                 LibraryFilterTab.Artists -> MobileArtistsContent(
-                    artists = sortedArtists,
+                    artists = artistPage.items,
                     viewMode = libraryViewMode,
                     onArtist = onArtist,
                 )
                 LibraryFilterTab.Albums -> MobileAlbumsContent(
                     catalog = catalog,
-                    albums = sortedAlbums,
+                    albums = albumPage.items,
                     viewMode = libraryViewMode,
                     onAlbum = onAlbum,
                 )
                 LibraryFilterTab.Songs -> MobileSongsList(
-                    tracks = sortedTracks,
+                    tracks = trackPage.items,
                     columns = libraryUi.columns,
-                    onPlay = { index -> onPlayTracks(sortedTracks, index) },
+                    onPlay = { index -> onPlayTracks(trackPage.items, index) },
                     onAddToUpNext = onAddToUpNext,
                     onDownload = onDownload,
                 )
@@ -805,7 +838,7 @@ internal fun MobileSongRow(
     val likeActions = LocalLikeActions.current
     val ratingActions = LocalRatingActions.current
     val downloads = LocalDownloadStatus.current
-    val canRate = ratingActions.ratingsEnabled && track.isPlexLibraryTrack()
+    val canRate = ratingActions.ratingsEnabled && track.isRemoteLibraryTrack()
     val canLike = likeActions.likesEnabled && track.canTogglePlexLike()
     val liked = likeActions.isLiked(track)
     val downloaded = downloads.isComplete(track)
@@ -1033,14 +1066,14 @@ internal fun PlaylistsMobileView(
             ) {
                 PhoebeIconView(PhoebeIcon.Queue, tint = PhoebeUi.mutedText, modifier = Modifier.size(36.dp))
                 Text(
-                    "Sign in to Plex to browse playlists",
+                    "Sign in to Plex or Jellyfin to browse playlists",
                     color = PhoebeUi.secondaryText,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.SemiBold,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 )
                 Text(
-                    "Playlists sync from your Plex music library.",
+                    "Playlists sync from your streaming music library.",
                     color = PhoebeUi.mutedText,
                     fontSize = 13.sp,
                     lineHeight = 18.sp,

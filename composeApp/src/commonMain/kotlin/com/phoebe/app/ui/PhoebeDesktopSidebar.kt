@@ -153,7 +153,8 @@ import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.isLocalMediaPlayback
 import com.phoebe.app.domain.isLikedSongsPlaylist
-import com.phoebe.app.domain.isPlexLibraryTrack
+import com.phoebe.app.domain.isRemoteLibraryTrack
+import com.phoebe.app.domain.providerLabel
 import com.phoebe.app.domain.supportsPlexPlaylists
 import com.phoebe.app.platform.createPlatformHttpClient
 import com.phoebe.app.platform.currentTimeMs
@@ -190,6 +191,9 @@ internal fun Sidebar(
     val pickLocalFolder = rememberPickLocalFolder(onPicked = onAddLocalFolder)
     val playlistActions = LocalPlaylistActions.current
     val syncState = LocalCatalogSyncState.current
+    val remoteSignedIn = session?.token?.isNotBlank() == true
+    val providerName = session.providerLabel()
+    val remoteSourceLabel = if (remoteSignedIn) "$providerName — streaming library" else "Streaming provider — Plex or Jellyfin"
     val showPlaylistRefreshBar = catalogRefreshing || syncState.isActive
     val likedSongsPlaylist = playlistActions.playlists.firstOrNull { it.isLikedSongsPlaylist() }
         ?: if (playlistActions.playlistsEnabled) {
@@ -273,7 +277,7 @@ internal fun Sidebar(
                 Column(Modifier.weight(1f)) {
                     Text(session?.userName ?: "Guest", color = PhoebeUi.secondaryText, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(
-                        if (session?.token?.isNotBlank() == true) "Plex signed in" else "Not signed in",
+                        if (remoteSignedIn) "$providerName signed in" else "Not signed in",
                         color = PhoebeUi.mutedText,
                         fontSize = 11.sp,
                         maxLines = 1,
@@ -314,17 +318,17 @@ internal fun Sidebar(
                             .fillMaxWidth()
                             .padding(top = 2.dp, bottom = 2.dp),
                     )
-                    if (session?.token?.isNotBlank() == true) {
+                    if (remoteSignedIn) {
                         OutlinedButton(
                             onClick = {
                                 profileExpanded = false
                                 onSignOut()
                             },
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                        ) { Text("Sign out of Plex", fontSize = 11.sp) }
+                        ) { Text("Sign out of $providerName", fontSize = 11.sp) }
                     }
                     SectionLabel("Media sources", PhoebeUi.primaryText)
-                    Text("Plex — streaming library", color = PhoebeUi.mutedText, fontSize = 11.sp, lineHeight = 15.sp)
+                    Text(remoteSourceLabel, color = PhoebeUi.mutedText, fontSize = 11.sp, lineHeight = 15.sp)
                     Text("Local folders — files on this device", color = PhoebeUi.mutedText, fontSize = 11.sp, lineHeight = 15.sp)
                     mediaSources.localFolders.forEach { folder ->
                         Row(

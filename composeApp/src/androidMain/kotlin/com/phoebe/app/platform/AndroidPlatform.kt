@@ -16,6 +16,7 @@ import androidx.documentfile.provider.DocumentFile
 import com.phoebe.app.AndroidContextHolder
 import com.phoebe.app.BuildConfig
 import com.phoebe.app.data.PlexClient
+import com.phoebe.app.domain.PlexServer
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
@@ -24,6 +25,10 @@ import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.InetAddress
+import java.net.SocketTimeoutException
 
 actual fun createPlatformHttpClient(): HttpClient = HttpClient(OkHttp) {
     install(HttpTimeout) {
@@ -255,6 +260,33 @@ actual fun openExternalUrl(url: String) {
     context.startActivity(intent)
 }
 
+actual suspend fun discoverJellyfinServers(): List<PlexServer> = withContext(Dispatchers.IO) {
+    val found = linkedMapOf<String, PlexServer>()
+    runCatching {
+        DatagramSocket().use { socket ->
+            socket.broadcast = true
+            socket.soTimeout = 350
+            val query = "Who is JellyfinServer?".toByteArray(Charsets.UTF_8)
+            val packet = DatagramPacket(query, query.size, InetAddress.getByName("255.255.255.255"), JellyfinDiscoveryPort)
+            socket.send(packet)
+            val deadline = System.currentTimeMillis() + 1_200L
+            while (System.currentTimeMillis() < deadline) {
+                val buffer = ByteArray(4096)
+                val response = DatagramPacket(buffer, buffer.size)
+                try {
+                    socket.receive(response)
+                    val payload = response.data.decodeToString(0, response.length)
+                    val server = parseJellyfinDiscoveryServer(payload) ?: continue
+                    found[server.id] = server
+                } catch (_: SocketTimeoutException) {
+                    // Keep listening until the short discovery window closes.
+                }
+            }
+        }
+    }
+    found.values.toList()
+}
+
 actual fun currentTimeMs(): Long = System.currentTimeMillis()
 
 actual fun prefersReducedArtworkEffects(): Boolean = false
@@ -268,3 +300,5 @@ actual fun isDebugBuild(): Boolean = BuildConfig.DEBUG
 internal actual fun platformLog(tag: String, message: String) {
     Log.d(tag, message)
 }
+
+private const val JellyfinDiscoveryPort = 7359

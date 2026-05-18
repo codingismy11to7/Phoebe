@@ -134,6 +134,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.zIndex
 import kotlin.math.roundToInt
 import com.phoebe.app.AppState
+import com.phoebe.app.data.JellyfinQuickConnectResult
 import com.phoebe.app.data.catalogAlbumsForArtist
 import com.phoebe.app.data.catalogTracksForArtist
 import com.phoebe.app.domain.Album
@@ -141,10 +142,13 @@ import com.phoebe.app.domain.AppScreen
 import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.ArtistRadioAvailability
 import com.phoebe.app.domain.HomeSection
+import com.phoebe.app.domain.JellyfinLibraryPageKind
+import com.phoebe.app.domain.JellyfinSyncMode
 import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryUiPreferences
 import com.phoebe.app.domain.LyricsLoadState
+import com.phoebe.app.domain.MediaProviderType
 import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.CollectionEntry
 import com.phoebe.app.domain.LocalFolderMediaSourceConfig
@@ -156,9 +160,13 @@ import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.PlexRadioStation
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
+import com.phoebe.app.domain.defaultCollectionEntries
+import com.phoebe.app.domain.isEmbyFamily
 import com.phoebe.app.domain.isLocalMediaPlayback
+import com.phoebe.app.domain.isJellyfin
+import com.phoebe.app.domain.isNavidrome
 import com.phoebe.app.player.CastState
-import com.phoebe.app.domain.isPlexLibraryTrack
+import com.phoebe.app.domain.isRemoteLibraryTrack
 import com.phoebe.app.domain.supportsPlexPlaylists
 import com.phoebe.app.platform.createPlatformHttpClient
 import com.phoebe.app.platform.currentTimeMs
@@ -204,6 +212,7 @@ internal fun DesktopPlayer(
     repeat: RepeatMode,
     volume: Float,
     castState: CastState = CastState(),
+    remotePlaybackTarget: String? = null,
     showQueue: Boolean,
     compact: Boolean,
     busy: Boolean,
@@ -226,6 +235,7 @@ internal fun DesktopPlayer(
     onMostPlayed: () -> Unit,
     onCollections: (CollectionEntry) -> Unit,
     onCollectionValue: (CollectionEntry, String) -> Unit,
+    supportedCollectionEntries: Set<CollectionEntry> = defaultCollectionEntries.toSet(),
     onRefreshRandomArtists: () -> Unit,
     onRefreshRandomAlbums: () -> Unit,
     onPrefetchHomeArtist: (Artist) -> Unit = {},
@@ -261,16 +271,25 @@ internal fun DesktopPlayer(
     onDownloadPlaylist: (Playlist) -> Unit,
     onStartSignIn: () -> Unit,
     onFinishSignIn: () -> Unit,
+    onSignInJellyfin: (String, String, String) -> Unit,
+    onSignInProvider: (MediaProviderType, String, String, String, JellyfinSyncMode?) -> Unit = { _, _, _, _, _ -> },
+    jellyfinServers: List<PlexServer> = emptyList(),
+    jellyfinDiscoveryLoading: Boolean = false,
+    jellyfinQuickConnect: JellyfinQuickConnectResult? = null,
+    onDiscoverJellyfinServers: () -> Unit = {},
+    onStartJellyfinQuickConnect: (String) -> Unit = {},
+    onFinishJellyfinQuickConnect: () -> Unit = {},
     onSignOut: () -> Unit,
     onAddLocalFolder: (String?) -> Unit,
     onRemoveLocalFolder: (String) -> Unit,
     onToggleLocalFolder: (String, Boolean) -> Unit,
     onRefreshLibrary: () -> Unit,
+    onJellyfinPage: (JellyfinLibraryPageKind, Int) -> Unit = { _, _ -> },
     servers: List<PlexServer>,
     libraries: List<MusicLibrary>,
     librariesLoading: Boolean = false,
     onSelectServer: (PlexServer) -> Unit,
-    onSelectLibrary: (MusicLibrary) -> Unit,
+    onSelectLibrary: (MusicLibrary, JellyfinSyncMode?) -> Unit,
     onCancelPlexSetup: () -> Unit,
     onBackToServerPicker: () -> Unit,
     onRetryServers: () -> Unit,
@@ -359,8 +378,10 @@ internal fun DesktopPlayer(
                                 is AppScreen.LibraryPicker -> PlexLibraryPickerPanel(
                                     libraries = libraries,
                                     serverName = session?.selectedServer?.name,
+                                    providerType = session?.providerType ?: MediaProviderType.Plex,
                                     busy = busy,
                                     librariesLoading = librariesLoading,
+                                    isJellyfin = session.isEmbyFamily(),
                                     onSelectLibrary = onSelectLibrary,
                                     onBack = onBackToServerPicker,
                                     onCancel = onCancelPlexSetup,
@@ -369,8 +390,16 @@ internal fun DesktopPlayer(
                                 is AppScreen.SignIn -> SignInWelcomeScreen(
                                     message = appMessage,
                                     pinCode = pinCode,
+                                    jellyfinServers = jellyfinServers,
+                                    jellyfinDiscoveryLoading = jellyfinDiscoveryLoading,
+                                    jellyfinQuickConnect = jellyfinQuickConnect,
                                     onStartSignIn = onStartSignIn,
                                     onFinishSignIn = onFinishSignIn,
+                                    onSignInJellyfin = onSignInJellyfin,
+                                    onSignInProvider = onSignInProvider,
+                                    onDiscoverJellyfinServers = onDiscoverJellyfinServers,
+                                    onStartJellyfinQuickConnect = onStartJellyfinQuickConnect,
+                                    onFinishJellyfinQuickConnect = onFinishJellyfinQuickConnect,
                                     showLocalFolderHint = true,
                                     modifier = Modifier.fillMaxSize(),
                                 )
@@ -553,6 +582,7 @@ internal fun DesktopPlayer(
                                         onAddToUpNext = onAddToUpNext,
                                         onDownload = onDownload,
                                         homeSections = libraryUi.homeSections,
+                                        supportedCollectionEntries = supportedCollectionEntries,
                                     )
                                     }
                                     section == DesktopSection.Search && selectedPlaylistId == null -> SearchDesktopView(
@@ -573,6 +603,8 @@ internal fun DesktopPlayer(
                                             catalogRefreshing = catalogRefreshing,
                                             filter = libraryFilter,
                                             libraryUi = libraryUi,
+                                            jellyfinPagination = (session.isEmbyFamily() || session.isNavidrome()) && session?.jellyfinSyncMode == JellyfinSyncMode.Quick,
+                                            onJellyfinPage = onJellyfinPage,
                                             onFilter = onLibraryFilter,
                                             onLibrarySortBy = onLibrarySortBy,
                                             onLibraryAscending = onLibraryAscending,
@@ -613,6 +645,8 @@ internal fun DesktopPlayer(
                                     else -> DesktopContent(
                                         catalog = catalog,
                                         catalogRefreshing = catalogRefreshing,
+                                        jellyfinPagination = (session.isEmbyFamily() || session.isNavidrome()) && session?.jellyfinSyncMode == JellyfinSyncMode.Quick,
+                                        onJellyfinPage = onJellyfinPage,
                                         section = section,
                                         selectedPlaylistId = selectedPlaylistId,
                                         searchQuery = searchQuery,
@@ -669,6 +703,7 @@ internal fun DesktopPlayer(
                             repeat = repeat,
                             volume = volume,
                             castState = castState,
+                            remotePlaybackTarget = remotePlaybackTarget,
                             compact = compact,
                             lyricsVisible = section == DesktopSection.Lyrics && selectedPlaylistId == null,
                             upNextVisible = showQueue && desktopUpNextExpanded,

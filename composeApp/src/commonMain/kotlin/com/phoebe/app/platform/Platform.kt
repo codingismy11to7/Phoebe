@@ -1,6 +1,9 @@
 package com.phoebe.app.platform
 
 import androidx.compose.runtime.Composable
+import com.phoebe.app.domain.PlexServer
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 
 expect fun createPlatformHttpClient(): io.ktor.client.HttpClient
 
@@ -22,6 +25,8 @@ expect fun rememberPickDownloadDirectory(onPicked: (String?) -> Unit): () -> Uni
 
 expect fun openExternalUrl(url: String)
 
+expect suspend fun discoverJellyfinServers(): List<PlexServer>
+
 /** Current wall-clock time, expressed as Unix millis. Platform-specific because
  * `System.currentTimeMillis()` is JVM-only and `kotlinx-datetime` isn't on the
  * classpath. */
@@ -35,3 +40,27 @@ expect fun catalogTrackPrefetchAlbumCount(): Int
 
 /** Maximum number of catalog prefetch requests to transform at once. */
 expect fun catalogTrackPrefetchParallelism(): Int
+
+@Serializable
+internal data class JellyfinDiscoveryResponse(
+    val Address: String? = null,
+    val Id: String? = null,
+    val Name: String? = null,
+    val EndpointAddress: String? = null,
+)
+
+internal fun parseJellyfinDiscoveryServer(payload: String): PlexServer? {
+    val response = runCatching {
+        Json { ignoreUnknownKeys = true }.decodeFromString<JellyfinDiscoveryResponse>(payload)
+    }.getOrNull() ?: return null
+    val address = response.Address?.trimEnd('/')?.takeIf { it.startsWith("http://") || it.startsWith("https://") } ?: return null
+    val rawId = response.Id?.takeIf { it.isNotBlank() } ?: address.hashCode().toUInt().toString(16)
+    return PlexServer(
+        id = if (rawId.startsWith("jellyfin:")) rawId else "jellyfin:$rawId",
+        name = response.Name?.takeIf { it.isNotBlank() } ?: address.removePrefix("https://").removePrefix("http://"),
+        uri = address,
+        owned = true,
+        connectionUris = listOf(address),
+        localConnectionUris = listOf(address),
+    )
+}

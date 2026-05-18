@@ -1,6 +1,10 @@
 use correct icons
 
-jellyfin / navidrome / emby?
+jellyfin / navidrome / emby
+-finalize support
+
+music assistant 
+-streaming?
 
 predictive back / swipe to dismiss
 

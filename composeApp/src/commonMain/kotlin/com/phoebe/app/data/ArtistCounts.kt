@@ -16,7 +16,9 @@ internal fun enrichArtistAlbumCountsOnly(
 ): List<Artist> =
     artists.map { artist ->
         val n = albums.count { albumMatchesArtist(it, artist.title) }
-        artist.copy(albumCount = n, songCount = 0)
+        val newAlbumCount = if (artist.albumCount > 0) artist.albumCount else n
+        val newSongCount = if (artist.songCount > 0) artist.songCount else 0
+        artist.copy(albumCount = newAlbumCount, songCount = newSongCount)
     }
 
 internal fun enrichArtistArtwork(artists: List<Artist>, albums: List<Album>): List<Artist> =

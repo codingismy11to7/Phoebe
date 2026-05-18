@@ -53,10 +53,11 @@ internal fun CollectionsScreen(
     catalog: CatalogSnapshot,
     modifier: Modifier = Modifier,
     searchQuery: String = "",
+    supportedCollectionEntries: Set<CollectionEntry> = allCollectionEntries().toSet(),
     onBack: () -> Unit,
     onCollectionValue: (CollectionEntry, String) -> Unit,
 ) {
-    val index = remember(catalog) { CollectionIndex.from(catalog) }
+    val index = remember(catalog, supportedCollectionEntries) { CollectionIndex.from(catalog, supportedCollectionEntries) }
     val buckets = remember(index, entry) { index.bucketsFor(entry) }
     val loading = remember(catalog.collectionValues, catalog.collectionValueLoads, buckets, entry) {
         buckets.isEmpty() && !catalog.collectionValuesLoaded(entry)
@@ -132,11 +133,12 @@ internal fun CollectionItemsScreen(
     catalog: CatalogSnapshot,
     modifier: Modifier = Modifier,
     searchQuery: String = "",
+    supportedCollectionEntries: Set<CollectionEntry> = allCollectionEntries().toSet(),
     onBack: () -> Unit,
     onArtist: (Artist) -> Unit,
     onAlbum: (Album) -> Unit,
 ) {
-    val index = remember(catalog) { CollectionIndex.from(catalog) }
+    val index = remember(catalog, supportedCollectionEntries) { CollectionIndex.from(catalog, supportedCollectionEntries) }
     val bucket = remember(index, entry, value) {
         index.bucketsFor(entry).firstOrNull { it.label.equals(value, ignoreCase = true) }
     }
@@ -472,7 +474,10 @@ private data class CollectionIndex(
     fun bucketsFor(entry: CollectionEntry): List<CollectionBucket> = bucketsByEntry[entry].orEmpty()
 
     companion object {
-        fun from(catalog: CatalogSnapshot): CollectionIndex {
+        fun from(
+            catalog: CatalogSnapshot,
+            supportedCollectionEntries: Set<CollectionEntry> = allCollectionEntries().toSet(),
+        ): CollectionIndex {
             PhoebeLog.d("PlexCollections") {
                 "index input collectionValues=${catalog.collectionValues.size} collectionTags=${catalog.collectionTags.size} artists=${catalog.artists.size} albums=${catalog.albums.size}"
             }
@@ -487,14 +492,14 @@ private data class CollectionIndex(
             val albumGenre = CollectionEntry(CollectionTarget.Albums, CollectionFacet.Genre)
             val albumMood = CollectionEntry(CollectionTarget.Albums, CollectionFacet.Mood)
             val albumStyle = CollectionEntry(CollectionTarget.Albums, CollectionFacet.Style)
-            val bucketsByEntry = mapOf(
-                artistGenre to catalog.artistItems(artistGenre, albumThumbByArtist).toBuckets(catalog.collectionValueLabels(artistGenre)),
-                albumGenre to catalog.albumItems(albumGenre).toBuckets(catalog.collectionValueLabels(albumGenre)),
-                artistMood to catalog.artistItems(artistMood, albumThumbByArtist).toBuckets(catalog.collectionValueLabels(artistMood)),
-                albumMood to catalog.albumItems(albumMood).toBuckets(catalog.collectionValueLabels(albumMood)),
-                artistStyle to catalog.artistItems(artistStyle, albumThumbByArtist).toBuckets(catalog.collectionValueLabels(artistStyle)),
-                albumStyle to catalog.albumItems(albumStyle).toBuckets(catalog.collectionValueLabels(albumStyle)),
-            )
+            val bucketsByEntry = buildMap {
+                if (artistGenre in supportedCollectionEntries) put(artistGenre, catalog.artistItems(artistGenre, albumThumbByArtist).toBuckets(catalog.collectionValueLabels(artistGenre)))
+                if (albumGenre in supportedCollectionEntries) put(albumGenre, catalog.albumItems(albumGenre).toBuckets(catalog.collectionValueLabels(albumGenre)))
+                if (artistMood in supportedCollectionEntries) put(artistMood, catalog.artistItems(artistMood, albumThumbByArtist).toBuckets(catalog.collectionValueLabels(artistMood)))
+                if (albumMood in supportedCollectionEntries) put(albumMood, catalog.albumItems(albumMood).toBuckets(catalog.collectionValueLabels(albumMood)))
+                if (artistStyle in supportedCollectionEntries) put(artistStyle, catalog.artistItems(artistStyle, albumThumbByArtist).toBuckets(catalog.collectionValueLabels(artistStyle)))
+                if (albumStyle in supportedCollectionEntries) put(albumStyle, catalog.albumItems(albumStyle).toBuckets(catalog.collectionValueLabels(albumStyle)))
+            }
             PhoebeLog.d("PlexCollections") {
                 "index buckets=${bucketsByEntry.mapValues { (_, buckets) -> buckets.sumOf { it.items.size } }}"
             }
@@ -502,6 +507,11 @@ private data class CollectionIndex(
         }
     }
 }
+
+private fun allCollectionEntries(): List<CollectionEntry> =
+    CollectionTarget.entries.flatMap { target ->
+        CollectionFacet.entries.map { facet -> CollectionEntry(target, facet) }
+    }
 
 private data class CollectionBucket(
     val label: String,

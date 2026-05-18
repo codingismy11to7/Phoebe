@@ -137,6 +137,7 @@ import com.phoebe.app.data.catalogTracksForArtist
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.AppScreen
 import com.phoebe.app.domain.Artist
+import com.phoebe.app.domain.JellyfinLibraryPageKind
 import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryUiPreferences
@@ -150,7 +151,7 @@ import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.isLocalMediaPlayback
-import com.phoebe.app.domain.isPlexLibraryTrack
+import com.phoebe.app.domain.isRemoteLibraryTrack
 import com.phoebe.app.domain.supportsPlexPlaylists
 import com.phoebe.app.platform.createPlatformHttpClient
 import com.phoebe.app.platform.currentTimeMs
@@ -312,6 +313,7 @@ internal fun LibrarySortAndDisplayBar(
 internal fun LibraryPanel(
     catalog: CatalogSnapshot,
     catalogRefreshing: Boolean,
+    jellyfinPagination: Boolean,
     filter: LibraryFilterTab,
     libraryUi: LibraryUiPreferences,
     onFilter: (LibraryFilterTab) -> Unit,
@@ -324,7 +326,9 @@ internal fun LibraryPanel(
     onPlayTracks: (List<Track>, Int) -> Unit,
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
+    onJellyfinPage: (JellyfinLibraryPageKind, Int) -> Unit = { _, _ -> },
 ) {
+    var pageIndex by remember(filter) { mutableStateOf(0) }
     val allTracksRaw = remember(catalog.tracksByParent) {
         catalog.tracksByParent.values.asSequence().flatten().distinctBy { it.id }.toList()
     }
@@ -338,6 +342,20 @@ internal fun LibraryPanel(
     }
     val sortedTracks = remember(allTracksRaw, sortBy, ascending) {
         sortTracksForLibrary(allTracksRaw, sortBy, ascending)
+    }
+    val artistTotal = catalog.remotePageInfo.artistTotal
+    val albumTotal = catalog.remotePageInfo.albumTotal
+    val trackTotal = catalog.remotePageInfo.trackTotal
+    val artistPage = remember(sortedArtists, jellyfinPagination, pageIndex, artistTotal) { libraryPage(sortedArtists, jellyfinPagination, pageIndex, artistTotal) }
+    val albumPage = remember(sortedAlbums, jellyfinPagination, pageIndex, albumTotal) { libraryPage(sortedAlbums, jellyfinPagination, pageIndex, albumTotal) }
+    val trackPage = remember(sortedTracks, jellyfinPagination, pageIndex, trackTotal) { libraryPage(sortedTracks, jellyfinPagination, pageIndex, trackTotal) }
+    LaunchedEffect(filter, sortedArtists.size, sortedAlbums.size, sortedTracks.size) {
+        val pageCount = when (filter) {
+            LibraryFilterTab.Artists -> artistPage.pageCount
+            LibraryFilterTab.Albums -> albumPage.pageCount
+            LibraryFilterTab.Songs -> trackPage.pageCount
+        }
+        if (pageIndex > pageCount - 1) pageIndex = (pageCount - 1).coerceAtLeast(0)
     }
     LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item(contentType = "filter") {
@@ -355,27 +373,43 @@ internal fun LibraryPanel(
         if (catalogRefreshing) {
             item(contentType = "loading") { CatalogLoadingStrip() }
         }
+        item(contentType = "pagination") {
+            when (filter) {
+                LibraryFilterTab.Artists -> LibraryPaginationControls(artistPage, onPage = {
+                    if (jellyfinPagination) onJellyfinPage(filter.toJellyfinPageKind(), it)
+                    pageIndex = it
+                })
+                LibraryFilterTab.Albums -> LibraryPaginationControls(albumPage, onPage = {
+                    if (jellyfinPagination) onJellyfinPage(filter.toJellyfinPageKind(), it)
+                    pageIndex = it
+                })
+                LibraryFilterTab.Songs -> LibraryPaginationControls(trackPage, onPage = {
+                    if (jellyfinPagination) onJellyfinPage(filter.toJellyfinPageKind(), it)
+                    pageIndex = it
+                })
+            }
+        }
         when (filter) {
             LibraryFilterTab.Artists -> {
-                items(sortedArtists, key = { it.id }, contentType = { "artist" }) { artist ->
+                items(artistPage.items, key = { it.id }, contentType = { "artist" }) { artist ->
                     LibraryRow(artist.title, artistAlbumCountSubtitle(artist), artist.title, artist.thumbUrl) {
                         onArtist(artist)
                     }
                 }
             }
             LibraryFilterTab.Albums -> {
-                items(sortedAlbums, key = { it.id }, contentType = { "album" }) { album ->
+                items(albumPage.items, key = { it.id }, contentType = { "album" }) { album ->
                     LibraryRow(album.title, "${album.artist} • ${album.year ?: "Album"}", album.title, album.thumbUrl) {
                         onAlbum(album)
                     }
                 }
             }
             LibraryFilterTab.Songs -> {
-                itemsIndexed(sortedTracks, key = { _, track -> track.id }, contentType = { _, _ -> "song" }) { index, track ->
+                itemsIndexed(trackPage.items, key = { _, track -> track.id }, contentType = { _, _ -> "song" }) { index, track ->
                     ContentTrackRow(
                         track = track,
                         libraryColumns = libraryUi.columns,
-                        onPlay = { onPlayTracks(sortedTracks, index) },
+                        onPlay = { onPlayTracks(trackPage.items, index) },
                         onAddToUpNext = { onAddToUpNext(track) },
                         onDownload = { onDownload(track) },
                     )

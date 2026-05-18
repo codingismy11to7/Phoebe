@@ -4,48 +4,102 @@
   <img src="branding/icon-rounded.png" alt="Phoebe app icon" width="192" height="192" />
 </p>
 
-Phoebe is a Compose Multiplatform Plex-first music player for Android, iOS, desktop (JVM), and the browser (Kotlin/Wasm).
+Phoebe is a Compose Multiplatform music player for Plex, Jellyfin, Emby, Subsonic-compatible servers (Navidrome, etc.), Music Assistant, local folders, Android, iOS, desktop (JVM), and the browser (Kotlin/Wasm).
+
+## Music providers
+
+Phoebe can sign in to one remote music source at a time (plus optional local folders). Catalog IDs are prefixed (`plex:`, `jellyfin:`, `emby:`, `navidrome:`, `music-assistant:`) so items from different backends can be merged with local files in search and the library.
+
+**Support policy:** Plex is the primary, best-tested integration. Jellyfin, Emby, Subsonic (Navidrome), and Music Assistant support is **experimental** — the maintainers do not offer real-world support or SLAs for these backends. Server API differences, incomplete coverage, and regressions are expected. If you use one of them and want it to improve, bug reports and pull requests are greatly appreciated.
+
+### Capability overview
+
+| Capability | Plex | Jellyfin | Emby | Subsonic (Navidrome) | Music Assistant | Local folders |
+|------------|:----:|:--------:|:----:|:--------------------:|:---------------:|:-------------:|
+| Sign-in | PIN | Password + Quick Connect | Password | Username/password (token) | API token | Folder picker |
+| Server discovery | Yes | No (URL) | No (URL) | No (URL) | No (URL) | — |
+| Artists / albums / playlists / tracks | Yes | Yes | Yes | Yes | Yes | Yes |
+| Lazy / paged catalog sync | Yes | Quick + full | Quick + full | Quick + full | Yes | Index on add |
+| Create / edit playlists | Yes | Yes | Yes | Yes | Yes | Phoebe-only |
+| Track hearts / stars | Liked Songs playlist | Server favorite | Server favorite | Star | Favorite | Local only |
+| Artist / album favorites | Plex collections | Server API | Server API | Star | Favorite | Local only |
+| Star ratings | Yes | Yes | Yes | Yes | No | Local tags |
+| Metadata editing (server sync) | Yes | Yes | Yes | No | No | Tags / sidecar |
+| Native in-app streaming | Yes | Yes | Yes | Yes | Partial¹ | Yes |
+| Offline downloads | Yes | Yes | Yes | Yes | When URL available | From disk |
+| Playback sync to server | Timeline API | Session progress | Session progress | Scrobble on stop | Queue control | — |
+| Home library radio stations | Yes | No | No | No | Via MA² | — |
+| Artist radio / mix | Plex stations | Instant mix | Instant mix³ | Not wired⁴ | Via MA² | — |
+| Collections (genre / mood / style) | All three | Genre | Genre | Genre | Genre | From tags |
+| Import server play history | Yes | No | No | No | No | — |
+| Chromecast (Android) | Yes | — | — | — | — | — |
+
+¹ Music Assistant items are modeled as **Library + Control**: Phoebe can browse the MA library and often delegates playback to Music Assistant’s default player queue. Direct stream URLs are used when the server exposes them; many upstream provider tracks are not guaranteed to play inside Phoebe alone.
+
+² Music Assistant “radio” and mixes are whatever the MA server exposes through its library/queue APIs, not Plex-style named stations inside Phoebe.
+
+³ Jellyfin and Emby both expose instant-mix APIs; artist radio in the UI is wired for Jellyfin today.
+
+⁴ Navidrome/Subsonic `getSimilarSongs2` exists in the client but is not yet hooked up to Artist Radio in the app.
+
+### Plex (primary)
+
+Full-featured integration: PIN sign-in, relay/shared server discovery, music-library selection, lazy track loading, playlists (including Liked Songs), favorite artist/album Plex collections, ratings, metadata edits, original-file downloads, playback timeline reporting, Plex library radio stations and artist radio, genre/mood/style collections, and optional playback-history import to warm the catalog.
+
+### Jellyfin & Emby (Jellyfin API family)
+
+Shared catalog and playback stack (Emby uses `/emby` path normalization). Password sign-in on the server URL; Jellyfin also supports **Quick Connect**. Music libraries, artists, albums, playlists, and tracks sync with optional quick (paged) or full catalog modes. Playlists can be created and edited; favorites and ratings sync to the server; Jellyfin/Emby track metadata can be edited from Phoebe. Streams and downloads use the server’s item URLs; playback position is reported to the session API. **Artist instant mix** works for Jellyfin; Emby uses the same server APIs but artist-radio UI entry points are not fully aligned yet. Genre-only collections (no Plex mood/style facets). No PIN flow, no Plex-style home radio stations, no server play-history import, and no Plex Liked Songs playlist semantics (hearts map to server favorites).
+
+### Subsonic — Navidrome and compatible servers
+
+Subsonic-compatible `/rest/*.view` JSON with token auth (`u`, `t`, `s`, `v=1.16.1`, `c=phoebe`, `f=json`). Music folders, artists, albums, songs, playlists, playlist create/add, stars, ratings, streaming, downloads, artwork, and scrobbling on track stop. Quick and paged full-catalog sync modes. Genre collections only. No server metadata editing, no Plex-style library radio, and artist radio is not exposed in the UI yet (depends on server Last.fm/similar-song configuration when enabled).
+
+### Music Assistant
+
+Bearer-token JSON API (`/api`). Library browse, search, playlists, playlist edits, and favorites. Ratings are not supported. Playback is **library + control**: queue commands target Music Assistant’s player; local streaming is attempted when MA returns a playable URL. Treat MA as an orchestration hub, not a guarantee that every linked Spotify/Tidal/etc. item will stream directly inside Phoebe.
+
+### Local folders
+
+Desktop, Android, and iOS folder roots (web: stubbed). Indexed tracks merge with whichever remote provider is signed in. Phoebe-only playlists, exports (M3U8, text, CSV on desktop), and tag-based metadata. Can be used without any remote sign-in.
 
 ## Features
 
 ### Library and catalog
 
-- **Plex streaming** — PIN sign-in, server and music-library selection, and browsing of artists, albums, playlists, and tracks from your Plex library.
+- **Remote providers** — See [Music providers](#music-providers) for per-backend capabilities; sign in from the welcome screen (Plex PIN or direct URL for the others).
 - **Lazy library loading** — Track lists load on demand for albums, artists, and playlists; opened detail views are preserved across catalog refreshes.
-- **Local music folders** — Add one or more local folder roots (desktop, Android, and iOS), enable or disable them individually, and merge them with your Plex catalog in one library. You can add a folder from the sign-in screen to use Phoebe without Plex.
-- **Unified catalog** — Plex (`plex:`-prefixed ids) and local tracks appear together in search, library views, and playback.
-- **Home** — Configurable sections (mixes, collections, favorites, recents, listening history, random picks) with order controlled in Settings. Recently added songs, artists, and albums (7-day window), favorite playlist/artist/album rows, recently played and most-played panels, random artist/album picks, a **personal mix** seeded from listening history (including recent play-frequency signals), and a **decade mix** that shuffles tracks from a chosen era.
-- **Plex radio** — Start Plex library radio stations (for example Library Radio, Deep Cuts, and Random Album) from the Home mixes row; stations are loaded from the server when available with sensible defaults. **Artist Radio** for matched Plex artists from artist detail and library surfaces (availability is probed when needed).
-- **Collections** — Browse artists and albums grouped by **genre**, **mood**, or **style** (from Plex collection metadata and local tags), with grid/list sorting.
+- **Local music folders** — Add one or more local folder roots (desktop, Android, and iOS), enable or disable them individually, and merge them with a remote catalog in one library. You can add a folder from the sign-in screen to use Phoebe without signing in to a server.
+- **Unified catalog** — Remote provider prefixes and local tracks appear together in search, library views, and playback.
+- **Home** — Configurable sections (mixes, collections, favorites, recents, listening history, random picks) with order controlled in Settings. Recently added songs, artists, and albums (7-day window), favorite rows, recently played and most-played panels, random artist/album picks, a **personal mix** seeded from listening history, and a **decade mix** for a chosen era. Plex library radio stations appear in mixes when signed in to Plex.
+- **Collections** — Browse artists and albums grouped by **genre**, **mood**, or **style** where the active source exposes them (Plex and local tags: all three; other providers: genre only).
 - **Play history** — Dedicated screens for recently played and most played tracks; per-play events power smarter home mixes. Last-played timestamps and play counts surface in the library and home UI. Plex playback history sync can warm missing track metadata from the server.
 - **Rich library table** — Configurable columns (title, artist, album, year, genre, path, codec, bitrate, duration, rating, favorite, and related fields where available).
 - **Sorting and layout prefs** — Sort library and detail views; column visibility and sort preferences persist per platform.
 
 ### Playlists, likes, favorites, and ratings
 
-- **Plex playlists** — Create playlists, add tracks from the library, and drag a song onto a sidebar playlist row to append it.
-- **Local playlists** — Phoebe-only playlists for local audio (desktop, Android, iOS, and web logic); export to **M3U8**, plain text, or **CSV** (written under `exports/` in app storage on desktop).
-- **Liked Songs** — Heart tracks to sync with Plex’s Liked Songs playlist when signed in (with local fallback when offline or unsigned).
-- **Favorites** — Mark artists, albums, and playlists as favorites from detail views and the library table; favorite artists and albums sync to Plex’s Favorite Artists / Favorite Albums collections when signed in. Home and library surfaces include favorite rows and full-list screens; favorite playlist flags can be exported and imported as JSON under `exports/favorite-playlists.json` (desktop settings).
-- **Star ratings** — Half-star ratings on tracks, artists, albums, and playlists; synced to Plex when the server supports ratings.
+- **Playlists** — Create and edit playlists on Plex, Jellyfin, Emby, Subsonic, and Music Assistant when signed in; drag a song onto a sidebar playlist row on desktop. **Local playlists** are Phoebe-only (export to **M3U8**, plain text, or **CSV** under `exports/` on desktop).
+- **Liked Songs / hearts** — Plex: syncs with Plex’s Liked Songs playlist. Other providers: hearts map to server favorites/stars (see capability table).
+- **Favorites** — Artists, albums, and playlists; Plex also syncs favorite artist/album collections. Favorite playlist flags can be exported/imported as JSON on desktop (`exports/favorite-playlists.json`).
+- **Star ratings** — Half-star ratings on tracks, artists, albums, and playlists; synced to the active server when supported (not on Music Assistant).
 
 ### Playback and player
 
 - **Playback** — Play, pause, seek, next/previous, shuffle, repeat, and an Up Next queue you can add to, reorder, and play from.
 - **Now playing** — Full-screen player with artwork, progress, transport controls, queue, and a now-playing badge on the active track row.
 - **Lyrics** — Synced and plain lyrics from embedded tags, sidecar files, and [LRCLIB](https://lrclib.net); cached in SQLDelight with auto-scroll during playback (desktop lyrics section and mobile detail flow).
-- **Plex playback sync** — Reports playback to Plex’s timeline API so plays show up on the server and other Plex clients.
+- **Playback sync** — Plex timeline reporting; Jellyfin/Emby session progress; Subsonic scrobble on stop (see [Music providers](#music-providers)).
 - **Search** — Search songs, artists, and albums across the merged catalog, with recent search history.
 
 ### Downloads and metadata
 
-- **Downloads** — Download Plex tracks as original files, pick a download directory (where supported), and browse them in a dedicated downloads area.
-- **Metadata editing** — Edit title, artist, album, year, and genre from the library or track surfaces; changes persist locally and sync to Plex when supported.
+- **Downloads** — Download remote tracks when the server exposes a URL (Plex original files, Jellyfin/Emby/Subsonic download endpoints); pick a download directory where supported.
+- **Metadata editing** — Edit title, artist, album, year, and genre; changes persist locally and sync to Plex, Jellyfin, or Emby when supported.
 
 ### Appearance and settings
 
 - **Appearance** — Album-art-inspired Material 3 UI with light and dark modes (preference stored in app storage).
-- **Settings** — Manage Plex sign-in, local folders, library options, home section order, favorite-playlist export/import, downloads, and appearance (desktop settings shell includes additional category placeholders).
+- **Settings** — Manage provider sign-in, local folders, library options, home section order, favorite-playlist export/import, downloads, and appearance (desktop settings shell includes additional category placeholders).
 
 ### System integration
 
@@ -90,6 +144,11 @@ Phoebe is a Compose Multiplatform Plex-first music player for Android, iOS, desk
 - Plex music stations and play queues for library and artist radio.
 - Playback history import with optional on-demand track metadata warming for history entries not yet in the catalog.
 - Collection facet values loaded from Plex where available, merged with local tag metadata.
+
+### Additional providers
+
+- `MusicProviderAdapter` registry with per-type capabilities; Jellyfin, Emby, Subsonic (`SubsonicClient`), and Music Assistant clients in `composeApp/src/commonMain/kotlin/com/phoebe/app/data/`.
+- Experimental Jellyfin / Emby / Subsonic / Music Assistant behavior is summarized in [Music providers](#music-providers); contributions welcome, but not officially supported.
 
 ### Local media and merged catalog
 

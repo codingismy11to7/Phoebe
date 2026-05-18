@@ -172,7 +172,7 @@ private fun MetadataEditorHeader(compact: Boolean, onDismiss: () -> Unit) {
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                "Update library fields and sync Plex-backed songs.",
+                "Update library fields and sync supported streaming songs.",
                 color = PhoebeUi.secondaryText,
                 fontSize = 12.sp,
             )

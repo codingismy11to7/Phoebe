@@ -160,7 +160,7 @@ import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.isLocalMediaPlayback
-import com.phoebe.app.domain.isPlexLibraryTrack
+import com.phoebe.app.domain.isRemoteLibraryTrack
 import com.phoebe.app.domain.supportsPlexPlaylists
 import com.phoebe.app.platform.createPlatformHttpClient
 import com.phoebe.app.platform.currentTimeMs
@@ -196,6 +196,7 @@ internal enum class PhoebeScreenshotScenario {
     PlayerUpNextExpanded,
     Settings,
     SignIn,
+    SignInProviders,
 }
 
 @Composable
@@ -277,7 +278,9 @@ internal fun PhoebeDesktopScreenshotScenario(
         PhoebeScreenshotScenario.CollectionValues -> AppScreen.Collections(CollectionEntry(CollectionTarget.Artists, CollectionFacet.Genre))
         PhoebeScreenshotScenario.CollectionItems -> AppScreen.CollectionItems(CollectionEntry(CollectionTarget.Artists, CollectionFacet.Genre), "Dream pop")
         PhoebeScreenshotScenario.Song -> AppScreen.SongDetail(fixture.currentTrack)
-        PhoebeScreenshotScenario.SignIn -> AppScreen.SignIn
+        PhoebeScreenshotScenario.SignIn,
+        PhoebeScreenshotScenario.SignInProviders,
+        -> AppScreen.SignIn
         else -> AppScreen.Home
     }
     val section = when (scenario) {
@@ -366,6 +369,8 @@ internal fun PhoebeDesktopScreenshotScenario(
         onDownloadPlaylist = {},
         onStartSignIn = {},
         onFinishSignIn = {},
+        onSignInJellyfin = { _, _, _ -> },
+        onSignInProvider = { _, _, _, _, _ -> },
         onSignOut = {},
         onAddLocalFolder = {},
         onRemoveLocalFolder = {},
@@ -374,7 +379,7 @@ internal fun PhoebeDesktopScreenshotScenario(
         servers = fixture.servers,
         libraries = fixture.libraries,
         onSelectServer = {},
-        onSelectLibrary = {},
+        onSelectLibrary = { _, _ -> },
         onCancelPlexSetup = {},
         onBackToServerPicker = {},
         onRetryServers = {},
@@ -409,9 +414,34 @@ internal fun PhoebeMobileScreenshotScenario(
             PhoebeScreenshotScenario.SignIn -> MobileSignInWelcomeScreen(
                 message = "Sign in to Plex or add a local music folder to get started.",
                 pinCode = "PHOEBE",
+                jellyfinServers = emptyList(),
+                jellyfinDiscoveryLoading = false,
+                jellyfinQuickConnect = null,
                 onStartSignIn = {},
                 onFinishSignIn = {},
+                onSignInJellyfin = { _, _, _ -> },
+                onSignInProvider = { _, _, _, _, _ -> },
+                onDiscoverJellyfinServers = {},
+                onStartJellyfinQuickConnect = {},
+                onFinishJellyfinQuickConnect = {},
                 onAddLocalFolder = {},
+                modifier = Modifier.fillMaxSize(),
+            )
+            PhoebeScreenshotScenario.SignInProviders -> MobileSignInWelcomeScreen(
+                message = "Sign in to Plex, Jellyfin, or another media provider—or add a local music folder to get started.",
+                pinCode = null,
+                jellyfinServers = emptyList(),
+                jellyfinDiscoveryLoading = false,
+                jellyfinQuickConnect = null,
+                onStartSignIn = {},
+                onFinishSignIn = {},
+                onSignInJellyfin = { _, _, _ -> },
+                onSignInProvider = { _, _, _, _, _ -> },
+                onDiscoverJellyfinServers = {},
+                onStartJellyfinQuickConnect = {},
+                onFinishJellyfinQuickConnect = {},
+                onAddLocalFolder = {},
+                initialProvidersExpanded = true,
                 modifier = Modifier.fillMaxSize(),
             )
             PhoebeScreenshotScenario.FavoritePlaylists -> FavoritePlaylistsMobileView(

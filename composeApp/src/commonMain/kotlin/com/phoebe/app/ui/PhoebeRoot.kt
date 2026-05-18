@@ -168,15 +168,23 @@ import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.PlayHistoryKind
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.RecentlyAddedKind
+import com.phoebe.app.domain.supportedCollectionEntries
+import com.phoebe.app.domain.supportsCollectionEntry
 import com.phoebe.app.domain.Track
+import com.phoebe.app.domain.belongsToProvider
 import com.phoebe.app.domain.canAddToLocalPlaylist
 import com.phoebe.app.domain.canAddToPlexPlaylist
+import com.phoebe.app.domain.isEmbyFamily
 import com.phoebe.app.domain.isLocalMediaPlayback
+import com.phoebe.app.domain.isJellyfin
 import com.phoebe.app.domain.isLocalPlaylist
 import com.phoebe.app.domain.isLikedSongsPlaylist
-import com.phoebe.app.domain.isPlexLibraryTrack
+import com.phoebe.app.domain.isRemoteProviderPlaylist
+import com.phoebe.app.domain.isRemoteLibraryTrack
 import com.phoebe.app.domain.supportsPlexPlaylists
 import com.phoebe.app.domain.supportsPlexRatings
+import com.phoebe.app.domain.supportsRemotePlaylists
+import com.phoebe.app.domain.supportsRemoteRatings
 import com.phoebe.app.player.CastState
 import com.phoebe.app.platform.createPlatformHttpClient
 import com.phoebe.app.platform.currentTimeMs
@@ -212,8 +220,10 @@ fun PhoebeRoot(
     val catalogWorkActive by state.catalogRefreshing.collectAsState()
     val catalogSyncState by state.catalogSyncState.collectAsState()
     val session by state.session.collectAsState()
+    val supportedCollectionEntries = remember(session) { session.supportedCollectionEntries().toSet() }
     val mediaSources by state.mediaSources.collectAsState()
     val player by state.player.collectAsState()
+    val musicAssistantRemotePlayback by state.musicAssistantRemotePlayback.collectAsState()
     val cast by state.cast.collectAsState()
     val busy by state.busy.collectAsState()
     val serversLoading by state.serversLoading.collectAsState()
@@ -226,6 +236,9 @@ fun PhoebeRoot(
     val downloadDirectory by state.downloadDirectory.collectAsState()
     val pin by state.pin.collectAsState()
     val servers by state.servers.collectAsState()
+    val jellyfinServers by state.jellyfinServers.collectAsState()
+    val jellyfinDiscoveryLoading by state.jellyfinDiscoveryLoading.collectAsState()
+    val jellyfinQuickConnect by state.jellyfinQuickConnect.collectAsState()
     val libraries by state.libraries.collectAsState()
     val libraryUi by state.libraryUi.collectAsState()
     val lastPlayedByArtist by state.lastPlayedByArtist.collectAsState()
@@ -435,18 +448,22 @@ fun PhoebeRoot(
         state.open(AppScreen.FavoriteAlbums)
     }
     val openCollections: (CollectionEntry) -> Unit = { entry ->
-        selectedPlaylistId = null
-        browseSection = DesktopSection.Home
-        libraryFilter = when (entry.target) {
-            CollectionTarget.Artists -> LibraryFilterTab.Artists
-            CollectionTarget.Albums -> LibraryFilterTab.Albums
+        if (session.supportsCollectionEntry(entry)) {
+            selectedPlaylistId = null
+            browseSection = DesktopSection.Home
+            libraryFilter = when (entry.target) {
+                CollectionTarget.Artists -> LibraryFilterTab.Artists
+                CollectionTarget.Albums -> LibraryFilterTab.Albums
+            }
+            state.open(AppScreen.Collections(entry))
         }
-        state.open(AppScreen.Collections(entry))
     }
     val openCollectionValue: (CollectionEntry, String) -> Unit = { entry, value ->
-        selectedPlaylistId = null
-        browseSection = DesktopSection.Home
-        state.open(AppScreen.CollectionItems(entry, value))
+        if (session.supportsCollectionEntry(entry)) {
+            selectedPlaylistId = null
+            browseSection = DesktopSection.Home
+            state.open(AppScreen.CollectionItems(entry, value))
+        }
     }
     val commitSearch: (String) -> Unit = { rawQuery ->
         val trimmed = rawQuery.trim()
@@ -476,10 +493,12 @@ fun PhoebeRoot(
     var createPlaylistFor by remember { mutableStateOf<List<Track>?>(null) }
     var metadataEditorTrack by remember { mutableStateOf<Track?>(null) }
     val playlistActions = remember(catalog.playlists, session, mediaSources.localFolders) {
-        val plexReady = session.supportsPlexPlaylists()
+        val plexReady = session.supportsRemotePlaylists()
         val localReady = mediaSources.localFolders.any { it.enabled }
+        val providerType = session?.providerType
         val list = catalog.playlists.filter { playlist ->
-            playlist.isLocalPlaylist() || (plexReady && playlist.id.startsWith("plex:"))
+            playlist.isLocalPlaylist() ||
+                (plexReady && providerType != null && playlist.isRemoteProviderPlaylist() && playlist.belongsToProvider(providerType))
         }
         PlaylistActions(
             playlists = list,
@@ -508,13 +527,13 @@ fun PhoebeRoot(
             likedTrackIds = likedPlaylist?.let { playlist ->
                 catalog.tracksByParent[playlist.id].orEmpty().map { it.id }.toSet()
             }.orEmpty(),
-            likesEnabled = session.supportsPlexPlaylists(),
+            likesEnabled = session.supportsRemotePlaylists(),
             onToggleLiked = { track -> state.toggleLikedTrack(track) },
         )
     }
     val ratingActions = remember(catalog, session) {
         RatingActions(
-            ratingsEnabled = session.supportsPlexRatings(),
+            ratingsEnabled = session.supportsRemoteRatings(),
             catalog = catalog,
             onRateTrack = { track, rating -> state.rateTrack(track, rating) },
             onRateArtist = { artist, rating -> state.rateArtist(artist, rating) },
@@ -657,9 +676,11 @@ fun PhoebeRoot(
                     is AppScreen.LibraryPicker -> PlexLibraryPickerPanel(
                         libraries = libraries,
                         serverName = session?.selectedServer?.name,
+                        providerType = session?.providerType ?: com.phoebe.app.domain.MediaProviderType.Plex,
                         busy = busy,
                         librariesLoading = librariesLoading,
-                        onSelectLibrary = state::selectLibrary,
+                        isJellyfin = session.isEmbyFamily(),
+                        onSelectLibrary = { library, mode -> state.selectLibrary(library, mode) },
                         onBack = state::returnToServerPicker,
                         onCancel = state::signOut,
                         modifier = Modifier.fillMaxSize(),
@@ -667,8 +688,16 @@ fun PhoebeRoot(
                     is AppScreen.SignIn -> MobileSignInWelcomeScreen(
                         message = message,
                         pinCode = pin?.code,
+                        jellyfinServers = jellyfinServers,
+                        jellyfinDiscoveryLoading = jellyfinDiscoveryLoading,
+                        jellyfinQuickConnect = jellyfinQuickConnect,
                         onStartSignIn = state::startPlexSignIn,
                         onFinishSignIn = state::finishPlexSignIn,
+                        onSignInJellyfin = state::signInJellyfin,
+                        onSignInProvider = state::signInProvider,
+                        onDiscoverJellyfinServers = state::discoverJellyfinServers,
+                        onStartJellyfinQuickConnect = state::startJellyfinQuickConnect,
+                        onFinishJellyfinQuickConnect = state::finishJellyfinQuickConnect,
                         onAddLocalFolder = state::addLocalFolderFromUri,
                         modifier = Modifier.fillMaxSize(),
                     )
@@ -752,6 +781,7 @@ fun PhoebeRoot(
                         entry = scr.entry,
                         catalog = catalog,
                         modifier = Modifier.fillMaxSize(),
+                        supportedCollectionEntries = supportedCollectionEntries,
                         onBack = state::popDetail,
                         onCollectionValue = openCollectionValue,
                     )
@@ -760,6 +790,7 @@ fun PhoebeRoot(
                         value = scr.value,
                         catalog = catalog,
                         modifier = Modifier.fillMaxSize(),
+                        supportedCollectionEntries = supportedCollectionEntries,
                         onBack = state::popDetail,
                         onArtist = { state.open(AppScreen.ArtistDetail(it)) },
                         onAlbum = { state.open(AppScreen.AlbumDetail(it)) },
@@ -837,6 +868,7 @@ fun PhoebeRoot(
                         positionMs = player.positionMs,
                         currentIndex = currentIndex,
                         castState = cast,
+                        remotePlaybackTarget = musicAssistantRemotePlayback?.target,
                         onToggle = state::togglePlayPause,
                         onPrevious = state::previous,
                         onNext = state::next,
@@ -917,6 +949,7 @@ fun PhoebeRoot(
                         onRecentlyPlayed = openRecentlyPlayed,
                         onMostPlayed = openMostPlayed,
                         onCollections = openCollections,
+                        supportedCollectionEntries = supportedCollectionEntries,
                         onRefreshRandomArtists = { randomArtistSeed = Random.nextInt() },
                         onRefreshRandomAlbums = { randomAlbumSeed = Random.nextInt() },
                         onPrefetchHomeArtist = state::prefetchHomeArtistStats,
@@ -938,6 +971,7 @@ fun PhoebeRoot(
                         onSignOut = state::signOut,
                         onAddLocalFolder = state::addLocalFolderFromUri,
                         onRefreshLibrary = state::refreshCatalog,
+                        onJellyfinPage = state::loadJellyfinLibraryPage,
                         onLibrarySortBy = state::setLibrarySortBy,
                         onLibraryAscending = state::setLibrarySortAscending,
                         onLibraryColumns = state::setLibraryColumns,
@@ -985,6 +1019,7 @@ fun PhoebeRoot(
                     repeat = player.repeat,
                     volume = player.volume,
                     castState = cast,
+                    remotePlaybackTarget = musicAssistantRemotePlayback?.target,
                     showQueue = wideDesktop,
                     compact = !wideDesktop,
                     busy = busy,
@@ -1038,6 +1073,7 @@ fun PhoebeRoot(
                     onMostPlayed = openMostPlayed,
                     onCollections = openCollections,
                     onCollectionValue = openCollectionValue,
+                    supportedCollectionEntries = supportedCollectionEntries,
                     onRefreshRandomArtists = { randomArtistSeed = Random.nextInt() },
                     onRefreshRandomAlbums = { randomAlbumSeed = Random.nextInt() },
                     onPrefetchHomeArtist = state::prefetchHomeArtistStats,
@@ -1077,16 +1113,25 @@ fun PhoebeRoot(
                     onDownloadPlaylist = state::download,
                     onStartSignIn = state::startPlexSignIn,
                     onFinishSignIn = state::finishPlexSignIn,
+                    onSignInJellyfin = state::signInJellyfin,
+                    onSignInProvider = state::signInProvider,
+                    jellyfinServers = jellyfinServers,
+                    jellyfinDiscoveryLoading = jellyfinDiscoveryLoading,
+                    jellyfinQuickConnect = jellyfinQuickConnect,
+                    onDiscoverJellyfinServers = state::discoverJellyfinServers,
+                    onStartJellyfinQuickConnect = state::startJellyfinQuickConnect,
+                    onFinishJellyfinQuickConnect = state::finishJellyfinQuickConnect,
                     onSignOut = state::signOut,
                     onAddLocalFolder = state::addLocalFolderFromUri,
                     onRemoveLocalFolder = state::removeLocalFolder,
                     onToggleLocalFolder = state::setLocalFolderEnabled,
                     onRefreshLibrary = state::refreshCatalog,
+                    onJellyfinPage = state::loadJellyfinLibraryPage,
                     servers = servers,
                     libraries = libraries,
                     librariesLoading = librariesLoading,
                     onSelectServer = { state.selectServer(it) },
-                    onSelectLibrary = { state.selectLibrary(it) },
+                    onSelectLibrary = { library, mode -> state.selectLibrary(library, mode) },
                     onCancelPlexSetup = { state.signOut() },
                     onBackToServerPicker = { state.returnToServerPicker() },
                     onRetryServers = { state.loadServers() },

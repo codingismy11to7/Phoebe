@@ -4,10 +4,12 @@ import com.phoebe.app.db.PhoebeDatabase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-suspend fun PhoebeDatabase.clearAllAppData() = withContext(Dispatchers.Default) {
+suspend fun PhoebeDatabase.clearAllAppData(clearPlayHistory: Boolean = true) = withContext(Dispatchers.Default) {
     transaction {
         downloadsQueries.clearAll()
-        playHistoryQueries.clearAll()
+        if (clearPlayHistory) {
+            playHistoryQueries.clearAll()
+        }
         lyricsQueries.clear()
         libraryPrefsQueries.clear()
         mediaSourcesQueries.clear()

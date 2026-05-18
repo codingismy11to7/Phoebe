@@ -67,6 +67,7 @@ import com.phoebe.app.data.catalogTracksForArtist
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.CatalogSnapshot
+import com.phoebe.app.domain.JellyfinLibraryPageKind
 import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryUiPreferences
@@ -74,7 +75,7 @@ import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.canTogglePlexLike
 import com.phoebe.app.domain.isLikedSongsPlaylist
-import com.phoebe.app.domain.isPlexLibraryTrack
+import com.phoebe.app.domain.isRemoteLibraryTrack
 
 internal enum class LibraryFilterTab { Artists, Albums, Songs }
 
@@ -85,6 +86,98 @@ internal enum class AlbumSortKey { RecentlyAdded, Name, Year, Artist }
 internal enum class SongFileFilter { All, Lossless, Lossy }
 
 internal enum class LibraryViewMode { Grid, List }
+
+private const val JellyfinLibraryPageSize = 100
+
+internal data class LibraryPage<T>(
+    val items: List<T>,
+    val pageIndex: Int,
+    val pageCount: Int,
+    val totalCount: Int,
+) {
+    val firstItemNumber: Int get() = if (totalCount == 0) 0 else pageIndex * JellyfinLibraryPageSize + 1
+    val lastItemNumber: Int get() = (pageIndex * JellyfinLibraryPageSize + items.size).coerceAtMost(totalCount)
+}
+
+internal fun <T> libraryPage(items: List<T>, enabled: Boolean, pageIndex: Int, totalCountOverride: Int? = null): LibraryPage<T> {
+    val totalCount = totalCountOverride ?: items.size
+    if (!enabled) {
+        return LibraryPage(items = items, pageIndex = 0, pageCount = 1, totalCount = totalCount)
+    }
+    if (totalCount <= JellyfinLibraryPageSize) {
+        return LibraryPage(items = items.take(JellyfinLibraryPageSize), pageIndex = 0, pageCount = 1, totalCount = totalCount)
+    }
+    val pageCount = ((totalCount + JellyfinLibraryPageSize - 1) / JellyfinLibraryPageSize).coerceAtLeast(1)
+    val safeIndex = pageIndex.coerceIn(0, pageCount - 1)
+    val start = safeIndex * JellyfinLibraryPageSize
+    return LibraryPage(
+        items = items.drop(start).take(JellyfinLibraryPageSize),
+        pageIndex = safeIndex,
+        pageCount = pageCount,
+        totalCount = totalCount,
+    )
+}
+
+internal fun LibraryFilterTab.toJellyfinPageKind(): JellyfinLibraryPageKind = when (this) {
+    LibraryFilterTab.Artists -> JellyfinLibraryPageKind.Artists
+    LibraryFilterTab.Albums -> JellyfinLibraryPageKind.Albums
+    LibraryFilterTab.Songs -> JellyfinLibraryPageKind.Tracks
+}
+
+internal fun CatalogSnapshot.remoteTotalFor(filter: LibraryFilterTab): Int? = when (filter) {
+    LibraryFilterTab.Artists -> remotePageInfo.artistTotal
+    LibraryFilterTab.Albums -> remotePageInfo.albumTotal
+    LibraryFilterTab.Songs -> remotePageInfo.trackTotal
+}
+
+@Composable
+internal fun LibraryPaginationControls(
+    page: LibraryPage<*>,
+    onPage: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (page.pageCount <= 1) return
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        val compact = maxWidth < 430.dp
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            LibraryToolbarButton(
+                icon = PhoebeIcon.Back,
+                label = if (compact) "Prev" else "Previous",
+                enabled = page.pageIndex > 0,
+                onClick = { onPage(page.pageIndex - 1) },
+            )
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                Text(
+                    "Page ${page.pageIndex + 1} of ${page.pageCount}",
+                    color = PhoebeUi.primaryText,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (!compact) {
+                    Text(
+                        "${page.firstItemNumber}-${page.lastItemNumber} of ${page.totalCount}",
+                        color = PhoebeUi.mutedText,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            LibraryToolbarButton(
+                icon = PhoebeIcon.Forward,
+                label = "Next",
+                enabled = page.pageIndex < page.pageCount - 1,
+                onClick = { onPage(page.pageIndex + 1) },
+            )
+        }
+    }
+}
 
 @Composable
 internal fun FavoriteArtistsDesktopView(
@@ -327,11 +420,14 @@ internal fun LibraryDesktopView(
     detailWidth: androidx.compose.ui.unit.Dp = 278.dp,
     searchQuery: String = "",
     onSearchQuery: (String) -> Unit = {},
+    jellyfinPagination: Boolean = false,
+    onJellyfinPage: (JellyfinLibraryPageKind, Int) -> Unit = { _, _ -> },
 ) {
     var selectedAlbumId by remember { mutableStateOf<String?>(null) }
     var selectedTrackId by remember { mutableStateOf<String?>(null) }
     var libraryViewMode by remember { mutableStateOf(LibraryViewMode.Grid) }
     var songFilter by remember { mutableStateOf(SongFileFilter.All) }
+    var pageIndex by remember(filter) { mutableStateOf(0) }
 
     val ascending = libraryUi.ascending
     val sortBy = libraryUi.sortBy
@@ -380,6 +476,20 @@ internal fun LibraryDesktopView(
                 it.album.contains(q, ignoreCase = true)
         }
     }
+    val artistTotal = if (searchQuery.isBlank()) catalog.remotePageInfo.artistTotal else null
+    val albumTotal = if (searchQuery.isBlank()) catalog.remotePageInfo.albumTotal else null
+    val trackTotal = if (searchQuery.isBlank()) catalog.remotePageInfo.trackTotal else null
+    val artistPage = remember(visibleArtists, jellyfinPagination, pageIndex, artistTotal) { libraryPage(visibleArtists, jellyfinPagination, pageIndex, artistTotal) }
+    val albumPage = remember(visibleAlbums, jellyfinPagination, pageIndex, albumTotal) { libraryPage(visibleAlbums, jellyfinPagination, pageIndex, albumTotal) }
+    val trackPage = remember(visibleTracks, jellyfinPagination, pageIndex, trackTotal) { libraryPage(visibleTracks, jellyfinPagination, pageIndex, trackTotal) }
+    LaunchedEffect(filter, searchQuery, visibleArtists.size, visibleAlbums.size, visibleTracks.size) {
+        val pageCount = when (filter) {
+            LibraryFilterTab.Artists -> artistPage.pageCount
+            LibraryFilterTab.Albums -> albumPage.pageCount
+            LibraryFilterTab.Songs -> trackPage.pageCount
+        }
+        if (pageIndex > pageCount - 1) pageIndex = (pageCount - 1).coerceAtLeast(0)
+    }
 
     // Default selection when the catalog first arrives or tab changes.
     LaunchedEffect(filter, sortedAlbums.firstOrNull()?.id, sortedTracks.firstOrNull()?.id) {
@@ -396,46 +506,59 @@ internal fun LibraryDesktopView(
 
     BoxWithConstraints(modifier.fillMaxSize()) {
         val narrowPane = maxWidth < 760.dp
-        Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(28.dp)) {
-            Column(
-                Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .padding(
-                        start = 36.dp,
-                        top = 32.dp,
-                        end = if (narrowPane || filter == LibraryFilterTab.Artists) 28.dp else 0.dp,
-                        bottom = 24.dp,
-                    ),
-                verticalArrangement = Arrangement.spacedBy(18.dp),
-            ) {
-                LibraryHeader(filter, searchQuery, onSearchQuery, narrowPane)
-                LibraryToolbarRow(
-                    filter = filter,
-                    onFilter = onFilter,
-                    prefs = libraryUi,
-                    onSortBy = onLibrarySortBy,
-                    onAscending = onLibraryAscending,
-                    onColumns = onLibraryColumns,
-                    libraryViewMode = libraryViewMode,
-                    onLibraryViewMode = { libraryViewMode = it },
-                    songFilter = songFilter,
-                    onSongFilter = { songFilter = it },
-                )
-                if (catalogRefreshing) {
-                    LibraryLoadingStrip(Modifier.padding(top = 2.dp))
-                }
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(
+                    start = 36.dp,
+                    top = 32.dp,
+                    end = 28.dp,
+                    bottom = 24.dp,
+                ),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            LibraryHeader(filter, searchQuery, onSearchQuery, narrowPane)
+            LibraryToolbarRow(
+                filter = filter,
+                onFilter = onFilter,
+                prefs = libraryUi,
+                onSortBy = onLibrarySortBy,
+                onAscending = onLibraryAscending,
+                onColumns = onLibraryColumns,
+                libraryViewMode = libraryViewMode,
+                onLibraryViewMode = { libraryViewMode = it },
+                songFilter = songFilter,
+                onSongFilter = { songFilter = it },
+            )
+            if (catalogRefreshing) {
+                LibraryLoadingStrip(Modifier.padding(top = 2.dp))
+            }
+            when (filter) {
+                LibraryFilterTab.Artists -> LibraryPaginationControls(artistPage, onPage = {
+                    if (jellyfinPagination && searchQuery.isBlank()) onJellyfinPage(filter.toJellyfinPageKind(), it)
+                    pageIndex = it
+                })
+                LibraryFilterTab.Albums -> LibraryPaginationControls(albumPage, onPage = {
+                    if (jellyfinPagination && searchQuery.isBlank()) onJellyfinPage(filter.toJellyfinPageKind(), it)
+                    pageIndex = it
+                })
+                LibraryFilterTab.Songs -> LibraryPaginationControls(trackPage, onPage = {
+                    if (jellyfinPagination && searchQuery.isBlank()) onJellyfinPage(filter.toJellyfinPageKind(), it)
+                    pageIndex = it
+                })
+            }
+            if (narrowPane || filter == LibraryFilterTab.Artists) {
                 when (filter) {
                     LibraryFilterTab.Artists -> ArtistsContent(
                         catalog = catalog,
-                        artists = visibleArtists,
+                        artists = artistPage.items,
                         viewMode = libraryViewMode,
                         onArtist = onArtist,
                         modifier = Modifier.weight(1f).fillMaxWidth(),
                     )
                     LibraryFilterTab.Albums -> AlbumsGrid(
                         catalog = catalog,
-                        albums = visibleAlbums,
+                        albums = albumPage.items,
                         selectedAlbumId = selectedAlbumId,
                         viewMode = libraryViewMode,
                         onSelect = { selectedAlbumId = it.id },
@@ -443,62 +566,87 @@ internal fun LibraryDesktopView(
                         modifier = Modifier.weight(1f).fillMaxWidth(),
                     )
                     LibraryFilterTab.Songs -> SongsTable(
-                        tracks = visibleTracks,
+                        tracks = trackPage.items,
                         selectedTrackId = selectedTrackId,
                         columns = libraryUi.columns,
                         onSelect = { selectedTrackId = it.id },
-                        onPlay = { index -> onPlayTracks(visibleTracks, index) },
+                        onPlay = { index -> onPlayTracks(trackPage.items, index) },
                         onAddToUpNext = onAddToUpNext,
                         onDownload = onDownload,
                         modifier = Modifier.weight(1f).fillMaxWidth(),
                     )
                 }
-            }
-
-            if (!narrowPane && filter != LibraryFilterTab.Artists) {
-                Column(
-                    modifier = Modifier
-                        .width(detailWidth)
-                        .fillMaxHeight()
-                        .padding(top = 32.dp, bottom = 24.dp, end = 28.dp),
+            } else {
+                Row(
+                    Modifier.weight(1f).fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(28.dp),
                 ) {
                     when (filter) {
-                        LibraryFilterTab.Albums -> {
-                            val selected = visibleAlbums.firstOrNull { it.id == selectedAlbumId }
-                                ?: sortedAlbums.firstOrNull { it.id == selectedAlbumId }
-                            if (selected != null) {
-                                AlbumDetailSidebar(
-                                    album = selected,
-                                    columns = libraryUi.columns,
-                                    catalog = catalog,
-                                    onPlayTrack = { tracks, index -> onPlayTracks(tracks, index) },
-                                )
-                            } else {
-                                LibraryEmptyDetail("Select an album to see details.")
+                        LibraryFilterTab.Albums -> AlbumsGrid(
+                            catalog = catalog,
+                            albums = albumPage.items,
+                            selectedAlbumId = selectedAlbumId,
+                            viewMode = libraryViewMode,
+                            onSelect = { selectedAlbumId = it.id },
+                            onOpen = onAlbum,
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
+                        )
+                        LibraryFilterTab.Songs -> SongsTable(
+                            tracks = trackPage.items,
+                            selectedTrackId = selectedTrackId,
+                            columns = libraryUi.columns,
+                            onSelect = { selectedTrackId = it.id },
+                            onPlay = { index -> onPlayTracks(trackPage.items, index) },
+                            onAddToUpNext = onAddToUpNext,
+                            onDownload = onDownload,
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
+                        )
+                        LibraryFilterTab.Artists -> Unit
+                    }
+                    Column(
+                        modifier = Modifier
+                            .width(detailWidth)
+                            .fillMaxHeight(),
+                    ) {
+                        when (filter) {
+                            LibraryFilterTab.Albums -> {
+                                val selected = albumPage.items.firstOrNull { it.id == selectedAlbumId }
+                                    ?: sortedAlbums.firstOrNull { it.id == selectedAlbumId }
+                                if (selected != null) {
+                                    AlbumDetailSidebar(
+                                        album = selected,
+                                        columns = libraryUi.columns,
+                                        catalog = catalog,
+                                        onPlayTrack = { tracks, index -> onPlayTracks(tracks, index) },
+                                    )
+                                } else {
+                                    LibraryEmptyDetail("Select an album to see details.")
+                                }
                             }
-                        }
-                        LibraryFilterTab.Songs -> {
-                            val selected = visibleTracks.firstOrNull { it.id == selectedTrackId }
-                                ?: sortedTracks.firstOrNull { it.id == selectedTrackId }
-                            if (selected != null) {
-                                SongDetailSidebar(
-                                    track = selected,
-                                    columns = libraryUi.columns,
-                                    onPlay = {
-                                        val idx = visibleTracks.indexOfFirst { it.id == selected.id }
-                                        if (idx >= 0) {
-                                            onPlayTracks(visibleTracks, idx)
-                                        } else {
-                                            val fallback = sortedTracks.indexOfFirst { it.id == selected.id }
-                                            if (fallback >= 0) onPlayTracks(sortedTracks, fallback)
-                                        }
-                                    },
-                                    onAddToPlaylist = { onAddToUpNext(selected) },
-                                    onDownload = { onDownload(selected) },
-                                )
-                            } else {
-                                LibraryEmptyDetail("Select a song to see details.")
+                            LibraryFilterTab.Songs -> {
+                                val selected = trackPage.items.firstOrNull { it.id == selectedTrackId }
+                                    ?: sortedTracks.firstOrNull { it.id == selectedTrackId }
+                                if (selected != null) {
+                                    SongDetailSidebar(
+                                        track = selected,
+                                        columns = libraryUi.columns,
+                                        onPlay = {
+                                            val idx = trackPage.items.indexOfFirst { it.id == selected.id }
+                                            if (idx >= 0) {
+                                                onPlayTracks(trackPage.items, idx)
+                                            } else {
+                                                val fallback = sortedTracks.indexOfFirst { it.id == selected.id }
+                                                if (fallback >= 0) onPlayTracks(sortedTracks, fallback)
+                                            }
+                                        },
+                                        onAddToPlaylist = { onAddToUpNext(selected) },
+                                        onDownload = { onDownload(selected) },
+                                    )
+                                } else {
+                                    LibraryEmptyDetail("Select a song to see details.")
+                                }
                             }
+                            LibraryFilterTab.Artists -> Unit
                         }
                     }
                 }
@@ -1410,7 +1558,7 @@ internal fun SongRow(
         if (columns.rating) {
             RatingStars(
                 rating = ratingActions.ratingFor(track),
-                enabled = ratingActions.ratingsEnabled && track.isPlexLibraryTrack(),
+                enabled = ratingActions.ratingsEnabled && track.isRemoteLibraryTrack(),
                 onRating = { ratingActions.onRateTrack(track, it) },
                 modifier = Modifier.width(86.dp),
                 starSize = 13.dp,
