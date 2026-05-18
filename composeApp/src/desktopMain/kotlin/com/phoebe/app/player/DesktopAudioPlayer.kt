@@ -1,6 +1,7 @@
 package com.phoebe.app.player
 
 import javazoom.spi.vorbis.sampled.file.VorbisAudioFileReader
+import com.phoebe.app.data.PlexClient
 import com.phoebe.app.domain.Track
 import com.phoebe.app.platform.PhoebeLog
 import javafx.application.Platform
@@ -38,6 +39,7 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
     private var player: MediaPlayer? = null
     private var sampledClip: Clip? = null
     private var remoteSampledFile: File? = null
+    private val isLinuxDesktop = System.getProperty("os.name").orEmpty().lowercase().contains("linux")
     private val httpClient = HttpClient.newBuilder()
         .followRedirects(HttpClient.Redirect.NORMAL)
         .build()
@@ -72,7 +74,19 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
             runCatching {
                 disposeAllOnPlaybackThread()
                 if (!isPlayRequestCurrent(generation)) return@execute
-                val file = uriToLocalFile(uri)
+                var file = uriToLocalFile(uri)
+                if (file == null && shouldBufferRemotePlayback(uri)) {
+                    val extension = preferredSampledExtension
+                        ?: sampledPlaybackExtensionFromUri(uri)
+                        ?: "mp3"
+                    val downloaded = downloadRemoteAudio(uri, extension)
+                    if (!isPlayRequestCurrent(generation)) {
+                        runCatching { downloaded.delete() }
+                        return@execute
+                    }
+                    remoteSampledFile = downloaded
+                    file = downloaded
+                }
                 if (file != null && preferSampledPlayback(file)) {
                     val clip = openAndStartSampledClip(file)
                     if (clip != null) {
@@ -109,7 +123,11 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
                     disposeSampled()
                 }
                 if (!isPlayRequestCurrent(generation)) return@execute
-                playJavaFxSync(uri)
+                val playbackUri = file?.toURI()?.toString() ?: uri
+                if (!playJavaFxSync(playbackUri, generation)) {
+                    markPlaybackFailed(generation = generation)
+                    return@execute
+                }
                 if (!isPlayRequestCurrent(generation)) return@execute
                 applyVolumesFromState()
                 markPlaybackReady(generation = generation)
@@ -228,6 +246,16 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
             "wav", "wave", "aif", "aiff", "flac", "ogg", "opus" -> extension.lowercase()
             else -> null
         }
+    }
+
+    /**
+     * JavaFX streaming from Plex/Jellyfin URLs is unreliable on Linux (GStreamer / redirect /
+     * codec issues). Buffer to a temp file first so playback uses the same local paths as
+     * downloaded folders.
+     */
+    private fun shouldBufferRemotePlayback(uri: String): Boolean {
+        if (!isLinuxDesktop) return false
+        return uri.startsWith("http://", ignoreCase = true) || uri.startsWith("https://", ignoreCase = true)
     }
 
     /** Avoid SPI probe order issues (e.g. JFlac throwing on Ogg before Vorbis runs). */
@@ -408,7 +436,11 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
     }
 
     private fun downloadRemoteAudio(uri: String, extension: String): File {
-        val request = HttpRequest.newBuilder(URI(uri)).GET().build()
+        val request = HttpRequest.newBuilder(URI(uri))
+            .GET()
+            .header("User-Agent", "Phoebe/0.1.0 (https://github.com/phoebe)")
+            .header("X-Plex-Client-Identifier", PlexClient.ClientIdentifier)
+            .build()
         val response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream())
         if (response.statusCode() !in 200..299) {
             response.body().close()
@@ -423,7 +455,11 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
             response.body().close()
             error("Plex stream returned $contentType instead of audio")
         }
-        val suffix = ".$extension"
+        val resolvedExtension = extensionFromContentType(contentType)
+            ?: sampledPlaybackExtensionFromSuffix(extension)
+            ?: extension.takeIf { it.isNotBlank() && it != "bin" }
+            ?: "mp3"
+        val suffix = ".$resolvedExtension"
         val temp = Files.createTempFile("phoebe-plex-stream-", suffix).toFile()
         temp.deleteOnExit()
         try {
@@ -467,33 +503,56 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
         disposeJavaFxBlocking()
     }
 
-    private fun playJavaFxSync(uri: String) {
+    private fun playJavaFxSync(uri: String, generation: Int): Boolean {
         val latch = CountDownLatch(1)
-        var err: Throwable? = null
+        val failed = AtomicBoolean(false)
         JavaFxRuntime.runLater {
             runCatching {
                 val media = Media(uri)
-                player = MediaPlayer(media).also { mediaPlayer ->
-                    mediaPlayer.volume = effectiveOutputVolume().toDouble().coerceIn(0.0, 1.0)
-                    mediaPlayer.setOnError {
-                        PhoebeLog.d("DesktopAudioPlayer") { "playback error: ${mediaPlayer.error?.message}" }
+                val mediaPlayer = MediaPlayer(media)
+                mediaPlayer.volume = effectiveOutputVolume().toDouble().coerceIn(0.0, 1.0)
+                mediaPlayer.setOnError {
+                    failed.set(true)
+                    PhoebeLog.d("DesktopAudioPlayer") {
+                        "playback error: ${mediaPlayer.error?.message ?: mediaPlayer.error?.type}"
                     }
-                    val generation = activePlayGeneration
-                    mediaPlayer.setOnEndOfMedia {
-                        if (isPlayRequestCurrent(generation)) {
-                            next()
-                        }
+                    if (latch.count > 0L) latch.countDown()
+                }
+                mediaPlayer.setOnEndOfMedia {
+                    if (isPlayRequestCurrent(generation)) {
+                        next()
                     }
-                    media.setOnError {
-                        PhoebeLog.d("DesktopAudioPlayer") { "media error: ${media.error?.message}" }
-                    }
+                }
+                media.setOnError {
+                    failed.set(true)
+                    PhoebeLog.d("DesktopAudioPlayer") { "media error: ${media.error?.message}" }
+                    if (latch.count > 0L) latch.countDown()
+                }
+                mediaPlayer.setOnPlaying {
+                    if (latch.count > 0L) latch.countDown()
+                }
+                mediaPlayer.setOnReady {
                     mediaPlayer.play()
                 }
-            }.onFailure { err = it }
-            latch.countDown()
+                player = mediaPlayer
+            }.onFailure { error ->
+                failed.set(true)
+                logPlaybackFailure(error)
+                if (latch.count > 0L) latch.countDown()
+            }
         }
-        latch.await(30, TimeUnit.SECONDS)
-        err?.let(::logPlaybackFailure)
+        val signaled = latch.await(45, TimeUnit.SECONDS)
+        return signaled && !failed.get() && isPlayRequestCurrent(generation)
+    }
+
+    private fun extensionFromContentType(contentType: String): String? = when {
+        contentType.contains("flac") -> "flac"
+        contentType.contains("mpeg") || contentType.contains("mp3") -> "mp3"
+        contentType.contains("mp4") || contentType.contains("m4a") || contentType.contains("aac") -> "m4a"
+        contentType.contains("ogg") || contentType.contains("vorbis") -> "ogg"
+        contentType.contains("opus") -> "opus"
+        contentType.contains("wav") -> "wav"
+        else -> null
     }
 
     private fun logPlaybackFailure(error: Throwable) {

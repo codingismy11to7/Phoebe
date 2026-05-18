@@ -17,6 +17,7 @@ abstract class SimpleAudioPlayer : AudioPlayer {
     private val scope = CoroutineScope(Dispatchers.Default)
     private var progressJob: Job? = null
     private var preferUnityOutputVolume = false
+    private var systemVolumeScale = 1f
     private var playGeneration = 0
 
     /** When false, a superseded or user-paused load must not start audible playback. */
@@ -211,13 +212,18 @@ abstract class SimpleAudioPlayer : AudioPlayer {
         val coerced = volume.coerceIn(0f, 1f)
         mutableState.value = mutableState.value.copy(volume = coerced)
         if (!preferUnityOutputVolume) {
-            setOutputVolume(coerced)
+            setOutputVolume(effectiveOutputVolume())
         }
     }
 
     override fun setUnityOutputVolume() {
         preferUnityOutputVolume = true
-        setOutputVolume(1.0f)
+        setOutputVolume(effectiveOutputVolume())
+    }
+
+    override fun setSystemVolumeScale(scale: Float) {
+        systemVolumeScale = scale.coerceIn(0f, 1f)
+        setOutputVolume(effectiveOutputVolume())
     }
 
     override fun updateReportedVolume(volume: Float) {
@@ -326,8 +332,10 @@ abstract class SimpleAudioPlayer : AudioPlayer {
     protected open fun seek(positionMs: Long) = Unit
     protected open fun setOutputVolume(volume: Float) = Unit
 
-    protected fun effectiveOutputVolume(): Float =
-        if (preferUnityOutputVolume) 1f else mutableState.value.volume.coerceIn(0f, 1f)
+    protected fun effectiveOutputVolume(): Float {
+        val playerLevel = if (preferUnityOutputVolume) 1f else mutableState.value.volume.coerceIn(0f, 1f)
+        return (playerLevel * systemVolumeScale).coerceIn(0f, 1f)
+    }
 
     private fun startProgressTicker() {
         if (!useProgressTicker) return

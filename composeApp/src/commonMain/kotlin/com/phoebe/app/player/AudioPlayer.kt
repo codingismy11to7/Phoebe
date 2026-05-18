@@ -32,6 +32,13 @@ interface AudioPlayer {
      * double-attenuate.
      */
     fun updateReportedVolume(volume: Float)
+
+    /**
+     * Scales audible output by the OS mixer level (0..1) while [state.volume] stays the
+     * in-app slider value. Used on desktop when hardware keys move PulseAudio/CoreAudio
+     * but the slider only stores the app preference.
+     */
+    fun setSystemVolumeScale(scale: Float) = Unit
 }
 
 expect fun createAudioPlayer(): AudioPlayer

@@ -254,6 +254,13 @@ class AppState(
                     dependencies.audioPlayer.updateReportedVolume(v)
                 }
             }
+        } else if (controller.isSupported) {
+            dependencies.audioPlayer.setSystemVolumeScale(controller.volume.value)
+            scope.launch {
+                controller.volume.collect { scale ->
+                    dependencies.audioPlayer.setSystemVolumeScale(scale)
+                }
+            }
         }
     }
 
