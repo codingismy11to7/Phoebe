@@ -185,10 +185,12 @@ import com.phoebe.app.domain.supportsPlexPlaylists
 import com.phoebe.app.domain.supportsPlexRatings
 import com.phoebe.app.domain.supportsRemotePlaylists
 import com.phoebe.app.domain.supportsRemoteRatings
+import com.phoebe.app.domain.telemetryName
 import com.phoebe.app.player.CastState
 import com.phoebe.app.platform.createPlatformHttpClient
 import com.phoebe.app.platform.currentTimeMs
 import com.phoebe.app.platform.prefersReducedArtworkEffects
+import com.phoebe.app.telemetry.Telemetry
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -299,6 +301,10 @@ fun PhoebeRoot(
     }
     var recentSearches by remember { mutableStateOf(emptyList<String>()) }
     var libraryFilter by remember { mutableStateOf(LibraryFilterTab.Artists) }
+
+    LaunchedEffect(screen) {
+        Telemetry.trackScreen(screen.telemetryName)
+    }
 
     val upNext = player.upNext
     val currentTrack = player.currentTrack
@@ -976,6 +982,7 @@ fun PhoebeRoot(
                         onLibraryAscending = state::setLibrarySortAscending,
                         onLibraryColumns = state::setLibraryColumns,
                         onHomeSections = state::setHomeSections,
+                        onPersonalMix = state::setPersonalMixPreferences,
                         onExportFavoritePlaylists = state::exportFavoritePlaylists,
                         onImportFavoritePlaylists = state::importFavoritePlaylists,
                         downloadDirectory = downloadDirectory,
@@ -1139,6 +1146,7 @@ fun PhoebeRoot(
                     onLibraryAscending = state::setLibrarySortAscending,
                     onLibraryColumns = state::setLibraryColumns,
                     onHomeSections = state::setHomeSections,
+                    onPersonalMix = state::setPersonalMixPreferences,
                     onExportFavoritePlaylists = state::exportFavoritePlaylists,
                     onImportFavoritePlaylists = state::importFavoritePlaylists,
                     downloadDirectory = downloadDirectory,

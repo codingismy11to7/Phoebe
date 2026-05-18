@@ -337,7 +337,68 @@ data class LibraryUiPreferences(
     val ascending: Boolean = true,
     val columns: LibraryColumnVisibility = LibraryColumnVisibility(),
     val homeSections: List<HomeSection> = HomeSection.defaultOrder,
+    val personalMix: PersonalMixPreferences = PersonalMixPreferences(),
 )
+
+@Serializable
+data class PersonalMixPreferences(
+    val limit: Int = 50,
+    val heavyRotationWeight: Int = 25,
+    val recentWeight: Int = 30,
+    val mostPlayedWeight: Int = 25,
+    val similarWeight: Int = 15,
+    val discoveryWeight: Int = 5,
+) {
+    companion object {
+        val Default = PersonalMixPreferences()
+        const val MinLimit = 10
+        const val MaxLimit = 100
+    }
+
+    fun normalized(): PersonalMixPreferences =
+        normalizeMixWeights(
+            copy(
+                limit = limit.coerceIn(MinLimit, MaxLimit),
+                heavyRotationWeight = heavyRotationWeight.coerceAtLeast(0),
+                recentWeight = recentWeight.coerceAtLeast(0),
+                mostPlayedWeight = mostPlayedWeight.coerceAtLeast(0),
+                similarWeight = similarWeight.coerceAtLeast(0),
+                discoveryWeight = discoveryWeight.coerceAtLeast(0),
+            ),
+        )
+}
+
+private fun normalizeMixWeights(preferences: PersonalMixPreferences): PersonalMixPreferences {
+    val weights = listOf(
+        preferences.heavyRotationWeight,
+        preferences.recentWeight,
+        preferences.mostPlayedWeight,
+        preferences.similarWeight,
+        preferences.discoveryWeight,
+    )
+    val total = weights.sum()
+    if (total <= 100) return preferences
+
+    val scaled = weights.map { weight -> (weight.toDouble() * 100.0) / total.toDouble() }
+    val base = scaled.map { it.toInt() }.toMutableList()
+    var remaining = 100 - base.sum()
+    scaled.indices
+        .sortedWith(compareByDescending<Int> { scaled[it] - base[it] }.thenBy { it })
+        .forEach { index ->
+            if (remaining > 0) {
+                base[index]++
+                remaining--
+            }
+        }
+    return preferences.copy(
+        limit = preferences.limit.coerceIn(PersonalMixPreferences.MinLimit, PersonalMixPreferences.MaxLimit),
+        heavyRotationWeight = base[0],
+        recentWeight = base[1],
+        mostPlayedWeight = base[2],
+        similarWeight = base[3],
+        discoveryWeight = base[4],
+    )
+}
 
 @Serializable
 enum class HomeSection(val label: String) {
@@ -499,6 +560,27 @@ sealed interface AppScreen {
     data class PlaylistDetail(val playlist: Playlist) : AppScreen
     data object Player : AppScreen
 }
+
+val AppScreen.telemetryName: String
+    get() = when (this) {
+        AppScreen.SignIn -> "sign_in"
+        AppScreen.ServerPicker -> "server_picker"
+        AppScreen.LibraryPicker -> "library_picker"
+        AppScreen.Home -> "home"
+        is AppScreen.Collections -> "collections"
+        is AppScreen.CollectionItems -> "collection_items"
+        is AppScreen.AlbumDetail -> "album_detail"
+        is AppScreen.ArtistDetail -> "artist_detail"
+        is AppScreen.SongDetail -> "song_detail"
+        is AppScreen.Lyrics -> "lyrics"
+        is AppScreen.RecentlyAdded -> "recently_added"
+        is AppScreen.PlayHistory -> "play_history"
+        AppScreen.FavoritePlaylists -> "favorite_playlists"
+        AppScreen.FavoriteArtists -> "favorite_artists"
+        AppScreen.FavoriteAlbums -> "favorite_albums"
+        is AppScreen.PlaylistDetail -> "playlist_detail"
+        AppScreen.Player -> "player"
+    }
 
 data class LyricsLine(
     val startMs: Long?,

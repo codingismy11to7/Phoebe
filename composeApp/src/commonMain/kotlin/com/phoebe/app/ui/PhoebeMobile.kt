@@ -160,6 +160,7 @@ import com.phoebe.app.domain.CollectionEntry
 import com.phoebe.app.domain.LocalFolderMediaSourceConfig
 import com.phoebe.app.domain.MediaSourcesState
 import com.phoebe.app.domain.MusicLibrary
+import com.phoebe.app.domain.PersonalMixPreferences
 import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.Playlist
@@ -439,6 +440,7 @@ internal fun MobileBrowseShell(
     onLibraryAscending: (Boolean) -> Unit,
     onLibraryColumns: (LibraryColumnVisibility) -> Unit,
     onHomeSections: (List<HomeSection>) -> Unit,
+    onPersonalMix: (PersonalMixPreferences) -> Unit,
     onExportFavoritePlaylists: () -> Unit,
     onImportFavoritePlaylists: () -> Unit,
     downloadDirectory: String?,
@@ -539,6 +541,7 @@ internal fun MobileBrowseShell(
                     onDownloadDirectory = onDownloadDirectory,
                     onDeleteAllDownloads = onDeleteAllDownloads,
                     onHomeSections = onHomeSections,
+                    onPersonalMix = onPersonalMix,
                     onExportFavoritePlaylists = onExportFavoritePlaylists,
                     onImportFavoritePlaylists = onImportFavoritePlaylists,
                     modifier = Modifier.fillMaxSize(),
@@ -577,6 +580,7 @@ internal fun MobileBrowseShell(
                     onAddToUpNext = onAddToUpNext,
                     onDownload = onDownload,
                     homeSections = libraryUi.homeSections,
+                    personalMixPreferences = libraryUi.personalMix,
                     supportedCollectionEntries = supportedCollectionEntries,
                 )
                 }

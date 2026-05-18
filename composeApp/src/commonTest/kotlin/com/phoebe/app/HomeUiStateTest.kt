@@ -3,6 +3,7 @@ package com.phoebe.app
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.CatalogSnapshot
+import com.phoebe.app.domain.PersonalMixPreferences
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.Track
 import com.phoebe.app.ui.HomePlayedTrack
@@ -196,5 +197,59 @@ class HomeUiStateTest {
 
         assertEquals(setOf("heavy1", "heavy2"), mix.take(2).toSet())
         assertTrue(mix.count { it.startsWith("new") } <= 1)
+    }
+
+    @Test
+    fun personalMixDedupesLogicalSongsAcrossParentsAndProviderIds() {
+        val original = Track("plex:101", "Same Song", "Artist", "Album", 1_000L, "stream", "")
+        val unprefixed = original.copy(id = "101")
+        val differentIdSameMetadata = original.copy(id = "local-copy")
+        val other = Track("other", "Other Song", "Artist", "Album", 1_000L, "stream", "")
+        val catalog = CatalogSnapshot(
+            tracksByParent = mapOf(
+                "album" to listOf(original, other),
+                "playlist" to listOf(unprefixed, differentIdSameMetadata),
+            ),
+        )
+        val state = HomeUiState(
+            heavyRotationTracks = listOf(HomePlayedTrack(original, playCount = 3L)),
+            recentlyPlayedTracks = listOf(HomePlayedTrack(unprefixed, playCount = 1L)),
+            mostPlayedTracks = listOf(HomePlayedTrack(differentIdSameMetadata, playCount = 10L)),
+        )
+
+        val mix = personalMix(catalog, state, limit = 10)
+
+        assertEquals(listOf("Same Song", "Other Song").toSet(), mix.map { it.title }.toSet())
+        assertEquals(mix.size, mix.map { it.title to it.artist to it.album to it.durationMs }.toSet().size)
+    }
+
+    @Test
+    fun personalMixUsesCustomWeights() {
+        val heavy = (1..12).map {
+            Track("heavy$it", "Heavy $it", "Artist $it", "Album", 1_000L, "stream", "")
+        }
+        val other = (1..8).map {
+            Track("other$it", "Other $it", "Other", "Album", 1_000L, "stream", "", dateAddedMs = it.toLong())
+        }
+        val catalog = CatalogSnapshot(tracksByParent = mapOf("all" to heavy + other))
+        val state = HomeUiState(
+            heavyRotationTracks = heavy.map { HomePlayedTrack(it, playCount = 3L) },
+        )
+
+        val mix = personalMix(
+            catalog = catalog,
+            state = state,
+            preferences = PersonalMixPreferences(
+                limit = 10,
+                heavyRotationWeight = 100,
+                recentWeight = 0,
+                mostPlayedWeight = 0,
+                similarWeight = 0,
+                discoveryWeight = 0,
+            ),
+        )
+
+        assertEquals(10, mix.size)
+        assertTrue(mix.all { it.id.startsWith("heavy") })
     }
 }

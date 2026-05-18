@@ -11,6 +11,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaConstants
 import androidx.media3.session.LibraryResult
@@ -18,6 +19,8 @@ import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSession.MediaItemsWithStartPosition
 import androidx.media3.session.SessionError
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.ListenableFuture
 import com.phoebe.app.MainActivity
@@ -50,6 +53,10 @@ class PlaybackService : MediaLibraryService() {
                 if (muted) 0f else (volume.toFloat() / maxVolume.toFloat()).coerceIn(0f, 1f),
             )
         }
+
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            updateLikeButton()
+        }
     }
 
     private val librarySessionCallback = object : MediaLibrarySession.Callback {
@@ -58,10 +65,16 @@ class PlaybackService : MediaLibraryService() {
             controller: MediaSession.ControllerInfo,
         ): MediaSession.ConnectionResult {
             PhoebeLog.d(TAG) { "onConnect package=${controller.packageName}" }
-            return MediaSession.ConnectionResult.accept(
-                MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS,
-                MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS,
-            )
+            val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
+                .buildUpon()
+                .add(LikeTrackCommand)
+                .build()
+            return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                .setAvailableSessionCommands(sessionCommands)
+                .setAvailablePlayerCommands(MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS)
+                .setCustomLayout(likeButtonLayout())
+                .setMediaButtonPreferences(likeButtonLayout())
+                .build()
         }
 
         override fun onPlayerCommandRequest(
@@ -159,6 +172,26 @@ class PlaybackService : MediaLibraryService() {
                     session.notifySearchResultChanged(browser, query, count, params)
                 }
                 LibraryResult.ofVoid()
+            }
+        }
+
+        override fun onCustomCommand(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            customCommand: SessionCommand,
+            args: Bundle,
+        ): ListenableFuture<SessionResult> {
+            if (customCommand.customAction != LikeTrackAction) {
+                return immediateFuture(SessionResult(SessionError.ERROR_BAD_VALUE))
+            }
+            return listenableFuture("onCustomCommand:$LikeTrackAction") {
+                val track = currentTrackForLike() ?: return@listenableFuture SessionResult(SessionError.ERROR_BAD_VALUE)
+                if (AndroidPlaybackBridge.isLikeAvailable?.invoke(track) != true) {
+                    return@listenableFuture SessionResult(SessionError.ERROR_NOT_SUPPORTED)
+                }
+                AndroidPlaybackBridge.onToggleLikedTrack?.invoke(track)
+                updateLikeButton(track)
+                SessionResult(SessionResult.RESULT_SUCCESS)
             }
         }
 
@@ -267,6 +300,8 @@ class PlaybackService : MediaLibraryService() {
 
         mediaLibrarySession = MediaLibrarySession.Builder(this, player, librarySessionCallback)
             .setSessionActivity(openAppIntent)
+            .setCustomLayout(likeButtonLayout())
+            .setMediaButtonPreferences(likeButtonLayout())
             .build()
     }
 
@@ -357,6 +392,23 @@ class PlaybackService : MediaLibraryService() {
         }
     }
 
+    private suspend fun currentTrackForLike(): Track? {
+        val item = mediaLibrarySession?.player?.currentMediaItem ?: return null
+        val source = AndroidPlaybackRuntime.ensureInstalledNow()
+        return source.expandPlayableItem(item).firstOrNull()
+            ?: source.resolveTracks(listOf(item)).firstOrNull()
+    }
+
+    private fun updateLikeButton(track: Track? = null) {
+        val session = mediaLibrarySession ?: return
+        serviceScope.launch {
+            val resolved = track ?: runCatching { currentTrackForLike() }.getOrNull()
+            val layout = likeButtonLayout(resolved)
+            session.setCustomLayout(layout)
+            session.setMediaButtonPreferences(layout)
+        }
+    }
+
     private fun List<MediaItem>.isInAppPlaybackQueue(): Boolean =
         isNotEmpty() && all { it.requestMetadata.extras?.getBoolean(InAppPlaybackExtra, false) == true }
 
@@ -387,6 +439,23 @@ class PlaybackService : MediaLibraryService() {
     private companion object {
         private const val TAG = "PlaybackService"
         private const val NOTIFICATION_ID = 1001
+        private const val LikeTrackAction = "com.phoebe.app.action.LIKE_TRACK"
+        private val LikeTrackCommand = SessionCommand(LikeTrackAction, Bundle.EMPTY)
+
+        private fun likeButtonLayout(track: Track? = null): List<CommandButton> {
+            val enabled = track?.let { AndroidPlaybackBridge.isLikeAvailable?.invoke(it) } ?: false
+            val liked = track?.let { AndroidPlaybackBridge.isTrackLiked?.invoke(it) } ?: false
+            return listOf(
+                CommandButton.Builder(
+                    if (liked) CommandButton.ICON_HEART_FILLED else CommandButton.ICON_HEART_UNFILLED,
+                )
+                    .setDisplayName(if (liked) "Unlike" else "Like")
+                    .setSessionCommand(LikeTrackCommand)
+                    .setEnabled(enabled)
+                    .setSlots(CommandButton.SLOT_OVERFLOW)
+                    .build(),
+            )
+        }
 
         private fun androidAutoRootParams(
             @Suppress("UNUSED_PARAMETER") incoming: MediaLibraryService.LibraryParams?,

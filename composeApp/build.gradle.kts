@@ -13,12 +13,12 @@ val phoebeVersionCode = providers.gradleProperty("phoebe.versionCode")
     .map(String::toInt)
     .orElse(1)
 
-val phoebeWindowsMsiPackageVersion = phoebeVersionName.map { version ->
+val phoebeJpackagePackageVersion = phoebeVersionName.map { version ->
     val parts = version.split(".")
     val major = parts.firstOrNull()?.toIntOrNull()
     if (major != null && parts.size == 3) {
-        // Early Windows packages were all published as 1.0.0. Keep the MSI
-        // ProductVersion monotonic while the public app version remains semver.
+        // Early native packages need a positive, monotonic jpackage version while
+        // the public app version remains semver.
         "${major + 1}.${parts[1]}.${parts[2]}"
     } else {
         version
@@ -65,6 +65,7 @@ plugins {
     alias(libs.plugins.kotlinSerialization)
     alias(libs.plugins.sqldelight)
     alias(libs.plugins.roborazzi)
+    alias(libs.plugins.sentryJvm)
 }
 
 kotlin {
@@ -191,6 +192,7 @@ kotlin {
             implementation(libs.androidx.media3.session)
             implementation(libs.ktor.client.okhttp)
             implementation(libs.sqldelight.android.driver)
+            implementation(libs.sentry.kotlin.multiplatform)
         }
         desktopMain.dependencies {
             implementation("org.jetbrains.compose.desktop:desktop-jvm-$composeDesktopTarget:${libs.versions.compose.get()}")
@@ -200,6 +202,7 @@ kotlin {
             implementation(libs.jaudiotagger)
             implementation(libs.ktor.client.cio)
             implementation(libs.sqldelight.sqlite.driver)
+            implementation(libs.sentry.kotlin.multiplatform)
             implementation("org.openjfx:javafx-base:${libs.versions.javafx.get()}:$javaFxClassifier")
             implementation("org.openjfx:javafx-graphics:${libs.versions.javafx.get()}:$javaFxClassifier")
             implementation("org.openjfx:javafx-media:${libs.versions.javafx.get()}:$javaFxClassifier")
@@ -234,6 +237,13 @@ sqldelight {
 
 roborazzi {
     outputDir.set(layout.projectDirectory.dir("src/screenshotTest/roborazzi"))
+}
+
+sentry {
+    includeSourceContext = true
+    org = "personal-0mr"
+    projectName = "phoebe"
+    authToken = System.getenv("SENTRY_AUTH_TOKEN")
 }
 
 android {
@@ -331,6 +341,7 @@ compose.desktop {
             )
             macOS {
                 bundleID = if (phoebeDebugDistribution.get()) "com.phoebe.app.debug" else "com.phoebe.app"
+                packageVersion = phoebeJpackagePackageVersion.get()
                 iconFile.set(iconsDir.file("icon.icns").asFile)
                 signing {
                     identity.set(
@@ -341,7 +352,7 @@ compose.desktop {
             }
             windows {
                 iconFile.set(iconsDir.file("icon.ico").asFile)
-                msiPackageVersion = phoebeWindowsMsiPackageVersion.get()
+                msiPackageVersion = phoebeJpackagePackageVersion.get()
                 upgradeUuid = if (phoebeDebugDistribution.get()) {
                     "17D3846B-2D54-4AB4-A692-B1A3889D6D62"
                 } else {

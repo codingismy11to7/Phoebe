@@ -54,6 +54,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.phoebe.app.domain.HomeSection
 import com.phoebe.app.domain.LibraryUiPreferences
+import com.phoebe.app.domain.PersonalMixPreferences
 import com.phoebe.app.platform.rememberPickDownloadDirectory
 import kotlin.math.roundToInt
 
@@ -63,7 +64,7 @@ internal enum class SettingsCategory(
     val icon: PhoebeIcon,
 ) {
     Account("Account", "Profile and plans", PhoebeIcon.Music),
-    Playback("Playback", "Playback behavior", PhoebeIcon.Play),
+    Personalization("Personalization", "Mixes and recommendations", PhoebeIcon.Person),
     AudioQuality("Audio Quality", "Streaming and downloads", PhoebeIcon.Volume),
     Library("Library", "Organize your library", PhoebeIcon.Library),
     Downloads("Downloads", "Manage downloads", PhoebeIcon.Download),
@@ -83,6 +84,7 @@ internal fun SettingsDesktopView(
     onDownloadDirectory: (String?) -> Unit,
     onDeleteAllDownloads: () -> Unit,
     onHomeSections: (List<HomeSection>) -> Unit,
+    onPersonalMix: (PersonalMixPreferences) -> Unit,
     onExportFavoritePlaylists: () -> Unit,
     onImportFavoritePlaylists: () -> Unit,
     modifier: Modifier = Modifier,
@@ -138,7 +140,7 @@ internal fun SettingsDesktopView(
                         onDownloadDirectory = onDownloadDirectory,
                         onDeleteAllDownloads = onDeleteAllDownloads,
                     )
-                    SettingsCategory.Playback,
+                    SettingsCategory.Personalization -> PersonalMixSettingsCard(libraryUi.personalMix, onPersonalMix)
                     SettingsCategory.Notifications,
                     SettingsCategory.Advanced,
                     -> GenericPlaceholderCard(category.label)
@@ -159,6 +161,7 @@ internal fun SettingsMobileView(
     onDownloadDirectory: (String?) -> Unit,
     onDeleteAllDownloads: () -> Unit,
     onHomeSections: (List<HomeSection>) -> Unit,
+    onPersonalMix: (PersonalMixPreferences) -> Unit,
     onExportFavoritePlaylists: () -> Unit,
     onImportFavoritePlaylists: () -> Unit,
     modifier: Modifier = Modifier,
@@ -186,8 +189,8 @@ internal fun SettingsMobileView(
             onDeleteAllDownloads = onDeleteAllDownloads,
             compact = true,
         )
-        SectionLabel("PLAYBACK", PhoebeUi.accentLight)
-        GenericPlaceholderCard("Playback", compact = true)
+        SectionLabel("PERSONALIZATION", PhoebeUi.accentLight)
+        PersonalMixSettingsCard(libraryUi.personalMix, onPersonalMix, compact = true)
     }
 }
 
@@ -497,6 +500,87 @@ private fun displayDownloadDirectory(uri: String): String =
         .replace("%20", " ")
         .substringAfterLast("tree/", uri)
         .ifBlank { uri }
+
+@Composable
+private fun PersonalMixSettingsCard(
+    preferences: PersonalMixPreferences,
+    onPreferences: (PersonalMixPreferences) -> Unit,
+    compact: Boolean = false,
+) {
+    val normalized = preferences.normalized()
+    val weightTotal = normalized.mixWeightTotal()
+    fun weightRange(current: Int): IntRange =
+        0..(current + (100 - weightTotal)).coerceIn(current, 100)
+    SettingsCard {
+        Text("Personal Mix", color = PhoebeUi.primaryText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Row(
+            Modifier.fillMaxWidth().padding(bottom = 14.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Tune the mix created from Home", color = PhoebeUi.mutedText, fontSize = 12.sp)
+            Text("$weightTotal%", color = PhoebeUi.accentLight, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        }
+        MixValueSlider(
+            label = "Songs",
+            value = normalized.limit,
+            range = PersonalMixPreferences.MinLimit..PersonalMixPreferences.MaxLimit,
+            suffix = "",
+            compact = compact,
+        ) { onPreferences(normalized.copy(limit = it)) }
+        Spacer(Modifier.height(8.dp))
+        MixValueSlider("Heavy rotation", normalized.heavyRotationWeight, weightRange(normalized.heavyRotationWeight), "%", compact) {
+            onPreferences(normalized.copy(heavyRotationWeight = it))
+        }
+        MixValueSlider("Recent plays", normalized.recentWeight, weightRange(normalized.recentWeight), "%", compact) {
+            onPreferences(normalized.copy(recentWeight = it))
+        }
+        MixValueSlider("Most played", normalized.mostPlayedWeight, weightRange(normalized.mostPlayedWeight), "%", compact) {
+            onPreferences(normalized.copy(mostPlayedWeight = it))
+        }
+        MixValueSlider("Similar songs", normalized.similarWeight, weightRange(normalized.similarWeight), "%", compact) {
+            onPreferences(normalized.copy(similarWeight = it))
+        }
+        MixValueSlider("Discovery", normalized.discoveryWeight, weightRange(normalized.discoveryWeight), "%", compact) {
+            onPreferences(normalized.copy(discoveryWeight = it))
+        }
+        Spacer(Modifier.height(6.dp))
+        TextButton(onClick = { onPreferences(PersonalMixPreferences.Default) }) {
+            Text("Reset mix", color = PhoebeUi.accentLight)
+        }
+    }
+}
+
+private fun PersonalMixPreferences.mixWeightTotal(): Int =
+    heavyRotationWeight + recentWeight + mostPlayedWeight + similarWeight + discoveryWeight
+
+@Composable
+private fun MixValueSlider(
+    label: String,
+    value: Int,
+    range: IntRange,
+    suffix: String,
+    compact: Boolean,
+    onValue: (Int) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth().padding(vertical = if (compact) 3.dp else 4.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text(label, color = PhoebeUi.secondaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text("$value$suffix", color = PhoebeUi.accentLight, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        }
+        Slider(
+            value = value.toFloat(),
+            onValueChange = { onValue(it.roundToInt().coerceIn(range.first, range.last)) },
+            valueRange = range.first.toFloat()..range.last.toFloat(),
+            steps = (range.last - range.first - 1).coerceAtLeast(0),
+            colors = SliderDefaults.colors(
+                thumbColor = PhoebeUi.accentLight,
+                activeTrackColor = PhoebeUi.accentLight,
+                inactiveTrackColor = PhoebeUi.progressTrack,
+            ),
+        )
+    }
+}
 
 @Composable
 private fun HomeSettingsCard(

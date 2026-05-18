@@ -6,6 +6,7 @@ import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.HomeSection
 import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryUiPreferences
+import com.phoebe.app.domain.PersonalMixPreferences
 import com.phoebe.app.platform.PlatformStorage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -60,6 +61,10 @@ class LibraryUiRepository(
         save(mutableState.value.copy(homeSections = normalized))
     }
 
+    suspend fun setPersonalMix(personalMix: PersonalMixPreferences) {
+        save(mutableState.value.copy(personalMix = personalMix.normalized()))
+    }
+
     /** Updates UI state immediately; pair with [persistCurrentToDisk] on a background coroutine. */
     fun applyColumns(columns: LibraryColumnVisibility) {
         mutableState.value = mutableState.value.copy(columns = columns)
@@ -95,6 +100,7 @@ class LibraryUiRepository(
             colRating = c.rating.toDb(),
             colFavorite = c.favorite.toDb(),
             homeSections = prefs.homeSections.joinToString(",") { it.name },
+            personalMix = json.encodeToString(PersonalMixPreferences.serializer(), prefs.personalMix.normalized()),
         )
     }
 
@@ -116,6 +122,7 @@ class LibraryUiRepository(
                 favorite = colFavorite.toBool(),
             ),
             homeSections = homeSections.toHomeSections(),
+            personalMix = personalMix.toPersonalMixPreferences(),
         )
 
     private companion object {
@@ -125,6 +132,11 @@ class LibraryUiRepository(
 
 private fun Boolean.toDb(): Long = if (this) 1L else 0L
 private fun Long.toBool(): Boolean = this != 0L
+private fun String.toPersonalMixPreferences(): PersonalMixPreferences =
+    runCatching {
+        PlexClient.PlexJson.decodeFromString(PersonalMixPreferences.serializer(), this).normalized()
+    }.getOrDefault(PersonalMixPreferences.Default)
+
 private fun String.toHomeSections(): List<HomeSection> {
     val parsed = split(',')
         .mapNotNull { raw -> runCatching { HomeSection.valueOf(raw.trim()) }.getOrNull() }
