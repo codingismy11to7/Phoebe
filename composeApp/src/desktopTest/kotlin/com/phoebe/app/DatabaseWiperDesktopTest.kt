@@ -35,7 +35,7 @@ class DatabaseWiperDesktopTest {
                     jellyfinSyncMode = "Quick",
                 )
                 database.mediaSourcesQueries.insertOrReplace("lf1", "file:///music", "Music", 1L)
-                database.libraryPrefsQueries.upsert("Name", 1L, 1L, 1L, 1L, 1L, 1L, 1L, 1L, 1L, 1L, 1L, 1L, "Mixes,Collections,FavoritePlaylists,FavoriteArtists,FavoriteAlbums,RecentSongs,RecentArtists,RecentAlbums,Played,Random")
+                database.libraryPrefsQueries.upsert("Name", 1L, 1L, 1L, 1L, 1L, 1L, 1L, 1L, 1L, 1L, 1L, 1L, "Mixes,Collections,FavoritePlaylists,FavoriteArtists,FavoriteAlbums,RecentSongs,RecentArtists,RecentAlbums,Played,Random", "{\"limit\":50,\"heavyRotationWeight\":25,\"recentWeight\":30,\"mostPlayedWeight\":25,\"similarWeight\":15,\"discoveryWeight\":5}")
                 database.lyricsQueries.upsertLyrics("track", "Cache", null, "lyrics", 0L)
                 database.downloadsQueries.upsert("track", "Song", "Artist", "Complete", 1.0, "file:///song.mp3")
                 database.playHistoryQueries.recordPlay("track", "Artist", "Album", 123L)

@@ -81,6 +81,7 @@ import com.phoebe.app.domain.CollectionEntry
 import com.phoebe.app.domain.CollectionFacet
 import com.phoebe.app.domain.CollectionTarget
 import com.phoebe.app.domain.HomeSection
+import com.phoebe.app.domain.PersonalMixPreferences
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.PlexRadioStation
 import com.phoebe.app.domain.Track
@@ -121,6 +122,7 @@ internal fun DesktopHomeScreen(
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
     homeSections: List<HomeSection> = HomeSection.defaultOrder,
+    personalMixPreferences: PersonalMixPreferences = PersonalMixPreferences.Default,
     supportedCollectionEntries: Set<CollectionEntry> = allCollectionEntries().toSet(),
 ) {
     var showDecadeMix by remember { mutableStateOf(false) }
@@ -170,7 +172,11 @@ internal fun DesktopHomeScreen(
         }
         normalizedHomeSections(homeSections).forEach { section ->
             when (section) {
-                HomeSection.Mixes -> item("mixes") { DesktopMixesPanel(catalog, state, radioStations, radioStartingIds, onPlayTracks, onPlayRadioStation, onClearDecadeMixNotice) { showDecadeMix = true } }
+                HomeSection.Mixes -> item("mixes") {
+                    DesktopMixesPanel(catalog, state, personalMixPreferences, radioStations, radioStartingIds, onPlayTracks, onPlayRadioStation, onClearDecadeMixNotice) {
+                        showDecadeMix = true
+                    }
+                }
                 HomeSection.Collections -> item("collections") {
                     HomePanel(Modifier.fillMaxWidth()) {
                         SectionLabel("COLLECTIONS", PhoebeUi.mutedText)
@@ -237,6 +243,7 @@ internal fun MobileHomeScreen(
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
     homeSections: List<HomeSection> = HomeSection.defaultOrder,
+    personalMixPreferences: PersonalMixPreferences = PersonalMixPreferences.Default,
     supportedCollectionEntries: Set<CollectionEntry> = allCollectionEntries().toSet(),
 ) {
     var showDecadeMix by remember { mutableStateOf(false) }
@@ -276,7 +283,7 @@ internal fun MobileHomeScreen(
         normalizedHomeSections(homeSections).forEach { section ->
             when (section) {
                 HomeSection.Mixes -> item("mix") {
-                    MobileMixesSection(catalog, state, radioStations, radioStartingIds, onPlayTracks, onPlayRadioStation, onClearDecadeMixNotice) {
+                    MobileMixesSection(catalog, state, personalMixPreferences, radioStations, radioStartingIds, onPlayTracks, onPlayRadioStation, onClearDecadeMixNotice) {
                         showDecadeMix = true
                     }
                 }
@@ -544,6 +551,7 @@ private fun MobileRecentlyPlayedSection(
 private fun DesktopMixesPanel(
     catalog: CatalogSnapshot,
     state: HomeUiState,
+    personalMixPreferences: PersonalMixPreferences,
     radioStations: List<PlexRadioStation>,
     radioStartingIds: Set<String>,
     onPlayTracks: (List<Track>, Int) -> Unit,
@@ -564,7 +572,7 @@ private fun DesktopMixesPanel(
                     PhoebeIcon.Person,
                     Modifier.width(260.dp),
                 ) {
-                    val tracks = personalMix(catalog, state)
+                    val tracks = personalMix(catalog, state, personalMixPreferences)
                     if (tracks.isNotEmpty()) onPlayTracks(tracks, 0)
                 }
             }
@@ -599,6 +607,7 @@ private fun DesktopMixesPanel(
 private fun MobileMixesSection(
     catalog: CatalogSnapshot,
     state: HomeUiState,
+    personalMixPreferences: PersonalMixPreferences,
     radioStations: List<PlexRadioStation>,
     radioStartingIds: Set<String>,
     onPlayTracks: (List<Track>, Int) -> Unit,
@@ -610,7 +619,7 @@ private fun MobileMixesSection(
     LazyRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
         item("personal-mix", contentType = "mobile-mix-action") {
             MobileActionCard("Personal", PhoebeIcon.Person, Modifier.width(126.dp)) {
-                val tracks = personalMix(catalog, state)
+                val tracks = personalMix(catalog, state, personalMixPreferences)
                 if (tracks.isNotEmpty()) onPlayTracks(tracks, 0)
             }
         }
@@ -1130,6 +1139,7 @@ private fun homeIconPalette(icon: PhoebeIcon): HomeIconPalette = when (icon) {
     PhoebeIcon.MoodFace -> HomeIconPalette(Color(0xFFF97316), Color(0xFFFACC15), Color(0xFFFFF2D6))
     PhoebeIcon.SunglassesFace -> HomeIconPalette(Color(0xFF06B6D4), Color(0xFFA855F7), Color(0xFFE3FAFF))
     PhoebeIcon.GenreMasks -> HomeIconPalette(Color(0xFFFF3D6E), Color(0xFFFACC15), Color(0xFFFFE1EA))
+    PhoebeIcon.Heart -> HomeIconPalette(Color(0xFFFB7185), Color(0xFFBE123C), Color(0xFFFFDCE5))
     else -> HomeIconPalette(PhoebeUi.accentLight, Color(0xFF5EEAD4), PhoebeUi.accentLight)
 }
 

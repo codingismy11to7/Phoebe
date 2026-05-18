@@ -26,6 +26,7 @@ import com.phoebe.app.ui.PhoebePaletteDark
 import com.phoebe.app.ui.PhoebeTheme
 import com.phoebe.app.ui.PhoebeRoot
 import com.phoebe.app.ui.mediaPlaybackShortcuts
+import com.phoebe.app.telemetry.Telemetry
 import kotlinx.coroutines.launch
 
 private const val AppearanceThemeFile = "appearance_theme"
@@ -41,6 +42,10 @@ fun App(
     dependencies: AppDependencies? = null,
     onAppearanceChange: ((Boolean) -> Unit)? = null,
 ) {
+    LaunchedEffect(Unit) {
+        Telemetry.initialize()
+    }
+
     val bootstrap by produceState<AppBootstrapState>(
         initialValue = dependencies?.let { AppBootstrapState.Ready(it) } ?: AppBootstrapState.Loading,
         dependencies,

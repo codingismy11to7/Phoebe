@@ -13,6 +13,9 @@ object AndroidPlaybackBridge {
     var onTrackEnded: (() -> Unit)? = null
     var onPlayQueue: ((List<Track>, Int) -> Unit)? = null
     var onAdoptQueue: ((List<Track>, Int, Boolean) -> Unit)? = null
+    var onToggleLikedTrack: ((Track) -> Unit)? = null
+    var isLikeAvailable: ((Track) -> Boolean)? = null
+    var isTrackLiked: ((Track) -> Boolean)? = null
     var isCastActive: (() -> Boolean)? = null
     var onCastTogglePlayPause: (() -> Unit)? = null
     var onCastPlay: (() -> Unit)? = null

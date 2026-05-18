@@ -21,6 +21,7 @@ import com.phoebe.app.domain.PlexPin
 import com.phoebe.app.domain.PlexRadioStation
 import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.PlexSession
+import com.phoebe.app.domain.PersonalMixPreferences
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.TrackMetadataUpdate
@@ -1291,6 +1292,10 @@ class AppState(
 
     fun setHomeSections(sections: List<HomeSection>) = scope.launch {
         dependencies.libraryUiRepository.setHomeSections(sections)
+    }
+
+    fun setPersonalMixPreferences(preferences: PersonalMixPreferences) = scope.launch {
+        dependencies.libraryUiRepository.setPersonalMix(preferences)
     }
 
     fun download(track: Track) = launchDownload {

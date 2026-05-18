@@ -1,0 +1,1 @@
+ALTER TABLE LibraryPrefsRow ADD COLUMN personalMix TEXT NOT NULL DEFAULT '{"limit":50,"heavyRotationWeight":25,"recentWeight":30,"mostPlayedWeight":25,"similarWeight":15,"discoveryWeight":5}';
