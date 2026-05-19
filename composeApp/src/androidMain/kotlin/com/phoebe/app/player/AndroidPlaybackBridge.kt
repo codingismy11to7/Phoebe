@@ -32,6 +32,9 @@ object AndroidPlaybackBridge {
     var onCastMediaSessionState: ((CastMediaSessionState?) -> Unit)? = null
 
     @Volatile
+    var suppressServiceEndedCallback: Boolean = false
+
+    @Volatile
     private var suspendingLocalPlayback = false
 
   @Volatile

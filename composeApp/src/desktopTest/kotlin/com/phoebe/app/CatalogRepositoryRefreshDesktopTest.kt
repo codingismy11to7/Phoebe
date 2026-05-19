@@ -13,6 +13,7 @@ import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.Track
 import com.phoebe.app.platform.PlatformStorage
+import com.phoebe.app.testing.minimalMp3Bytes
 import com.phoebe.app.testing.newInMemoryPhoebeDatabase
 import com.phoebe.app.testing.testHttpClient
 import io.ktor.client.engine.mock.MockEngine
@@ -30,6 +31,7 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import java.io.File
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -70,6 +72,32 @@ class CatalogRepositoryRefreshDesktopTest {
         assertFalse(repo.catalogRefreshing.value)
         assertEquals(0, repo.catalog.value.artists.size)
         assertEquals(0, repo.catalog.value.albums.size)
+    }
+
+    @Test
+    fun refreshLocalFoldersOnlyReportsScanCompletion() = runTest {
+        val music = temp.newFolder("local-scan")
+        File(music, "alpha.mp3").writeBytes(minimalMp3Bytes())
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        val engine = MockEngine { respond("", HttpStatusCode.NotFound) }
+        val http = testHttpClient(engine)
+        val media = MediaSourcesRepository(db, PlatformStorage())
+        val repo = CatalogRepository(
+            plexClient = PlexClient(http),
+            database = db,
+            storage = PlatformStorage(),
+            httpClient = http,
+            mediaSourcesRepository = media,
+        )
+        media.addLocalFolder(music.toURI().toString(), "Local Scan")
+
+        repo.refreshLocalFoldersOnly(session = null)
+
+        assertFalse(repo.catalogRefreshing.value)
+        assertEquals(CatalogSyncPhase.Complete, repo.catalogSyncState.value.phase)
+        assertEquals("Local folders scanned.", repo.catalogSyncState.value.message)
+        assertEquals(listOf("alpha"), repo.catalog.value.tracksByParent.values.flatten().map { it.title })
     }
 
     @Test

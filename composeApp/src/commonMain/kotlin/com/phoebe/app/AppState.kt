@@ -1,6 +1,7 @@
 package com.phoebe.app
 
 import com.phoebe.app.domain.Album
+import com.phoebe.app.domain.AppSettings
 import com.phoebe.app.domain.AppScreen
 import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.CatalogSnapshot
@@ -62,6 +63,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -110,6 +112,7 @@ class AppState(
         }
     }.stateIn(scope, SharingStarted.Eagerly, dependencies.audioPlayer.state.value)
     val libraryUi = dependencies.libraryUiRepository.preferences
+    val appSettings = dependencies.appSettingsRepository.settings
     val lastPlayedByArtist = dependencies.playHistoryRepository.lastPlayedByArtist
     val lastPlayedByAlbum = dependencies.playHistoryRepository.lastPlayedByAlbum
     val lastPlayedByTrack = dependencies.playHistoryRepository.lastPlayedByTrack
@@ -187,7 +190,9 @@ class AppState(
             // can skip Sign-in; repeat here for callers that inject dependencies without that path.
             dependencies.sessionRepository.restore(refreshConnections = false)
             dependencies.mediaSourcesRepository.restore()
+            dependencies.appSettingsRepository.restore()
             dependencies.libraryUiRepository.restore()
+            dependencies.audioPlayer.setCrossfadeDurationMs(appSettings.value.crossfadeSeconds * 1_000L)
             dependencies.playHistoryRepository.restore()
             mutableDownloadDirectory.value = dependencies.platformStorage.readDownloadDirectory()
             mutableScreen.value = defaultBrowseScreen(session.value)
@@ -195,6 +200,12 @@ class AppState(
                 refreshServers()
             }
             dependencies.catalogRepository.restoreCachedCatalog()
+            if (appSettings.value.scanLibraryOnLaunch) {
+                launch {
+                    delay(500)
+                    refreshCatalogSuspended()
+                }
+            }
             if (session.value.isEmbyFamily() &&
                 session.value?.selectedLibrary != null &&
                 !dependencies.catalogRepository.catalog.value.hasBrowseableContent()
@@ -215,9 +226,18 @@ class AppState(
             }
         }
         bindSystemVolume()
+        bindAppSettingsToPlayback()
         recordPlaybackHistory()
         surfacePlaybackFailures()
         dependencies.plexPlaybackReporter.start(scope)
+    }
+
+    private fun bindAppSettingsToPlayback() {
+        scope.launch {
+            appSettings.collect { settings ->
+                dependencies.audioPlayer.setCrossfadeDurationMs(settings.crossfadeSeconds * 1_000L)
+            }
+        }
     }
 
     private fun surfacePlaybackFailures() {
@@ -1323,40 +1343,68 @@ class AppState(
         dependencies.libraryUiRepository.setPersonalMix(preferences)
     }
 
+    fun setCrossfadeSeconds(seconds: Int) = scope.launch {
+        dependencies.appSettingsRepository.setCrossfadeSeconds(seconds)
+    }
+
+    fun setScanLibraryOnLaunch(enabled: Boolean) = scope.launch {
+        dependencies.appSettingsRepository.setScanLibraryOnLaunch(enabled)
+    }
+
+    fun setNotifyWhenDownloadFinishes(enabled: Boolean) = scope.launch {
+        dependencies.appSettingsRepository.setNotifyWhenDownloadFinishes(enabled)
+    }
+
     fun download(track: Track) = launchDownload {
         val result = dependencies.catalogRepository.download(track)
         mutableMessage.value = downloadMessage(result, singular = "song", plural = "songs")
+        result
     }
 
     fun download(album: Album) = launchDownload {
         mutableMessage.value = "Downloading ${album.title}…"
         val result = dependencies.catalogRepository.downloadAlbum(session.value, album)
         mutableMessage.value = downloadMessage(result, singular = "song from ${album.title}", plural = "songs from ${album.title}")
+        result
     }
 
     fun download(artist: Artist) = launchDownload {
         mutableMessage.value = "Downloading ${artist.title}…"
         val result = dependencies.catalogRepository.downloadArtist(session.value, artist)
         mutableMessage.value = downloadMessage(result, singular = "song by ${artist.title}", plural = "songs by ${artist.title}")
+        result
     }
 
     fun download(playlist: Playlist) = launchDownload {
         mutableMessage.value = "Downloading ${playlist.title}…"
         val result = dependencies.catalogRepository.downloadPlaylist(session.value, playlist)
         mutableMessage.value = downloadMessage(result, singular = "song from ${playlist.title}", plural = "songs from ${playlist.title}")
+        result
     }
 
-    private fun launchDownload(block: suspend () -> Unit): Job {
+    private fun launchDownload(block: suspend () -> DownloadBatchResult): Job {
         lateinit var downloadJob: Job
         downloadJob = scope.launch {
             try {
-                block()
+                val result = block()
+                notifyDownloadFinishedIfNeeded(result)
             } finally {
                 activeDownloadJobs.remove(downloadJob)
             }
         }
         activeDownloadJobs += downloadJob
         return downloadJob
+    }
+
+    private suspend fun notifyDownloadFinishedIfNeeded(result: DownloadBatchResult) {
+        if (!appSettings.value.notifyWhenDownloadFinishes || result.completed <= 0) return
+        val title = "Download complete"
+        val body = if (result.completed == 1) {
+            "Downloaded 1 song."
+        } else {
+            "Downloaded ${result.completed} songs."
+        }
+        dependencies.downloadNotifier.notifyDownloadFinished(title, body)
     }
 
     fun setDownloadDirectory(uri: String?) = scope.launch {

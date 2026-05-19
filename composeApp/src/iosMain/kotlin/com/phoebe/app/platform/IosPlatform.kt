@@ -25,6 +25,12 @@ import platform.UIKit.UIApplication
 import platform.UIKit.UIViewController
 import platform.UIKit.UIWindow
 import platform.UIKit.UIWindowScene
+import platform.UserNotifications.UNAuthorizationOptionAlert
+import platform.UserNotifications.UNAuthorizationOptionSound
+import platform.UserNotifications.UNMutableNotificationContent
+import platform.UserNotifications.UNNotificationRequest
+import platform.UserNotifications.UNTimeIntervalNotificationTrigger
+import platform.UserNotifications.UNUserNotificationCenter
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.usePinned
 import kotlin.experimental.ExperimentalNativeApi
@@ -43,6 +49,8 @@ actual fun createPlatformHttpClient(): HttpClient = HttpClient(Darwin) {
         json(PlexClient.PlexJson)
     }
 }
+
+actual fun isDesktopPlatform(): Boolean = false
 
 actual suspend fun discoverJellyfinServers(): List<PlexServer> = emptyList()
 
@@ -103,6 +111,24 @@ actual class PlatformStorage actual constructor() {
     }
 
     actual fun defaultDownloadDirectoryLabel(): String = "App Documents/Phoebe"
+}
+
+actual class DownloadNotifier actual constructor() {
+    actual suspend fun notifyDownloadFinished(title: String, body: String): Boolean {
+        val center = UNUserNotificationCenter.currentNotificationCenter()
+        center.requestAuthorizationWithOptions(UNAuthorizationOptionAlert or UNAuthorizationOptionSound) { _, _ -> }
+        val content = UNMutableNotificationContent().apply {
+            setTitle(title)
+            setBody(body)
+        }
+        val request = UNNotificationRequest.requestWithIdentifier(
+            identifier = "phoebe-download-${currentTimeMs()}",
+            content = content,
+            trigger = UNTimeIntervalNotificationTrigger.triggerWithTimeInterval(1.0, repeats = false),
+        )
+        center.addNotificationRequest(request, withCompletionHandler = null)
+        return true
+    }
 }
 
 @Composable

@@ -1,0 +1,19 @@
+-- Single-row table: holds app-wide settings that are not specific to library layout.
+
+CREATE TABLE AppSettingsRow (
+    id INTEGER NOT NULL PRIMARY KEY CHECK (id = 1) DEFAULT 1,
+    crossfadeSeconds INTEGER NOT NULL DEFAULT 0,
+    scanLibraryOnLaunch INTEGER NOT NULL DEFAULT 0,
+    notifyWhenDownloadFinishes INTEGER NOT NULL DEFAULT 0
+);
+
+selectCurrent:
+SELECT * FROM AppSettingsRow WHERE id = 1;
+
+upsert:
+INSERT OR REPLACE INTO AppSettingsRow(
+    id, crossfadeSeconds, scanLibraryOnLaunch, notifyWhenDownloadFinishes
+) VALUES (1, ?, ?, ?);
+
+clear:
+DELETE FROM AppSettingsRow;

@@ -259,7 +259,9 @@ internal fun ContentTrackRow(
     val downloaded = downloads.isComplete(track)
     val techParts = remember(track.id, cols) {
         buildList {
-            if (cols.audioCodec && !track.audioCodec.isNullOrBlank()) add(track.audioCodec!!)
+            if (cols.audioCodec) {
+                track.audioCodec?.takeIf { it.isNotBlank() }?.let(::add)
+            }
             if (cols.bitrate && track.bitrateKbps != null && track.bitrateKbps > 0) add("${track.bitrateKbps} kbps")
             if (cols.sampleRate) {
                 val rate = displaySampleRateLabel(track)
@@ -348,8 +350,10 @@ internal fun ContentTrackRow(
                 if (cols.genre) {
                     AutoScrollingText(track.genre?.takeIf { it.isNotBlank() } ?: "Genre —", color = PhoebeUi.mutedText, fontSize = 11.sp)
                 }
-                if (cols.filepath && !track.filepath.isNullOrBlank()) {
-                    Text(track.filepath!!, color = PhoebeUi.mutedText, fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                if (cols.filepath) {
+                    track.filepath?.takeIf { it.isNotBlank() }?.let { filepath ->
+                        Text(filepath, color = PhoebeUi.mutedText, fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
                 }
                 if (techParts.isNotEmpty()) {
                     AutoScrollingText(techParts.joinToString(" · "), color = PhoebeUi.mutedText, fontSize = 11.sp)

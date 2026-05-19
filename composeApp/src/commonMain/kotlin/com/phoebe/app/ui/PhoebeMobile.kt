@@ -146,6 +146,7 @@ import com.phoebe.app.AppState
 import com.phoebe.app.data.catalogAlbumsForArtist
 import com.phoebe.app.data.catalogTracksForArtist
 import com.phoebe.app.domain.Album
+import com.phoebe.app.domain.AppSettings
 import com.phoebe.app.domain.AppScreen
 import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.ArtistRadioAvailability
@@ -446,6 +447,10 @@ internal fun MobileBrowseShell(
     onPersonalMix: (PersonalMixPreferences) -> Unit,
     onExportFavoritePlaylists: () -> Unit,
     onImportFavoritePlaylists: () -> Unit,
+    appSettings: AppSettings,
+    onCrossfadeSeconds: (Int) -> Unit,
+    onScanLibraryOnLaunch: (Boolean) -> Unit,
+    onNotifyWhenDownloadFinishes: (Boolean) -> Unit,
     downloadDirectory: String?,
     downloadCount: Int,
     defaultDownloadDirectoryLabel: String,
@@ -453,6 +458,8 @@ internal fun MobileBrowseShell(
     onDeleteAllDownloads: () -> Unit,
     useLightAppearance: Boolean,
     onUseLightAppearanceChange: (Boolean) -> Unit,
+    appearanceTintId: String,
+    onAppearanceTintChange: (String) -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     val pickLocalFolder = rememberPickLocalFolder(onPicked = onAddLocalFolder)
@@ -537,12 +544,18 @@ internal fun MobileBrowseShell(
                 section == DesktopSection.Settings && selectedPlaylistId == null -> SettingsMobileView(
                     isLightMode = useLightAppearance,
                     onLightModeChange = onUseLightAppearanceChange,
+                    tintId = appearanceTintId,
+                    onTintChange = onAppearanceTintChange,
                     downloadDirectory = downloadDirectory,
                     downloadCount = downloadCount,
+                    appSettings = appSettings,
                     libraryUi = libraryUi,
                     defaultDownloadDirectoryLabel = defaultDownloadDirectoryLabel,
                     onDownloadDirectory = onDownloadDirectory,
                     onDeleteAllDownloads = onDeleteAllDownloads,
+                    onCrossfadeSeconds = onCrossfadeSeconds,
+                    onScanLibraryOnLaunch = onScanLibraryOnLaunch,
+                    onNotifyWhenDownloadFinishes = onNotifyWhenDownloadFinishes,
                     onHomeSections = onHomeSections,
                     onPersonalMix = onPersonalMix,
                     onExportFavoritePlaylists = onExportFavoritePlaylists,
@@ -1139,15 +1152,26 @@ internal fun MobilePlayer(
                                         alpha = 1f - sheetProgress
                                     },
                             ) {
-                                SwipeableMobileArtwork(
-                                    track = track,
-                                    nextTrack = upNext.firstOrNull(),
-                                    previousTrack = previousTrack,
-                                    onSkipQueueBy = onSkipQueueBy,
-                                    modifier = Modifier
+                                Box(
+                                    Modifier
                                         .size(artworkSize)
                                         .align(Alignment.Start),
-                                )
+                                ) {
+                                    SwipeableMobileArtwork(
+                                        track = track,
+                                        nextTrack = upNext.firstOrNull(),
+                                        previousTrack = previousTrack,
+                                        onSkipQueueBy = onSkipQueueBy,
+                                        modifier = Modifier.fillMaxSize(),
+                                    )
+                                    AudioQualityBadge(
+                                        track = track,
+                                        onArtwork = true,
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .padding(12.dp),
+                                    )
+                                }
                                 Spacer(Modifier.height(20.dp))
                                 AutoScrollingText(track.title, color = PhoebeUi.primaryText, fontSize = 22.sp, fontWeight = FontWeight.Black)
                                 AutoScrollingText(

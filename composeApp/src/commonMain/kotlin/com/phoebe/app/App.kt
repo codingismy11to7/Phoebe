@@ -24,12 +24,14 @@ import com.phoebe.app.ui.DesktopKeyboardShortcutsEffect
 import com.phoebe.app.ui.GlobalMediaKeysEffect
 import com.phoebe.app.ui.PhoebePaletteDark
 import com.phoebe.app.ui.PhoebeTheme
+import com.phoebe.app.ui.PhoebeTintOption
 import com.phoebe.app.ui.PhoebeRoot
 import com.phoebe.app.ui.mediaPlaybackShortcuts
 import com.phoebe.app.telemetry.Telemetry
 import kotlinx.coroutines.launch
 
 private const val AppearanceThemeFile = "appearance_theme"
+private const val AppearanceTintFile = "appearance_tint"
 
 private sealed interface AppBootstrapState {
     data object Loading : AppBootstrapState
@@ -90,11 +92,17 @@ fun App(
     }
 
     var useLightAppearance by remember(readyDependencies) { mutableStateOf(false) }
+    var appearanceTintId by remember(readyDependencies) { mutableStateOf(PhoebeTintOption.Purple.id) }
 
     LaunchedEffect(readyDependencies) {
         installPlatformPlayback(readyDependencies)
         val stored = readyDependencies.platformStorage.readText(AppearanceThemeFile)?.trim()?.lowercase()
         useLightAppearance = stored == "light" || stored == "true"
+        appearanceTintId = readyDependencies.platformStorage.readText(AppearanceTintFile)
+            ?.trim()
+            ?.lowercase()
+            ?.let { PhoebeTintOption.fromId(it).id }
+            ?: PhoebeTintOption.Purple.id
     }
 
     LaunchedEffect(state) {
@@ -105,7 +113,7 @@ fun App(
         onAppearanceChange?.invoke(useLightAppearance)
     }
 
-    PhoebeTheme(useLightAppearance = useLightAppearance) {
+    PhoebeTheme(useLightAppearance = useLightAppearance, tintId = appearanceTintId) {
         GlobalMediaKeysEffect(
             player = player,
             onTogglePlayPause = { state.mediaKeyTogglePlayPause() },
@@ -136,6 +144,17 @@ fun App(
                         readyDependencies.platformStorage.writeText(
                             AppearanceThemeFile,
                             if (value) "light" else "dark",
+                        )
+                    }
+                },
+                appearanceTintId = appearanceTintId,
+                onAppearanceTintChange = { value ->
+                    val tintId = PhoebeTintOption.fromId(value).id
+                    appearanceTintId = tintId
+                    scope.launch {
+                        readyDependencies.platformStorage.writeText(
+                            AppearanceTintFile,
+                            tintId,
                         )
                     }
                 },

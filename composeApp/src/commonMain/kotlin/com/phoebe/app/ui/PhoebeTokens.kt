@@ -6,6 +6,33 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 
 @Immutable
+data class PhoebeTintOption(
+    val id: String,
+    val label: String,
+    val color: Color,
+    val lightColor: Color = color,
+) {
+    companion object {
+        val Purple = PhoebeTintOption("purple", "Purple", Color(0xFF9B4DFF), Color(0xFF8B3DFF))
+        val Options = listOf(
+            PhoebeTintOption("red", "Red", Color(0xFFEF4444), Color(0xFFDC2626)),
+            PhoebeTintOption("coral", "Coral", Color(0xFFFF6B5F), Color(0xFFE64B3C)),
+            PhoebeTintOption("amber", "Amber", Color(0xFFF59E0B), Color(0xFFD97706)),
+            PhoebeTintOption("yellow", "Yellow", Color(0xFFEAB308), Color(0xFFCA8A04)),
+            PhoebeTintOption("green", "Green", Color(0xFF22C55E), Color(0xFF16A34A)),
+            PhoebeTintOption("teal", "Teal", Color(0xFF14B8A6), Color(0xFF0D9488)),
+            PhoebeTintOption("blue", "Blue", Color(0xFF3B82F6), Color(0xFF2563EB)),
+            PhoebeTintOption("indigo", "Indigo", Color(0xFF6366F1), Color(0xFF4F46E5)),
+            Purple,
+            PhoebeTintOption("pink", "Pink", Color(0xFFEC4899), Color(0xFFDB2777)),
+        )
+
+        fun fromId(id: String?): PhoebeTintOption =
+            Options.firstOrNull { it.id == id } ?: Purple
+    }
+}
+
+@Immutable
 data class PhoebeVisualPalette(
     val canvasBackground: Color,
     val shellRadialTint: Color,
@@ -99,6 +126,17 @@ val PhoebePaletteLight = PhoebeVisualPalette(
     waveformUnplayed = Color(0x59181B22),
     waveformPlayhead = Color(0x99181B22),
 )
+
+internal fun PhoebeVisualPalette.withTint(tint: PhoebeTintOption, useLightAppearance: Boolean): PhoebeVisualPalette {
+    if (tint.id == PhoebeTintOption.Purple.id) return this
+    val accent = if (useLightAppearance) tint.lightColor else tint.color
+    return copy(
+        shellRadialTint = accent.copy(alpha = if (useLightAppearance) 0.06f else 0.20f),
+        accent = accent,
+        accentLight = accent,
+        librarySelectedRow = accent.copy(alpha = if (useLightAppearance) 0.10f else 0.18f),
+    )
+}
 
 val LocalPhoebePalette = staticCompositionLocalOf { PhoebePaletteDark }
 

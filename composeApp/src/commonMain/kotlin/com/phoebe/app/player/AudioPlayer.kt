@@ -20,6 +20,7 @@ interface AudioPlayer {
     fun setShuffle(enabled: Boolean)
     fun setRepeat(mode: RepeatMode)
     fun setVolume(volume: Float)
+    fun setCrossfadeDurationMs(durationMs: Long)
 
     /**
      * Keep per-app output at unity while [updateReportedVolume] mirrors the OS level on the slider.

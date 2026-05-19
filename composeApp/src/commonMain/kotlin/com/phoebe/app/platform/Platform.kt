@@ -7,6 +7,8 @@ import kotlinx.serialization.json.Json
 
 expect fun createPlatformHttpClient(): io.ktor.client.HttpClient
 
+expect fun isDesktopPlatform(): Boolean
+
 expect class PlatformStorage() {
     suspend fun readText(name: String): String?
     suspend fun writeText(name: String, value: String)
@@ -41,6 +43,10 @@ expect fun catalogTrackPrefetchAlbumCount(): Int
 /** Maximum number of catalog prefetch requests to transform at once. */
 expect fun catalogTrackPrefetchParallelism(): Int
 
+expect class DownloadNotifier() {
+    suspend fun notifyDownloadFinished(title: String, body: String): Boolean
+}
+
 @Serializable
 internal data class JellyfinDiscoveryResponse(
     val Address: String? = null,
@@ -49,9 +55,11 @@ internal data class JellyfinDiscoveryResponse(
     val EndpointAddress: String? = null,
 )
 
+private val jellyfinDiscoveryJson = Json { ignoreUnknownKeys = true }
+
 internal fun parseJellyfinDiscoveryServer(payload: String): PlexServer? {
     val response = runCatching {
-        Json { ignoreUnknownKeys = true }.decodeFromString<JellyfinDiscoveryResponse>(payload)
+        jellyfinDiscoveryJson.decodeFromString<JellyfinDiscoveryResponse>(payload)
     }.getOrNull() ?: return null
     val address = response.Address?.trimEnd('/')?.takeIf { it.startsWith("http://") || it.startsWith("https://") } ?: return null
     val rawId = response.Id?.takeIf { it.isNotBlank() } ?: address.hashCode().toUInt().toString(16)

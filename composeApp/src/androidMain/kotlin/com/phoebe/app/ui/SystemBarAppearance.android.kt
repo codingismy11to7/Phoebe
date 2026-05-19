@@ -18,8 +18,11 @@ actual fun ApplySystemBarAppearance(
     if (view.isInEditMode) return
     SideEffect {
         val window = (view.context as Activity).window
-        window.statusBarColor = statusBarColor.toArgb()
-        window.navigationBarColor = navigationBarColor.toArgb()
+        @Suppress("DEPRECATION")
+        run {
+            window.statusBarColor = statusBarColor.toArgb()
+            window.navigationBarColor = navigationBarColor.toArgb()
+        }
         val controller = WindowCompat.getInsetsController(window, view)
         controller.isAppearanceLightStatusBars = useLightIcons
         controller.isAppearanceLightNavigationBars = useLightIcons

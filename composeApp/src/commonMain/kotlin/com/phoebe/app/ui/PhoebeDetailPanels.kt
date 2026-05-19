@@ -300,14 +300,25 @@ private fun SongDetailHero(
             Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            FlippableSongArtwork(
-                track = track,
+            Box(
                 Modifier
                     .size(220.dp)
                     .align(Alignment.CenterHorizontally),
-                artworkModifier = Modifier.sharedArtworkTransition("song:${track.id}"),
-                radius = 14.dp,
-            )
+            ) {
+                FlippableSongArtwork(
+                    track = track,
+                    Modifier.fillMaxSize(),
+                    artworkModifier = Modifier.sharedArtworkTransition("song:${track.id}"),
+                    radius = 14.dp,
+                )
+                AudioQualityBadge(
+                    track = track,
+                    onArtwork = true,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(10.dp),
+                )
+            }
             SongDetailText(track, titleSize = 28.sp, titleLineHeight = 32.sp, titleMaxLines = 3, autoScroll = true)
             SongActionRow(
                 track = track,
@@ -709,6 +720,23 @@ private fun PlayRadioActionButton(
 }
 
 @Composable
+private fun PlayAllActionButton(
+    tracks: List<Track>,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    LibraryToolbarButton(
+        icon = PhoebeIcon.Play,
+        label = "Play All",
+        value = tracks.takeIf { it.isNotEmpty() }?.size?.let { "$it" },
+        modifier = modifier,
+        enabled = tracks.isNotEmpty(),
+        iconTint = if (tracks.isEmpty()) PhoebeUi.mutedText else PhoebeUi.accentLight,
+        onClick = onClick,
+    )
+}
+
+@Composable
 private fun ArtistDetailStatRow(icon: PhoebeIcon, value: String, label: String) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Box(
@@ -979,6 +1007,10 @@ internal fun ArtistDetailPanel(
                 }
                 if (!useTable) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        PlayAllActionButton(
+                            tracks = visibleTracks,
+                            onClick = { onPlayTracks(visibleTracks, 0) },
+                        )
                         if (artistRadioAvailability == ArtistRadioAvailability.Available) {
                             PlayRadioActionButton(
                                 starting = artistRadioStarting,
@@ -1026,6 +1058,10 @@ internal fun ArtistDetailPanel(
                 onViewMode = { albumViewMode = it },
                 actions = {
                     if (useTable) {
+                        PlayAllActionButton(
+                            tracks = visibleTracks,
+                            onClick = { onPlayTracks(visibleTracks, 0) },
+                        )
                         if (artistRadioAvailability == ArtistRadioAvailability.Available) {
                             PlayRadioActionButton(
                                 starting = artistRadioStarting,

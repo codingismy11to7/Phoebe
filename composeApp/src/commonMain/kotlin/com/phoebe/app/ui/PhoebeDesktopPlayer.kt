@@ -138,6 +138,7 @@ import com.phoebe.app.data.JellyfinQuickConnectResult
 import com.phoebe.app.data.catalogAlbumsForArtist
 import com.phoebe.app.data.catalogTracksForArtist
 import com.phoebe.app.domain.Album
+import com.phoebe.app.domain.AppSettings
 import com.phoebe.app.domain.AppScreen
 import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.ArtistRadioAvailability
@@ -302,6 +303,10 @@ internal fun DesktopPlayer(
     onPersonalMix: (PersonalMixPreferences) -> Unit,
     onExportFavoritePlaylists: () -> Unit,
     onImportFavoritePlaylists: () -> Unit,
+    appSettings: AppSettings,
+    onCrossfadeSeconds: (Int) -> Unit,
+    onScanLibraryOnLaunch: (Boolean) -> Unit,
+    onNotifyWhenDownloadFinishes: (Boolean) -> Unit,
     downloadDirectory: String?,
     downloadCount: Int,
     defaultDownloadDirectoryLabel: String,
@@ -309,6 +314,9 @@ internal fun DesktopPlayer(
     onDeleteAllDownloads: () -> Unit,
     useLightAppearance: Boolean,
     onUseLightAppearanceChange: (Boolean) -> Unit,
+    appearanceTintId: String,
+    onAppearanceTintChange: (String) -> Unit,
+    settingsInitialCategory: SettingsCategory = SettingsCategory.AudioPlayback,
     onRetryLyrics: () -> Unit = {},
 ) {
     var desktopUpNextExpanded by remember { mutableStateOf(true) }
@@ -635,17 +643,24 @@ internal fun DesktopPlayer(
                                     section == DesktopSection.Settings && selectedPlaylistId == null -> SettingsDesktopView(
                                         isLightMode = useLightAppearance,
                                         onLightModeChange = onUseLightAppearanceChange,
+                                        tintId = appearanceTintId,
+                                        onTintChange = onAppearanceTintChange,
                                         downloadDirectory = downloadDirectory,
                                         downloadCount = downloadCount,
+                                        appSettings = appSettings,
                                         libraryUi = libraryUi,
                                         defaultDownloadDirectoryLabel = defaultDownloadDirectoryLabel,
                                         onDownloadDirectory = onDownloadDirectory,
                                         onDeleteAllDownloads = onDeleteAllDownloads,
+                                        onCrossfadeSeconds = onCrossfadeSeconds,
+                                        onScanLibraryOnLaunch = onScanLibraryOnLaunch,
+                                        onNotifyWhenDownloadFinishes = onNotifyWhenDownloadFinishes,
                                         onHomeSections = onHomeSections,
                                         onPersonalMix = onPersonalMix,
                                         onExportFavoritePlaylists = onExportFavoritePlaylists,
                                         onImportFavoritePlaylists = onImportFavoritePlaylists,
                                         modifier = Modifier.fillMaxSize(),
+                                        initialCategory = settingsInitialCategory,
                                     )
                                     else -> DesktopContent(
                                         catalog = catalog,

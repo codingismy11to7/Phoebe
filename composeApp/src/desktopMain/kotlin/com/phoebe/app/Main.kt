@@ -11,8 +11,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.painter.BitmapPainter
-import androidx.compose.ui.res.loadImageBitmap
-import androidx.compose.ui.res.useResource
+import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowScope
@@ -53,7 +52,7 @@ fun main() {
         } else {
             "icon$debugSuffix.png"
         }
-        val icon = useResource(iconResource) { BitmapPainter(loadImageBitmap(it)) }
+        val icon = BitmapPainter(loadDesktopResourceImage(iconResource).toComposeImageBitmap())
         var useLightAppearance by remember { mutableStateOf(false) }
         Window(
             onCloseRequest = ::exitApplication,
@@ -85,6 +84,15 @@ fun main() {
         }
     }
 }
+
+private fun loadDesktopResourceImage(resourcePath: String) =
+    checkNotNull(Thread.currentThread().contextClassLoader.getResourceAsStream(resourcePath)) {
+        "Missing desktop resource: $resourcePath"
+    }.use { stream ->
+        checkNotNull(ImageIO.read(stream)) {
+            "Unable to decode desktop resource: $resourcePath"
+        }
+    }
 
 private fun configureSandboxedNativeLibraries() {
     if (System.getProperty("os.name").orEmpty().lowercase().contains("mac")) return

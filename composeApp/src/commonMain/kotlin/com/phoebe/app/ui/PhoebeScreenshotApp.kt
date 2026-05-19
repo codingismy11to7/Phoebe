@@ -137,6 +137,7 @@ import com.phoebe.app.data.catalogAlbumsForArtist
 import com.phoebe.app.data.catalogTracksForArtist
 import com.phoebe.app.data.defaultPlexRadioStations
 import com.phoebe.app.domain.Album
+import com.phoebe.app.domain.AppSettings
 import com.phoebe.app.domain.AppScreen
 import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.ArtistRadioAvailability
@@ -203,11 +204,17 @@ internal enum class PhoebeScreenshotScenario {
 internal fun PhoebeScreenshotApp(
     scenario: PhoebeScreenshotScenario,
     useLightAppearance: Boolean = false,
+    tintId: String = PhoebeTintOption.Purple.id,
     forceShowQueue: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val fixture = remember { PhoebeScreenshotFixture }
-    PhoebeTheme(useLightAppearance = useLightAppearance) {
+    val settingsInitialCategory = if (scenario == PhoebeScreenshotScenario.Settings && tintId != PhoebeTintOption.Purple.id) {
+        SettingsCategory.Appearance
+    } else {
+        SettingsCategory.AudioPlayback
+    }
+    PhoebeTheme(useLightAppearance = useLightAppearance, tintId = tintId) {
         CompositionLocalProvider(
             LocalCatalogHasContent provides true,
             LocalNowPlaying provides NowPlayingIndicatorState(
@@ -247,6 +254,8 @@ internal fun PhoebeScreenshotApp(
                         scenario = scenario,
                         fixture = fixture,
                         useLightAppearance = useLightAppearance,
+                        tintId = tintId,
+                        settingsInitialCategory = settingsInitialCategory,
                         showQueue = wideDesktop || forceShowQueue,
                         compact = !wideDesktop,
                         modifier = Modifier.fillMaxSize(),
@@ -263,6 +272,8 @@ internal fun PhoebeDesktopScreenshotScenario(
     scenario: PhoebeScreenshotScenario,
     fixture: PhoebeScreenshotFixtureData,
     useLightAppearance: Boolean,
+    tintId: String = PhoebeTintOption.Purple.id,
+    settingsInitialCategory: SettingsCategory = SettingsCategory.AudioPlayback,
     showQueue: Boolean,
     compact: Boolean,
     modifier: Modifier = Modifier,
@@ -391,6 +402,10 @@ internal fun PhoebeDesktopScreenshotScenario(
         onPersonalMix = {},
         onExportFavoritePlaylists = {},
         onImportFavoritePlaylists = {},
+        appSettings = AppSettings.Default,
+        onCrossfadeSeconds = {},
+        onScanLibraryOnLaunch = {},
+        onNotifyWhenDownloadFinishes = {},
         downloadDirectory = null,
         downloadCount = fixture.catalog.downloads.size,
         defaultDownloadDirectoryLabel = "App storage",
@@ -398,6 +413,9 @@ internal fun PhoebeDesktopScreenshotScenario(
         onDeleteAllDownloads = {},
         useLightAppearance = useLightAppearance,
         onUseLightAppearanceChange = {},
+        appearanceTintId = tintId,
+        onAppearanceTintChange = {},
+        settingsInitialCategory = settingsInitialCategory,
     )
 }
 
@@ -643,6 +661,10 @@ internal fun PhoebeMobileScreenshotScenario(
                 onPersonalMix = {},
                 onExportFavoritePlaylists = {},
                 onImportFavoritePlaylists = {},
+                appSettings = AppSettings.Default,
+                onCrossfadeSeconds = {},
+                onScanLibraryOnLaunch = {},
+                onNotifyWhenDownloadFinishes = {},
                 downloadDirectory = null,
                 downloadCount = fixture.catalog.downloads.size,
                 defaultDownloadDirectoryLabel = "App storage",
@@ -650,6 +672,8 @@ internal fun PhoebeMobileScreenshotScenario(
                 onDeleteAllDownloads = {},
                 useLightAppearance = false,
                 onUseLightAppearanceChange = {},
+                appearanceTintId = PhoebeTintOption.Purple.id,
+                onAppearanceTintChange = {},
                 radioStations = fixture.radioStations,
             )
         }

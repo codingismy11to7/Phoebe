@@ -1,0 +1,6 @@
+CREATE TABLE AppSettingsRow (
+    id INTEGER NOT NULL PRIMARY KEY CHECK (id = 1) DEFAULT 1,
+    crossfadeSeconds INTEGER NOT NULL DEFAULT 0,
+    scanLibraryOnLaunch INTEGER NOT NULL DEFAULT 0,
+    notifyWhenDownloadFinishes INTEGER NOT NULL DEFAULT 0
+);
