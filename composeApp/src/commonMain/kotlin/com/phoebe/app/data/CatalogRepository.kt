@@ -416,6 +416,57 @@ class CatalogRepository(
         }
     }
 
+    suspend fun refreshLocalFoldersOnly(session: PlexSession?) {
+        PhoebeLog.d("CatalogRepository") {
+            "refreshLocalFoldersOnly start → localFolders=${mediaSourcesRepository.state.value.localFolders.count { it.enabled }}"
+        }
+        try {
+            refreshMutex.withLock {
+                withCatalogRefreshing {
+                    mutableCatalogSyncState.value = CatalogSyncState(
+                        phase = CatalogSyncPhase.LoadingLibrary,
+                        message = "Scanning local folders…",
+                        loadedAlbums = mutableCatalog.value.albums.size,
+                        loadedTracks = mutableCatalog.value.tracksByParent.values.sumOf { it.size },
+                        blocking = true,
+                    )
+                    val previous = mutableCatalog.value
+                    val ctx = SourceBuildContext(
+                        session = session,
+                        plexClient = plexClient,
+                        httpClient = httpClient,
+                        localFolders = mediaSourcesRepository.state.value.localFolders,
+                        localFileMetadataCache = localFileMetadataCache,
+                    )
+                    val localRaw = LocalFolderMusicSourcePlugin.buildCatalog(ctx)
+                    val remoteAndUserSnapshot = previous.withoutLocalFolderCatalog()
+                    val merged = CatalogMerge.merge(remoteAndUserSnapshot, localRaw).copy(downloads = previous.downloads)
+                    mutableCatalogSyncState.value = CatalogSyncState(
+                        phase = CatalogSyncPhase.Persisting,
+                        message = "Saving local library…",
+                        loadedAlbums = merged.albums.size,
+                        loadedTracks = merged.tracksByParent.values.sumOf { it.size },
+                        blocking = false,
+                    )
+                    publish(merged, persist = true)
+                    mutableCatalogSyncState.value = CatalogSyncState(
+                        phase = CatalogSyncPhase.Complete,
+                        message = "Local folders scanned.",
+                        loadedAlbums = mutableCatalog.value.albums.size,
+                        loadedTracks = mutableCatalog.value.tracksByParent.values.sumOf { it.size },
+                    )
+                }
+            }
+        } catch (error: Throwable) {
+            if (error is CancellationException) throw error
+            mutableCatalogSyncState.value = CatalogSyncState(
+                phase = CatalogSyncPhase.Failed,
+                message = error.message ?: "Local folder scan failed.",
+            )
+            throw error
+        }
+    }
+
     private suspend fun refreshAdapterAggregated(session: PlexSession) {
         val adapter = providerRegistry.adapterFor(session) ?: return
         if (adapter.capabilities.pagedCatalog && session.jellyfinSyncMode == JellyfinSyncMode.Quick) {
@@ -1517,7 +1568,7 @@ class CatalogRepository(
         val fetch: suspend () -> Unit = fetch@{
             val providerPrefix = session?.providerType?.catalogPrefix
             if (session != null && providerPrefix != null && playlist.id.startsWith("$providerPrefix:") && !session.isPlex()) {
-                val server = session?.selectedServer ?: return@fetch
+                val server = session.selectedServer ?: return@fetch
                 val token = session.token
                 val adapter = providerRegistry.adapterFor(session)
                 if (adapter != null && !session.isEmbyFamily()) {
@@ -1620,7 +1671,7 @@ class CatalogRepository(
         if (!existing.isNullOrEmpty()) return existing
         val providerPrefix = session?.providerType?.catalogPrefix
         if (session != null && providerPrefix != null && album.id.startsWith("$providerPrefix:") && !session.isPlex()) {
-            val server = session?.selectedServer ?: return emptyList()
+            val server = session.selectedServer ?: return emptyList()
             val token = session.token
             return withCatalogRefreshing {
                 val adapter = providerRegistry.adapterFor(session)
@@ -2269,7 +2320,7 @@ class CatalogRepository(
     suspend fun playArtistRadio(session: PlexSession?, artist: Artist): List<Track> {
         val providerPrefix = session?.providerType?.catalogPrefix
         if (session.isEmbyFamily() && providerPrefix != null && artist.id.startsWith("$providerPrefix:")) {
-            val server = session?.selectedServer ?: return emptyList()
+            val server = session.selectedServer ?: return emptyList()
             val userId = session.userId ?: return emptyList()
             val remoteClient = if (providerPrefix == "emby") embyClient else jellyfinClient
             return remoteClient.instantMix(server, session.token, userId, artist.id.removePrefix("$providerPrefix:"))
@@ -2457,7 +2508,7 @@ class CatalogRepository(
         liked: Boolean,
     ): Boolean {
         if (session != null && !session.isPlex()) {
-            val server = session?.selectedServer ?: return false
+            val server = session.selectedServer ?: return false
             val prefix = session.providerType.catalogPrefix
             val itemId = providerItemId(track.id, prefix) ?: return false
             return runCatching {
@@ -2803,7 +2854,7 @@ class CatalogRepository(
             PhoebeLog.d("CatalogRepository") { "addTracksToPlaylist: Plex session not ready" }
             return
         }
-        val s = session!!
+        val s = session
         var snapshot = mutableCatalog.value
         val playlistMeta = snapshot.playlists.find { it.id == playlist.id } ?: playlist
         var existing = snapshot.tracksByParent[playlist.id].orEmpty()
@@ -2913,7 +2964,7 @@ class CatalogRepository(
                 val remoteClient = if (remotePrefix == "emby") embyClient else jellyfinClient
                 remoteClient.editTrackMetadata(server, token, remoteItemId, existing, cleanUpdate)
             }.onFailure { error ->
-                PhoebeLog.d("CatalogRepository") { "updateTrackMetadata ${session?.providerType?.name} sync failed for '${existing.title}': ${error.message}" }
+                PhoebeLog.d("CatalogRepository") { "updateTrackMetadata ${session.providerType.name} sync failed for '${existing.title}': ${error.message}" }
             }.isSuccess
         } else
         if (hasPlexEditableChanges && rating != null && server != null && library != null && token != null) {
@@ -3014,8 +3065,9 @@ class CatalogRepository(
         var nextFavorite: Boolean? = null
         val artists = snapshot.artists.map {
             if (it.id == artist.id) {
-                nextFavorite = !it.favorite
-                it.copy(favorite = nextFavorite!!)
+                val favorite = !it.favorite
+                nextFavorite = favorite
+                it.copy(favorite = favorite)
             } else {
                 it
             }
@@ -3038,8 +3090,9 @@ class CatalogRepository(
         var nextFavorite: Boolean? = null
         val albums = snapshot.albums.map {
             if (it.id == album.id) {
-                nextFavorite = !it.favorite
-                it.copy(favorite = nextFavorite!!)
+                val favorite = !it.favorite
+                nextFavorite = favorite
+                it.copy(favorite = favorite)
             } else {
                 it
             }
@@ -3062,8 +3115,9 @@ class CatalogRepository(
         var nextFavorite: Boolean? = null
         val playlists = snapshot.playlists.map {
             if (it.id == playlist.id) {
-                nextFavorite = !it.favorite
-                it.copy(favorite = nextFavorite!!)
+                val favorite = !it.favorite
+                nextFavorite = favorite
+                it.copy(favorite = favorite)
             } else {
                 it
             }
@@ -3121,9 +3175,9 @@ class CatalogRepository(
         val providerPrefix = session?.providerType?.catalogPrefix
         val remoteId = providerPrefix?.let { providerItemId(id, it) }
         if (session != null && !session.isPlex() && remoteId != null) {
-            val server = session?.selectedServer
-            val token = session?.token
-            if (!session.supportsRemoteRatings() || server == null || token.isNullOrBlank()) {
+            val server = session.selectedServer
+            val token = session.token
+            if (!session.supportsRemoteRatings() || server == null || token.isBlank()) {
                 return RatingSyncResult(savedLocally = false, plexAttempted = false, plexSynced = false)
             }
             val synced = runCatching {
@@ -3189,7 +3243,7 @@ class CatalogRepository(
     ): FavoriteSyncResult {
         val prefix = session?.providerType?.catalogPrefix ?: return FavoriteSyncResult(favorite = favorite)
         val itemId = providerItemId(id, prefix) ?: return FavoriteSyncResult(favorite = favorite)
-        val server = session?.selectedServer ?: return FavoriteSyncResult(favorite = favorite)
+        val server = session.selectedServer ?: return FavoriteSyncResult(favorite = favorite)
         val token = session.token.takeIf { it.isNotBlank() } ?: return FavoriteSyncResult(favorite = favorite)
         val synced = runCatching {
             val adapter = providerRegistry.adapterFor(session)
@@ -4054,3 +4108,17 @@ private fun Float?.normalizedRating(): Float? =
     this?.coerceIn(0f, 5f)
         ?.let { kotlin.math.round(it * 2f) / 2f }
         ?.takeIf { it > 0f }
+
+private fun CatalogSnapshot.withoutLocalFolderCatalog(): CatalogSnapshot =
+    copy(
+        artists = artists.filterNot { it.id.isLocalFolderCatalogId() },
+        albums = albums.filterNot { it.id.isLocalFolderCatalogId() },
+        tracksByParent = tracksByParent
+            .filterKeys { !it.isLocalFolderCatalogId() }
+            .mapValues { (_, tracks) -> tracks.filterNot { it.id.isLocalFolderCatalogId() } }
+            .filterValues { it.isNotEmpty() },
+        collectionTags = collectionTags.filterNot { it.itemId.isLocalFolderCatalogId() },
+        collectionValueLoads = collectionValueLoads,
+    )
+
+private fun String.isLocalFolderCatalogId(): Boolean = startsWith("local_")

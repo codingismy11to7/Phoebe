@@ -19,6 +19,8 @@ abstract class SimpleAudioPlayer : AudioPlayer {
     private var preferUnityOutputVolume = false
     private var systemVolumeScale = 1f
     private var playGeneration = 0
+    private var crossfadeDurationMs = 0L
+    private var crossfadeRequestKey: String? = null
 
     /** When false, a superseded or user-paused load must not start audible playback. */
     protected var playWhenReady = false
@@ -54,6 +56,7 @@ abstract class SimpleAudioPlayer : AudioPlayer {
         }
 
         playGeneration++
+        crossfadeRequestKey = null
         playWhenReady = true
         val generation = playGeneration
         stopProgressTicker()
@@ -152,18 +155,24 @@ abstract class SimpleAudioPlayer : AudioPlayer {
     }
 
     override fun next() {
+        advanceNext(allowCrossfade = false)
+    }
+
+    private fun advanceNext(allowCrossfade: Boolean) {
         val state = mutableState.value
         if (state.currentIndex < 0 || state.queue.isEmpty()) return
         when (state.repeat) {
-            RepeatMode.One -> play(state.queue, state.currentIndex)
+            RepeatMode.One -> {
+                if (!allowCrossfade || !crossfadeToIndex(state.currentIndex)) play(state.queue, state.currentIndex)
+            }
             RepeatMode.All -> {
                 val target = if (state.currentIndex >= state.queue.lastIndex) 0 else state.currentIndex + 1
-                play(state.queue, target)
+                if (!allowCrossfade || !crossfadeToIndex(target)) play(state.queue, target)
             }
             RepeatMode.Off -> {
                 val target = state.currentIndex + 1
                 if (target <= state.queue.lastIndex) {
-                    play(state.queue, target)
+                    if (!allowCrossfade || !crossfadeToIndex(target)) play(state.queue, target)
                 } else {
                     playWhenReady = false
                     mutableState.value = state.copy(
@@ -217,6 +226,10 @@ abstract class SimpleAudioPlayer : AudioPlayer {
         if (!preferUnityOutputVolume) {
             setOutputVolume(effectiveOutputVolume())
         }
+    }
+
+    override fun setCrossfadeDurationMs(durationMs: Long) {
+        crossfadeDurationMs = durationMs.coerceIn(0L, MaxCrossfadeDurationMs)
     }
 
     override fun setUnityOutputVolume() {
@@ -289,6 +302,7 @@ abstract class SimpleAudioPlayer : AudioPlayer {
         } else {
             stopProgressTicker()
         }
+        maybeStartCrossfade(generation)
     }
 
     /** Stop audible output immediately when leaving the current track (before the next loads). */
@@ -369,6 +383,39 @@ abstract class SimpleAudioPlayer : AudioPlayer {
     protected open fun seek(positionMs: Long) = Unit
     protected open fun setOutputVolume(volume: Float) = Unit
 
+    protected open fun startCrossfadeOnPlatform(
+        queue: List<Track>,
+        targetIndex: Int,
+        track: Track,
+        durationMs: Long,
+        baseVolume: Float,
+        generation: Int,
+    ): Boolean = false
+
+    protected fun adoptCrossfadeTarget(
+        queue: List<Track>,
+        targetIndex: Int,
+        positionMs: Long,
+        generation: Int,
+    ) {
+        if (!isPlayRequestCurrent(generation)) return
+        val track = queue.getOrNull(targetIndex) ?: return
+        val boundedPositionMs = positionMs.coerceAtLeast(0L).let { position ->
+            if (track.durationMs > 0L) position.coerceAtMost(track.durationMs) else position
+        }
+        mutableState.value = mutableState.value.copy(
+            queue = queue,
+            currentIndex = targetIndex,
+            isPlaying = playWhenReady,
+            isBuffering = false,
+            positionMs = boundedPositionMs,
+            bufferedPositionMs = boundedPositionMs,
+            durationMs = track.durationMs,
+            playbackErrorMessage = null,
+        )
+        crossfadeRequestKey = null
+    }
+
     protected fun effectiveOutputVolume(): Float {
         val playerLevel = if (preferUnityOutputVolume) 1f else mutableState.value.volume.coerceIn(0f, 1f)
         return (playerLevel * systemVolumeScale).coerceIn(0f, 1f)
@@ -384,6 +431,7 @@ abstract class SimpleAudioPlayer : AudioPlayer {
                 if (!current.isPlaying) break
                 val nextPosition = (current.positionMs + 1000L).coerceAtMost(current.durationMs)
                 mutableState.value = current.copy(positionMs = nextPosition)
+                maybeStartCrossfade(activePlayGeneration)
                 if (nextPosition >= current.durationMs && current.durationMs > 0L) break
             }
         }
@@ -392,5 +440,45 @@ abstract class SimpleAudioPlayer : AudioPlayer {
     private fun stopProgressTicker() {
         progressJob?.cancel()
         progressJob = null
+    }
+
+    private fun maybeStartCrossfade(generation: Int) {
+        val duration = crossfadeDurationMs
+        if (duration <= 0L || !isPlayRequestCurrent(generation)) return
+        val current = mutableState.value
+        if (!current.isPlaying || current.durationMs <= 0L || current.currentIndex !in current.queue.indices) return
+        if (current.currentIndex >= current.queue.lastIndex && current.repeat != RepeatMode.All) return
+        val remaining = current.durationMs - current.positionMs
+        if (remaining > duration) return
+        val target = when (current.repeat) {
+            RepeatMode.One -> current.currentIndex
+            RepeatMode.All -> if (current.currentIndex >= current.queue.lastIndex) 0 else current.currentIndex + 1
+            RepeatMode.Off -> current.currentIndex + 1
+        }
+        if (target in current.queue.indices) {
+            crossfadeToIndex(target)
+        }
+    }
+
+    private fun crossfadeToIndex(targetIndex: Int): Boolean {
+        val duration = crossfadeDurationMs
+        val current = mutableState.value
+        if (duration <= 0L || !current.isPlaying || targetIndex !in current.queue.indices) return false
+        val generation = activePlayGeneration
+        val requestKey = "$generation:$targetIndex"
+        if (crossfadeRequestKey == requestKey) return true
+        val baseVolume = effectiveOutputVolume()
+        val targetTrack = current.queue[targetIndex]
+        crossfadeRequestKey = requestKey
+        val accepted = startCrossfadeOnPlatform(current.queue, targetIndex, targetTrack, duration, baseVolume, generation)
+        if (accepted) {
+            return true
+        }
+        crossfadeRequestKey = null
+        return false
+    }
+
+    private companion object {
+        const val MaxCrossfadeDurationMs = 12_000L
     }
 }

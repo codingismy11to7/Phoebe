@@ -224,6 +224,118 @@ class PlayerStateTest {
         assertEquals(1, player.state.value.playbackErrorSerial)
         assertEquals(null, player.state.value.playbackErrorMessage)
     }
+
+    @Test
+    fun platformCrossfadeDoesNotChangeTimelineUntilCommit() {
+        val player = CrossfadeTestPlayer()
+        val tracks = listOf(
+            Track("t1", "One", "Artist", "Album", 60_000, "http://a", ""),
+            Track("t2", "Two", "Artist", "Album", 90_000, "http://b", ""),
+        )
+
+        player.play(tracks, 0)
+        player.setCrossfadeDurationMs(6_000)
+        player.platformPlayback(positionMs = 55_000, durationMs = 60_000, bufferedPositionMs = 60_000)
+
+        assertEquals(1, player.crossfadeStarts)
+        assertEquals(tracks[0], player.state.value.currentTrack)
+        assertEquals(55_000, player.state.value.positionMs)
+
+        player.commitCrossfade(positionMs = 6_000)
+
+        assertEquals(tracks[1], player.state.value.currentTrack)
+        assertEquals(6_000, player.state.value.positionMs)
+        assertEquals(90_000, player.state.value.durationMs)
+    }
+
+    @Test
+    fun repeatedCrossfadeRequestsForSameTargetAreIgnoredUntilCommit() {
+        val player = CrossfadeTestPlayer()
+        val tracks = listOf(
+            Track("t1", "One", "Artist", "Album", 60_000, "http://a", ""),
+            Track("t2", "Two", "Artist", "Album", 90_000, "http://b", ""),
+        )
+
+        player.play(tracks, 0)
+        player.setCrossfadeDurationMs(6_000)
+        player.platformPlayback(positionMs = 55_000, durationMs = 60_000, bufferedPositionMs = 60_000)
+        player.platformPlayback(positionMs = 56_000, durationMs = 60_000, bufferedPositionMs = 60_000)
+
+        assertEquals(1, player.crossfadeStarts)
+        assertEquals(tracks[0], player.state.value.currentTrack)
+    }
+
+    @Test
+    fun manualNextSkipsImmediatelyWhenCrossfadeIsEnabled() {
+        val player = CrossfadeTestPlayer()
+        val tracks = listOf(
+            Track("t1", "One", "Artist", "Album", 60_000, "http://a", ""),
+            Track("t2", "Two", "Artist", "Album", 90_000, "http://b", ""),
+        )
+
+        player.play(tracks, 0)
+        player.setCrossfadeDurationMs(6_000)
+        player.next()
+
+        assertEquals(0, player.crossfadeStarts)
+        assertEquals(tracks[1], player.state.value.currentTrack)
+    }
+
+    @Test
+    fun unsupportedAutomaticCrossfadeDoesNotSkipEarly() {
+        val player = PlatformStateTestPlayer()
+        val tracks = listOf(
+            Track("t1", "One", "Artist", "Album", 60_000, "http://a", ""),
+            Track("t2", "Two", "Artist", "Album", 90_000, "http://b", ""),
+        )
+
+        player.play(tracks, 0)
+        player.setCrossfadeDurationMs(6_000)
+        player.platformPlayback(positionMs = 55_000, durationMs = 60_000, bufferedPositionMs = 60_000)
+
+        assertEquals(tracks[0], player.state.value.currentTrack)
+        assertEquals(55_000, player.state.value.positionMs)
+    }
+
+    @Test
+    fun crossfadeCanRunAgainAfterCommitInSameQueue() {
+        val player = CrossfadeTestPlayer()
+        val tracks = listOf(
+            Track("t1", "One", "Artist", "Album", 60_000, "http://a", ""),
+            Track("t2", "Two", "Artist", "Album", 90_000, "http://b", ""),
+            Track("t3", "Three", "Artist", "Album", 120_000, "http://c", ""),
+        )
+
+        player.play(tracks, 0)
+        player.setCrossfadeDurationMs(6_000)
+        player.platformPlayback(positionMs = 55_000, durationMs = 60_000, bufferedPositionMs = 60_000)
+        player.commitCrossfade(positionMs = 6_000)
+        player.platformPlayback(positionMs = 85_000, durationMs = 90_000, bufferedPositionMs = 90_000)
+
+        assertEquals(2, player.crossfadeStarts)
+        assertEquals(tracks[1], player.state.value.currentTrack)
+
+        player.commitCrossfade(positionMs = 6_000)
+
+        assertEquals(tracks[2], player.state.value.currentTrack)
+        assertEquals(6_000, player.state.value.positionMs)
+    }
+
+    @Test
+    fun zeroSecondCrossfadeKeepsNormalNextBehavior() {
+        val player = CrossfadeTestPlayer()
+        val tracks = listOf(
+            Track("t1", "One", "Artist", "Album", 60_000, "http://a", ""),
+            Track("t2", "Two", "Artist", "Album", 90_000, "http://b", ""),
+        )
+
+        player.play(tracks, 0)
+        player.setCrossfadeDurationMs(0)
+        player.next()
+
+        assertEquals(0, player.crossfadeStarts)
+        assertEquals(tracks[1], player.state.value.currentTrack)
+    }
 }
 
 private class TestPlayer : SimpleAudioPlayer() {
@@ -317,5 +429,45 @@ private class PlatformStateTestPlayer : SimpleAudioPlayer() {
 
     fun failPlayback(message: String? = null) {
         markPlaybackFailed(message = message)
+    }
+}
+
+private class CrossfadeTestPlayer : SimpleAudioPlayer() {
+    var crossfadeStarts = 0
+    private var pendingQueue: List<Track> = emptyList()
+    private var pendingTargetIndex = -1
+    private var pendingGeneration = -1
+
+    override fun playUri(uri: String) {
+        markPlaybackReady()
+    }
+
+    override fun startCrossfadeOnPlatform(
+        queue: List<Track>,
+        targetIndex: Int,
+        track: Track,
+        durationMs: Long,
+        baseVolume: Float,
+        generation: Int,
+    ): Boolean {
+        crossfadeStarts++
+        pendingQueue = queue
+        pendingTargetIndex = targetIndex
+        pendingGeneration = generation
+        return true
+    }
+
+    fun platformPlayback(positionMs: Long, durationMs: Long, bufferedPositionMs: Long) {
+        applyPlatformPlayback(
+            positionMs = positionMs,
+            durationMs = durationMs,
+            isPlaying = true,
+            isBuffering = false,
+            bufferedPositionMs = bufferedPositionMs,
+        )
+    }
+
+    fun commitCrossfade(positionMs: Long) {
+        adoptCrossfadeTarget(pendingQueue, pendingTargetIndex, positionMs, pendingGeneration)
     }
 }

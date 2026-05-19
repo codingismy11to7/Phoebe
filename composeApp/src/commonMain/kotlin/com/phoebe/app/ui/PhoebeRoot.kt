@@ -191,6 +191,7 @@ import com.phoebe.app.domain.telemetryName
 import com.phoebe.app.player.CastState
 import com.phoebe.app.platform.createPlatformHttpClient
 import com.phoebe.app.platform.currentTimeMs
+import com.phoebe.app.platform.isDesktopPlatform
 import com.phoebe.app.platform.prefersReducedArtworkEffects
 import com.phoebe.app.telemetry.Telemetry
 import kotlinx.coroutines.Job
@@ -218,6 +219,8 @@ fun PhoebeRoot(
     state: AppState,
     useLightAppearance: Boolean,
     onUseLightAppearanceChange: (Boolean) -> Unit,
+    appearanceTintId: String,
+    onAppearanceTintChange: (String) -> Unit,
 ) {
     val screen by state.screen.collectAsState()
     val catalog by state.catalog.collectAsState()
@@ -246,6 +249,7 @@ fun PhoebeRoot(
     val jellyfinQuickConnect by state.jellyfinQuickConnect.collectAsState()
     val libraries by state.libraries.collectAsState()
     val libraryUi by state.libraryUi.collectAsState()
+    val appSettings by state.appSettings.collectAsState()
     val lastPlayedByArtist by state.lastPlayedByArtist.collectAsState()
     val lastPlayedByAlbum by state.lastPlayedByAlbum.collectAsState()
     val lastPlayedByTrack by state.lastPlayedByTrack.collectAsState()
@@ -620,15 +624,17 @@ fun PhoebeRoot(
     // here results in painter order = source order, with the last one rendered last/highest).
     Box(modifier = Modifier.fillMaxSize()) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
-            val compact = maxWidth < 900.dp
+            val compact = maxWidth < 1200.dp
             val wideDesktop = maxWidth >= 1280.dp
             CompositionLocalProvider(LocalPlaylistDragEnabled provides !compact) {
             val mergesTitleBar = LocalDesktopMergesTitleBar.current
+            val desktopCompactTopPadding = if (compact && isDesktopPlatform()) 22.dp else 0.dp
             val shellModifier = if (compact) {
                 Modifier
                     .fillMaxSize()
                     .background(PhoebeUi.shellTop)
                     .statusBarsPadding()
+                    .padding(top = desktopCompactTopPadding)
             } else {
                 val shellInsets = if (mergesTitleBar) {
                     WindowInsets.safeDrawing.only(
@@ -995,6 +1001,10 @@ fun PhoebeRoot(
                         onPersonalMix = state::setPersonalMixPreferences,
                         onExportFavoritePlaylists = state::exportFavoritePlaylists,
                         onImportFavoritePlaylists = state::importFavoritePlaylists,
+                        appSettings = appSettings,
+                        onCrossfadeSeconds = state::setCrossfadeSeconds,
+                        onScanLibraryOnLaunch = state::setScanLibraryOnLaunch,
+                        onNotifyWhenDownloadFinishes = state::setNotifyWhenDownloadFinishes,
                         downloadDirectory = downloadDirectory,
                         downloadCount = catalog.downloads.size,
                         defaultDownloadDirectoryLabel = state.defaultDownloadDirectoryLabel,
@@ -1002,6 +1012,8 @@ fun PhoebeRoot(
                         onDeleteAllDownloads = state::deleteAllDownloads,
                         useLightAppearance = useLightAppearance,
                         onUseLightAppearanceChange = onUseLightAppearanceChange,
+                        appearanceTintId = appearanceTintId,
+                        onAppearanceTintChange = onAppearanceTintChange,
                     )
                 }
                 }
@@ -1159,6 +1171,10 @@ fun PhoebeRoot(
                     onPersonalMix = state::setPersonalMixPreferences,
                     onExportFavoritePlaylists = state::exportFavoritePlaylists,
                     onImportFavoritePlaylists = state::importFavoritePlaylists,
+                    appSettings = appSettings,
+                    onCrossfadeSeconds = state::setCrossfadeSeconds,
+                    onScanLibraryOnLaunch = state::setScanLibraryOnLaunch,
+                    onNotifyWhenDownloadFinishes = state::setNotifyWhenDownloadFinishes,
                     downloadDirectory = downloadDirectory,
                     downloadCount = catalog.downloads.size,
                     defaultDownloadDirectoryLabel = state.defaultDownloadDirectoryLabel,
@@ -1166,6 +1182,8 @@ fun PhoebeRoot(
                     onDeleteAllDownloads = state::deleteAllDownloads,
                     useLightAppearance = useLightAppearance,
                     onUseLightAppearanceChange = onUseLightAppearanceChange,
+                    appearanceTintId = appearanceTintId,
+                    onAppearanceTintChange = onAppearanceTintChange,
                     onRetryLyrics = retryLyrics,
                 )
             }

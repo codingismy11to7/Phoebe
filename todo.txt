@@ -1,4 +1,4 @@
-use correct icons
+full instrumentation tests - verify playback
 
 jellyfin / navidrome / emby
 -finalize support

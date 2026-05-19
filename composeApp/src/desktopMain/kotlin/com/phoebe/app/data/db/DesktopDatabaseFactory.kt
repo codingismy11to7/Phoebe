@@ -18,11 +18,17 @@ actual suspend fun createSqlDriver(schema: SqlSchema<QueryResult.AsyncValue<Unit
 
     // Passing the schema parameter lets the JDBC driver invoke Schema.create / Schema.migrate
     // automatically based on PRAGMA user_version, so future schema changes "just work".
-    return JdbcSqliteDriver(
+    val properties = Properties().apply {
+        setProperty("busy_timeout", "10000")
+        setProperty("journal_mode", "WAL")
+        setProperty("synchronous", "NORMAL")
+    }
+    val driver = JdbcSqliteDriver(
         url = "jdbc:sqlite:${dbFile.absolutePath}",
-        properties = Properties(),
+        properties = properties,
         schema = schema.synchronous(),
     )
+    return driver
 }
 
 /**

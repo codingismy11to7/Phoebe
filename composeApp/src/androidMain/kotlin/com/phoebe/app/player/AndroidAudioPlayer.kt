@@ -3,9 +3,11 @@ package com.phoebe.app.player
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import androidx.media3.common.AudioAttributes
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.phoebe.app.AndroidContextHolder
@@ -56,6 +58,10 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
     private var bufferingTimeoutJob: Job? = null
     private var fullTrackBufferJob: Job? = null
     private var retryJob: Job? = null
+    private var crossfadeJob: Job? = null
+    private var crossfadePlayer: ExoPlayer? = null
+    private var crossfadeGeneration = -1
+    private var crossfadeOwnedTrackId: String? = null
     private var retryGeneration = -1
     private var retryCount = 0
     private val controllerMutex = Mutex()
@@ -141,6 +147,7 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
     override fun stopCurrentPlaybackImmediately() {
         platformLoadJob?.cancel()
         platformLoadJob = null
+        stopAndroidCrossfade()
         stopBufferingTimeout()
         stopFullTrackBufferProbe()
         stopRetry()
@@ -158,20 +165,33 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
 
     override fun pause() {
         scope.launch {
-            controllerMutex.withLock { controller?.pause() }
-            syncFromController()
+            val ownedPlayer = ownedCrossfadePlayer()
+            if (ownedPlayer != null) {
+                ownedPlayer.pause()
+                syncFromCrossfadePlayer(ownedPlayer)
+            } else {
+                controllerMutex.withLock { controller?.pause() }
+                syncFromController()
+            }
         }
     }
 
     override fun resume() {
         scope.launch {
-            controllerMutex.withLock {
-                controller?.run {
-                    volume = effectiveOutputVolume()
-                    play()
+            val ownedPlayer = ownedCrossfadePlayer()
+            if (ownedPlayer != null) {
+                ownedPlayer.volume = effectiveOutputVolume()
+                ownedPlayer.play()
+                syncFromCrossfadePlayer(ownedPlayer)
+            } else {
+                controllerMutex.withLock {
+                    controller?.run {
+                        volume = effectiveOutputVolume()
+                        play()
+                    }
                 }
+                syncFromController()
             }
-            syncFromController()
         }
     }
 
@@ -179,18 +199,110 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
         seekJob?.cancel()
         val generation = activePlayGeneration
         seekJob = scope.launch {
-            controllerMutex.withLock {
-                if (!isPlayRequestCurrent(generation)) return@withLock
-                controller?.seekTo(positionMs)
+            val ownedPlayer = ownedCrossfadePlayer()
+            if (ownedPlayer != null) {
+                if (!isPlayRequestCurrent(generation)) return@launch
+                ownedPlayer.seekTo(positionMs)
+                syncFromCrossfadePlayer(ownedPlayer, generation)
+            } else {
+                controllerMutex.withLock {
+                    if (!isPlayRequestCurrent(generation)) return@withLock
+                    controller?.seekTo(positionMs)
+                }
+                syncFromController(generation)
             }
-            syncFromController(generation)
         }
     }
 
     override fun setOutputVolume(volume: Float) {
         scope.launch {
+            val ownedPlayer = ownedCrossfadePlayer()
+            if (ownedPlayer != null) {
+                ownedPlayer.volume = volume
+                return@launch
+            }
             controllerMutex.withLock { controller?.volume = volume }
         }
+    }
+
+    override fun startCrossfadeOnPlatform(
+        queue: List<Track>,
+        targetIndex: Int,
+        track: Track,
+        durationMs: Long,
+        baseVolume: Float,
+        generation: Int,
+    ): Boolean {
+        if (crossfadeGeneration == generation) return true
+        if (targetIndex !in queue.indices) return false
+        val ownedOutgoing = ownedCrossfadePlayer()
+        if (ownedOutgoing == null && controller == null) return false
+        crossfadeGeneration = generation
+        crossfadeJob?.cancel()
+        crossfadeJob = scope.launch {
+            var incoming: ExoPlayer? = null
+            var incomingOwnedByPlayback = false
+            AndroidPlaybackBridge.suppressServiceEndedCallback = true
+            try {
+                val outgoingOwnedByPlayback = ownedCrossfadePlayer()
+                val outgoing: Player = outgoingOwnedByPlayback ?: controller ?: return@launch
+                incoming = ExoPlayer.Builder(appContext)
+                    .setAudioAttributes(AudioAttributes.DEFAULT, /* handleAudioFocus= */ false)
+                    .build()
+                incoming.volume = 0f
+                incoming.setMediaItem(playbackMediaItem(track, inAppPlayback = true))
+                incoming.prepare()
+                incoming.play()
+                if (!waitUntilReady(incoming, generation, CrossfadePrepareTimeoutMs)) return@launch
+                if (!isPlayRequestCurrent(generation)) return@launch
+                if (outgoingOwnedByPlayback == null && controller !== outgoing) return@launch
+                if (outgoingOwnedByPlayback != null && crossfadePlayer !== outgoingOwnedByPlayback) return@launch
+
+                val remainingMs = outgoing.duration
+                    .takeIf { it > 0L }
+                    ?.let { duration -> duration - outgoing.currentPosition.coerceAtLeast(0L) }
+                    ?: durationMs
+                val fadeDurationMs = remainingMs
+                    .coerceAtMost(durationMs)
+                    .coerceAtLeast(CrossfadeMinimumFadeMs)
+                fadeVolumes(outgoing, incoming, fadeDurationMs, baseVolume, generation)
+                if (!isPlayRequestCurrent(generation)) return@launch
+                if (outgoingOwnedByPlayback == null && controller !== outgoing) return@launch
+                if (outgoingOwnedByPlayback != null && crossfadePlayer !== outgoingOwnedByPlayback) return@launch
+
+                if (outgoingOwnedByPlayback != null) {
+                    outgoing.pause()
+                    outgoing.volume = 0f
+                    outgoingOwnedByPlayback.release()
+                } else {
+                    controllerMutex.withLock {
+                        if (!isPlayRequestCurrent(generation) || controller !== outgoing) return@withLock
+                        outgoing.pause()
+                        outgoing.volume = 0f
+                    }
+                }
+                if (!isPlayRequestCurrent(generation)) return@launch
+                incoming.volume = effectiveOutputVolume()
+                incomingOwnedByPlayback = true
+                crossfadePlayer = incoming
+                crossfadeOwnedTrackId = track.id
+                adoptCrossfadeTarget(queue, targetIndex, incoming.currentPosition.coerceAtLeast(0L), generation)
+                startFullTrackBufferProbe(track, generation)
+                startCrossfadeOwnedSync(incoming, queue, targetIndex, generation)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                PhoebeLog.d("AndroidAudioPlayer") { "android crossfade failed: ${error.message}" }
+            } finally {
+                AndroidPlaybackBridge.suppressServiceEndedCallback = false
+                if (!incomingOwnedByPlayback) {
+                    incoming?.release()
+                    if (crossfadePlayer === incoming) crossfadePlayer = null
+                }
+                if (crossfadeGeneration == generation) crossfadeGeneration = -1
+            }
+        }
+        return true
     }
 
     override fun playUri(uri: String) {
@@ -220,8 +332,93 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
         )
     }
 
+    private fun stopAndroidCrossfade() {
+        crossfadeJob?.cancel()
+        crossfadeJob = null
+        crossfadeGeneration = -1
+        crossfadeOwnedTrackId = null
+        AndroidPlaybackBridge.suppressServiceEndedCallback = false
+        crossfadePlayer?.release()
+        crossfadePlayer = null
+    }
+
+    private fun ownedCrossfadePlayer(): ExoPlayer? =
+        crossfadePlayer?.takeIf { crossfadeOwnedTrackId != null }
+
+    private suspend fun waitUntilReady(player: Player, generation: Int, timeoutMs: Long): Boolean {
+        var waitedMs = 0L
+        while (waitedMs < timeoutMs && isPlayRequestCurrent(generation)) {
+            if (player.playbackState == Player.STATE_READY && player.playWhenReady) return true
+            if (player.playbackState == Player.STATE_ENDED) return false
+            delay(50)
+            waitedMs += 50
+        }
+        return false
+    }
+
+    private suspend fun fadeVolumes(
+        outgoing: Player,
+        incoming: Player,
+        durationMs: Long,
+        baseVolume: Float,
+        generation: Int,
+    ) {
+        val stepDelayMs = (durationMs / CrossfadeSteps).coerceAtLeast(16L)
+        repeat(CrossfadeSteps) { index ->
+            if (!isPlayRequestCurrent(generation)) return
+            val progress = (index + 1).toFloat() / CrossfadeSteps.toFloat()
+            outgoing.volume = (baseVolume * (1f - progress)).coerceIn(0f, 1f)
+            incoming.volume = (baseVolume * progress).coerceIn(0f, 1f)
+            delay(stepDelayMs)
+        }
+    }
+
+    private fun startCrossfadeOwnedSync(
+        player: Player,
+        queue: List<Track>,
+        targetIndex: Int,
+        generation: Int,
+    ) {
+        stopPositionSyncLoop()
+        positionSyncJob = scope.launch {
+            while (isActive && isPlayRequestCurrent(generation) && crossfadePlayer === player) {
+                val positionMs = player.currentPosition.coerceAtLeast(0L)
+                applyPlatformPlayback(
+                    positionMs = positionMs,
+                    durationMs = player.duration.coerceAtLeast(queue.getOrNull(targetIndex)?.durationMs ?: 0L),
+                    isPlaying = player.isPlaying,
+                    isBuffering = player.playbackState == Player.STATE_BUFFERING,
+                    bufferedPositionMs = player.bufferedPosition.coerceAtLeast(positionMs).coerceAtLeast(0L),
+                    generation = generation,
+                )
+                if (player.playbackState == Player.STATE_ENDED) {
+                    next()
+                    break
+                }
+                delay(250)
+            }
+        }
+    }
+
+    private fun syncFromCrossfadePlayer(
+        player: Player,
+        generation: Int = activePlayGeneration,
+    ) {
+        if (!isPlayRequestCurrent(generation) || crossfadePlayer !== player) return
+        val positionMs = player.currentPosition.coerceAtLeast(0L)
+        applyPlatformPlayback(
+            positionMs = positionMs,
+            durationMs = player.duration.coerceAtLeast(state.value.currentTrack?.durationMs ?: 0L),
+            isPlaying = player.isPlaying && player.playbackState != Player.STATE_BUFFERING,
+            isBuffering = player.playbackState == Player.STATE_BUFFERING,
+            bufferedPositionMs = player.bufferedPosition.coerceAtLeast(positionMs).coerceAtLeast(0L),
+            generation = generation,
+        )
+    }
+
     private fun runPlatformLoad(generation: Int, block: suspend (Player) -> Unit) {
         platformLoadJob?.cancel()
+        stopAndroidCrossfade()
         seekJob?.cancel()
         stopBufferingTimeout()
         stopRetry()
@@ -355,6 +552,7 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
 
     private fun syncFromController(generation: Int = activePlayGeneration) {
         if (!isPlayRequestCurrent(generation)) return
+        if (crossfadePlayer != null && crossfadeOwnedTrackId != null) return
         val player = controller ?: return
         val appState = state.value
         val controllerIndex = player.currentMediaItemIndex
@@ -529,5 +727,8 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
         const val StreamRetryBaseDelayMs = 1_000L
         const val BufferProbeReportIntervalMs = 1_000L
         const val FallbackBitrateKbps = 256
+        const val CrossfadeSteps = 24
+        const val CrossfadePrepareTimeoutMs = 5_000L
+        const val CrossfadeMinimumFadeMs = 500L
     }
 }

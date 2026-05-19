@@ -38,8 +38,12 @@ actual fun createAudioPlayer(): AudioPlayer = DesktopAudioPlayer()
  */
 private class DesktopAudioPlayer : SimpleAudioPlayer() {
     private var player: MediaPlayer? = null
+    private var fadingOutPlayer: MediaPlayer? = null
+    private var desktopCrossfadeGeneration = -1
     private var sampledClip: Clip? = null
     private var remoteSampledFile: File? = null
+    private var prefetchedCrossfade: PrefetchedCrossfade? = null
+    private var crossfadePrefetchFuture: CompletableFuture<PrefetchedCrossfade?>? = null
     private var fullyBufferedPlayback = false
     private val httpClient = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(15))
@@ -48,6 +52,14 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
     private val playbackExecutor = Executors.newSingleThreadExecutor { r ->
         Thread(r, "Phoebe-desktop-playback").apply { isDaemon = true }
     }
+    private val crossfadePrefetchExecutor = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "Phoebe-desktop-crossfade-prefetch").apply { isDaemon = true }
+    }
+
+    private data class PrefetchedCrossfade(
+        val trackId: String,
+        val file: File,
+    )
 
     override fun playUri(uri: String) {
         playUri(uri, preferredSampledExtension = null)
@@ -58,10 +70,31 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
         playUri(uri, preferredSampledExtension = sampledPlaybackExtensionFromTrack(track))
     }
 
+    override fun playQueueOnPlatform(
+        queue: List<Track>,
+        startIndex: Int,
+        track: Track,
+        generation: Int,
+    ) {
+        super.playQueueOnPlatform(queue, startIndex, track, generation)
+        scheduleCrossfadePrefetchAfterLoad(queue, startIndex, generation)
+    }
+
+    override fun skipToInQueueOnPlatform(
+        queue: List<Track>,
+        startIndex: Int,
+        track: Track,
+        generation: Int,
+    ) {
+        super.skipToInQueueOnPlatform(queue, startIndex, track, generation)
+        scheduleCrossfadePrefetchAfterLoad(queue, startIndex, generation)
+    }
+
     override fun stopCurrentPlaybackImmediately() {
         runCatching { sampledClip?.stop() }
         JavaFxRuntime.runLater {
             runCatching { player?.pause() }
+            runCatching { fadingOutPlayer?.pause() }
         }
     }
 
@@ -195,6 +228,171 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
         }
     }
 
+    override fun startCrossfadeOnPlatform(
+        queue: List<Track>,
+        targetIndex: Int,
+        track: Track,
+        durationMs: Long,
+        baseVolume: Float,
+        generation: Int,
+    ): Boolean {
+        val outgoing = player ?: return false
+        if (sampledClip != null) return false
+        val uri = track.localUri ?: track.streamUrl
+        if (uri.isBlank()) return false
+        val localFile = uriToLocalFile(uri)
+        val prefetchedFile = if (localFile == null) {
+            prefetchedCrossfade
+            ?.takeIf { it.trackId == track.id && it.file.exists() }
+            ?.file
+        } else {
+            null
+        }
+        val file = localFile ?: prefetchedFile ?: return false
+        if (preferSampledPlayback(file)) return false
+        if (desktopCrossfadeGeneration == generation) return true
+        desktopCrossfadeGeneration = generation
+        val playbackUri = file.toURI().toString()
+        JavaFxRuntime.runLater {
+            if (!isPlayRequestCurrent(generation) || player !== outgoing) {
+                if (desktopCrossfadeGeneration == generation) desktopCrossfadeGeneration = -1
+                return@runLater
+            }
+            outgoing.setOnEndOfMedia {}
+            runCatching {
+                val media = Media(playbackUri)
+                val incoming = MediaPlayer(media)
+                var committed = false
+                var failed = false
+                fun fallbackToNormalPlayback() {
+                    if (failed) return
+                    failed = true
+                    if (desktopCrossfadeGeneration == generation) desktopCrossfadeGeneration = -1
+                    runCatching { incoming.dispose() }
+                    if (isPlayRequestCurrent(generation)) {
+                        play(queue, targetIndex)
+                    }
+                }
+                incoming.volume = 0.0
+                incoming.setOnError {
+                    PhoebeLog.d("DesktopAudioPlayer") {
+                        "crossfade playback error: ${incoming.error?.message ?: incoming.error?.type}"
+                    }
+                    fallbackToNormalPlayback()
+                }
+                media.setOnError {
+                    PhoebeLog.d("DesktopAudioPlayer") { "crossfade media error: ${media.error?.message}" }
+                    fallbackToNormalPlayback()
+                }
+                incoming.setOnReady {
+                    if (!isPlayRequestCurrent(generation) || player !== outgoing) {
+                        fallbackToNormalPlayback()
+                        return@setOnReady
+                    }
+                    incoming.play()
+                }
+                incoming.setOnPlaying {
+                    if (committed || !isPlayRequestCurrent(generation) || player !== outgoing) {
+                        runCatching { incoming.dispose() }
+                        if (desktopCrossfadeGeneration == generation) desktopCrossfadeGeneration = -1
+                        return@setOnPlaying
+                    }
+                    incoming.setOnPlaying(null)
+                    fadingOutPlayer = outgoing
+                    committed = true
+                    if (prefetchedCrossfade?.trackId == track.id) {
+                        prefetchedCrossfade = null
+                    }
+                    runDesktopCrossfade(
+                        outgoing = outgoing,
+                        incoming = incoming,
+                        incomingTempFile = prefetchedFile,
+                        queue = queue,
+                        targetIndex = targetIndex,
+                        durationMs = durationMs,
+                        baseVolume = baseVolume,
+                        generation = generation,
+                    )
+                }
+                Thread({
+                    Thread.sleep(JavaFxStartupTimeoutSeconds * 1_000L)
+                    JavaFxRuntime.runLater {
+                        if (!committed && !failed && isPlayRequestCurrent(generation) && player === outgoing) {
+                            fallbackToNormalPlayback()
+                        }
+                    }
+                }, "Phoebe-desktop-crossfade-timeout").apply { isDaemon = true }.start()
+            }.onFailure { error ->
+                if (desktopCrossfadeGeneration == generation) desktopCrossfadeGeneration = -1
+                logPlaybackFailure(error)
+            }
+        }
+        return true
+    }
+
+    private fun runDesktopCrossfade(
+        outgoing: MediaPlayer,
+        incoming: MediaPlayer,
+        incomingTempFile: File?,
+        queue: List<Track>,
+        targetIndex: Int,
+        durationMs: Long,
+        baseVolume: Float,
+        generation: Int,
+    ) {
+        playbackExecutor.execute {
+            val steps = 24
+            val stepDelay = (durationMs / steps).coerceAtLeast(16L)
+            repeat(steps) { index ->
+                if (!isPlayRequestCurrent(generation)) return@execute
+                val progress = (index + 1).toDouble() / steps.toDouble()
+                JavaFxRuntime.runLater {
+                    outgoing.volume = (baseVolume * (1.0 - progress)).coerceIn(0.0, 1.0)
+                    incoming.volume = (baseVolume * progress).coerceIn(0.0, 1.0)
+                }
+                Thread.sleep(stepDelay)
+            }
+            JavaFxRuntime.runLater {
+                runCatching {
+                    outgoing.stop()
+                    outgoing.dispose()
+                }
+                if (fadingOutPlayer === outgoing) fadingOutPlayer = null
+                if (desktopCrossfadeGeneration == generation) desktopCrossfadeGeneration = -1
+                if (isPlayRequestCurrent(generation)) {
+                    player = incoming
+                    incomingTempFile?.let { temp ->
+                        remoteSampledFile?.takeIf { it != temp }?.delete()
+                        remoteSampledFile = temp
+                    }
+                    incoming.volume = effectiveOutputVolume().toDouble().coerceIn(0.0, 1.0)
+                    incoming.setOnEndOfMedia {
+                        if (isPlayRequestCurrent(generation)) next()
+                    }
+                    incoming.bufferProgressTimeProperty().addListener { _, _, _ ->
+                        if (player === incoming) syncJavaFxPlayback(incoming, generation, isBuffering = false)
+                    }
+                    incoming.currentTimeProperty().addListener { _, _, _ ->
+                        if (player === incoming) syncJavaFxPlayback(incoming, generation, isBuffering = false)
+                    }
+                    adoptCrossfadeTarget(
+                        queue = queue,
+                        targetIndex = targetIndex,
+                        positionMs = incoming.currentTime.toMillis().toLong().coerceAtLeast(0L),
+                        generation = generation,
+                    )
+                    syncJavaFxPlayback(incoming, generation, isBuffering = false)
+                    prefetchCrossfadeCandidate(queue, targetIndex, generation)
+                } else {
+                    runCatching {
+                        incoming.stop()
+                        incoming.dispose()
+                    }
+                }
+            }
+        }
+    }
+
     private fun applyVolumesFromState() {
         val v = effectiveOutputVolume()
         JavaFxRuntime.runLater { player?.volume = v.toDouble() }
@@ -261,6 +459,54 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
     private fun shouldBufferRemotePlayback(uri: String): Boolean {
         return uri.startsWith("http://", ignoreCase = true) || uri.startsWith("https://", ignoreCase = true)
     }
+
+    private fun scheduleCrossfadePrefetchAfterLoad(queue: List<Track>, currentIndex: Int, generation: Int) {
+        playbackExecutor.execute {
+            if (isPlayRequestCurrent(generation)) {
+                prefetchCrossfadeCandidate(queue, currentIndex, generation)
+            }
+        }
+    }
+
+    private fun prefetchCrossfadeCandidate(queue: List<Track>, currentIndex: Int, generation: Int) {
+        val nextTrack = queue.getOrNull(currentIndex + 1) ?: return clearCrossfadePrefetch()
+        val uri = nextTrack.localUri ?: nextTrack.streamUrl
+        if (!shouldBufferRemotePlayback(uri)) return clearCrossfadePrefetch()
+        if (prefetchedCrossfade?.trackId == nextTrack.id && prefetchedCrossfade?.file?.exists() == true) return
+        crossfadePrefetchFuture?.cancel(true)
+        crossfadePrefetchFuture = CompletableFuture.supplyAsync({
+            if (!isPlayRequestCurrent(generation)) return@supplyAsync null
+            runCatching {
+                val extension = sampledPlaybackExtensionFromTrack(nextTrack)
+                    ?: sampledPlaybackExtensionFromUri(uri)
+                    ?: "mp3"
+                val file = downloadRemoteAudioForCrossfade(uri, extension)
+                PrefetchedCrossfade(nextTrack.id, file)
+            }.getOrNull()
+        }, crossfadePrefetchExecutor).whenComplete { prefetched, _ ->
+            val current = state.value
+            val stillNext = current.queue.getOrNull(current.currentIndex + 1)?.id == prefetched?.trackId
+            if (!isPlayRequestCurrent(generation) || prefetched == null || !stillNext) {
+                prefetched?.file?.delete()
+                return@whenComplete
+            }
+            val previous = prefetchedCrossfade
+            if (previous?.trackId != prefetched.trackId) {
+                previous?.file?.delete()
+            }
+            prefetchedCrossfade = prefetched
+        }
+    }
+
+    private fun clearCrossfadePrefetch() {
+        crossfadePrefetchFuture?.cancel(true)
+        crossfadePrefetchFuture = null
+        prefetchedCrossfade?.file?.delete()
+        prefetchedCrossfade = null
+    }
+
+    private fun downloadRemoteAudioForCrossfade(uri: String, extension: String): File =
+        downloadRemoteAudio(uri, extension)
 
     /** Avoid SPI probe order issues (e.g. JFlac throwing on Ogg before Vorbis runs). */
     private fun openRawAudioInputStream(file: File): AudioInputStream {
@@ -499,14 +745,20 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
                 player?.dispose()
             }
             player = null
+            runCatching {
+                fadingOutPlayer?.stop()
+                fadingOutPlayer?.dispose()
+            }
+            fadingOutPlayer = null
             latch.countDown()
         }
         latch.await(30, TimeUnit.SECONDS)
     }
 
     private fun disposeAllOnPlaybackThread() {
-        disposeSampled()
         disposeJavaFxBlocking()
+        disposeSampled()
+        clearCrossfadePrefetch()
     }
 
     private fun playJavaFxSync(uri: String, generation: Int): Boolean {

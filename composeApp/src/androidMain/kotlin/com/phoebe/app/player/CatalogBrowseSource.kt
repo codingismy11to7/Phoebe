@@ -136,8 +136,8 @@ internal class CatalogBrowseSourceImpl(
                 ?: searchQuery.takeIf { mediaFocus == MediaStore.Audio.Artists.ENTRY_CONTENT_TYPE },
             album = extras?.getString(MediaStore.EXTRA_MEDIA_ALBUM)
                 ?: searchQuery.takeIf { mediaFocus == MediaStore.Audio.Albums.ENTRY_CONTENT_TYPE },
-            playlist = extras?.getString(MediaStore.EXTRA_MEDIA_PLAYLIST)
-                ?: searchQuery.takeIf { mediaFocus == MediaStore.Audio.Playlists.ENTRY_CONTENT_TYPE },
+            playlist = extras?.getString(MediaStoreSearchExtras.EXTRA_MEDIA_PLAYLIST)
+                ?: searchQuery.takeIf { mediaFocus == MediaStoreSearchExtras.PLAYLIST_ENTRY_CONTENT_TYPE },
             genre = extras?.getString(MediaStore.EXTRA_MEDIA_GENRE)
                 ?: searchQuery.takeIf { mediaFocus == MediaStore.Audio.Genres.ENTRY_CONTENT_TYPE },
         )

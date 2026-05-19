@@ -221,7 +221,7 @@ internal fun DesktopTransport(
             EmptyNowPlayingArtworkSlot(Modifier.size(56.dp), glyphSp = 20.sp)
         }
         Spacer(Modifier.width(12.dp))
-        Column(Modifier.width(150.dp)) {
+        Column(Modifier.width(if (compact) 156.dp else 190.dp)) {
             Text(
                 track?.title ?: "Nothing playing",
                 color = PhoebeUi.primaryText,
@@ -231,17 +231,27 @@ internal fun DesktopTransport(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                remotePlaybackTarget?.let { "Music Assistant: $it" }
-                    ?: track?.artist?.takeIf { it.isNotBlank() }
-                    ?: "Pick a track to begin",
-                color = if (remotePlaybackTarget != null) PhoebeUi.accentLight else if (hasTrack) PhoebeUi.secondaryText else PhoebeUi.mutedText,
+                track?.artist?.takeIf { it.isNotBlank() } ?: "Pick a track to begin",
+                color = if (hasTrack) PhoebeUi.secondaryText else PhoebeUi.mutedText,
                 fontSize = 12.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.clickable(
-                    enabled = remotePlaybackTarget == null && track != null && track.artist.isNotBlank(),
+                    enabled = track != null && track.artist.isNotBlank(),
                 ) {
                     track?.let { trackNavigationActions.onOpenArtistForTrack(it) }
+                },
+            )
+            Text(
+                track?.album?.takeIf { it.isNotBlank() } ?: "",
+                color = PhoebeUi.mutedText,
+                fontSize = 11.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.clickable(
+                    enabled = track != null && track.album.isNotBlank(),
+                ) {
+                    track?.let { trackNavigationActions.onOpenAlbumForTrack(it) }
                 },
             )
         }
@@ -251,25 +261,41 @@ internal fun DesktopTransport(
             onClick = { track?.let(likeActions.onToggleLiked) },
             modifier = Modifier.size(34.dp),
         )
-        Spacer(Modifier.weight(1f))
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(24.dp), verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(50.dp)) {
-                ShuffleIcon(active = shuffle, onClick = onShuffle)
-                TransportIcon(PhoebeIcon.Previous, "Previous Track", onPrevious)
-                PlayButton(isPlaying, isBuffering, 48.dp, onToggle, enabled = hasTrack)
-                TransportIcon(PhoebeIcon.Next, "Next Track", onNext)
-                RepeatIcon(mode = repeat, onClick = onRepeat)
+        AudioQualityBadge(track = track, compact = true, modifier = Modifier.padding(start = 8.dp))
+        Spacer(Modifier.width(if (compact) 12.dp else 24.dp))
+        BoxWithConstraints(
+            modifier = Modifier
+                .weight(1f),
+            contentAlignment = Alignment.Center,
+        ) {
+            val transportWidth = maxWidth.coerceAtMost(if (compact) 320.dp else 640.dp)
+            Column(
+                modifier = Modifier.width(transportWidth),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(24.dp), verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(48.dp)) {
+                    ShuffleIcon(active = shuffle, onClick = onShuffle)
+                    TransportIcon(PhoebeIcon.Previous, "Previous Track", onPrevious)
+                    PlayButton(isPlaying, isBuffering, 48.dp, onToggle, enabled = hasTrack)
+                    TransportIcon(PhoebeIcon.Next, "Next Track", onNext)
+                    RepeatIcon(mode = repeat, onClick = onRepeat)
+                }
+                ProgressLine(
+                    positionMs = positionMs,
+                    bufferedPositionMs = bufferedPositionMs,
+                    durationMs = track?.durationMs ?: 0L,
+                    waveformSeed = track?.let(::trackWaveformSeed) ?: "",
+                    modifier = Modifier.fillMaxWidth(),
+                    onSeek = if (hasTrack) onSeek else null,
+                    barHeight = 20.dp,
+                    labelFontSize = 11.sp,
+                    labelSpacing = 2.dp,
+                    maxBarSlots = if (compact) 140 else 220,
+                )
             }
-            ProgressLine(
-                positionMs = positionMs,
-                bufferedPositionMs = bufferedPositionMs,
-                durationMs = track?.durationMs ?: 0L,
-                waveformSeed = track?.let(::trackWaveformSeed) ?: "",
-                modifier = Modifier.width(if (compact) 320.dp else 460.dp),
-                onSeek = if (hasTrack) onSeek else null,
-            )
         }
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.width(if (compact) 12.dp else 24.dp))
         Row(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -291,12 +317,6 @@ internal fun DesktopTransport(
                 visible = upNextVisible,
                 enabled = upNextToggleEnabled,
                 onClick = onToggleUpNext,
-            )
-            CastIcon(
-                active = castState.isConnected,
-                loading = castState.isBuffering,
-                enabled = castState.isAvailable || castState.isConnected,
-                onClick = onCast,
             )
         }
     }

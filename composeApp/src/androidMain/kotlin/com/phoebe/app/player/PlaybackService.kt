@@ -9,7 +9,6 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
-import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.CommandButton
@@ -42,6 +41,7 @@ class PlaybackService : MediaLibraryService() {
     private val servicePlayerListener = object : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
             if (playbackState == Player.STATE_ENDED) {
+                if (AndroidPlaybackBridge.suppressServiceEndedCallback) return
                 AndroidPlaybackBridge.onTrackEnded?.invoke()
             }
         }
@@ -78,6 +78,7 @@ class PlaybackService : MediaLibraryService() {
                 .build()
         }
 
+        @Suppress("OVERRIDE_DEPRECATION", "DEPRECATION")
         override fun onPlayerCommandRequest(
             session: MediaSession,
             controller: MediaSession.ControllerInfo,
@@ -126,7 +127,6 @@ class PlaybackService : MediaLibraryService() {
             }
         }
 
-        @OptIn(UnstableApi::class)
         override fun onGetItem(
             session: MediaLibrarySession,
             browser: MediaSession.ControllerInfo,
@@ -143,7 +143,6 @@ class PlaybackService : MediaLibraryService() {
             }
         }
 
-        @OptIn(UnstableApi::class)
         override fun onGetChildren(
             session: MediaLibrarySession,
             browser: MediaSession.ControllerInfo,
@@ -230,7 +229,6 @@ class PlaybackService : MediaLibraryService() {
             }
         }
 
-        @OptIn(UnstableApi::class)
         override fun onSetMediaItems(
             mediaSession: MediaSession,
             controller: MediaSession.ControllerInfo,
@@ -277,7 +275,6 @@ class PlaybackService : MediaLibraryService() {
         }
     }
 
-    @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
         AndroidPlaybackRuntime.ensureInstalled()
@@ -333,7 +330,6 @@ class PlaybackService : MediaLibraryService() {
         return result
     }
 
-    @OptIn(UnstableApi::class)
     override fun onDestroy() {
         serviceScope.cancel()
         mediaLibrarySession?.player?.let { player ->
@@ -374,7 +370,7 @@ class PlaybackService : MediaLibraryService() {
     ): MediaItemsWithStartPosition? {
         if (mediaItems.size != 1) return null
         val request = mediaItems.first().requestMetadata
-        val query = request.searchQuery?.toString()?.trim().orEmpty()
+        val query = request.searchQuery?.trim().orEmpty()
         val extras = request.extras
         if (!isSearchRequest(query, extras)) return null
 
@@ -443,7 +439,7 @@ class PlaybackService : MediaLibraryService() {
             extras?.containsKey(MediaStore.EXTRA_MEDIA_TITLE) == true ||
             extras?.containsKey(MediaStore.EXTRA_MEDIA_ARTIST) == true ||
             extras?.containsKey(MediaStore.EXTRA_MEDIA_ALBUM) == true ||
-            extras?.containsKey(MediaStore.EXTRA_MEDIA_PLAYLIST) == true ||
+            extras?.containsKey(MediaStoreSearchExtras.EXTRA_MEDIA_PLAYLIST) == true ||
             extras?.containsKey(MediaStore.EXTRA_MEDIA_GENRE) == true
 
     private fun <T> List<T>.paged(page: Int, pageSize: Int): List<T> {

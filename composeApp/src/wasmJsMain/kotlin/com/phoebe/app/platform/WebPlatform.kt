@@ -10,6 +10,8 @@ import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.browser.window
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
 
 actual fun createPlatformHttpClient(): HttpClient = HttpClient(Js) {
     install(HttpTimeout) {
@@ -21,6 +23,8 @@ actual fun createPlatformHttpClient(): HttpClient = HttpClient(Js) {
         json(PlexClient.PlexJson)
     }
 }
+
+actual fun isDesktopPlatform(): Boolean = false
 
 actual suspend fun discoverJellyfinServers(): List<PlexServer> = emptyList()
 
@@ -69,6 +73,20 @@ actual class PlatformStorage actual constructor() {
     actual fun defaultDownloadDirectoryLabel(): String = "Browser storage"
 
     private fun storageKey(name: String): String = "phoebe:$name"
+}
+
+actual class DownloadNotifier actual constructor() {
+    actual suspend fun notifyDownloadFinished(title: String, body: String): Boolean {
+        if (!browserNotificationsSupported()) return false
+        val granted = when (browserNotificationPermission()) {
+            "granted" -> true
+            "default" -> requestBrowserNotificationPermissionSuspending() == "granted"
+            else -> false
+        }
+        if (!granted) return false
+        showBrowserNotification(title, body)
+        return true
+    }
 }
 
 @Composable
@@ -129,3 +147,24 @@ private external fun encodeURIComponent(value: String): String
 @OptIn(ExperimentalWasmJsInterop::class)
 @JsFun("(value) => decodeURIComponent(value)")
 private external fun decodeURIComponent(value: String): String
+
+@OptIn(ExperimentalWasmJsInterop::class)
+@JsFun("() => typeof Notification !== 'undefined'")
+private external fun browserNotificationsSupported(): Boolean
+
+@OptIn(ExperimentalWasmJsInterop::class)
+@JsFun("() => Notification.permission")
+private external fun browserNotificationPermission(): String
+
+private suspend fun requestBrowserNotificationPermissionSuspending(): String =
+    suspendCoroutine { continuation ->
+        requestBrowserNotificationPermission { result -> continuation.resume(result) }
+    }
+
+@OptIn(ExperimentalWasmJsInterop::class)
+@JsFun("(callback) => { Notification.requestPermission().then(callback); }")
+private external fun requestBrowserNotificationPermission(callback: (String) -> Unit)
+
+@OptIn(ExperimentalWasmJsInterop::class)
+@JsFun("(title, body) => { new Notification(title, { body }); }")
+private external fun showBrowserNotification(title: String, body: String)

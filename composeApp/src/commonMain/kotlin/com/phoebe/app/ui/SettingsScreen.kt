@@ -22,8 +22,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
@@ -34,6 +32,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -52,6 +51,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.phoebe.app.domain.AppSettings
 import com.phoebe.app.domain.HomeSection
 import com.phoebe.app.domain.LibraryUiPreferences
 import com.phoebe.app.domain.PersonalMixPreferences
@@ -65,7 +65,7 @@ internal enum class SettingsCategory(
 ) {
     Account("Account", "Profile and plans", PhoebeIcon.Music),
     Personalization("Personalization", "Mixes and recommendations", PhoebeIcon.Person),
-    AudioQuality("Audio Quality", "Streaming and downloads", PhoebeIcon.Volume),
+    AudioPlayback("Audio Playback", "Transitions and library scan", PhoebeIcon.Volume),
     Library("Library", "Organize your library", PhoebeIcon.Library),
     Downloads("Downloads", "Manage downloads", PhoebeIcon.Download),
     Appearance("Appearance", "Theme and visuals", PhoebeIcon.Grid),
@@ -77,19 +77,26 @@ internal enum class SettingsCategory(
 internal fun SettingsDesktopView(
     isLightMode: Boolean,
     onLightModeChange: (Boolean) -> Unit,
+    tintId: String,
+    onTintChange: (String) -> Unit,
     downloadDirectory: String?,
     downloadCount: Int,
+    appSettings: AppSettings,
     libraryUi: LibraryUiPreferences,
     defaultDownloadDirectoryLabel: String,
     onDownloadDirectory: (String?) -> Unit,
     onDeleteAllDownloads: () -> Unit,
+    onCrossfadeSeconds: (Int) -> Unit,
+    onScanLibraryOnLaunch: (Boolean) -> Unit,
+    onNotifyWhenDownloadFinishes: (Boolean) -> Unit,
     onHomeSections: (List<HomeSection>) -> Unit,
     onPersonalMix: (PersonalMixPreferences) -> Unit,
     onExportFavoritePlaylists: () -> Unit,
     onImportFavoritePlaylists: () -> Unit,
     modifier: Modifier = Modifier,
+    initialCategory: SettingsCategory = SettingsCategory.AudioPlayback,
 ) {
-    var category by remember { mutableStateOf(SettingsCategory.AudioQuality) }
+    var category by remember(initialCategory) { mutableStateOf(initialCategory) }
     val scroll = rememberScrollState()
     Column(
         modifier = modifier
@@ -126,8 +133,12 @@ internal fun SettingsDesktopView(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 when (category) {
-                    SettingsCategory.Appearance -> AppearanceSettingsCard(isLightMode, onLightModeChange)
-                    SettingsCategory.AudioQuality -> AudioQualityPlaceholderCard()
+                    SettingsCategory.Appearance -> AppearanceSettingsCard(isLightMode, onLightModeChange, tintId, onTintChange)
+                    SettingsCategory.AudioPlayback -> AudioPlaybackSettingsCard(
+                        settings = appSettings,
+                        onCrossfadeSeconds = onCrossfadeSeconds,
+                        onScanLibraryOnLaunch = onScanLibraryOnLaunch,
+                    )
                     SettingsCategory.Account -> AccountPlaceholderCard()
                     SettingsCategory.Library -> {
                         HomeSettingsCard(libraryUi.homeSections, onHomeSections)
@@ -141,9 +152,11 @@ internal fun SettingsDesktopView(
                         onDeleteAllDownloads = onDeleteAllDownloads,
                     )
                     SettingsCategory.Personalization -> PersonalMixSettingsCard(libraryUi.personalMix, onPersonalMix)
-                    SettingsCategory.Notifications,
-                    SettingsCategory.Advanced,
-                    -> GenericPlaceholderCard(category.label)
+                    SettingsCategory.Notifications -> NotificationsSettingsCard(
+                        settings = appSettings,
+                        onNotifyWhenDownloadFinishes = onNotifyWhenDownloadFinishes,
+                    )
+                    SettingsCategory.Advanced -> GenericPlaceholderCard(category.label)
                 }
             }
         }
@@ -154,12 +167,18 @@ internal fun SettingsDesktopView(
 internal fun SettingsMobileView(
     isLightMode: Boolean,
     onLightModeChange: (Boolean) -> Unit,
+    tintId: String,
+    onTintChange: (String) -> Unit,
     downloadDirectory: String?,
     downloadCount: Int,
+    appSettings: AppSettings,
     libraryUi: LibraryUiPreferences,
     defaultDownloadDirectoryLabel: String,
     onDownloadDirectory: (String?) -> Unit,
     onDeleteAllDownloads: () -> Unit,
+    onCrossfadeSeconds: (Int) -> Unit,
+    onScanLibraryOnLaunch: (Boolean) -> Unit,
+    onNotifyWhenDownloadFinishes: (Boolean) -> Unit,
     onHomeSections: (List<HomeSection>) -> Unit,
     onPersonalMix: (PersonalMixPreferences) -> Unit,
     onExportFavoritePlaylists: () -> Unit,
@@ -174,12 +193,17 @@ internal fun SettingsMobileView(
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
         SectionLabel("APPEARANCE", PhoebeUi.accentLight)
-        AppearanceSettingsCard(isLightMode, onLightModeChange)
+        AppearanceSettingsCard(isLightMode, onLightModeChange, tintId, onTintChange)
         SectionLabel("HOME", PhoebeUi.accentLight)
         HomeSettingsCard(libraryUi.homeSections, onHomeSections, compact = true)
         FavoritePlaylistSettingsCard(onExportFavoritePlaylists, onImportFavoritePlaylists, compact = true)
-        SectionLabel("AUDIO QUALITY", PhoebeUi.accentLight)
-        AudioQualityPlaceholderCard(compact = true)
+        SectionLabel("AUDIO PLAYBACK", PhoebeUi.accentLight)
+        AudioPlaybackSettingsCard(
+            settings = appSettings,
+            onCrossfadeSeconds = onCrossfadeSeconds,
+            onScanLibraryOnLaunch = onScanLibraryOnLaunch,
+            compact = true,
+        )
         SectionLabel("DOWNLOADS", PhoebeUi.accentLight)
         DownloadsSettingsCard(
             downloadDirectory = downloadDirectory,
@@ -191,6 +215,11 @@ internal fun SettingsMobileView(
         )
         SectionLabel("PERSONALIZATION", PhoebeUi.accentLight)
         PersonalMixSettingsCard(libraryUi.personalMix, onPersonalMix, compact = true)
+        SectionLabel("NOTIFICATIONS", PhoebeUi.accentLight)
+        NotificationsSettingsCard(
+            settings = appSettings,
+            onNotifyWhenDownloadFinishes = onNotifyWhenDownloadFinishes,
+        )
     }
 }
 
@@ -232,6 +261,8 @@ private fun SettingsCategoryRow(
 private fun AppearanceSettingsCard(
     isLightMode: Boolean,
     onLightModeChange: (Boolean) -> Unit,
+    tintId: String,
+    onTintChange: (String) -> Unit,
 ) {
     SettingsCard {
         Text("Appearance", color = PhoebeUi.primaryText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
@@ -256,23 +287,82 @@ private fun AppearanceSettingsCard(
                 ),
             )
         }
+        Spacer(Modifier.height(18.dp))
+        Text("Tint", color = PhoebeUi.primaryText, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+        Text("Choose the accent color for controls and active states", color = PhoebeUi.secondaryText, fontSize = 12.sp)
+        Spacer(Modifier.height(10.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            PhoebeTintOption.Options.chunked(5).forEach { row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    row.forEach { option ->
+                        TintSwatch(
+                            option = option,
+                            selected = option.id == tintId,
+                            onClick = { onTintChange(option.id) },
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
 @Composable
-private fun AudioQualityPlaceholderCard(compact: Boolean = false) {
-    var crossfade by remember { mutableFloatStateOf(0.35f) }
-    var streamingMenu by remember { mutableStateOf(false) }
-    var downloadMenu by remember { mutableStateOf(false) }
-    var streamingQuality by remember { mutableStateOf("Lossless") }
-    var downloadQuality by remember { mutableStateOf("Lossless") }
+private fun TintSwatch(
+    option: PhoebeTintOption,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val shape = RoundedCornerShape(999.dp)
+    Box(
+        Modifier
+            .size(34.dp)
+            .clip(shape)
+            .clickable(onClick = onClick)
+            .background(option.color.copy(alpha = 0.18f))
+            .border(
+                BorderStroke(1.dp, if (selected) PhoebeUi.primaryText else PhoebeUi.border),
+                shape,
+            )
+            .padding(5.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .clip(shape)
+                .background(option.color),
+        )
+        if (selected) {
+            PhoebeIconView(PhoebeIcon.Check, tint = Color.White, modifier = Modifier.size(13.dp))
+        }
+    }
+}
+
+@Composable
+private fun AudioPlaybackSettingsCard(
+    settings: AppSettings,
+    onCrossfadeSeconds: (Int) -> Unit,
+    onScanLibraryOnLaunch: (Boolean) -> Unit,
+    compact: Boolean = false,
+) {
+    var localCrossfade by remember(settings.crossfadeSeconds) { mutableIntStateOf(settings.crossfadeSeconds) }
     SettingsCard {
-        Text("Audio Quality", color = PhoebeUi.primaryText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-        Text("Streaming and downloads", color = PhoebeUi.mutedText, fontSize = 12.sp, modifier = Modifier.padding(bottom = 14.dp))
+        Text("Audio Playback", color = PhoebeUi.primaryText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Text("Transitions and library scan", color = PhoebeUi.mutedText, fontSize = 12.sp, modifier = Modifier.padding(bottom = 14.dp))
         Text("Crossfade", color = PhoebeUi.secondaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
         Slider(
-            value = crossfade,
-            onValueChange = { crossfade = it },
+            value = localCrossfade.toFloat(),
+            onValueChange = {
+                val seconds = it.roundToInt().coerceIn(AppSettings.MinCrossfadeSeconds, AppSettings.MaxCrossfadeSeconds)
+                localCrossfade = seconds
+                if (seconds != settings.crossfadeSeconds) {
+                    onCrossfadeSeconds(seconds)
+                }
+            },
+            onValueChangeFinished = { onCrossfadeSeconds(localCrossfade) },
+            valueRange = AppSettings.MinCrossfadeSeconds.toFloat()..AppSettings.MaxCrossfadeSeconds.toFloat(),
+            steps = AppSettings.MaxCrossfadeSeconds - AppSettings.MinCrossfadeSeconds - 1,
             modifier = Modifier.padding(vertical = 4.dp),
             colors = SliderDefaults.colors(
                 thumbColor = PhoebeUi.accentLight,
@@ -282,56 +372,33 @@ private fun AudioQualityPlaceholderCard(compact: Boolean = false) {
         )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("0s", color = PhoebeUi.mutedText, fontSize = 11.sp)
-            Text("${(crossfade * 12).toInt()}s", color = PhoebeUi.accentLight, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            Text("${localCrossfade}s", color = PhoebeUi.accentLight, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
             Text("12s", color = PhoebeUi.mutedText, fontSize = 11.sp)
         }
         Spacer(Modifier.height(12.dp))
-        PlaceholderToggleRow("Gapless Playback", true)
-        PlaceholderToggleRow("Normalize Audio", true)
-        PlaceholderToggleRow("Explicit Content", true)
-        if (!compact) {
-            PlaceholderToggleRow("Scan Library on Launch", true)
-        }
-        Spacer(Modifier.height(8.dp))
-        Text("Streaming Quality", color = PhoebeUi.secondaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-        BoxWithQualityMenu(
-            value = streamingQuality,
-            expanded = streamingMenu,
-            onExpand = { streamingMenu = true },
-            onDismiss = { streamingMenu = false },
-            onSelect = { streamingQuality = it; streamingMenu = false },
+        SettingsSwitchRow(
+            title = "Scan library on launch",
+            subtitle = "Refresh local folders when Phoebe starts",
+            checked = settings.scanLibraryOnLaunch,
+            onCheckedChange = onScanLibraryOnLaunch,
         )
-        Spacer(Modifier.height(10.dp))
-        Text("Download Quality", color = PhoebeUi.secondaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-        BoxWithQualityMenu(
-            value = downloadQuality,
-            expanded = downloadMenu,
-            onExpand = { downloadMenu = true },
-            onDismiss = { downloadMenu = false },
-            onSelect = { downloadQuality = it; downloadMenu = false },
+    }
+}
+
+@Composable
+private fun NotificationsSettingsCard(
+    settings: AppSettings,
+    onNotifyWhenDownloadFinishes: (Boolean) -> Unit,
+) {
+    SettingsCard {
+        Text("Notifications", color = PhoebeUi.primaryText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Text("Download alerts", color = PhoebeUi.mutedText, fontSize = 12.sp, modifier = Modifier.padding(bottom = 14.dp))
+        SettingsSwitchRow(
+            title = "Download finished",
+            subtitle = "Be notified when something finishes downloading",
+            checked = settings.notifyWhenDownloadFinishes,
+            onCheckedChange = onNotifyWhenDownloadFinishes,
         )
-        if (!compact) {
-            Spacer(Modifier.height(10.dp))
-            Text("Local Library Path", color = PhoebeUi.secondaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(top = 6.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(PhoebeUi.subtleFill)
-                    .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(10.dp))
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    "~/Music/Library",
-                    color = PhoebeUi.mutedText,
-                    fontSize = 12.sp,
-                    modifier = Modifier.weight(1f),
-                )
-                Text("…", color = PhoebeUi.accentLight, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-            }
-        }
     }
 }
 
@@ -752,43 +819,12 @@ private fun normalizedHomeSections(sections: List<HomeSection>): List<HomeSectio
         .let { (it + HomeSection.defaultOrder).distinct() }
 
 @Composable
-private fun BoxWithQualityMenu(
-    value: String,
-    expanded: Boolean,
-    onExpand: () -> Unit,
-    onDismiss: () -> Unit,
-    onSelect: (String) -> Unit,
+private fun SettingsSwitchRow(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
 ) {
-    val options = listOf("Low", "Normal", "High", "Lossless")
-    Box {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(top = 6.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(PhoebeUi.subtleFill)
-                .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(10.dp))
-                .clickable(onClick = onExpand)
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(value, color = PhoebeUi.primaryText, fontSize = 13.sp)
-            PhoebeIconView(PhoebeIcon.ChevronDown, tint = PhoebeUi.mutedText, modifier = Modifier.size(14.dp))
-        }
-        DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
-            options.forEach { opt ->
-                DropdownMenuItem(
-                    text = { Text(opt, color = PhoebeUi.primaryText) },
-                    onClick = { onSelect(opt) },
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun PlaceholderToggleRow(label: String, on: Boolean) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -796,14 +832,18 @@ private fun PlaceholderToggleRow(label: String, on: Boolean) {
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, color = PhoebeUi.primaryText, fontSize = 14.sp)
+        Column(Modifier.weight(1f)) {
+            Text(title, color = PhoebeUi.primaryText, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Text(subtitle, color = PhoebeUi.secondaryText, fontSize = 12.sp)
+        }
         Switch(
-            checked = on,
-            onCheckedChange = null,
-            enabled = false,
+            checked = checked,
+            onCheckedChange = onCheckedChange,
             colors = SwitchDefaults.colors(
-                disabledCheckedThumbColor = Color.White,
-                disabledCheckedTrackColor = PhoebeUi.accentLight.copy(alpha = 0.55f),
+                checkedThumbColor = Color.White,
+                checkedTrackColor = PhoebeUi.accentLight,
+                uncheckedThumbColor = Color.White,
+                uncheckedTrackColor = PhoebeUi.progressTrack,
             ),
         )
     }

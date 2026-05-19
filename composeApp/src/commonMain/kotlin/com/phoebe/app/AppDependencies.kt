@@ -1,5 +1,6 @@
 package com.phoebe.app
 
+import com.phoebe.app.data.AppSettingsRepository
 import com.phoebe.app.data.CatalogRepository
 import com.phoebe.app.data.EmbyClient
 import com.phoebe.app.data.LibraryUiRepository
@@ -23,6 +24,7 @@ import com.phoebe.app.data.db.clearAllAppData
 import com.phoebe.app.data.db.createPhoebeDatabase
 import com.phoebe.app.db.PhoebeDatabase
 import com.phoebe.app.platform.PlatformStorage
+import com.phoebe.app.platform.DownloadNotifier
 import com.phoebe.app.platform.createPlatformHttpClient
 import com.phoebe.app.player.AudioPlayer
 import com.phoebe.app.player.CastController
@@ -39,6 +41,7 @@ class AppDependencies(
     val libraryUiRepository: LibraryUiRepository,
     val lyricsRepository: LyricsRepository,
     val playHistoryRepository: PlayHistoryRepository,
+    val appSettingsRepository: AppSettingsRepository,
     val providerRegistry: MusicProviderRegistry,
     val plexPlayHistorySyncer: PlexPlayHistorySyncer,
     val jellyfinPlayHistorySyncer: JellyfinPlayHistorySyncer,
@@ -46,6 +49,7 @@ class AppDependencies(
     val audioPlayer: AudioPlayer,
     val castController: CastController,
     val systemVolume: SystemVolumeController,
+    val downloadNotifier: DownloadNotifier,
     /** File-backed on desktop; NSUserDefaults keys on iOS; etc. Used for lightweight UI prefs. */
     val platformStorage: PlatformStorage,
 ) {
@@ -57,6 +61,7 @@ class AppDependencies(
         catalogRepository.clearInMemoryCatalog()
         mediaSourcesRepository.clearInMemoryState()
         libraryUiRepository.resetInMemoryState()
+        appSettingsRepository.resetInMemoryState()
         lyricsRepository.clearMemoryCache()
     }
 
@@ -80,6 +85,7 @@ class AppDependencies(
             val database = createPhoebeDatabase()
             val mediaSourcesRepository = MediaSourcesRepository(database, storage)
             val libraryUiRepository = LibraryUiRepository(database, storage)
+            val appSettingsRepository = AppSettingsRepository(database)
             val playHistoryRepository = PlayHistoryRepository(database)
             val audioPlayer = createAudioPlayer()
             val castController = createCastController(audioPlayer)
@@ -103,6 +109,7 @@ class AppDependencies(
                 libraryUiRepository = libraryUiRepository,
                 lyricsRepository = LyricsRepository(database, httpClient),
                 playHistoryRepository = playHistoryRepository,
+                appSettingsRepository = appSettingsRepository,
                 providerRegistry = providerRegistry,
                 plexPlayHistorySyncer = PlexPlayHistorySyncer(
                     plexClient = plexClient,
@@ -123,6 +130,7 @@ class AppDependencies(
                 audioPlayer = audioPlayer,
                 castController = castController,
                 systemVolume = createSystemVolumeController(),
+                downloadNotifier = DownloadNotifier(),
                 platformStorage = storage,
             )
         }

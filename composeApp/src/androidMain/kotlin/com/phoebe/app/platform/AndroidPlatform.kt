@@ -1,8 +1,14 @@
 package com.phoebe.app.platform
 
+import android.Manifest
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Environment
 import android.provider.DocumentsContract
 import android.util.Log
@@ -15,6 +21,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.documentfile.provider.DocumentFile
 import com.phoebe.app.AndroidContextHolder
 import com.phoebe.app.BuildConfig
+import com.phoebe.app.MainActivity
+import com.phoebe.app.R
 import com.phoebe.app.data.PlexClient
 import com.phoebe.app.domain.PlexServer
 import io.ktor.client.HttpClient
@@ -40,6 +48,8 @@ actual fun createPlatformHttpClient(): HttpClient = HttpClient(OkHttp) {
         json(PlexClient.PlexJson)
     }
 }
+
+actual fun isDesktopPlatform(): Boolean = false
 
 actual class PlatformStorage actual constructor() {
     private val root: File
@@ -231,6 +241,51 @@ private fun File.canonicalOrNull(): File? =
 
 private fun File.isDescendantOf(parent: File): Boolean =
     runCatching { toPath().startsWith(parent.toPath()) }.getOrDefault(false)
+
+actual class DownloadNotifier actual constructor() {
+    actual suspend fun notifyDownloadFinished(title: String, body: String): Boolean = withContext(Dispatchers.IO) {
+        val context = AndroidContextHolder.application
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return@withContext false
+        }
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            manager.createNotificationChannel(
+                NotificationChannel(
+                    DownloadNotificationChannelId,
+                    "Downloads",
+                    NotificationManager.IMPORTANCE_DEFAULT,
+                ),
+            )
+        }
+        val openApp = PendingIntent.getActivity(
+            context,
+            0,
+            Intent(context, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            android.app.Notification.Builder(context, DownloadNotificationChannelId)
+        } else {
+            @Suppress("DEPRECATION")
+            android.app.Notification.Builder(context)
+        }
+        val notification = builder
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setContentIntent(openApp)
+            .setAutoCancel(true)
+            .build()
+        manager.notify(DownloadNotificationId, notification)
+        true
+    }
+}
+
+private const val DownloadNotificationChannelId = "phoebe_downloads"
+private const val DownloadNotificationId = 2001
 
 @Composable
 actual fun rememberPickDownloadDirectory(onPicked: (String?) -> Unit): () -> Unit {

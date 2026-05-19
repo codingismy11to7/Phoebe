@@ -10,6 +10,7 @@ import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
 import com.phoebe.app.ui.PhoebeScreenshotApp
 import com.phoebe.app.ui.PhoebeScreenshotScenario
+import com.phoebe.app.ui.PhoebeTintOption
 import io.github.takahirom.roborazzi.captureRoboImage
 import kotlin.test.Test
 
@@ -66,6 +67,26 @@ class PhoebeDesktopScreenshotTest {
             waitForIdle()
             onRoot().captureRoboImage(
                 filePath = "src/screenshotTest/roborazzi/desktop-${scenario.name.lowercase()}-light.png",
+            )
+        }
+    }
+
+    @OptIn(ExperimentalTestApi::class, ExperimentalComposeUiApi::class)
+    @Test
+    fun desktopTintSettings() = runDesktopComposeUiTest(width = 1365, height = 900) {
+        listOf(false, true).forEach { useLightAppearance ->
+            setContent {
+                Box(Modifier.size(1365.dp, 900.dp)) {
+                    PhoebeScreenshotApp(
+                        scenario = PhoebeScreenshotScenario.Settings,
+                        useLightAppearance = useLightAppearance,
+                        tintId = PhoebeTintOption.fromId("blue").id,
+                    )
+                }
+            }
+            waitForIdle()
+            onRoot().captureRoboImage(
+                filePath = "src/screenshotTest/roborazzi/desktop-settings-blue-tint-${if (useLightAppearance) "light" else "dark"}.png",
             )
         }
     }

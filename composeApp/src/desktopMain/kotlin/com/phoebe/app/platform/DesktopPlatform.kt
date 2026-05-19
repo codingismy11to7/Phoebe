@@ -11,6 +11,8 @@ import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.awt.Desktop
+import java.awt.SystemTray
+import java.awt.TrayIcon
 import java.io.File
 import java.net.DatagramPacket
 import java.net.DatagramSocket
@@ -31,6 +33,8 @@ actual fun createPlatformHttpClient(): HttpClient = HttpClient(CIO) {
         json(PlexClient.PlexJson)
     }
 }
+
+actual fun isDesktopPlatform(): Boolean = true
 
 private val storageRoot: File by lazy {
     com.phoebe.app.data.db.desktopDatabaseRoot()
@@ -100,6 +104,25 @@ actual class PlatformStorage actual constructor() {
 
     actual fun defaultDownloadDirectoryLabel(): String =
         defaultDownloadDirectory().absolutePath
+}
+
+actual class DownloadNotifier actual constructor() {
+    actual suspend fun notifyDownloadFinished(title: String, body: String): Boolean = withContext(Dispatchers.IO) {
+        if (!SystemTray.isSupported()) return@withContext false
+        val tray = SystemTray.getSystemTray()
+        val icon = TrayIcon(java.awt.image.BufferedImage(16, 16, java.awt.image.BufferedImage.TYPE_INT_ARGB), "Phoebe").apply {
+            isImageAutoSize = true
+        }
+        runCatching {
+            tray.add(icon)
+            icon.displayMessage(title, body, TrayIcon.MessageType.INFO)
+            Thread {
+                Thread.sleep(8_000)
+                runCatching { tray.remove(icon) }
+            }.apply { isDaemon = true }.start()
+            true
+        }.getOrDefault(false)
+    }
 }
 
 @Composable

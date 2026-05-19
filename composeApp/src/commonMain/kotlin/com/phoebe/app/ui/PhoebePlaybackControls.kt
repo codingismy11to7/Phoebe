@@ -456,6 +456,7 @@ internal fun WaveformDurationBar(
     contentDescription: String,
     modifier: Modifier = Modifier,
     isScrubbing: Boolean = false,
+    maxBarSlots: Int = 140,
 ) {
     val p = progress?.coerceIn(0f, 1f)
     val bp = bufferedProgress?.coerceIn(0f, 1f)
@@ -469,7 +470,7 @@ internal fun WaveformDurationBar(
         },
     ) {
         if (size.width <= 0f || size.height <= 0f) return@Canvas
-        val barSlots = (size.width / (2.2f * density)).toInt().coerceIn(20, 120)
+        val barSlots = (size.width / (2.2f * density)).toInt().coerceIn(20, maxBarSlots.coerceAtLeast(20))
         val slotW = size.width / barSlots
         val barW = (slotW * 0.62f).coerceAtLeast(1.2f)
         val played = playedColor
@@ -524,6 +525,10 @@ internal fun ProgressLine(
     waveformSeed: String,
     modifier: Modifier,
     onSeek: ((Long) -> Unit)? = null,
+    barHeight: Dp = 28.dp,
+    labelFontSize: TextUnit = 12.sp,
+    labelSpacing: Dp = 6.dp,
+    maxBarSlots: Int = 140,
 ) {
     val safeDuration = max(durationMs, 1L)
     var scrubPositionMs by remember { mutableStateOf<Long?>(null) }
@@ -565,7 +570,7 @@ internal fun ProgressLine(
     } else {
         Modifier
     }
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(labelSpacing)) {
         WaveformDurationBar(
             seed = waveformSeed,
             durationMs = durationMs,
@@ -579,15 +584,16 @@ internal fun ProgressLine(
             },
             modifier = seekModifier
                 .fillMaxWidth()
-                .height(28.dp),
+                .height(barHeight),
+            maxBarSlots = maxBarSlots,
         )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(
                 formatDuration(displayPositionMs),
                 color = if (isScrubbing) PhoebeUi.primaryText else PhoebeUi.mutedText,
-                fontSize = 12.sp,
+                fontSize = labelFontSize,
             )
-            Text(formatDuration(durationMs), color = PhoebeUi.mutedText, fontSize = 12.sp)
+            Text(formatDuration(durationMs), color = PhoebeUi.mutedText, fontSize = labelFontSize)
         }
     }
 }

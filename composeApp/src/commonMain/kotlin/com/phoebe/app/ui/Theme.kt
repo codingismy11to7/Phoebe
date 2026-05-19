@@ -36,10 +36,16 @@ private val DarkColors = darkColorScheme(
 @Composable
 fun PhoebeTheme(
     useLightAppearance: Boolean = false,
+    tintId: String = PhoebeTintOption.Purple.id,
     content: @Composable () -> Unit,
 ) {
-    val palette = if (useLightAppearance) PhoebePaletteLight else PhoebePaletteDark
-    val colors: ColorScheme = if (useLightAppearance) LightColors else DarkColors
+    val tint = PhoebeTintOption.fromId(tintId)
+    val palette = (if (useLightAppearance) PhoebePaletteLight else PhoebePaletteDark)
+        .withTint(tint, useLightAppearance)
+    val colors: ColorScheme = (if (useLightAppearance) LightColors else DarkColors).copy(
+        primary = palette.accent,
+        secondary = palette.accentLight,
+    )
     ApplySystemBarAppearance(
         statusBarColor = palette.shellTop,
         navigationBarColor = palette.navBar,

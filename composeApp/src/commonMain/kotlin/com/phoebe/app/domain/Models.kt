@@ -341,6 +341,22 @@ data class LibraryUiPreferences(
 )
 
 @Serializable
+data class AppSettings(
+    val crossfadeSeconds: Int = 0,
+    val scanLibraryOnLaunch: Boolean = false,
+    val notifyWhenDownloadFinishes: Boolean = false,
+) {
+    fun normalized(): AppSettings =
+        copy(crossfadeSeconds = crossfadeSeconds.coerceIn(MinCrossfadeSeconds, MaxCrossfadeSeconds))
+
+    companion object {
+        val Default = AppSettings()
+        const val MinCrossfadeSeconds = 0
+        const val MaxCrossfadeSeconds = 12
+    }
+}
+
+@Serializable
 data class PersonalMixPreferences(
     val limit: Int = 50,
     val heavyRotationWeight: Int = 25,

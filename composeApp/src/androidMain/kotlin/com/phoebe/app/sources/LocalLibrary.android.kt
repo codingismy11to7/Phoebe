@@ -42,7 +42,7 @@ actual object LocalLibraryIO {
         val root = DocumentFile.fromTreeUri(ctx, treeUri) ?: return@withContext emptyList()
         val out = mutableListOf<LocalAudioFile>()
         fun walk(dir: DocumentFile) {
-            for (f in dir.listFiles() ?: emptyArray()) {
+            for (f in dir.listFiles()) {
                 if (f.isDirectory) {
                     walk(f)
                 } else if (f.isFile && f.name?.substringAfterLast('.', "")?.lowercase() in audioExt) {
