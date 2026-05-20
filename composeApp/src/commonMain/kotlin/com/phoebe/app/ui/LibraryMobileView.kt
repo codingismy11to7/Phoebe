@@ -9,6 +9,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -58,6 +59,15 @@ import com.phoebe.app.domain.canTogglePlexLike
 import com.phoebe.app.domain.isLocalMediaPlayback
 import com.phoebe.app.domain.isLikedSongsPlaylist
 import com.phoebe.app.domain.isRemoteLibraryTrack
+
+private val MobileLibraryChromeTopPadding = 8.dp
+private val MobileLibraryTabsHeight = 50.dp
+private val MobileLibraryTabsToToolbarGap = 14.dp
+private val MobileLibraryToolbarHeight = 36.dp
+private val MobileLibraryToolbarToContentGap = 10.dp
+private val MobileLibraryLoadingStripHeight = 16.dp
+private val MobileLibraryPaginationHeight = 36.dp
+private val MobileLibraryContentGap = 8.dp
 
 @Composable
 internal fun LibraryMobileView(
@@ -110,49 +120,40 @@ internal fun LibraryMobileView(
         }
         if (pageIndex > pageCount - 1) pageIndex = (pageCount - 1).coerceAtLeast(0)
     }
+    val chromePadding = LocalMobileChromePadding.current
+    val activePage = when (filter) {
+        LibraryFilterTab.Artists -> artistPage
+        LibraryFilterTab.Albums -> albumPage
+        LibraryFilterTab.Songs -> trackPage
+    }
+    val listContentPadding = PaddingValues(
+        top = chromePadding.top +
+            MobileLibraryChromeTopPadding +
+            MobileLibraryTabsHeight +
+            MobileLibraryTabsToToolbarGap +
+            MobileLibraryToolbarHeight +
+            MobileLibraryToolbarToContentGap +
+            (if (catalogRefreshing) MobileLibraryLoadingStripHeight else 0.dp) +
+            (if (activePage.pageCount > 1) MobileLibraryPaginationHeight else 0.dp) +
+            MobileLibraryContentGap,
+        bottom = chromePadding.bottom + 8.dp,
+    )
 
-    Column(modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp)) {
-        MobileLibraryTabs(filter, onFilter)
-        Spacer(Modifier.height(14.dp))
-        MobileLibraryToolbar(
-            prefs = libraryUi,
-            filter = filter,
-            onSortBy = onLibrarySortBy,
-            onAscending = onLibraryAscending,
-            libraryViewMode = libraryViewMode,
-            onLibraryViewMode = { libraryViewMode = it },
-            onColumns = onLibraryColumns,
-        )
-        Spacer(Modifier.height(10.dp))
-        if (catalogRefreshing) {
-            LibraryLoadingStrip(Modifier.padding(bottom = 6.dp))
-        }
-        when (filter) {
-            LibraryFilterTab.Artists -> LibraryPaginationControls(artistPage, onPage = {
-                if (jellyfinPagination) onJellyfinPage(filter.toJellyfinPageKind(), it)
-                pageIndex = it
-            })
-            LibraryFilterTab.Albums -> LibraryPaginationControls(albumPage, onPage = {
-                if (jellyfinPagination) onJellyfinPage(filter.toJellyfinPageKind(), it)
-                pageIndex = it
-            })
-            LibraryFilterTab.Songs -> LibraryPaginationControls(trackPage, onPage = {
-                if (jellyfinPagination) onJellyfinPage(filter.toJellyfinPageKind(), it)
-                pageIndex = it
-            })
-        }
-        Box(Modifier.weight(1f).fillMaxWidth()) {
+    Box(modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+        Box(Modifier.fillMaxSize()) {
             when (filter) {
                 LibraryFilterTab.Artists -> MobileArtistsContent(
                     artists = artistPage.items,
                     viewMode = libraryViewMode,
                     onArtist = onArtist,
+                    contentPadding = listContentPadding,
                 )
                 LibraryFilterTab.Albums -> MobileAlbumsContent(
                     catalog = catalog,
                     albums = albumPage.items,
                     viewMode = libraryViewMode,
                     onAlbum = onAlbum,
+                    contentPadding = listContentPadding,
                 )
                 LibraryFilterTab.Songs -> MobileSongsList(
                     tracks = trackPage.items,
@@ -160,7 +161,44 @@ internal fun LibraryMobileView(
                     onPlay = { index -> onPlayTracks(trackPage.items, index) },
                     onAddToUpNext = onAddToUpNext,
                     onDownload = onDownload,
+                    contentPadding = listContentPadding,
                 )
+            }
+        }
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .background(PhoebeUi.shellTop)
+                .padding(top = chromePadding.top + MobileLibraryChromeTopPadding),
+        ) {
+            MobileLibraryTabs(filter, onFilter)
+            Spacer(Modifier.height(14.dp))
+            MobileLibraryToolbar(
+                prefs = libraryUi,
+                filter = filter,
+                onSortBy = onLibrarySortBy,
+                onAscending = onLibraryAscending,
+                libraryViewMode = libraryViewMode,
+                onLibraryViewMode = { libraryViewMode = it },
+                onColumns = onLibraryColumns,
+            )
+            Spacer(Modifier.height(10.dp))
+            if (catalogRefreshing) {
+                LibraryLoadingStrip(Modifier.padding(bottom = 6.dp))
+            }
+            when (filter) {
+                LibraryFilterTab.Artists -> LibraryPaginationControls(artistPage, onPage = {
+                    if (jellyfinPagination) onJellyfinPage(filter.toJellyfinPageKind(), it)
+                    pageIndex = it
+                })
+                LibraryFilterTab.Albums -> LibraryPaginationControls(albumPage, onPage = {
+                    if (jellyfinPagination) onJellyfinPage(filter.toJellyfinPageKind(), it)
+                    pageIndex = it
+                })
+                LibraryFilterTab.Songs -> LibraryPaginationControls(trackPage, onPage = {
+                    if (jellyfinPagination) onJellyfinPage(filter.toJellyfinPageKind(), it)
+                    pageIndex = it
+                })
             }
         }
     }
@@ -476,9 +514,12 @@ private fun MobileArtistsContent(
     artists: List<Artist>,
     viewMode: LibraryViewMode,
     onArtist: (Artist) -> Unit,
+    contentPadding: PaddingValues = PaddingValues(),
 ) {
     if (artists.isEmpty()) {
-        Text("No artists yet.", color = PhoebeUi.mutedText, fontSize = 13.sp)
+        Box(Modifier.fillMaxSize().padding(contentPadding)) {
+            Text("No artists yet.", color = PhoebeUi.mutedText, fontSize = 13.sp)
+        }
         return
     }
     when (viewMode) {
@@ -489,6 +530,7 @@ private fun MobileArtistsContent(
                 state = gridState,
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
+                contentPadding = contentPadding,
                 modifier = Modifier.fillMaxSize(),
             ) {
                 items(artists, key = { it.id }, contentType = { "artist-card" }) { artist ->
@@ -501,6 +543,7 @@ private fun MobileArtistsContent(
             LazyColumn(
                 state = listState,
                 verticalArrangement = Arrangement.spacedBy(2.dp),
+                contentPadding = contentPadding,
                 modifier = Modifier.fillMaxSize(),
             ) {
                 items(artists, key = { it.id }, contentType = { "artist-row" }) { artist ->
@@ -629,9 +672,12 @@ private fun MobileAlbumsContent(
     albums: List<Album>,
     viewMode: LibraryViewMode,
     onAlbum: (Album) -> Unit,
+    contentPadding: PaddingValues = PaddingValues(),
 ) {
     if (albums.isEmpty()) {
-        Text("No albums yet.", color = PhoebeUi.mutedText, fontSize = 13.sp)
+        Box(Modifier.fillMaxSize().padding(contentPadding)) {
+            Text("No albums yet.", color = PhoebeUi.mutedText, fontSize = 13.sp)
+        }
         return
     }
     when (viewMode) {
@@ -642,6 +688,7 @@ private fun MobileAlbumsContent(
                 state = gridState,
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
+                contentPadding = contentPadding,
                 modifier = Modifier.fillMaxSize(),
             ) {
                 items(albums, key = { it.id }, contentType = { "album-card" }) { album ->
@@ -654,6 +701,7 @@ private fun MobileAlbumsContent(
             LazyColumn(
                 state = listState,
                 verticalArrangement = Arrangement.spacedBy(2.dp),
+                contentPadding = contentPadding,
                 modifier = Modifier.fillMaxSize(),
             ) {
                 items(albums, key = { it.id }, contentType = { "album-row" }) { album ->
@@ -794,9 +842,12 @@ private fun MobileSongsList(
     onPlay: (Int) -> Unit,
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
+    contentPadding: PaddingValues = PaddingValues(),
 ) {
     if (tracks.isEmpty()) {
-        Text("No songs yet.", color = PhoebeUi.mutedText, fontSize = 13.sp)
+        Box(Modifier.fillMaxSize().padding(contentPadding)) {
+            Text("No songs yet.", color = PhoebeUi.mutedText, fontSize = 13.sp)
+        }
         return
     }
     val listState = RetainedLazyListStates.remember("library-songs")
@@ -804,6 +855,7 @@ private fun MobileSongsList(
     LazyColumn(
         state = listState,
         verticalArrangement = Arrangement.spacedBy(2.dp),
+        contentPadding = contentPadding,
         modifier = Modifier.fillMaxSize(),
     ) {
         items(tracks.size, key = { tracks[it].id }, contentType = { "song-row" }) { index ->
@@ -1055,7 +1107,7 @@ internal fun PlaylistsMobileView(
             modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
             placeholder = "Search playlists",
         )
-        if (catalogRefreshing) {
+        if (LocalCatalogSyncInProgress.current) {
             LibraryLoadingStrip(Modifier.padding(bottom = 6.dp))
         }
         if (!playlistActions.playlistsEnabled) {

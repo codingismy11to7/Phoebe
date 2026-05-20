@@ -177,9 +177,9 @@ internal fun Sidebar(
     catalogRefreshing: Boolean,
     session: PlexSession?,
     mediaSources: MediaSourcesState,
-    activeSection: DesktopSection,
+    activeSection: BrowseSection,
     selectedPlaylistId: String?,
-    onNavigate: (DesktopSection) -> Unit,
+    onNavigate: (BrowseSection) -> Unit,
     onPlaylist: (Playlist) -> Unit,
     onSignOut: () -> Unit,
     onAddLocalFolder: (String?) -> Unit,
@@ -190,11 +190,12 @@ internal fun Sidebar(
     var profileExpanded by remember { mutableStateOf(false) }
     val pickLocalFolder = rememberPickLocalFolder(onPicked = onAddLocalFolder)
     val playlistActions = LocalPlaylistActions.current
-    val syncState = LocalCatalogSyncState.current
     val remoteSignedIn = session?.token?.isNotBlank() == true
+    val mainNavEnabled = canBrowseMainSections(session, mediaSources)
     val providerName = session.providerLabel()
     val remoteSourceLabel = if (remoteSignedIn) "$providerName — streaming library" else "Streaming provider — Plex or Jellyfin"
-    val showPlaylistRefreshBar = catalogRefreshing || syncState.isActive
+    val catalogSyncInProgress = LocalCatalogSyncInProgress.current
+    val showPlaylistRefreshBar = remoteSignedIn && catalogSyncInProgress
     val likedSongsPlaylist = playlistActions.playlists.firstOrNull { it.isLikedSongsPlaylist() }
         ?: if (playlistActions.playlistsEnabled) {
             Playlist(id = PENDING_LIKED_SONGS_PLAYLIST_ID, title = LIKED_SONGS_PLAYLIST_TITLE, trackCount = 0)
@@ -218,9 +219,27 @@ internal fun Sidebar(
         }
 
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            NavRow(PhoebeIcon.Home, "Home", activeSection == DesktopSection.Home && selectedPlaylistId == null) { onNavigate(DesktopSection.Home) }
-            NavRow(PhoebeIcon.Search, "Search", activeSection == DesktopSection.Search) { onNavigate(DesktopSection.Search) }
-            NavRow(PhoebeIcon.Library, "Your Library", activeSection == DesktopSection.Library && selectedPlaylistId == null) { onNavigate(DesktopSection.Library) }
+            NavRow(
+                PhoebeIcon.Home,
+                "Home",
+                active = activeSection == BrowseSection.Home && selectedPlaylistId == null,
+                enabled = mainNavEnabled,
+                onClick = { onNavigate(BrowseSection.Home) },
+            )
+            NavRow(
+                PhoebeIcon.Search,
+                "Search",
+                active = activeSection == BrowseSection.Search,
+                enabled = mainNavEnabled,
+                onClick = { onNavigate(BrowseSection.Search) },
+            )
+            NavRow(
+                PhoebeIcon.Library,
+                "Your Library",
+                active = activeSection == BrowseSection.Library && selectedPlaylistId == null,
+                enabled = mainNavEnabled,
+                onClick = { onNavigate(BrowseSection.Library) },
+            )
         }
 
         LazyColumn(
@@ -299,7 +318,7 @@ internal fun Sidebar(
                             .clip(RoundedCornerShape(8.dp))
                             .clickable {
                                 profileExpanded = false
-                                onNavigate(DesktopSection.Settings)
+                                onNavigate(BrowseSection.Settings)
                             }
                             .padding(horizontal = 6.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -416,21 +435,38 @@ private fun SidebarPlaylistDropRow(
 }
 
 @Composable
-internal fun NavRow(icon: PhoebeIcon, label: String, active: Boolean, onClick: () -> Unit) {
+internal fun NavRow(
+    icon: PhoebeIcon,
+    label: String,
+    active: Boolean,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    val showActive = active && enabled
+    val iconTint = when {
+        !enabled -> PhoebeUi.mutedText.copy(alpha = 0.45f)
+        showActive -> PhoebeUi.accentLight
+        else -> PhoebeUi.secondaryText
+    }
+    val labelColor = when {
+        !enabled -> PhoebeUi.mutedText.copy(alpha = 0.45f)
+        showActive -> PhoebeUi.primaryText
+        else -> PhoebeUi.secondaryText
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
-            .clickable(onClick = onClick)
-            .background(if (active) PhoebeUi.elevatedFill else Color.Transparent)
+            .clickable(enabled = enabled, onClick = onClick)
+            .background(if (showActive) PhoebeUi.elevatedFill else Color.Transparent)
             .padding(horizontal = 8.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Box(Modifier.width(20.dp), contentAlignment = Alignment.Center) {
-            PhoebeIconView(icon, tint = if (active) PhoebeUi.accentLight else PhoebeUi.secondaryText, modifier = Modifier.size(18.dp))
+            PhoebeIconView(icon, tint = iconTint, modifier = Modifier.size(18.dp))
         }
-        Text(label, color = if (active) PhoebeUi.primaryText else PhoebeUi.secondaryText, fontSize = 14.sp)
+        Text(label, color = labelColor, fontSize = 14.sp)
     }
 }
 

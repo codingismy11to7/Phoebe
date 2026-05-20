@@ -30,6 +30,11 @@ val phoebeDebugDistribution = providers.gradleProperty("phoebe.debugDistribution
     .map(String::toBoolean)
     .orElse(false)
 
+val phoebeRealAudioTests = providers.gradleProperty("phoebe.realAudioTests")
+    .orElse(providers.environmentVariable("PHOEBE_REAL_AUDIO_TESTS"))
+    .map(String::toBoolean)
+    .orElse(false)
+
 fun providerValue(name: String, envName: String): String? =
     providers.gradleProperty(name).orElse(providers.environmentVariable(envName)).orNull
 
@@ -109,6 +114,7 @@ kotlin {
             implementation(libs.compose.foundation)
             implementation(libs.compose.material3)
             implementation(libs.compose.components.resources)
+            implementation(libs.jetbrains.navigation3.ui)
             implementation(libs.coroutines.core)
             implementation(libs.ktor.client.core)
             implementation(libs.ktor.client.content.negotiation)
@@ -260,6 +266,7 @@ android {
         versionCode = phoebeVersionCode.get()
         versionName = phoebeVersionName.get()
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        testInstrumentationRunnerArguments["phoebe.realAudioTests"] = phoebeRealAudioTests.get().toString()
     }
 
     buildTypes {
@@ -271,6 +278,12 @@ android {
 
     buildFeatures {
         buildConfig = true
+    }
+
+    sourceSets {
+        getByName("androidTest") {
+            assets.srcDir("src/commonTest/resources")
+        }
     }
 
     testOptions {
@@ -289,12 +302,13 @@ android {
     val releaseKeyAlias = providerValue("phoebe.android.signing.keyAlias", "PHOEBE_ANDROID_SIGNING_KEY_ALIAS")
     val releaseKeyPassword = providerValue("phoebe.android.signing.keyPassword", "PHOEBE_ANDROID_SIGNING_KEY_PASSWORD")
 
-    if (
+    val hasReleaseSigning =
         releaseStoreFile != null &&
-        releaseStorePassword != null &&
-        releaseKeyAlias != null &&
-        releaseKeyPassword != null
-    ) {
+            releaseStorePassword != null &&
+            releaseKeyAlias != null &&
+            releaseKeyPassword != null
+
+    if (hasReleaseSigning) {
         signingConfigs {
             create("release") {
                 storeFile = file(releaseStoreFile)
@@ -303,13 +317,23 @@ android {
                 keyPassword = releaseKeyPassword
             }
         }
-        buildTypes {
-            getByName("release") {
-                signingConfig = signingConfigs.getByName("release")
+    }
+
+    buildTypes {
+        getByName("release") {
+            signingConfig = if (hasReleaseSigning) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
             }
         }
     }
 }
+
+private val macosLocalNetworkInfoPlistKeys = """
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Phoebe connects to Jellyfin, Plex, Emby, and other media servers on your home network.</string>
+""".trimIndent()
 
 compose.desktop {
     application {
@@ -346,6 +370,12 @@ compose.desktop {
                 bundleID = if (phoebeDebugDistribution.get()) "com.phoebe.app.debug" else "com.phoebe.app"
                 packageVersion = phoebeJpackagePackageVersion.get()
                 iconFile.set(iconsDir.file("icon.icns").asFile)
+                val macEntitlements = project.layout.projectDirectory.file("desktop/macos/Phoebe.entitlements")
+                entitlementsFile.set(macEntitlements)
+                runtimeEntitlementsFile.set(macEntitlements)
+                infoPlist {
+                    extraKeysRawXml = macosLocalNetworkInfoPlistKeys
+                }
                 signing {
                     identity.set(
                         providers.gradleProperty("compose.desktop.mac.signing.identity")
@@ -439,6 +469,10 @@ tasks.withType<Test>().configureEach {
 
     if (name.contains("desktop", ignoreCase = true)) {
         systemProperty("phoebe.debug", "true")
+    }
+    systemProperty("phoebe.realAudioTests", phoebeRealAudioTests.get().toString())
+    if (phoebeRealAudioTests.get() && name.contains("desktop", ignoreCase = true)) {
+        maxParallelForks = 1
     }
     if (requestedAnyRoborazzi) {
         timeout.set(Duration.ofMinutes(5))

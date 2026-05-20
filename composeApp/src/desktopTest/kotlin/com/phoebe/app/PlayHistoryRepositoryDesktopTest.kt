@@ -116,4 +116,29 @@ class PlayHistoryRepositoryDesktopTest {
         val counts = repo.playCountsByTrack.first { it["plex:t1"] == 2L }
         assertEquals(2L, counts["plex:t1"])
     }
+
+    @Test
+    fun remotePlayCountFallbackUsesAggregateInsteadOfSyntheticRows() = runBlocking {
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        val repo = PlayHistoryRepository(db)
+        repository = repo
+        val track = Track("plex:t1", "Song", "Art", "Alb", 30_000L, "", "")
+
+        val imported = repo.importRemotePlayCountFallback(
+            track = track,
+            source = "plex",
+            serverId = "server",
+            lastPlayedAtMs = 9_000L,
+            playCount = 12L,
+            importedAtMs = 10_000L,
+        )
+
+        assertEquals(1, imported)
+        val eventRows = db.playHistoryQueries.selectPlayCountsByTrack().awaitAsList()
+        assertEquals(12L, eventRows.single { it.track_id == "plex:t1" }.playCount)
+        assertEquals(0, db.playHistoryQueries.selectLatestPlayEventsByTrack().awaitAsList().size)
+        val top = repo.topMostPlayed.first { list -> list.any { it.trackId == "plex:t1" } }
+        assertEquals(12L, top.first { it.trackId == "plex:t1" }.playCount)
+    }
 }

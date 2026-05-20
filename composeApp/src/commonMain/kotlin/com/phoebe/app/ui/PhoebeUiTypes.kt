@@ -165,9 +165,11 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.yield
+import kotlinx.serialization.Serializable
 import kotlin.math.max
 
-internal enum class DesktopSection {
+@Serializable
+internal enum class BrowseSection {
     Home,
     Search,
     Library,
@@ -175,6 +177,21 @@ internal enum class DesktopSection {
     Playlists,
     Settings,
 }
+
+internal fun BrowseSection.isMainBrowseSection(): Boolean = when (this) {
+    BrowseSection.Home,
+    BrowseSection.Search,
+    BrowseSection.Library,
+    -> true
+
+    BrowseSection.Lyrics,
+    BrowseSection.Playlists,
+    BrowseSection.Settings,
+    -> false
+}
+
+internal fun canBrowseMainSections(session: PlexSession?, mediaSources: MediaSourcesState): Boolean =
+    session?.selectedLibrary != null || mediaSources.localFolders.any { it.enabled }
 
 internal enum class PhoebeIcon {
     Home,

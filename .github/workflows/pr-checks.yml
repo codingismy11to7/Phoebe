@@ -31,8 +31,14 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Fetch test audio fixtures
+        run: ./scripts/fetch-test-audio.sh
+
       - name: Run desktop tests
-        run: ./gradlew :composeApp:desktopTest
+        run: ./gradlew :composeApp:desktopTest -Pphoebe.realAudioTests=true
 
       - name: Upload desktop screenshot artifacts
         if: failure()
@@ -205,6 +211,12 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Fetch test audio fixtures
+        run: ./scripts/fetch-test-audio.sh
+
       - name: Run Android instrumented tests
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -212,4 +224,4 @@ jobs:
           arch: x86_64
           target: google_apis
           disable-animations: true
-          script: ./gradlew :composeApp:connectedDebugAndroidTest
+          script: ./gradlew :composeApp:connectedDebugAndroidTest -Pphoebe.realAudioTests=true

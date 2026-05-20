@@ -32,17 +32,32 @@ import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.ConnectionPool
+import okhttp3.Dispatcher
 import java.io.File
+import java.util.concurrent.TimeUnit
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.SocketTimeoutException
 
 actual fun createPlatformHttpClient(): HttpClient = HttpClient(OkHttp) {
+    engine {
+        config {
+            connectionPool(ConnectionPool(16, 5, TimeUnit.MINUTES))
+            dispatcher(
+                Dispatcher().apply {
+                    maxRequests = 64
+                    maxRequestsPerHost = 16
+                },
+            )
+        }
+    }
     install(HttpTimeout) {
-        requestTimeoutMillis = 60_000
-        connectTimeoutMillis = 15_000
-        socketTimeoutMillis = 60_000
+        // Large Plex library metadata responses can exceed 30s on mobile networks.
+        requestTimeoutMillis = 90_000
+        connectTimeoutMillis = 8_000
+        socketTimeoutMillis = 45_000
     }
     install(ContentNegotiation) {
         json(PlexClient.PlexJson)
@@ -346,9 +361,7 @@ actual fun currentTimeMs(): Long = System.currentTimeMillis()
 
 actual fun prefersReducedArtworkEffects(): Boolean = false
 
-actual fun catalogTrackPrefetchAlbumCount(): Int = 0
-
-actual fun catalogTrackPrefetchParallelism(): Int = 1
+actual fun catalogTrackIndexParallelism(): Int = 6
 
 actual fun isDebugBuild(): Boolean = BuildConfig.DEBUG
 

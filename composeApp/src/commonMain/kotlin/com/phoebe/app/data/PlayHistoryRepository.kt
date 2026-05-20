@@ -1,9 +1,12 @@
 package com.phoebe.app.data
 
 import app.cash.sqldelight.coroutines.asFlow
+import app.cash.sqldelight.async.coroutines.awaitAsList
 import app.cash.sqldelight.async.coroutines.awaitAsOneOrNull
 import app.cash.sqldelight.coroutines.mapToList
 import com.phoebe.app.db.PhoebeDatabase
+import com.phoebe.app.domain.MostPlayedEntry
+import com.phoebe.app.domain.RecentlyPlayedEntry
 import com.phoebe.app.domain.Track
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -15,6 +18,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.withContext
+
+/** Max rows loaded eagerly for home derivation and catalog warm hints. */
+const val PlayHistoryTopListCapacity = 200
 
 /**
  * Tracks per-track play timestamps. Surfaces "last played" aggregates per
@@ -70,10 +76,43 @@ class PlayHistoryRepository(
         .mapToList(Dispatchers.Default)
         .map { rows ->
             buildMap(rows.size) {
-                for (row in rows) put(row.track_id, row.playCount)
+                for (row in rows) put(row.track_id, row.playCount ?: 0L)
             }
         }
         .stateIn(scope, SharingStarted.Eagerly, emptyMap())
+
+    val topMostPlayed: StateFlow<List<MostPlayedEntry>> = database.playHistoryQueries
+        .selectTopMostPlayedByTrack(PlayHistoryTopListCapacity.toLong())
+        .asFlow()
+        .mapToList(Dispatchers.Default)
+        .map { rows ->
+            rows.map { row ->
+                MostPlayedEntry(
+                    trackId = row.track_id,
+                    playCount = row.playCount ?: 0L,
+                    lastPlayedMs = row.lastPlayedMs ?: 0L,
+                    artist = row.artist,
+                    album = row.album,
+                )
+            }
+        }
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    val topRecentlyPlayed: StateFlow<List<RecentlyPlayedEntry>> = database.playHistoryQueries
+        .selectTopRecentlyPlayedByTrack(PlayHistoryTopListCapacity.toLong())
+        .asFlow()
+        .mapToList(Dispatchers.Default)
+        .map { rows ->
+            rows.map { row ->
+                RecentlyPlayedEntry(
+                    trackId = row.track_id,
+                    lastPlayedMs = row.lastPlayedMs ?: 0L,
+                    artist = row.artist,
+                    album = row.album,
+                )
+            }
+        }
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     val playEventsByTrack: StateFlow<Map<String, List<Long>>> = database.playHistoryQueries
         .selectLatestPlayEventsByTrack()
@@ -97,6 +136,22 @@ class PlayHistoryRepository(
     suspend fun restore() {
         // No-op — see class docs.
     }
+
+    suspend fun queryTopMostPlayed(limit: Int): List<MostPlayedEntry> =
+        withContext(Dispatchers.Default) {
+            database.playHistoryQueries
+                .selectTopMostPlayedByTrack(limit.coerceAtLeast(0).toLong())
+                .awaitAsList()
+                .map { row ->
+                    MostPlayedEntry(
+                        trackId = row.track_id,
+                        playCount = row.playCount ?: 0L,
+                        lastPlayedMs = row.lastPlayedMs ?: 0L,
+                        artist = row.artist,
+                        album = row.album,
+                    )
+                }
+        }
 
     /**
      * Persist a fresh play event for [track]. The eagerly-subscribed [StateFlow]s
@@ -181,26 +236,14 @@ class PlayHistoryRepository(
         lastPlayedAtMs: Long,
         playCount: Long,
         importedAtMs: Long,
-    ): Int {
-        val cappedCount = playCount.coerceIn(0L, 500L).toInt()
-        if (cappedCount <= 0) return 0
-        var imported = 0
-        repeat(cappedCount) { index ->
-            val playedAtMs = (lastPlayedAtMs - index).coerceAtLeast(0L)
-            if (importPlexPlay(
-                    track = track,
-                    serverId = serverId,
-                    historyKey = "plex-stats:$serverId:${track.id}:$index",
-                    playedAtMs = playedAtMs,
-                    importedAtMs = importedAtMs,
-                    mergeWindowMs = 0L,
-                )
-            ) {
-                imported += 1
-            }
-        }
-        return imported
-    }
+    ): Int = upsertRemotePlayCountAggregate(
+        track = track,
+        source = "plex-stats",
+        serverId = serverId,
+        lastPlayedAtMs = lastPlayedAtMs,
+        playCount = playCount,
+        importedAtMs = importedAtMs,
+    )
 
     suspend fun importRemotePlayCountFallback(
         track: Track,
@@ -209,34 +252,45 @@ class PlayHistoryRepository(
         lastPlayedAtMs: Long,
         playCount: Long,
         importedAtMs: Long,
+    ): Int = upsertRemotePlayCountAggregate(
+        track = track,
+        source = "$source-stats",
+        serverId = serverId,
+        lastPlayedAtMs = lastPlayedAtMs,
+        playCount = playCount,
+        importedAtMs = importedAtMs,
+    )
+
+    private suspend fun upsertRemotePlayCountAggregate(
+        track: Track,
+        source: String,
+        serverId: String,
+        lastPlayedAtMs: Long,
+        playCount: Long,
+        importedAtMs: Long,
     ): Int {
-        val cappedCount = playCount.coerceIn(0L, 500L).toInt()
-        if (track.id.isBlank() || source.isBlank() || serverId.isBlank() || cappedCount <= 0) return 0
+        if (track.id.isBlank() || source.isBlank() || serverId.isBlank() || playCount <= 0L) return 0
         val cleanArtist = track.artist.ifBlank { "Unknown Artist" }
         val cleanAlbum = track.album.ifBlank { "Unknown Album" }
-        var imported = 0
+        val cappedCount = playCount.coerceIn(1L, 500L)
         withContext(Dispatchers.Default) {
-            repeat(cappedCount) { index ->
-                val playedAtMs = (lastPlayedAtMs - index).coerceAtLeast(0L)
-                val historyKey = "$source-stats:$serverId:${track.id}:$index"
-                val alreadyImported = database.playHistoryQueries
-                    .selectImportedPlexHistoryKey(historyKey)
-                    .awaitAsOneOrNull() != null
-                if (alreadyImported) return@repeat
-                database.playHistoryQueries.insertImportedRemotePlay(
-                    track_id = track.id,
-                    artist = cleanArtist,
-                    album = cleanAlbum,
-                    played_at_ms = playedAtMs,
-                    source = source,
-                    plex_server_id = serverId,
-                    plex_history_key = historyKey,
-                    plex_imported_at_ms = importedAtMs,
-                )
-                imported += 1
-            }
+            val existing = database.playHistoryQueries
+                .selectPlayCountAggregateByTrack(track.id)
+                .awaitAsOneOrNull()
+            val mergedCount = maxOf(existing?.play_count ?: 0L, cappedCount)
+            val mergedLastPlayed = maxOf(existing?.last_played_at_ms ?: 0L, lastPlayedAtMs.coerceAtLeast(0L))
+            database.playHistoryQueries.insertPlayCountAggregate(
+                track_id = track.id,
+                artist = cleanArtist,
+                album = cleanAlbum,
+                play_count = mergedCount,
+                last_played_at_ms = mergedLastPlayed,
+                source = source,
+                server_id = serverId,
+                imported_at_ms = importedAtMs,
+            )
         }
-        return imported
+        return 1
     }
 
     /** Cancel background aggregate collectors. Call before closing the backing [SqlDriver] in tests. */

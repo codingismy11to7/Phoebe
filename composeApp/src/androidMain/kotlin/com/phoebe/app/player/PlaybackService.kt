@@ -10,7 +10,6 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.DefaultLoadControl
-import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaConstants
@@ -283,7 +282,7 @@ class PlaybackService : MediaLibraryService() {
             .build()
             .apply { setSmallIcon(R.drawable.ic_notification) }
         setMediaNotificationProvider(notificationProvider)
-        val player = ExoPlayer.Builder(this)
+        val player = AndroidPlaybackDiagnostics.newPlayerBuilder(this, PlaybackEnginePath.Media3)
             .setAudioAttributes(AudioAttributes.DEFAULT, /* handleAudioFocus= */ true)
             .setLoadControl(
                 DefaultLoadControl.Builder()

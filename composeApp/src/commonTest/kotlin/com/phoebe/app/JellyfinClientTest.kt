@@ -177,6 +177,102 @@ class JellyfinClientTest {
     }
 
     @Test
+    fun parallelAlbumPagesFetchConcurrentlyWithFastFields() = runTest {
+        val server = PlexServer("jellyfin:test", "Jellyfin", "https://jellyfin.example", owned = true)
+        val library = MusicLibrary("music", "Music")
+        val pageSize = JellyfinClient.JellyfinPageSize
+        val total = pageSize * 2
+        val starts = mutableListOf<Int>()
+        val seenFields = mutableListOf<String?>()
+        val seenEnableImages = mutableListOf<String?>()
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/Items" -> {
+                    starts += request.url.parameters["startIndex"]?.toIntOrNull() ?: 0
+                    seenFields += request.url.parameters["fields"]
+                    seenEnableImages += request.url.parameters["enableImages"]
+                    val start = request.url.parameters["startIndex"]?.toIntOrNull() ?: 0
+                    val items = (start until (start + pageSize).coerceAtMost(total)).joinToString(",") { index ->
+                        """{ "Id": "album-$index", "Type": "MusicAlbum", "Name": "Album $index", "AlbumArtist": "Artist" }"""
+                    }
+                    respondJson("""{ "Items": [ $items ], "TotalRecordCount": $total }""")
+                }
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val client = JellyfinClient(testHttpClient(engine))
+
+        val albums = client.albums(server, library, "token", "user-1", fastSync = true)
+
+        assertEquals(total, albums.size)
+        assertEquals(listOf(0, pageSize), starts.sorted())
+        val fields = seenFields.first().orEmpty()
+        assertFalse(fields.contains("Path"))
+        assertFalse(fields.contains("MediaSources"))
+        assertTrue(seenEnableImages.none { it == "true" })
+    }
+
+    @Test
+    fun parallelTrackPagesInvokeOnPagePerPageNotOnlyAfterAllPagesFinish() = runTest {
+        val server = PlexServer("jellyfin:test", "Jellyfin", "https://jellyfin.example", owned = true)
+        val library = MusicLibrary("music", "Music")
+        val pageSize = JellyfinClient.JellyfinPageSize
+        val total = pageSize * 2 + 1
+        val loadedPerCallback = mutableListOf<Int>()
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/Items" -> {
+                    val start = request.url.parameters["startIndex"]?.toIntOrNull() ?: 0
+                    val items = (start until (start + pageSize).coerceAtMost(total)).joinToString(",") { index ->
+                        """{ "Id": "track-$index", "Type": "Audio", "Name": "Track $index", "Album": "Album", "RunTimeTicks": 10000000 }"""
+                    }
+                    respondJson("""{ "Items": [ $items ], "TotalRecordCount": $total }""")
+                }
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val client = JellyfinClient(testHttpClient(engine))
+
+        client.tracks(server, library, "token", "user-1", includeMediaDetails = false) { page, _ ->
+            loadedPerCallback += page.size
+        }
+
+        assertEquals(3, loadedPerCallback.size)
+        assertEquals(total, loadedPerCallback.sum())
+        assertEquals(pageSize, loadedPerCallback.first())
+    }
+
+    @Test
+    fun parallelTrackPagesRequestExpectedOffsetsAndPreserveOrder() = runTest {
+        val server = PlexServer("jellyfin:test", "Jellyfin", "https://jellyfin.example", owned = true)
+        val library = MusicLibrary("music", "Music")
+        val starts = mutableListOf<Int>()
+        val pageSize = JellyfinClient.JellyfinPageSize
+        val total = pageSize * 2 + 1
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/Items" -> {
+                    val start = request.url.parameters["startIndex"]?.toIntOrNull() ?: 0
+                    starts += start
+                    val items = (start until (start + pageSize).coerceAtMost(total)).joinToString(",") { index ->
+                        val trackNum = index + 1
+                        """{ "Id": "track-$trackNum", "Type": "Audio", "Name": "Track $trackNum", "Album": "Album", "RunTimeTicks": 10000000 }"""
+                    }
+                    respondJson("""{ "Items": [ $items ], "TotalRecordCount": $total }""")
+                }
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val client = JellyfinClient(testHttpClient(engine))
+
+        val tracks = client.tracks(server, library, "token", "user-1", includeMediaDetails = false)
+
+        assertEquals(total, tracks.size)
+        assertEquals((1..total).map { "track-$it" }, tracks.map { it.id })
+        assertEquals(listOf(0, pageSize, pageSize * 2), starts.sorted())
+    }
+
+    @Test
     fun loadsJellyfinTracksAcrossPages() = runTest {
         val server = PlexServer("jellyfin:test", "Jellyfin", "https://jellyfin.example", owned = true)
         val library = MusicLibrary("music", "Music")

@@ -476,6 +476,20 @@ data class CatalogPageInfo(
     val hasAny: Boolean
         get() = artistTotal != null || albumTotal != null || trackTotal != null ||
             loadedArtistPages.isNotEmpty() || loadedAlbumPages.isNotEmpty() || loadedTrackPages.isNotEmpty()
+
+    /** True when Quick sync has not yet loaded every remote page (reconcile must not drop unloaded tracks). */
+    fun hasUnloadedRemotePages(): Boolean {
+        val size = pageSize.coerceAtLeast(1)
+        fun hasMore(total: Int?, loadedPages: Set<Int>): Boolean {
+            if (total == null || loadedPages.isEmpty()) return false
+            val loadedCount = loadedPages.size
+            val expectedPages = (total + size - 1) / size
+            return loadedCount < expectedPages
+        }
+        return hasMore(artistTotal, loadedArtistPages) ||
+            hasMore(albumTotal, loadedAlbumPages) ||
+            hasMore(trackTotal, loadedTrackPages)
+    }
 }
 
 @Serializable
@@ -518,14 +532,24 @@ enum class CatalogSyncPhase {
 data class CatalogSyncState(
     val phase: CatalogSyncPhase = CatalogSyncPhase.Idle,
     val message: String? = null,
+    val detail: String? = null,
     val loadedAlbums: Int = 0,
     val loadedTracks: Int = 0,
+    val totalTracks: Int? = null,
+    val totalPlaylists: Int? = null,
+    val warmedPlaylists: Int = 0,
+    val progress: Float? = null,
     val blocking: Boolean = false,
 ) {
     val isActive: Boolean
         get() = phase != CatalogSyncPhase.Idle &&
             phase != CatalogSyncPhase.Complete &&
-            phase != CatalogSyncPhase.Failed
+            phase != CatalogSyncPhase.Failed &&
+            phase != CatalogSyncPhase.RestoringCache
+
+    /** True when playlist track lists are being fetched in the foreground sync path. */
+    val isRefreshingPlaylists: Boolean
+        get() = phase == CatalogSyncPhase.RefreshingPlaylists
 
     val showGlobalProgress: Boolean
         get() = isActive && blocking
@@ -655,6 +679,23 @@ enum class RecentlyAddedKind {
     Albums,
 }
 
+/** Ranked play-history row from SQL top-N queries (ordering + warm hints). */
+data class MostPlayedEntry(
+    val trackId: String,
+    val playCount: Long,
+    val lastPlayedMs: Long,
+    val artist: String,
+    val album: String,
+)
+
+/** Recently played track ranked by last play time. */
+data class RecentlyPlayedEntry(
+    val trackId: String,
+    val lastPlayedMs: Long,
+    val artist: String,
+    val album: String,
+)
+
 @Serializable
 enum class PlayHistoryKind {
     RecentlyPlayed,
@@ -669,6 +710,23 @@ enum class RepeatMode {
     One,
     /** Repeat the entire queue indefinitely. */
     All,
+}
+
+/** Playback fields exposed to browse chrome without subscribing to transport ticks. */
+data class ShellPlaybackState(
+    val currentTrack: Track? = null,
+    val isPlaying: Boolean = false,
+    val isBuffering: Boolean = false,
+)
+
+/** Queue snapshot for up-next / skip UI; ignores position-only player updates. */
+data class PlayerQueueSnapshot(
+    val queue: List<Track> = emptyList(),
+    val currentIndex: Int = -1,
+) {
+    val currentTrack: Track? get() = queue.getOrNull(currentIndex)
+    val upNext: List<Track>
+        get() = if (currentIndex < 0) emptyList() else queue.drop(currentIndex + 1)
 }
 
 data class PlayerState(

@@ -13,7 +13,7 @@ internal actual fun platformInitializeTelemetry(
 ) {
     Sentry.init { options ->
         options.dsn = dsn
-        options.debug = debug
+        options.debug = false
         options.environment = environment
         options.attachScreenshot = true
         options.attachViewHierarchy = true

@@ -105,9 +105,7 @@ actual fun currentTimeMs(): Long = jsDateNow().toLong()
 
 actual fun prefersReducedArtworkEffects(): Boolean = true
 
-actual fun catalogTrackPrefetchAlbumCount(): Int = 6
-
-actual fun catalogTrackPrefetchParallelism(): Int = 2
+actual fun catalogTrackIndexParallelism(): Int = 4
 
 actual fun isDebugBuild(): Boolean = wasmDebugBuildEnabled()
 

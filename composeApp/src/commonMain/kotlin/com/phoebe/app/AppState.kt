@@ -2,7 +2,6 @@ package com.phoebe.app
 
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.AppSettings
-import com.phoebe.app.domain.AppScreen
 import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.CollectionFacet
@@ -17,7 +16,9 @@ import com.phoebe.app.domain.LyricsLoadState
 import com.phoebe.app.domain.MediaProviderType
 import com.phoebe.app.domain.MusicLibrary
 import com.phoebe.app.domain.Playlist
+import com.phoebe.app.domain.PlayerQueueSnapshot
 import com.phoebe.app.domain.PlayerState
+import com.phoebe.app.domain.ShellPlaybackState
 import com.phoebe.app.domain.PlexPin
 import com.phoebe.app.domain.PlexRadioStation
 import com.phoebe.app.domain.PlexServer
@@ -65,21 +66,39 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlin.collections.ArrayDeque
 
 data class MusicAssistantRemotePlayback(
     val tracks: List<Track>,
     val index: Int,
     val target: String,
 )
+
+data class CollectionMixSeed(
+    val facet: CollectionFacet,
+    val value: String,
+)
+
+sealed interface AppNavigationRequest {
+    data object SignIn : AppNavigationRequest
+    data object ServerPicker : AppNavigationRequest
+    data object LibraryPicker : AppNavigationRequest
+    data object Home : AppNavigationRequest
+    data object Player : AppNavigationRequest
+    data class PlaylistDetail(val playlistId: String) : AppNavigationRequest
+}
 
 class AppState(
     private val dependencies: AppDependencies,
@@ -89,6 +108,7 @@ class AppState(
     val catalog = dependencies.catalogRepository.catalog
     val catalogRefreshing: StateFlow<Boolean> = dependencies.catalogRepository.catalogRefreshing
     val catalogSyncState = dependencies.catalogRepository.catalogSyncState
+    val tracksLoading = dependencies.catalogRepository.tracksLoading
     val mediaSources = dependencies.mediaSourcesRepository.state
     val cast = dependencies.castController.state
     private val mutableMusicAssistantRemotePlayback = MutableStateFlow<MusicAssistantRemotePlayback?>(null)
@@ -111,6 +131,40 @@ class AppState(
             else -> audio
         }
     }.stateIn(scope, SharingStarted.Eagerly, dependencies.audioPlayer.state.value)
+    val shellPlayback: StateFlow<ShellPlaybackState> = player
+        .map { playback ->
+            ShellPlaybackState(
+                currentTrack = playback.currentTrack,
+                isPlaying = playback.isPlaying,
+                isBuffering = playback.isBuffering,
+            )
+        }
+        .distinctUntilChanged()
+        .stateIn(
+            scope,
+            SharingStarted.Eagerly,
+            ShellPlaybackState(
+                currentTrack = player.value.currentTrack,
+                isPlaying = player.value.isPlaying,
+                isBuffering = player.value.isBuffering,
+            ),
+        )
+    val playerQueue: StateFlow<PlayerQueueSnapshot> = player
+        .map { playback ->
+            PlayerQueueSnapshot(
+                queue = playback.queue,
+                currentIndex = playback.currentIndex,
+            )
+        }
+        .distinctUntilChanged()
+        .stateIn(
+            scope,
+            SharingStarted.Eagerly,
+            PlayerQueueSnapshot(
+                queue = player.value.queue,
+                currentIndex = player.value.currentIndex,
+            ),
+        )
     val libraryUi = dependencies.libraryUiRepository.preferences
     val appSettings = dependencies.appSettingsRepository.settings
     val lastPlayedByArtist = dependencies.playHistoryRepository.lastPlayedByArtist
@@ -118,10 +172,15 @@ class AppState(
     val lastPlayedByTrack = dependencies.playHistoryRepository.lastPlayedByTrack
     val playCountsByTrack = dependencies.playHistoryRepository.playCountsByTrack
     val playEventsByTrack = dependencies.playHistoryRepository.playEventsByTrack
+    val topMostPlayed = dependencies.playHistoryRepository.topMostPlayed
+    val topRecentlyPlayed = dependencies.playHistoryRepository.topRecentlyPlayed
     val defaultDownloadDirectoryLabel: String = dependencies.platformStorage.defaultDownloadDirectoryLabel()
 
-    private val mutableScreen = MutableStateFlow(defaultBrowseScreen())
-    val screen: StateFlow<AppScreen> = mutableScreen
+    private val mutableNavigationRequests = MutableSharedFlow<AppNavigationRequest>(
+        replay = 1,
+        extraBufferCapacity = 32,
+    )
+    val navigationRequests: SharedFlow<AppNavigationRequest> = mutableNavigationRequests.asSharedFlow()
 
     private val mutableTab = MutableStateFlow(LibraryTab.Albums)
     val tab: StateFlow<LibraryTab> = mutableTab
@@ -153,6 +212,9 @@ class AppState(
     private val mutableLibrariesLoading = MutableStateFlow(false)
     val librariesLoading: StateFlow<Boolean> = mutableLibrariesLoading
 
+    private val mutableAuthInProgress = MutableStateFlow(false)
+    val authInProgress: StateFlow<Boolean> = mutableAuthInProgress
+
     private val mutableMessage = MutableStateFlow("Sign in to Plex or Jellyfin, or add a local music folder to get started.")
     val message: StateFlow<String> = mutableMessage
 
@@ -174,11 +236,11 @@ class AppState(
     private val mutableDownloadDirectory = MutableStateFlow<String?>(null)
     val downloadDirectory: StateFlow<String?> = mutableDownloadDirectory
 
-    private val detailStack = ArrayDeque<AppScreen>()
     private var playRequestGeneration = 0
     private var collectionMixGeneration = 0
     private var recentAlbumWarmSignature: String? = null
     private var playedAlbumWarmSignature: String? = null
+    private var mostPlayedWarmSignature: String? = null
     private var catalogRefreshJob: Job? = null
     private var playHistorySyncJob: Job? = null
     private val activeDownloadJobs = mutableSetOf<Job>()
@@ -195,16 +257,20 @@ class AppState(
             dependencies.audioPlayer.setCrossfadeDurationMs(appSettings.value.crossfadeSeconds * 1_000L)
             dependencies.playHistoryRepository.restore()
             mutableDownloadDirectory.value = dependencies.platformStorage.readDownloadDirectory()
-            mutableScreen.value = defaultBrowseScreen(session.value)
+            requestNavigation(defaultBrowseRequest(session.value))
             if (session.value?.token?.isNotBlank() == true && session.value?.selectedServer == null) {
                 refreshServers()
             }
             dependencies.catalogRepository.restoreCachedCatalog()
-            if (appSettings.value.scanLibraryOnLaunch) {
-                launch {
-                    delay(500)
-                    refreshCatalogSuspended()
+            val hasRemoteLibrary = session.value?.selectedLibrary != null
+            val hasLocalFolders = mediaSources.value.localFolders.any { it.enabled }
+            if (appSettings.value.scanLibraryOnLaunch && (hasRemoteLibrary || hasLocalFolders)) {
+                delay(500)
+                if (session.value.isPlex()) {
+                    dependencies.sessionRepository.refreshSelectedServerConnections()
+                    dependencies.sessionRepository.warmServerConnection()
                 }
+                refreshCatalogSuspended(catalogMessage = null, backgroundIfCached = true)
             }
             if (session.value.isEmbyFamily() &&
                 session.value?.selectedLibrary != null &&
@@ -216,11 +282,18 @@ class AppState(
             warmPlaylistTracksInBackground()
             syncRemotePlayHistoryInBackground()
             ensureLikedSongsPlaylistIfPossible()
-            if (session.value?.token?.isNotBlank() == true && session.value?.selectedServer != null && session.value.isPlex()) {
-                launch { dependencies.sessionRepository.refreshSelectedServerConnections() }
+            if (session.value?.token?.isNotBlank() == true &&
+                session.value?.selectedServer != null &&
+                session.value.isPlex() &&
+                !appSettings.value.scanLibraryOnLaunch
+            ) {
+                launch {
+                    dependencies.sessionRepository.refreshSelectedServerConnections()
+                    dependencies.sessionRepository.warmServerConnection()
+                }
             }
             PhoebeLog.d("AppState") {
-                "startup restore complete → screen=${mutableScreen.value}, " +
+                "startup restore complete → destination=${defaultBrowseRequest(session.value)}, " +
                     "session=${session.value?.userName ?: "none"}, " +
                     "localFolders=${mediaSources.value.localFolders.size}"
             }
@@ -258,6 +331,11 @@ class AppState(
 
     fun dismissPlaybackSnackbar() {
         mutablePlaybackSnackbar.value = null
+    }
+
+    private fun surfaceTransientNotice(notice: String) {
+        mutableMessage.value = notice
+        mutablePlaybackSnackbar.value = notice
     }
 
     /**
@@ -311,26 +389,40 @@ class AppState(
     }
 
     /**
-     * If the UI is still on [AppScreen.SignIn] but the saved session (or local folders) implies a browse flow,
-     * jump to the correct screen. Covers startup races and missed navigation after async restore.
+     * If the saved session (or local folders) implies a browse flow, notify the root coordinator.
+     * Covers startup races and missed navigation after async restore.
      */
     fun reconcileBrowseScreenIfNeeded() {
-        if (mutableScreen.value != AppScreen.SignIn) return
-        val target = defaultBrowseScreen()
-        if (target != AppScreen.SignIn) {
-            detailStack.clear()
-            mutableScreen.value = target
+        val target = restoredBrowseRequest()
+        if (target != AppNavigationRequest.SignIn) {
+            requestNavigation(target)
         }
     }
 
-    private fun defaultBrowseScreen(sessionSnapshot: PlexSession? = session.value): AppScreen {
+    /** Destination implied by a restored remote session only (not local folders). */
+    private fun restoredBrowseRequest(sessionSnapshot: PlexSession? = session.value): AppNavigationRequest {
         return when {
-            sessionSnapshot?.selectedLibrary != null -> AppScreen.Home
-            sessionSnapshot?.selectedServer != null -> AppScreen.LibraryPicker
-            sessionSnapshot?.token?.isNotBlank() == true -> AppScreen.ServerPicker
-            mediaSources.value.localFolders.any { it.enabled } -> AppScreen.Home
-            else -> AppScreen.SignIn
+            sessionSnapshot?.selectedLibrary != null -> AppNavigationRequest.Home
+            sessionSnapshot?.selectedServer != null -> AppNavigationRequest.LibraryPicker
+            sessionSnapshot?.token?.isNotBlank() == true -> AppNavigationRequest.ServerPicker
+            else -> AppNavigationRequest.SignIn
         }
+    }
+
+    fun initialNavigationRequest(): AppNavigationRequest = defaultBrowseRequest()
+
+    private fun defaultBrowseRequest(sessionSnapshot: PlexSession? = session.value): AppNavigationRequest {
+        return when {
+            sessionSnapshot?.selectedLibrary != null -> AppNavigationRequest.Home
+            sessionSnapshot?.selectedServer != null -> AppNavigationRequest.LibraryPicker
+            sessionSnapshot?.token?.isNotBlank() == true -> AppNavigationRequest.ServerPicker
+            mediaSources.value.localFolders.any { it.enabled } -> AppNavigationRequest.Home
+            else -> AppNavigationRequest.SignIn
+        }
+    }
+
+    private fun requestNavigation(request: AppNavigationRequest) {
+        mutableNavigationRequests.tryEmit(request)
     }
 
     private fun CatalogSnapshot.hasBrowseableContent(): Boolean =
@@ -358,8 +450,7 @@ class AppState(
             mutableMessage.value = "That Plex code is not approved yet."
             return@launch
         }
-        detailStack.clear()
-        mutableScreen.value = AppScreen.ServerPicker
+        requestNavigation(AppNavigationRequest.ServerPicker)
         mutableServers.value = servers
         mutableLibraries.value = emptyList()
         mutableLibrariesLoading.value = false
@@ -367,27 +458,28 @@ class AppState(
     }
 
     fun signInJellyfin(serverUrl: String, username: String, password: String) = scope.launch {
-        mutableBusy.value = true
-        mutableMessage.value = "Signing in with Jellyfin…"
-        val server = runCatching {
-            dependencies.sessionRepository.signInJellyfin(serverUrl, username, password)
-        }.onFailure { error ->
-            mutableMessage.value = error.message ?: "Couldn't sign in to Jellyfin."
-        }.getOrNull()
-        mutableBusy.value = false
-        if (server == null) return@launch
-        detailStack.clear()
-        mutableServers.value = listOf(server)
-        mutableLibraries.value = emptyList()
-        mutableLibrariesLoading.value = true
-        mutableScreen.value = AppScreen.LibraryPicker
-        runCatching {
-            mutableLibraries.value = dependencies.sessionRepository.libraries(server)
-        }.onFailure { error ->
-            mutableMessage.value = error.message ?: "Couldn't load Jellyfin libraries."
+        mutableAuthInProgress.value = true
+        try {
+            mutableMessage.value = "Signing in with Jellyfin…"
+            val server = runCatching {
+                dependencies.sessionRepository.signInJellyfin(serverUrl, username, password)
+            }.onFailure { error ->
+                mutableMessage.value = error.message ?: "Couldn't sign in to Jellyfin."
+            }.getOrNull() ?: return@launch
+            mutableServers.value = listOf(server)
+            mutableLibraries.value = emptyList()
+            mutableLibrariesLoading.value = true
+            requestNavigation(AppNavigationRequest.LibraryPicker)
+            runCatching {
+                mutableLibraries.value = dependencies.sessionRepository.libraries(server)
+            }.onFailure { error ->
+                mutableMessage.value = error.message ?: "Couldn't load Jellyfin libraries."
+            }
+            mutableLibrariesLoading.value = false
+            mutableMessage.value = "Signed in. Pick the Jellyfin music library to browse."
+        } finally {
+            mutableAuthInProgress.value = false
         }
-        mutableLibrariesLoading.value = false
-        mutableMessage.value = "Signed in. Pick the Jellyfin music library to browse."
     }
 
     fun signInProvider(
@@ -397,60 +489,59 @@ class AppState(
         password: String,
         syncMode: JellyfinSyncMode? = null,
     ) = scope.launch {
-        mutableBusy.value = true
-        mutableMessage.value = "Signing in with ${type.displayName}…"
-        val server = runCatching {
-            dependencies.sessionRepository.signInProvider(type, serverUrl, username, password)
-        }.onFailure { error ->
-            mutableMessage.value = error.message ?: "Couldn't sign in to ${type.displayName}."
-        }.getOrNull()
-        mutableBusy.value = false
-        if (server == null) return@launch
-        detailStack.clear()
-        mutableServers.value = listOf(server)
-        mutableLibraries.value = emptyList()
-        if (type.skipsLibraryPicker()) {
-            mutableLibrariesLoading.value = false
-            runCatching {
-                dependencies.sessionRepository.selectLibrary(type.defaultLibrarySelection(), syncMode ?: JellyfinSyncMode.Quick)
-                detailStack.clear()
-                mutableScreen.value = AppScreen.Home
-                mutableMessage.value = if ((syncMode ?: JellyfinSyncMode.Quick) == JellyfinSyncMode.Full) {
-                    "Starting full ${type.displayName} sync…"
-                } else {
-                    "Loading ${type.displayName}…"
+        mutableAuthInProgress.value = true
+        try {
+            mutableMessage.value = "Signing in with ${type.displayName}…"
+            val server = runCatching {
+                dependencies.sessionRepository.signInProvider(type, serverUrl, username, password)
+            }.onFailure { error ->
+                mutableMessage.value = error.message ?: "Couldn't sign in to ${type.displayName}."
+            }.getOrNull() ?: return@launch
+            mutableServers.value = listOf(server)
+            mutableLibraries.value = emptyList()
+            if (type.skipsLibraryPicker()) {
+                mutableLibrariesLoading.value = false
+                runCatching {
+                    dependencies.sessionRepository.selectLibrary(type.defaultLibrarySelection(), syncMode ?: JellyfinSyncMode.Quick)
+                    requestNavigation(AppNavigationRequest.Home)
+                    mutableMessage.value = if ((syncMode ?: JellyfinSyncMode.Quick) == JellyfinSyncMode.Full) {
+                        "Starting full ${type.displayName} sync…"
+                    } else {
+                        "Loading ${type.displayName}…"
+                    }
+                    refreshCatalogSuspended(catalogMessage = "${type.displayName} ready.")
+                }.onFailure { error ->
+                    mutableMessage.value = error.message ?: "Couldn't load ${type.displayName}."
                 }
-                refreshCatalogSuspended(catalogMessage = "${type.displayName} ready.")
-            }.onFailure { error ->
-                mutableMessage.value = error.message ?: "Couldn't load ${type.displayName}."
+                return@launch
             }
-            return@launch
-        }
-        mutableLibrariesLoading.value = true
-        mutableScreen.value = AppScreen.LibraryPicker
-        val libraries = runCatching {
-            dependencies.sessionRepository.libraries(server)
-        }.onFailure { error ->
-            mutableMessage.value = error.message ?: "Couldn't load ${type.displayName} libraries."
-        }.getOrNull().orEmpty()
-        mutableLibraries.value = libraries
-        mutableLibrariesLoading.value = false
-        if (type.autoSelectSingleLibrary() && libraries.size == 1) {
-            runCatching {
-                dependencies.sessionRepository.selectLibrary(libraries.single())
-                detailStack.clear()
-                mutableScreen.value = AppScreen.Home
-                mutableMessage.value = "Loading ${type.displayName}…"
-                refreshCatalogSuspended(catalogMessage = "${type.displayName} ready.")
+            mutableLibrariesLoading.value = true
+            requestNavigation(AppNavigationRequest.LibraryPicker)
+            val libraries = runCatching {
+                dependencies.sessionRepository.libraries(server)
             }.onFailure { error ->
-                mutableMessage.value = error.message ?: "Couldn't load ${type.displayName}."
+                mutableMessage.value = error.message ?: "Couldn't load ${type.displayName} libraries."
+            }.getOrNull().orEmpty()
+            mutableLibraries.value = libraries
+            mutableLibrariesLoading.value = false
+            if (type.autoSelectSingleLibrary() && libraries.size == 1) {
+                runCatching {
+                    dependencies.sessionRepository.selectLibrary(libraries.single())
+                    requestNavigation(AppNavigationRequest.Home)
+                    mutableMessage.value = "Loading ${type.displayName}…"
+                    refreshCatalogSuspended(catalogMessage = "${type.displayName} ready.")
+                }.onFailure { error ->
+                    mutableMessage.value = error.message ?: "Couldn't load ${type.displayName}."
+                }
+                return@launch
             }
-            return@launch
-        }
-        mutableMessage.value = when (type) {
-            MediaProviderType.Navidrome -> "Signed in. Pick the Subsonic music folder to browse."
-            MediaProviderType.MusicAssistant -> "Signed in. Pick the Music Assistant source to browse."
-            else -> "Signed in. Pick the ${type.displayName} music library to browse."
+            mutableMessage.value = when (type) {
+                MediaProviderType.Navidrome -> "Signed in. Pick the Subsonic music folder to browse."
+                MediaProviderType.MusicAssistant -> "Signed in. Pick the Music Assistant source to browse."
+                else -> "Signed in. Pick the ${type.displayName} music library to browse."
+            }
+        } finally {
+            mutableAuthInProgress.value = false
         }
     }
 
@@ -489,15 +580,12 @@ class AppState(
             mutableMessage.value = "Enter or choose a Jellyfin server URL first."
             return@launch
         }
-        mutableBusy.value = true
         mutableMessage.value = "Starting Jellyfin Quick Connect…"
         val quickConnect = runCatching {
             dependencies.sessionRepository.startJellyfinQuickConnect(serverUrl)
         }.onFailure { error ->
             mutableMessage.value = error.message ?: "Couldn't start Jellyfin Quick Connect."
-        }.getOrNull()
-        mutableBusy.value = false
-        if (quickConnect == null) return@launch
+        }.getOrNull() ?: return@launch
         mutableJellyfinQuickConnect.value = quickConnect
         quickConnect.ServerUrl?.let { openExternalUrl(it) }
         mutableMessage.value = "Approve Jellyfin Quick Connect code ${quickConnect.Code}, then finish sign-in."
@@ -512,41 +600,40 @@ class AppState(
             mutableMessage.value = "Jellyfin server URL is missing. Start Quick Connect again."
             return@launch
         }
-        mutableBusy.value = true
-        mutableMessage.value = "Finishing Jellyfin Quick Connect…"
-        val server = runCatching {
-            dependencies.sessionRepository.completeJellyfinQuickConnect(serverUrl, quickConnect.Secret)
-        }.onFailure { error ->
-            mutableMessage.value = error.message ?: "That Jellyfin Quick Connect code is not approved yet."
-        }.getOrNull()
-        mutableBusy.value = false
-        if (server == null) return@launch
-        mutableJellyfinQuickConnect.value = null
-        detailStack.clear()
-        mutableServers.value = listOf(server)
-        mutableLibraries.value = emptyList()
-        mutableLibrariesLoading.value = true
-        mutableScreen.value = AppScreen.LibraryPicker
-        runCatching {
-            mutableLibraries.value = dependencies.sessionRepository.libraries(server)
-        }.onFailure { error ->
-            mutableMessage.value = error.message ?: "Couldn't load Jellyfin libraries."
+        mutableAuthInProgress.value = true
+        try {
+            mutableMessage.value = "Finishing Jellyfin Quick Connect…"
+            val server = runCatching {
+                dependencies.sessionRepository.completeJellyfinQuickConnect(serverUrl, quickConnect.Secret)
+            }.onFailure { error ->
+                mutableMessage.value = error.message ?: "That Jellyfin Quick Connect code is not approved yet."
+            }.getOrNull() ?: return@launch
+            mutableJellyfinQuickConnect.value = null
+            mutableServers.value = listOf(server)
+            mutableLibraries.value = emptyList()
+            mutableLibrariesLoading.value = true
+            requestNavigation(AppNavigationRequest.LibraryPicker)
+            runCatching {
+                mutableLibraries.value = dependencies.sessionRepository.libraries(server)
+            }.onFailure { error ->
+                mutableMessage.value = error.message ?: "Couldn't load Jellyfin libraries."
+            }
+            mutableLibrariesLoading.value = false
+            mutableMessage.value = "Signed in. Pick the Jellyfin music library to browse."
+        } finally {
+            mutableAuthInProgress.value = false
         }
-        mutableLibrariesLoading.value = false
-        mutableMessage.value = "Signed in. Pick the Jellyfin music library to browse."
     }
 
     fun loadServers() = scope.launch {
-        detailStack.clear()
         mutableLibrariesLoading.value = false
-        mutableScreen.value = AppScreen.ServerPicker
+        requestNavigation(AppNavigationRequest.ServerPicker)
         refreshServers()
     }
 
     fun returnToServerPicker() = scope.launch {
-        detailStack.clear()
         mutableLibrariesLoading.value = false
-        mutableScreen.value = AppScreen.ServerPicker
+        requestNavigation(AppNavigationRequest.ServerPicker)
         refreshServers()
     }
 
@@ -572,8 +659,7 @@ class AppState(
             mutableLibrariesLoading.value = false
             mutableMessage.value = it.message ?: "Couldn't select ${session.value.providerLabel()} server."
         }.getOrNull() ?: return@launch
-        detailStack.clear()
-        mutableScreen.value = AppScreen.LibraryPicker
+        requestNavigation(AppNavigationRequest.LibraryPicker)
         runCatching {
             mutableLibraries.value = dependencies.sessionRepository.libraries(resolved)
         }.onFailure {
@@ -584,28 +670,31 @@ class AppState(
 
     fun selectLibrary(library: MusicLibrary, jellyfinSyncMode: JellyfinSyncMode? = null) = scope.launch {
         cancelRemotePlayHistorySync()
-        mutableBusy.value = true
+        catalogRefreshJob?.cancel()
+        dependencies.catalogRepository.clearActiveSyncProgress()
         if (session.value == null) {
             mutableMessage.value = "Session expired. Sign in again."
-            mutableBusy.value = false
             return@launch
         }
         runCatching {
             dependencies.sessionRepository.selectLibrary(library, jellyfinSyncMode)
-            detailStack.clear()
-            mutableScreen.value = AppScreen.Home
+            requestNavigation(AppNavigationRequest.Home)
             mutableMessage.value = if (session.value.isJellyfin() && (jellyfinSyncMode ?: session.value?.jellyfinSyncMode) == JellyfinSyncMode.Full) {
                 "Starting full Jellyfin sync…"
             } else {
                 "Loading library…"
             }
         }.onFailure { mutableMessage.value = it.message ?: "Something went sideways." }
-        mutableBusy.value = false
 
+        launch(Dispatchers.Default) {
+            runCatching { dependencies.catalogRepository.restoreCachedCatalog() }
+        }
         runCatching {
             refreshCatalogSuspended(catalogMessage = "Library ready.")
         }.onFailure { error ->
-            if (error !is CancellationException) {
+            if (error is CancellationException) {
+                dependencies.catalogRepository.clearActiveSyncProgress()
+            } else {
                 mutableMessage.value = error.message ?: "Something went sideways."
             }
         }
@@ -616,14 +705,14 @@ class AppState(
      * Prefer this from [LaunchedEffect] so in-flight work is cancelled when dependencies change,
      * avoiding stale empty Plex refreshes overwriting a newer library load.
      */
-    suspend fun refreshCatalogSuspended(catalogMessage: String? = "Library refreshed.") {
+    suspend fun refreshCatalogSuspended(catalogMessage: String? = "Library refreshed.", backgroundIfCached: Boolean = false) {
         cancelRemotePlayHistorySync()
         val currentJob = currentCoroutineContext()[Job]
         catalogRefreshJob?.takeIf { it != currentJob }?.cancel()
         catalogRefreshJob = currentJob
         try {
             withContext(Dispatchers.Default) {
-                dependencies.catalogRepository.refreshAggregated(session.value)
+                dependencies.catalogRepository.refreshAggregated(session.value, backgroundIfCached = backgroundIfCached)
                 ensureLikedSongsPlaylistIfPossible()
             }
             warmPlaylistTracksInBackground()
@@ -632,6 +721,7 @@ class AppState(
             if (catalogMessage != null) mutableMessage.value = catalogMessage
         } catch (error: CancellationException) {
             PhoebeLog.d("AppState") { "catalog refresh cancelled" }
+            dependencies.catalogRepository.clearActiveSyncProgress()
             throw error
         } catch (error: Throwable) {
             mutableMessage.value = error.message ?: "Something went sideways."
@@ -682,8 +772,7 @@ class AppState(
             mutableMessage.value = "Couldn't create Liked Songs yet."
             return@launch
         }
-        detailStack.clear()
-        mutableScreen.value = AppScreen.PlaylistDetail(playlist)
+        requestNavigation(AppNavigationRequest.PlaylistDetail(playlist.id))
         syncLikedSongsInBackground()
     }
 
@@ -723,6 +812,7 @@ class AppState(
     private fun cancelCatalogRefresh() {
         catalogRefreshJob?.cancel()
         catalogRefreshJob = null
+        dependencies.catalogRepository.clearActiveSyncProgress()
     }
 
     private suspend fun syncRemotePlayHistory(showMessage: Boolean): Any? {
@@ -738,6 +828,7 @@ class AppState(
             } else {
                 dependencies.jellyfinPlayHistorySyncer.sync(currentSession, catalog.value)
             }
+            warmTracksForMostPlayed()
         }.onSuccess { result ->
             if (showMessage) {
                 mutableMessage.value = when (result) {
@@ -764,78 +855,55 @@ class AppState(
 
     fun setTab(tab: LibraryTab) {
         mutableTab.value = tab
-        dismissDetailsToHome()
+        requestNavigation(defaultBrowseRequest())
     }
 
-    fun open(screen: AppScreen) {
-        when (screen) {
-            AppScreen.SignIn, AppScreen.ServerPicker, AppScreen.LibraryPicker, AppScreen.Home -> {
-                detailStack.clear()
-                mutableScreen.value = screen
+    fun preloadArtistDetail(artist: Artist) {
+        scope.launch {
+            runCatching {
+                dependencies.catalogRepository.ensureTracksForArtistAlbums(session.value, artist.title)
             }
-            AppScreen.Player -> {
-                val cur = mutableScreen.value
-                if (cur != AppScreen.Player) {
-                    detailStack.addLast(cur)
-                    mutableScreen.value = screen
-                }
+        }
+    }
+
+    fun preloadAlbumDetail(album: Album) {
+        scope.launch {
+            runCatching {
+                dependencies.catalogRepository.tracksForAlbum(session.value, album)
+            }.onFailure {
+                mutableMessage.value = it.message ?: "Couldn't load album tracks."
             }
-            is AppScreen.ArtistDetail,
-            is AppScreen.AlbumDetail,
-            is AppScreen.SongDetail,
-            is AppScreen.Lyrics,
-            is AppScreen.Collections,
-            is AppScreen.CollectionItems,
-            is AppScreen.RecentlyAdded,
-            is AppScreen.PlayHistory,
-            AppScreen.FavoritePlaylists,
-            AppScreen.FavoriteArtists,
-            AppScreen.FavoriteAlbums,
-            is AppScreen.PlaylistDetail,
-            -> {
-                val cur = mutableScreen.value
-                if (cur != screen) {
-                    detailStack.addLast(cur)
-                    mutableScreen.value = screen
-                }
-                when (screen) {
-                    is AppScreen.ArtistDetail -> scope.launch {
-                        runCatching {
-                            dependencies.catalogRepository.ensureTracksForArtistAlbums(session.value, screen.artist.title)
-                        }
-                    }
-                    is AppScreen.AlbumDetail -> scope.launch {
-                        runCatching {
-                            dependencies.catalogRepository.tracksForAlbum(session.value, screen.album)
-                        }.onFailure {
-                            mutableMessage.value = it.message ?: "Couldn't load album tracks."
-                        }
-                    }
-                    is AppScreen.PlaylistDetail -> scope.launch {
-                        runCatching {
-                            dependencies.catalogRepository.tracksForPlaylist(session.value, screen.playlist)
-                        }.onFailure {
-                            mutableMessage.value = it.message ?: "Couldn't load playlist tracks."
-                        }
-                    }
-                    is AppScreen.Collections -> scope.launch {
-                        if (!session.value.supportsCollectionEntry(screen.entry)) return@launch
-                        runCatching {
-                            dependencies.catalogRepository.ensureCollectionValues(session.value, screen.entry)
-                        }.onFailure {
-                            mutableMessage.value = it.message ?: "Couldn't load collections."
-                        }
-                    }
-                    is AppScreen.CollectionItems -> scope.launch {
-                        if (!session.value.supportsCollectionEntry(screen.entry)) return@launch
-                        runCatching {
-                            dependencies.catalogRepository.ensureCollectionItems(session.value, screen.entry, screen.value)
-                        }.onFailure {
-                            mutableMessage.value = it.message ?: "Couldn't load collection."
-                        }
-                    }
-                    else -> Unit
-                }
+        }
+    }
+
+    fun preloadPlaylistDetail(playlist: Playlist) {
+        scope.launch {
+            runCatching {
+                dependencies.catalogRepository.tracksForPlaylist(session.value, playlist)
+            }.onFailure {
+                mutableMessage.value = it.message ?: "Couldn't load playlist tracks."
+            }
+        }
+    }
+
+    fun preloadCollections(entry: com.phoebe.app.domain.CollectionEntry) {
+        scope.launch {
+            if (!session.value.supportsCollectionEntry(entry)) return@launch
+            runCatching {
+                dependencies.catalogRepository.ensureCollectionValues(session.value, entry)
+            }.onFailure {
+                mutableMessage.value = it.message ?: "Couldn't load collections."
+            }
+        }
+    }
+
+    fun preloadCollectionItems(entry: com.phoebe.app.domain.CollectionEntry, value: String) {
+        scope.launch {
+            if (!session.value.supportsCollectionEntry(entry)) return@launch
+            runCatching {
+                dependencies.catalogRepository.ensureCollectionItems(session.value, entry, value)
+            }.onFailure {
+                mutableMessage.value = it.message ?: "Couldn't load collection."
             }
         }
     }
@@ -896,6 +964,21 @@ class AppState(
         }
     }
 
+    suspend fun resolveTracksByIds(trackIds: Collection<String>): Map<String, Track> =
+        dependencies.catalogRepository.resolveTracksByIds(trackIds)
+
+    fun warmTracksForMostPlayed(maxTracks: Int = 20) {
+        if (!session.value.canUsePlexBackgroundFetches()) return
+        val entries = topMostPlayed.value.take(maxTracks)
+        if (entries.isEmpty()) return
+        val signature = entries.joinToString("|") { "${it.trackId}:${it.playCount}" }
+        if (signature == mostPlayedWarmSignature) return
+        mostPlayedWarmSignature = signature
+        scope.launch {
+            dependencies.catalogRepository.warmTracksForMostPlayed(session.value, entries, maxTracks)
+        }
+    }
+
     fun playDecadeMix(decade: Int) = scope.launch {
         mutableDecadeMixNotice.value = "Searching the ${decade}s…"
         val firstTracks = runCatching {
@@ -914,7 +997,7 @@ class AppState(
         }
         mutableDecadeMixNotice.value = null
         playTracks(firstTracks, 0)
-        open(AppScreen.Player)
+        requestNavigation(AppNavigationRequest.Player)
         mutableMessage.value = "Playing ${firstTracks.size} songs from the ${decade}s."
         scope.launch {
             val initialIds = firstTracks.map { it.id }.toSet()
@@ -951,21 +1034,18 @@ class AppState(
         if (radioId in mutableRadioStartingIds.value) return@launch
         mutableRadioStartingIds.update { it + radioId }
         try {
-            mutableMessage.value = "Starting ${station.title}..."
             val tracks = runCatching {
                 dependencies.catalogRepository.playRadioStation(session.value, station)
             }.getOrElse { error ->
-                val notice = error.message ?: "Couldn't start ${station.title}."
-                mutableMessage.value = notice
+                surfaceTransientNotice(error.message ?: "Couldn't start ${station.title}.")
                 return@launch
             }
             if (tracks.isEmpty()) {
-                mutableMessage.value = "No songs found for ${station.title}."
+                surfaceTransientNotice("No songs found for ${station.title}.")
                 return@launch
             }
             playTracks(tracks, 0)
-            open(AppScreen.Player)
-            mutableMessage.value = "Playing ${station.title}."
+            requestNavigation(AppNavigationRequest.Player)
         } finally {
             mutableRadioStartingIds.update { it - radioId }
         }
@@ -998,7 +1078,7 @@ class AppState(
             }
             mutableArtistRadioAvailability.update { it + (artist.id to ArtistRadioAvailability.Available) }
             playTracks(tracks, 0)
-            open(AppScreen.Player)
+            requestNavigation(AppNavigationRequest.Player)
             mutableMessage.value = "Playing ${artist.title} Radio."
         } finally {
             mutableRadioStartingIds.update { it - artist.id }
@@ -1034,7 +1114,7 @@ class AppState(
         }
         playTracks(tracks.shuffled(), 0)
         dependencies.audioPlayer.setShuffle(true)
-        open(AppScreen.Player)
+        requestNavigation(AppNavigationRequest.Player)
         mutableMessage.value = "Shuffling ${playlist.title}."
     }
 
@@ -1042,64 +1122,11 @@ class AppState(
         mutableDecadeMixNotice.value = null
     }
 
-    fun popDetail() {
-        mutableScreen.value = detailStack.removeLastOrNull() ?: defaultBrowseScreen()
-    }
-
-    fun canHandleBack(screenSnapshot: AppScreen = mutableScreen.value): Boolean =
-        when (screenSnapshot) {
-            AppScreen.SignIn, AppScreen.Home -> false
-            AppScreen.Player, AppScreen.ServerPicker, AppScreen.LibraryPicker -> true
-            is AppScreen.ArtistDetail,
-            is AppScreen.AlbumDetail,
-            is AppScreen.SongDetail,
-            is AppScreen.Lyrics,
-            is AppScreen.Collections,
-            is AppScreen.CollectionItems,
-            is AppScreen.RecentlyAdded,
-            is AppScreen.PlayHistory,
-            AppScreen.FavoritePlaylists,
-            AppScreen.FavoriteArtists,
-            AppScreen.FavoriteAlbums,
-            is AppScreen.PlaylistDetail,
-            -> true
-        }
-
-    fun handleBack() {
-        when (mutableScreen.value) {
-            AppScreen.SignIn, AppScreen.Home -> Unit
-            AppScreen.Player -> popDetail()
-            AppScreen.ServerPicker -> {
-                detailStack.clear()
-                mutableScreen.value = AppScreen.SignIn
-            }
-            AppScreen.LibraryPicker -> returnToServerPicker()
-            is AppScreen.ArtistDetail,
-            is AppScreen.AlbumDetail,
-            is AppScreen.SongDetail,
-            is AppScreen.Lyrics,
-            is AppScreen.Collections,
-            is AppScreen.CollectionItems,
-            is AppScreen.RecentlyAdded,
-            is AppScreen.PlayHistory,
-            AppScreen.FavoritePlaylists,
-            AppScreen.FavoriteArtists,
-            AppScreen.FavoriteAlbums,
-            is AppScreen.PlaylistDetail,
-            -> popDetail()
-        }
-    }
-
-    fun dismissDetailsToHome() {
-        detailStack.clear()
-        mutableScreen.value = defaultBrowseScreen()
-    }
-
-    fun backHome() {
-        dismissDetailsToHome()
-    }
-
-    fun playTracks(tracks: List<Track>, index: Int = 0) {
+    fun playTracks(
+        tracks: List<Track>,
+        index: Int = 0,
+        collectionMixSeed: CollectionMixSeed? = null,
+    ) {
         val requestGeneration = ++playRequestGeneration
         collectionMixGeneration++
         val track = tracks.getOrNull(index)
@@ -1137,7 +1164,7 @@ class AppState(
         mutableMusicAssistantRemotePlayback.value = null
         if (track?.localUri.isNullOrBlank()) {
             dependencies.audioPlayer.play(tracks, index)
-            collectionMixFromDetailStack()?.let { mix ->
+            collectionMixSeed?.toCollectionMix()?.let { mix ->
                 scheduleCollectionMix(mix, tracks.map { it.id }.toSet())
             }
             return
@@ -1164,14 +1191,11 @@ class AppState(
         }
     }
 
-    private fun collectionMixFromDetailStack(): CollectionMix? {
-        val screens = detailStack.toList() + mutableScreen.value
-        val items = screens.filterIsInstance<AppScreen.CollectionItems>().lastOrNull() ?: return null
-        if (!session.value.supportsCollectionEntry(items.entry)) return null
-        if (items.entry.facet != CollectionFacet.Mood && items.entry.facet != CollectionFacet.Style) return null
-        val value = items.value.trim()
+    private fun CollectionMixSeed.toCollectionMix(): CollectionMix? {
+        if (facet != CollectionFacet.Mood && facet != CollectionFacet.Style) return null
+        val value = value.trim()
         if (value.isBlank()) return null
-        return CollectionMix(items.entry.facet, value)
+        return CollectionMix(facet, value)
     }
 
     private suspend fun appendCollectionMix(
@@ -1747,8 +1771,8 @@ class AppState(
         dependencies.mediaSourcesRepository.addLocalFolder(rootUri, label)
         refreshCatalogSuspended(catalogMessage = null)
         mutableMessage.value = "Added local music folder."
-        if (defaultBrowseScreen() == AppScreen.Home) {
-            mutableScreen.value = AppScreen.Home
+        if (defaultBrowseRequest() == AppNavigationRequest.Home) {
+            requestNavigation(AppNavigationRequest.Home)
         }
     }
 
@@ -1756,18 +1780,16 @@ class AppState(
         dependencies.mediaSourcesRepository.removeLocalFolder(id)
         refreshCatalogSuspended(catalogMessage = null)
         mutableMessage.value = "Removed local folder."
-        if (defaultBrowseScreen() == AppScreen.SignIn) {
-            detailStack.clear()
-            mutableScreen.value = AppScreen.SignIn
+        if (defaultBrowseRequest() == AppNavigationRequest.SignIn) {
+            requestNavigation(AppNavigationRequest.SignIn)
         }
     }
 
     fun setLocalFolderEnabled(id: String, enabled: Boolean) = scope.launch {
         dependencies.mediaSourcesRepository.setLocalFolderEnabled(id, enabled)
         refreshCatalogSuspended(catalogMessage = null)
-        if (defaultBrowseScreen() == AppScreen.SignIn) {
-            detailStack.clear()
-            mutableScreen.value = AppScreen.SignIn
+        if (defaultBrowseRequest() == AppNavigationRequest.SignIn) {
+            requestNavigation(AppNavigationRequest.SignIn)
         }
     }
 
@@ -1777,12 +1799,11 @@ class AppState(
         mutableMusicAssistantRemotePlayback.value = null
         dependencies.castController.disconnect()
         dependencies.audioPlayer.clearQueue()
-        mutableBusy.value = true
-        detailStack.clear()
         mutablePin.value = null
         mutableLibraries.value = emptyList()
         mutableLibrariesLoading.value = false
-        mutableScreen.value = AppScreen.SignIn
+        mutableAuthInProgress.value = false
+        requestNavigation(AppNavigationRequest.SignIn)
         mutableMessage.value = "Signing out…"
         scope.launch {
             runCatching {
@@ -1790,7 +1811,6 @@ class AppState(
                 dependencies.deleteDatabaseDataForSignOut()
             }.onFailure { mutableMessage.value = it.message ?: "Something went sideways." }
             mutableMessage.value = "Signed out."
-            mutableBusy.value = false
         }
     }
 

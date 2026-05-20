@@ -145,6 +145,7 @@ import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryUiPreferences
 import com.phoebe.app.domain.CatalogSnapshot
+import com.phoebe.app.domain.CatalogSyncPhase
 import com.phoebe.app.domain.LocalFolderMediaSourceConfig
 import com.phoebe.app.domain.MediaSourcesState
 import com.phoebe.app.domain.MusicLibrary
@@ -321,22 +322,62 @@ internal fun CatalogLoadingStrip(modifier: Modifier = Modifier) {
     val hasContent = LocalCatalogHasContent.current
     val syncState = LocalCatalogSyncState.current
     val message = syncState.message ?: if (hasContent) "Syncing…" else "Loading your library…"
+    val detail = syncState.detail
+    val progress = syncState.progress
+    val animatedProgress by animateFloatAsState(
+        targetValue = progress?.coerceIn(0f, 1f) ?: 0f,
+        animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing),
+        label = "catalog-sync-progress",
+    )
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        LinearProgressIndicator(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(3.dp)
-                .clip(RoundedCornerShape(999.dp)),
-            color = PhoebeUi.accentLight,
-            trackColor = Color.White.copy(alpha = 0.08f),
-        )
-        Text(
-            message,
-            color = PhoebeUi.mutedText,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.SemiBold,
-            letterSpacing = 0.06.em,
-        )
+        if (progress != null) {
+            LinearProgressIndicator(
+                progress = { animatedProgress },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(3.dp)
+                    .clip(RoundedCornerShape(999.dp)),
+                color = PhoebeUi.accentLight,
+                trackColor = Color.White.copy(alpha = 0.08f),
+            )
+        } else {
+            LinearProgressIndicator(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(3.dp)
+                    .clip(RoundedCornerShape(999.dp)),
+                color = PhoebeUi.accentLight,
+                trackColor = Color.White.copy(alpha = 0.08f),
+            )
+        }
+        AnimatedContent(
+            targetState = syncState.phase to message,
+            transitionSpec = {
+                fadeIn(tween(180)) togetherWith fadeOut(tween(120))
+            },
+            label = "catalog-sync-message",
+        ) { (_, animatedMessage) ->
+            Text(
+                animatedMessage,
+                color = PhoebeUi.mutedText,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 0.06.em,
+            )
+        }
+        AnimatedVisibility(
+            visible = !detail.isNullOrBlank(),
+            enter = fadeIn(tween(180)),
+            exit = fadeOut(tween(120)),
+        ) {
+            Text(
+                detail.orEmpty(),
+                color = PhoebeUi.mutedText.copy(alpha = 0.85f),
+                fontSize = 10.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
@@ -345,23 +386,64 @@ internal fun CatalogMenuSyncIndicator(modifier: Modifier = Modifier) {
     val syncState = LocalCatalogSyncState.current
     if (!syncState.isActive) return
     val message = syncState.message ?: "Syncing library…"
-    val detail = when {
-        syncState.loadedTracks > 0 -> "${syncState.loadedTracks} songs"
-        syncState.loadedAlbums > 0 -> "${syncState.loadedAlbums} albums"
-        else -> null
+    val detail = syncState.detail ?: when (syncState.phase) {
+        CatalogSyncPhase.LoadingLibrary -> when {
+            syncState.message?.contains("Organizing", ignoreCase = true) == true ->
+                syncState.detail ?: "Linking artists to albums on device"
+            syncState.totalPlaylists != null && syncState.totalPlaylists!! > 0 ->
+                "${syncState.loadedAlbums} albums · ${syncState.totalPlaylists} playlists"
+            syncState.loadedAlbums > 0 -> "${syncState.loadedAlbums} albums"
+            else -> "From your server"
+        }
+        CatalogSyncPhase.LoadingSongs -> when {
+            syncState.loadedTracks > 0 && syncState.totalTracks != null ->
+                "${syncState.loadedTracks} / ${syncState.totalTracks} songs"
+            syncState.loadedTracks > 0 -> "${syncState.loadedTracks} songs indexed"
+            else -> null
+        }
+        CatalogSyncPhase.RefreshingPlaylists -> when {
+            syncState.warmedPlaylists > 0 && syncState.totalPlaylists != null ->
+                "${syncState.warmedPlaylists} / ${syncState.totalPlaylists} playlists"
+            syncState.totalPlaylists != null -> "${syncState.totalPlaylists} playlists"
+            else -> null
+        }
+        CatalogSyncPhase.FinishingArtwork -> "Album and artist artwork"
+        CatalogSyncPhase.Persisting -> "Writing to local database"
+        CatalogSyncPhase.RestoringCache -> "Reading cached library"
+        else -> when {
+            syncState.loadedTracks > 0 && syncState.totalTracks != null ->
+                "${syncState.loadedTracks} / ${syncState.totalTracks} songs"
+            syncState.loadedTracks > 0 -> "${syncState.loadedTracks} songs"
+            syncState.loadedAlbums > 0 -> "${syncState.loadedAlbums} albums"
+            syncState.warmedPlaylists > 0 && syncState.totalPlaylists != null ->
+                "${syncState.warmedPlaylists} / ${syncState.totalPlaylists} playlists"
+            else -> null
+        }
     }
+    val progress = syncState.progress
     Row(
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        CircularProgressIndicator(
-            modifier = Modifier
-                .size(16.dp)
-                .semantics { contentDescription = "Library sync in progress" },
-            color = PhoebeUi.accentLight,
-            strokeWidth = 2.dp,
-        )
+        if (progress != null) {
+            CircularProgressIndicator(
+                progress = { progress.coerceIn(0f, 1f) },
+                modifier = Modifier
+                    .size(16.dp)
+                    .semantics { contentDescription = "Library sync in progress" },
+                color = PhoebeUi.accentLight,
+                strokeWidth = 2.dp,
+            )
+        } else {
+            CircularProgressIndicator(
+                modifier = Modifier
+                    .size(16.dp)
+                    .semantics { contentDescription = "Library sync in progress" },
+                color = PhoebeUi.accentLight,
+                strokeWidth = 2.dp,
+            )
+        }
         Column {
             Text(
                 message,

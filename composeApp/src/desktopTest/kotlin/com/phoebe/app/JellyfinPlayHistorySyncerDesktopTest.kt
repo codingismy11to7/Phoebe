@@ -89,8 +89,8 @@ class JellyfinPlayHistorySyncerDesktopTest {
         val second = assertIs<JellyfinPlayHistorySyncResult.Synced>(syncer.sync(embySession(), embyCatalog()))
 
         assertEquals(2, first.seen)
-        assertEquals(2, first.imported)
-        assertEquals(0, second.imported)
+        assertEquals(1, first.imported)
+        assertEquals(1, second.imported)
         assertEquals(listOf<String?>("0", "0"), starts)
         assertEquals(listOf<String?>(JellyfinPlayHistorySyncer.PageSize.toString(), JellyfinPlayHistorySyncer.PageSize.toString()), limits)
         val counts = repo.playCountsByTrack.first { it["emby:track-1"] == 2L }

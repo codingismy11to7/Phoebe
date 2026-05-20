@@ -296,7 +296,7 @@ internal fun DesktopContent(
     catalog: CatalogSnapshot,
     catalogRefreshing: Boolean,
     jellyfinPagination: Boolean = false,
-    section: DesktopSection,
+    section: BrowseSection,
     selectedPlaylistId: String?,
     searchQuery: String,
     libraryFilter: LibraryFilterTab,
@@ -336,24 +336,24 @@ internal fun DesktopContent(
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val sectionLabel = when {
                 selectedPlaylist != null -> "Playlist"
-                section == DesktopSection.Search -> "Search"
-                section == DesktopSection.Library -> "Your Library"
-                section == DesktopSection.Lyrics -> "Lyrics"
-                section == DesktopSection.Playlists -> "Playlists"
-                section == DesktopSection.Settings -> "Settings"
+                section == BrowseSection.Search -> "Search"
+                section == BrowseSection.Library -> "Your Library"
+                section == BrowseSection.Lyrics -> "Lyrics"
+                section == BrowseSection.Playlists -> "Playlists"
+                section == BrowseSection.Settings -> "Settings"
                 else -> "Home"
             }
             val headline = selectedPlaylist?.title ?: when (section) {
-                DesktopSection.Search -> "Find your sound"
-                DesktopSection.Library -> "Albums, artists, and songs"
-                DesktopSection.Lyrics -> "Follow along"
-                DesktopSection.Playlists -> "Your playlists"
-                DesktopSection.Settings -> "Customize your listening experience"
-                DesktopSection.Home -> "Now playing"
+                BrowseSection.Search -> "Find your sound"
+                BrowseSection.Library -> "Albums, artists, and songs"
+                BrowseSection.Lyrics -> "Follow along"
+                BrowseSection.Playlists -> "Your playlists"
+                BrowseSection.Settings -> "Customize your listening experience"
+                BrowseSection.Home -> "Now playing"
             }
             val searchPlaceholder = when {
                 selectedPlaylist != null -> "Search songs and artists"
-                section == DesktopSection.Playlists -> "Search playlists"
+                section == BrowseSection.Playlists -> "Search playlists"
                 else -> "Search songs, artists, albums"
             }
             val titleBlock: @Composable () -> Unit = {
@@ -449,7 +449,7 @@ internal fun DesktopContent(
                     )
                 }
             }
-            section == DesktopSection.Search -> {
+            section == BrowseSection.Search -> {
                 val query = searchQuery.trim()
                 val allTracks = remember(catalog.tracksByParent) {
                     catalog.tracksByParent.values.asSequence().flatten().distinctBy { it.id }.toList()
@@ -485,7 +485,7 @@ internal fun DesktopContent(
                     )
                 }
             }
-            section == DesktopSection.Library -> LibraryPanel(
+            section == BrowseSection.Library -> LibraryPanel(
                 catalog,
                 catalogRefreshing,
                 jellyfinPagination,
@@ -503,12 +503,13 @@ internal fun DesktopContent(
                 onDownload,
                 onJellyfinPage,
             )
-            section == DesktopSection.Playlists -> {
+            section == BrowseSection.Playlists -> {
                 val playlistActions = LocalPlaylistActions.current
+                val catalogSyncInProgress = LocalCatalogSyncInProgress.current
                 val visiblePlaylists = remember(playlistActions.playlists, searchQuery) {
                     filterPlaylistsByQuery(playlistActions.playlists, searchQuery)
                 }
-                val playlistsLoading = catalogRefreshing && searchQuery.isBlank() && visiblePlaylists.isEmpty()
+                val showPlaylistSyncProgress = catalogSyncInProgress && searchQuery.isBlank()
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (!playlistActions.playlistsEnabled) {
                         Text(
@@ -516,31 +517,36 @@ internal fun DesktopContent(
                             color = PhoebeUi.mutedText,
                             fontSize = 14.sp,
                         )
-                    } else if (playlistsLoading) {
-                        CatalogLoadingStrip()
-                    } else if (visiblePlaylists.isEmpty()) {
-                        Text(
-                            if (searchQuery.isNotBlank()) {
-                                "No playlists match \"$searchQuery\"."
-                            } else {
-                                "No playlists yet. Create one from the sidebar."
-                            },
-                            color = PhoebeUi.mutedText,
-                            fontSize = 14.sp,
-                        )
                     } else {
-                        visiblePlaylists.forEach { playlist ->
-                            val liked = playlist.isLikedSongsPlaylist()
-                            Box(Modifier.draggablePlaylist(playlist).playlistDropTarget(playlist)) {
-                                PlaylistRow(
-                                    icon = if (liked) PhoebeIcon.Heart else null,
-                                    title = playlist.title,
-                                    subtitle = "${playlist.trackCount} songs",
-                                    thumbUrl = playlist.thumbUrl,
-                                    accent = liked,
-                                    onClick = { onPlaylist(playlist) },
-                                    onLongClick = { playlistActions.onShufflePlaylist(playlist) },
+                        if (showPlaylistSyncProgress) {
+                            CatalogLoadingStrip()
+                        }
+                        if (visiblePlaylists.isEmpty()) {
+                            if (!showPlaylistSyncProgress) {
+                                Text(
+                                    if (searchQuery.isNotBlank()) {
+                                        "No playlists match \"$searchQuery\"."
+                                    } else {
+                                        "No playlists yet. Create one from the sidebar."
+                                    },
+                                    color = PhoebeUi.mutedText,
+                                    fontSize = 14.sp,
                                 )
+                            }
+                        } else {
+                            visiblePlaylists.forEach { playlist ->
+                                val liked = playlist.isLikedSongsPlaylist()
+                                Box(Modifier.draggablePlaylist(playlist).playlistDropTarget(playlist)) {
+                                    PlaylistRow(
+                                        icon = if (liked) PhoebeIcon.Heart else null,
+                                        title = playlist.title,
+                                        subtitle = "${playlist.trackCount} songs",
+                                        thumbUrl = playlist.thumbUrl,
+                                        accent = liked,
+                                        onClick = { onPlaylist(playlist) },
+                                        onLongClick = { playlistActions.onShufflePlaylist(playlist) },
+                                    )
+                                }
                             }
                         }
                     }

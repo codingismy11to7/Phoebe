@@ -55,6 +55,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -196,6 +197,10 @@ import kotlin.math.max
 
 private const val MobileBufferFallbackTickMs = 500L
 private const val MobileBufferFallbackAdvanceMs = 2_000L
+private val MobileToolbarChromeHeight = 56.dp
+private val MobileBottomNavChromeHeight = 68.dp
+private val MobileMiniPlayerChromeHeight = 66.dp
+private val MobileChromeScrollGap = 12.dp
 
 @Composable
 internal fun MobileCompactMainFeature(
@@ -256,19 +261,20 @@ internal fun MobileHomeHero(track: Track?, onOpenFullPlayer: () -> Unit) {
 
 @Composable
 internal fun MobileBottomNavigation(
-    section: DesktopSection,
-    onSection: (DesktopSection) -> Unit,
+    section: BrowseSection,
+    onSection: (BrowseSection) -> Unit,
 ) {
     val tabs = listOf(
-        DesktopSection.Home to (PhoebeIcon.Home to "Home"),
-        DesktopSection.Search to (PhoebeIcon.Search to "Search"),
-        DesktopSection.Library to (PhoebeIcon.Library to "Library"),
-        DesktopSection.Playlists to (PhoebeIcon.PlaylistPlay to "Playlists"),
+        BrowseSection.Home to (PhoebeIcon.Home to "Home"),
+        BrowseSection.Search to (PhoebeIcon.Search to "Search"),
+        BrowseSection.Library to (PhoebeIcon.Library to "Library"),
+        BrowseSection.Playlists to (PhoebeIcon.PlaylistPlay to "Playlists"),
     )
     val topShape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
     Column(
         Modifier
             .fillMaxWidth()
+            .heightIn(min = MobileBottomNavChromeHeight)
             .clip(topShape)
             .background(PhoebeUi.navBar, topShape)
             .border(BorderStroke(1.dp, PhoebeUi.border), topShape),
@@ -378,13 +384,13 @@ internal fun MobileScreenToolbar(
     }
 }
 
-internal fun mobileSectionTitle(section: DesktopSection): String = when (section) {
-    DesktopSection.Home -> "Home"
-    DesktopSection.Search -> "Search"
-    DesktopSection.Library -> "Library"
-    DesktopSection.Lyrics -> "Lyrics"
-    DesktopSection.Playlists -> "Playlists"
-    DesktopSection.Settings -> "Settings"
+internal fun mobileSectionTitle(section: BrowseSection): String = when (section) {
+    BrowseSection.Home -> "Home"
+    BrowseSection.Search -> "Search"
+    BrowseSection.Library -> "Library"
+    BrowseSection.Lyrics -> "Lyrics"
+    BrowseSection.Playlists -> "Playlists"
+    BrowseSection.Settings -> "Settings"
 }
 
 @Composable
@@ -392,7 +398,7 @@ internal fun MobileBrowseShell(
     catalog: CatalogSnapshot,
     catalogRefreshing: Boolean,
     session: PlexSession?,
-    section: DesktopSection,
+    section: BrowseSection,
     selectedPlaylistId: String?,
     searchQuery: String,
     libraryFilter: LibraryFilterTab,
@@ -401,7 +407,7 @@ internal fun MobileBrowseShell(
     homeUiState: HomeUiState,
     isPlaying: Boolean,
     isBuffering: Boolean = false,
-    onNavigate: (DesktopSection) -> Unit,
+    onNavigate: (BrowseSection) -> Unit,
     onSearchQuery: (String) -> Unit,
     onLibraryFilter: (LibraryFilterTab) -> Unit,
     onPlaylist: (Playlist) -> Unit,
@@ -428,6 +434,7 @@ internal fun MobileBrowseShell(
     radioStations: List<PlexRadioStation> = emptyList(),
     radioStartingIds: Set<String> = emptySet(),
     onPlayRadioStation: (PlexRadioStation) -> Unit = {},
+    onPlayPersonalMix: () -> Unit = {},
     onPlayTracks: (List<Track>, Int) -> Unit,
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
@@ -460,88 +467,36 @@ internal fun MobileBrowseShell(
     onUseLightAppearanceChange: (Boolean) -> Unit,
     appearanceTintId: String,
     onAppearanceTintChange: (String) -> Unit,
+    initialExpandedPhoneSection: PhoneHomeAccordionSection? = null,
+    homeListState: LazyListState? = null,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     val pickLocalFolder = rememberPickLocalFolder(onPicked = onAddLocalFolder)
     val toolbarTitle = when {
-        section == DesktopSection.Settings -> "Settings"
+        section == BrowseSection.Settings -> "Settings"
         selectedPlaylistId != null -> "Playlist"
         else -> mobileSectionTitle(section)
     }
+    val density = LocalDensity.current
+    val navigationBottomPadding = with(density) {
+        WindowInsets.navigationBars.getBottom(this).toDp()
+    }
+    val chromePadding = MobileChromePadding(
+        top = MobileToolbarChromeHeight + MobileChromeScrollGap,
+        bottom = MobileBottomNavChromeHeight +
+            navigationBottomPadding +
+            MobileChromeScrollGap +
+            if (currentTrack != null) MobileMiniPlayerChromeHeight else 0.dp,
+    )
     Box(
         Modifier
             .fillMaxSize()
             .background(PhoebeUi.shellTop),
     ) {
-        Column(
-            Modifier
-                .fillMaxSize(),
-        ) {
-        MobileScreenToolbar(
-            title = toolbarTitle,
-            onBack = if (section == DesktopSection.Settings && selectedPlaylistId == null) {
-                { onNavigate(DesktopSection.Home) }
-            } else {
-                null
-            },
-            menuExpanded = menuExpanded,
-            onMenuExpandedChange = { menuExpanded = it },
-            showMenu = !(section == DesktopSection.Settings && selectedPlaylistId == null),
-            menuContent = {
-            val userName = session?.userName
-            if (userName != null) {
-                DropdownMenuItem(
-                    text = { Text(userName, color = PhoebeUi.mutedText, fontSize = 13.sp) },
-                    onClick = {},
-                    enabled = false,
-                )
-            }
-            if (LocalCatalogSyncState.current.isActive) {
-                DropdownMenuItem(
-                    text = { CatalogMenuSyncIndicator() },
-                    onClick = {},
-                    enabled = false,
-                )
-            }
-            DropdownMenuItem(
-                text = {
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        PhoebeIconView(PhoebeIcon.Settings, tint = PhoebeUi.secondaryText, modifier = Modifier.size(18.dp))
-                        Text("Settings")
-                    }
-                },
-                onClick = {
-                    onNavigate(DesktopSection.Settings)
-                    menuExpanded = false
-                },
-            )
-            DropdownMenuItem(
-                text = { Text("Refresh library") },
-                onClick = {
-                    onRefreshLibrary()
-                    menuExpanded = false
-                },
-            )
-            DropdownMenuItem(
-                text = { Text("Add music folder") },
-                onClick = {
-                    pickLocalFolder()
-                    menuExpanded = false
-                },
-            )
-            DropdownMenuItem(
-                text = { Text("Sign out") },
-                onClick = {
-                    onSignOut()
-                    menuExpanded = false
-                },
-            )
-            },
-        )
-
-        Column(Modifier.weight(1f).fillMaxWidth()) {
+        CompositionLocalProvider(LocalMobileChromePadding provides chromePadding) {
+            Box(Modifier.fillMaxSize()) {
             when {
-                section == DesktopSection.Settings && selectedPlaylistId == null -> SettingsMobileView(
+                section == BrowseSection.Settings && selectedPlaylistId == null -> SettingsMobileView(
                     isLightMode = useLightAppearance,
                     onLightModeChange = onUseLightAppearanceChange,
                     tintId = appearanceTintId,
@@ -560,47 +515,96 @@ internal fun MobileBrowseShell(
                     onPersonalMix = onPersonalMix,
                     onExportFavoritePlaylists = onExportFavoritePlaylists,
                     onImportFavoritePlaylists = onImportFavoritePlaylists,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize().padding(top = chromePadding.top, bottom = chromePadding.bottom),
                 )
-                section == DesktopSection.Home && selectedPlaylistId == null -> {
-                    val homeListState = RetainedLazyListStates.remember("mobile-home")
-                    MobileHomeScreen(
-                    state = homeUiState,
-                    catalog = catalog,
-                    catalogRefreshing = catalogRefreshing,
-                    listState = homeListState,
-                    modifier = Modifier.fillMaxSize(),
-                    onArtist = onArtist,
-                    onAlbum = onAlbum,
-                    onPlaylist = onPlaylist,
-                    onRecentSongs = onRecentSongs,
-                    onRecentArtists = onRecentArtists,
-                    onRecentAlbums = onRecentAlbums,
-                    onFavoritePlaylists = onFavoritePlaylists,
-                    onFavoriteArtists = onFavoriteArtists,
-                    onFavoriteAlbums = onFavoriteAlbums,
-                    onCollections = onCollections,
-                    onRecentlyPlayed = onRecentlyPlayed,
-                    onMostPlayed = onMostPlayed,
-                    onRefreshArtists = onRefreshRandomArtists,
-                    onRefreshAlbums = onRefreshRandomAlbums,
-                    onPrefetchArtist = onPrefetchHomeArtist,
-                    onPrefetchAlbum = onPrefetchHomeAlbum,
-                    onPlayDecadeMix = onPlayDecadeMix,
-                    decadeMixNotice = decadeMixNotice,
-                    onClearDecadeMixNotice = onClearDecadeMixNotice,
-                    radioStations = radioStations,
-                    radioStartingIds = radioStartingIds,
-                    onPlayRadioStation = onPlayRadioStation,
-                    onPlayTracks = onPlayTracks,
-                    onAddToUpNext = onAddToUpNext,
-                    onDownload = onDownload,
-                    homeSections = libraryUi.homeSections,
-                    personalMixPreferences = libraryUi.personalMix,
-                    supportedCollectionEntries = supportedCollectionEntries,
-                )
+                section == BrowseSection.Home && selectedPlaylistId == null -> {
+                    val homeListState = homeListState ?: RetainedLazyListStates.remember("mobile-home")
+                    val mobileHomeRouteState = remember(
+                        homeUiState.recentlyAddedTracks,
+                        homeUiState.recentlyAddedArtists,
+                        homeUiState.recentlyAddedAlbums,
+                        homeUiState.favoritePlaylists,
+                        homeUiState.favoriteArtists,
+                        homeUiState.favoriteAlbums,
+                        homeUiState.favoritePlaylistCount,
+                        homeUiState.favoriteArtistCount,
+                        homeUiState.favoriteAlbumCount,
+                        homeUiState.randomArtists,
+                        homeUiState.randomAlbums,
+                        homeUiState.artistThumbs,
+                        catalogRefreshing,
+                        libraryUi.homeSections,
+                        supportedCollectionEntries,
+                        radioStations,
+                        radioStartingIds,
+                        decadeMixNotice,
+                    ) {
+                        MobileHomeRouteState(
+                            homeUiState = homeUiState,
+                            catalogRefreshing = catalogRefreshing,
+                            homeSections = libraryUi.homeSections,
+                            supportedCollectionEntries = supportedCollectionEntries,
+                            radioStations = radioStations,
+                            radioStartingIds = radioStartingIds,
+                            decadeMixNotice = decadeMixNotice,
+                        )
+                    }
+                    val mobileHomeCallbacks = remember(
+                        onArtist,
+                        onAlbum,
+                        onPlaylist,
+                        onRecentSongs,
+                        onRecentArtists,
+                        onRecentAlbums,
+                        onFavoritePlaylists,
+                        onFavoriteArtists,
+                        onFavoriteAlbums,
+                        onCollections,
+                        onRecentlyPlayed,
+                        onMostPlayed,
+                        onRefreshRandomArtists,
+                        onRefreshRandomAlbums,
+                        onPlayDecadeMix,
+                        onClearDecadeMixNotice,
+                        onPlayRadioStation,
+                        onPlayPersonalMix,
+                        onPlayTracks,
+                        onAddToUpNext,
+                        onDownload,
+                    ) {
+                        MobileHomeCallbacks(
+                            onArtist = onArtist,
+                            onAlbum = onAlbum,
+                            onPlaylist = onPlaylist,
+                            onRecentSongs = onRecentSongs,
+                            onRecentArtists = onRecentArtists,
+                            onRecentAlbums = onRecentAlbums,
+                            onFavoritePlaylists = onFavoritePlaylists,
+                            onFavoriteArtists = onFavoriteArtists,
+                            onFavoriteAlbums = onFavoriteAlbums,
+                            onCollections = onCollections,
+                            onRecentlyPlayed = onRecentlyPlayed,
+                            onMostPlayed = onMostPlayed,
+                            onRefreshArtists = onRefreshRandomArtists,
+                            onRefreshAlbums = onRefreshRandomAlbums,
+                            onPlayDecadeMix = onPlayDecadeMix,
+                            onClearDecadeMixNotice = onClearDecadeMixNotice,
+                            onPlayRadioStation = onPlayRadioStation,
+                            onPlayPersonalMix = onPlayPersonalMix,
+                            onPlayTracks = onPlayTracks,
+                            onAddToUpNext = onAddToUpNext,
+                            onDownload = onDownload,
+                        )
+                    }
+                    MobileHomeRoute(
+                        routeState = mobileHomeRouteState,
+                        listState = homeListState,
+                        callbacks = mobileHomeCallbacks,
+                        modifier = Modifier.fillMaxSize(),
+                        initialExpandedPhoneSection = initialExpandedPhoneSection,
+                    )
                 }
-                section == DesktopSection.Library && selectedPlaylistId == null -> LibraryMobileView(
+                section == BrowseSection.Library && selectedPlaylistId == null -> LibraryMobileView(
                     catalog = catalog,
                     catalogRefreshing = catalogRefreshing,
                     filter = libraryFilter,
@@ -618,7 +622,7 @@ internal fun MobileBrowseShell(
                     onDownload = onDownload,
                     modifier = Modifier.fillMaxSize(),
                 )
-                section == DesktopSection.Search && selectedPlaylistId == null -> SearchMobileView(
+                section == BrowseSection.Search && selectedPlaylistId == null -> SearchMobileView(
                     catalog = catalog,
                     catalogRefreshing = catalogRefreshing,
                     searchQuery = searchQuery,
@@ -628,14 +632,14 @@ internal fun MobileBrowseShell(
                     onPlayTracks = onPlayTracks,
                     onAddToUpNext = onAddToUpNext,
                     onDownload = onDownload,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize().padding(top = chromePadding.top, bottom = chromePadding.bottom),
                 )
-                section == DesktopSection.Playlists && selectedPlaylistId == null -> PlaylistsMobileView(
+                section == BrowseSection.Playlists && selectedPlaylistId == null -> PlaylistsMobileView(
                     catalogRefreshing = catalogRefreshing,
                     searchQuery = searchQuery,
                     onSearchQuery = onSearchQuery,
                     onPlaylist = onPlaylist,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize().padding(top = chromePadding.top, bottom = chromePadding.bottom),
                 )
                 else -> DesktopContent(
                     catalog = catalog,
@@ -647,7 +651,7 @@ internal fun MobileBrowseShell(
                     searchQuery = searchQuery,
                     libraryFilter = libraryFilter,
                     libraryUi = libraryUi,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize().padding(top = chromePadding.top, bottom = chromePadding.bottom),
                     onSearchQuery = onSearchQuery,
                     onLibraryFilter = onLibraryFilter,
                     onPlaylist = onPlaylist,
@@ -666,46 +670,121 @@ internal fun MobileBrowseShell(
                 )
             }
         }
-
-        if (currentTrack != null) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp))
-                    .background(PhoebeUi.panel)
-                    .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp))
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Row(
-                    Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable(onClick = onOpenNowPlaying)
-                        .padding(end = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    TrackArtworkImage(currentTrack, Modifier.size(44.dp))
-                    Column(Modifier.weight(1f)) {
-                        AutoScrollingText(
-                            currentTrack.title,
-                            color = PhoebeUi.primaryText,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        AutoScrollingText(
-                            currentTrack.artist,
-                            color = PhoebeUi.secondaryText,
-                            fontSize = 12.sp,
+        }
+        Box(
+            Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .background(PhoebeUi.shellTop)
+                .zIndex(2f),
+        ) {
+            MobileScreenToolbar(
+                title = toolbarTitle,
+                onBack = if (section == BrowseSection.Settings && selectedPlaylistId == null) {
+                    { onNavigate(BrowseSection.Home) }
+                } else {
+                    null
+                },
+                menuExpanded = menuExpanded,
+                onMenuExpandedChange = { menuExpanded = it },
+                showMenu = !(section == BrowseSection.Settings && selectedPlaylistId == null),
+                menuContent = {
+                    val userName = session?.userName
+                    if (userName != null) {
+                        DropdownMenuItem(
+                            text = { Text(userName, color = PhoebeUi.mutedText, fontSize = 13.sp) },
+                            onClick = {},
+                            enabled = false,
                         )
                     }
-                }
-                PlayButton(isPlaying, isBuffering, 40.dp, onTogglePlayPause, enabled = true)
-            }
+                    if (LocalCatalogSyncState.current.isActive) {
+                        DropdownMenuItem(
+                            text = { CatalogMenuSyncIndicator() },
+                            onClick = {},
+                            enabled = false,
+                        )
+                    }
+                    DropdownMenuItem(
+                        text = {
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                PhoebeIconView(PhoebeIcon.Settings, tint = PhoebeUi.secondaryText, modifier = Modifier.size(18.dp))
+                                Text("Settings")
+                            }
+                        },
+                        onClick = {
+                            onNavigate(BrowseSection.Settings)
+                            menuExpanded = false
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Refresh library") },
+                        onClick = {
+                            onRefreshLibrary()
+                            menuExpanded = false
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Add music folder") },
+                        onClick = {
+                            pickLocalFolder()
+                            menuExpanded = false
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Sign out") },
+                        onClick = {
+                            onSignOut()
+                            menuExpanded = false
+                        },
+                    )
+                },
+            )
         }
 
-        MobileBottomNavigation(section = section, onSection = onNavigate)
+    Column(
+        Modifier
+            .align(Alignment.BottomCenter)
+            .fillMaxWidth()
+            .zIndex(2f),
+    ) {
+            if (currentTrack != null) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp))
+                        .background(PhoebeUi.navBar)
+                        .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp))
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Row(
+                        Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable(onClick = onOpenNowPlaying)
+                            .padding(end = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        TrackArtworkImage(currentTrack, Modifier.size(44.dp))
+                        Column(Modifier.weight(1f)) {
+                            AutoScrollingText(
+                                currentTrack.title,
+                                color = PhoebeUi.primaryText,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            AutoScrollingText(
+                                currentTrack.artist,
+                                color = PhoebeUi.secondaryText,
+                                fontSize = 12.sp,
+                            )
+                        }
+                    }
+                    PlayButton(isPlaying, isBuffering, 40.dp, onTogglePlayPause, enabled = true)
+                }
+            }
+            MobileBottomNavigation(section = section, onSection = onNavigate)
         }
     }
 }
@@ -1279,7 +1358,6 @@ internal fun MobilePlayer(
 }
 
 @Composable
-
 internal fun MobileQueueSheet(
     currentTrack: Track?,
     upNext: List<Track>,

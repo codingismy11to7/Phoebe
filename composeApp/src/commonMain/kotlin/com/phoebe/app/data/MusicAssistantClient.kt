@@ -421,7 +421,8 @@ private fun JsonArray.pageSignature(): String =
 private fun normalizeBaseUrl(serverUrl: String): String {
     val trimmed = serverUrl.trim().trimEnd('/')
     return when {
-        trimmed.startsWith("http://") || trimmed.startsWith("https://") -> trimmed
+        trimmed.startsWith("http://", ignoreCase = true) ||
+            trimmed.startsWith("https://", ignoreCase = true) -> trimmed
         else -> "http://$trimmed"
     }
 }

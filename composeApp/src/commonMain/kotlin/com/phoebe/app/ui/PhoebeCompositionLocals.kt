@@ -149,7 +149,9 @@ import com.phoebe.app.domain.DownloadItem
 import com.phoebe.app.domain.DownloadState
 import com.phoebe.app.domain.LocalFolderMediaSourceConfig
 import com.phoebe.app.domain.MediaSourcesState
+import com.phoebe.app.domain.MostPlayedEntry
 import com.phoebe.app.domain.MusicLibrary
+import com.phoebe.app.domain.RecentlyPlayedEntry
 import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.Playlist
@@ -176,6 +178,30 @@ import kotlin.math.max
 internal val LocalCatalogHasContent = compositionLocalOf { false }
 
 internal val LocalCatalogSyncState = compositionLocalOf { CatalogSyncState() }
+
+/** True while a foreground or background catalog sync is still running (metadata, tracks, playlists, artwork). */
+internal val LocalCatalogSyncInProgress = compositionLocalOf { false }
+
+/**
+ * When false, tiles keep gradient placeholders (no new decode jobs).
+ * Used briefly after sync so layout can settle before artwork loads.
+ */
+internal val LocalArtworkLoadingEnabled = compositionLocalOf { true }
+
+/** False while the home track index and played rows are still being derived after sync. */
+internal val LocalHomeTrackSectionsReady = compositionLocalOf { true }
+
+/** True when SQL-ranked most-played rows exist but home has not resolved the full panel yet. */
+internal val LocalMostPlayedResolving = compositionLocalOf { false }
+
+internal data class MobileChromePadding(
+    val top: Dp = 0.dp,
+    val bottom: Dp = 0.dp,
+)
+
+internal val LocalMobileChromePadding = compositionLocalOf { MobileChromePadding() }
+
+internal val LocalTracksLoading = compositionLocalOf { emptySet<String>() }
 
 internal data class DownloadStatusSnapshot(
     val itemsByTrackId: Map<String, DownloadItem> = emptyMap(),
@@ -217,6 +243,8 @@ internal data class PlayHistorySnapshot(
     val byTrack: Map<String, Long> = emptyMap(),
     val playCountByTrack: Map<String, Long> = emptyMap(),
     val playEventsByTrack: Map<String, List<Long>> = emptyMap(),
+    val topMostPlayed: List<MostPlayedEntry> = emptyList(),
+    val topRecentlyPlayed: List<RecentlyPlayedEntry> = emptyList(),
 )
 
 internal val LocalPlayHistory = compositionLocalOf { PlayHistorySnapshot() }
@@ -283,16 +311,15 @@ internal val LocalFavoriteActions = compositionLocalOf { FavoriteActions() }
 internal data class RatingActions(
     val ratingsEnabled: Boolean = false,
     val catalog: CatalogSnapshot = CatalogSnapshot(),
+    val trackRatingsById: Map<String, Float?> = emptyMap(),
     val onRateTrack: (Track, Float?) -> Unit = { _, _ -> },
     val onRateArtist: (Artist, Float?) -> Unit = { _, _ -> },
     val onRateAlbum: (Album, Float?) -> Unit = { _, _ -> },
     val onRatePlaylist: (Playlist, Float?) -> Unit = { _, _ -> },
 ) {
     fun ratingFor(track: Track): Float? =
-        catalog.tracksByParent.values.asSequence()
-            .flatten()
-            .firstOrNull { existing -> equivalentTrackIds(track.id).any { it in equivalentTrackIds(existing.id) } }
-            ?.rating
+        equivalentTrackIds(track.id)
+            .firstNotNullOfOrNull { trackRatingsById[it] }
             ?: track.rating
 
     fun ratingFor(artist: Artist): Float? =
@@ -320,6 +347,16 @@ private fun equivalentTrackIds(id: String): Set<String> {
     if (id.startsWith("plex:")) return setOf(id, id.removePrefix("plex:"))
     if (id.startsWith("jellyfin:")) return setOf(id, id.removePrefix("jellyfin:"))
     return if (':' in id) setOf(id) else setOf(id, "plex:$id")
+}
+
+internal fun buildTrackRatingIndex(catalog: CatalogSnapshot): Map<String, Float?> {
+    val ratings = hashMapOf<String, Float?>()
+    catalog.tracksByParent.values.forEach { tracks ->
+        tracks.forEach { track ->
+            equivalentTrackIds(track.id).forEach { id -> ratings[id] = track.rating }
+        }
+    }
+    return ratings
 }
 
 /**

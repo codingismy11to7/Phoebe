@@ -20,6 +20,19 @@ CREATE INDEX play_history_played_at_idx ON PlayHistoryRow(played_at_ms);
 CREATE UNIQUE INDEX play_history_plex_history_key_idx ON PlayHistoryRow(plex_history_key)
 WHERE plex_history_key IS NOT NULL;
 
+CREATE TABLE PlayCountAggregateRow (
+    track_id TEXT NOT NULL PRIMARY KEY,
+    artist TEXT NOT NULL,
+    album TEXT NOT NULL,
+    play_count INTEGER NOT NULL,
+    last_played_at_ms INTEGER NOT NULL,
+    source TEXT NOT NULL,
+    server_id TEXT NOT NULL,
+    imported_at_ms INTEGER NOT NULL
+);
+
+CREATE INDEX play_count_aggregate_source_idx ON PlayCountAggregateRow(source, server_id);
+
 recordPlay:
 INSERT INTO PlayHistoryRow(track_id, artist, album, played_at_ms)
 VALUES (?, ?, ?, ?);
@@ -106,9 +119,88 @@ FROM PlayHistoryRow
 GROUP BY track_id;
 
 selectPlayCountsByTrack:
-SELECT track_id, COUNT(*) AS playCount
-FROM PlayHistoryRow
+SELECT track_id, MAX(playCount) AS playCount
+FROM (
+    SELECT track_id, COUNT(*) AS playCount
+    FROM PlayHistoryRow
+    GROUP BY track_id
+    UNION ALL
+    SELECT track_id, play_count AS playCount
+    FROM PlayCountAggregateRow
+)
 GROUP BY track_id;
+
+selectPlayCountAggregateByTrack:
+SELECT *
+FROM PlayCountAggregateRow
+WHERE track_id = ?
+LIMIT 1;
+
+insertPlayCountAggregate:
+INSERT OR REPLACE INTO PlayCountAggregateRow(
+    track_id,
+    artist,
+    album,
+    play_count,
+    last_played_at_ms,
+    source,
+    server_id,
+    imported_at_ms
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+
+selectTopMostPlayedByTrack:
+WITH play_counts AS (
+    SELECT track_id, MAX(playCount) AS playCount
+    FROM (
+        SELECT track_id, COUNT(*) AS playCount
+        FROM PlayHistoryRow
+        GROUP BY track_id
+        UNION ALL
+        SELECT track_id, play_count AS playCount
+        FROM PlayCountAggregateRow
+    )
+    GROUP BY track_id
+    HAVING playCount > 0
+)
+SELECT
+    play_counts.track_id,
+    play_counts.playCount,
+    COALESCE(
+        (SELECT MAX(played_at_ms) FROM PlayHistoryRow p WHERE p.track_id = play_counts.track_id),
+        (SELECT last_played_at_ms FROM PlayCountAggregateRow a WHERE a.track_id = play_counts.track_id),
+        0
+    ) AS lastPlayedMs,
+    COALESCE(
+        (SELECT artist FROM PlayHistoryRow p WHERE p.track_id = play_counts.track_id ORDER BY played_at_ms DESC LIMIT 1),
+        (SELECT artist FROM PlayCountAggregateRow a WHERE a.track_id = play_counts.track_id),
+        ''
+    ) AS artist,
+    COALESCE(
+        (SELECT album FROM PlayHistoryRow p WHERE p.track_id = play_counts.track_id ORDER BY played_at_ms DESC LIMIT 1),
+        (SELECT album FROM PlayCountAggregateRow a WHERE a.track_id = play_counts.track_id),
+        ''
+    ) AS album
+FROM play_counts
+ORDER BY play_counts.playCount DESC, lastPlayedMs DESC, play_counts.track_id
+LIMIT ?;
+
+selectTopRecentlyPlayedByTrack:
+SELECT
+    track_id,
+    MAX(played_at_ms) AS lastPlayedMs,
+    COALESCE(
+        (SELECT artist FROM PlayHistoryRow p2 WHERE p2.track_id = p1.track_id ORDER BY played_at_ms DESC LIMIT 1),
+        ''
+    ) AS artist,
+    COALESCE(
+        (SELECT album FROM PlayHistoryRow p2 WHERE p2.track_id = p1.track_id ORDER BY played_at_ms DESC LIMIT 1),
+        ''
+    ) AS album
+FROM PlayHistoryRow p1
+GROUP BY track_id
+ORDER BY lastPlayedMs DESC, track_id
+LIMIT ?;
 
 selectLatestPlayEventsByTrack:
 SELECT track_id, played_at_ms
@@ -118,3 +210,6 @@ LIMIT 2000;
 
 clearAll:
 DELETE FROM PlayHistoryRow;
+
+clearAllAggregates:
+DELETE FROM PlayCountAggregateRow;

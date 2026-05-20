@@ -4,10 +4,13 @@ import app.cash.sqldelight.db.SqlDriver
 import com.phoebe.app.data.CatalogRepository
 import com.phoebe.app.data.MediaSourcesRepository
 import com.phoebe.app.data.PlexClient
+import com.phoebe.app.data.JellyfinClient
 import com.phoebe.app.domain.CatalogSyncPhase
 import com.phoebe.app.domain.CollectionEntry
 import com.phoebe.app.domain.CollectionFacet
 import com.phoebe.app.domain.CollectionTarget
+import com.phoebe.app.domain.JellyfinSyncMode
+import com.phoebe.app.domain.MediaProviderType
 import com.phoebe.app.domain.MusicLibrary
 import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.PlexSession
@@ -25,7 +28,9 @@ import io.ktor.http.headersOf
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.yield
 import org.junit.After
 import org.junit.Before
 import org.junit.Rule
@@ -387,8 +392,10 @@ class CatalogRepositoryRefreshDesktopTest {
         )
         restored.restoreCachedCatalog()
 
-        assertEquals(listOf("plex:t1"), restored.catalog.value.tracksByParent["plex:a1"].orEmpty().map { it.id })
-        assertEquals("a1", restored.catalog.value.tracksByParent["plex:a1"].orEmpty().single().parentAlbumId)
+        val restoredAlbum = restored.catalog.value.albums.single { it.id == "plex:a1" }
+        assertTrue(restored.catalog.value.tracksByParent["plex:a1"].isNullOrEmpty())
+        assertEquals(listOf("plex:t1"), restored.tracksForAlbum(testSession(), restoredAlbum).map { it.id })
+        assertEquals("a1", restored.tracksForAlbum(testSession(), restoredAlbum).single().parentAlbumId)
     }
 
     @Test
@@ -725,6 +732,198 @@ class CatalogRepositoryRefreshDesktopTest {
         assertEquals(listOf("plex:t1"), repo.catalog.value.tracksByParent[playlist.id].orEmpty().map { it.id })
     }
 
+    @Test
+    fun jellyfinQuickRefreshPublishesFirstPageWithoutWaitingForAllPlaylists() = runTest {
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        val requestKinds = java.util.Collections.synchronizedList(mutableListOf<String>())
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/Artists/AlbumArtists" -> {
+                    requestKinds += "artists"
+                    respondJson(jellyfinArtistPageJson(total = 600))
+                }
+                "/Items" -> when {
+                    request.url.parameters["includeItemTypes"] == "MusicAlbum" -> {
+                        requestKinds += "albums"
+                        respondJson(jellyfinAlbumPageJson(total = 600))
+                    }
+                    request.url.parameters["includeItemTypes"] == "Audio" -> {
+                        requestKinds += "tracks"
+                        respondJson(jellyfinTrackPageJson(total = 600))
+                    }
+                    request.url.parameters["includeItemTypes"] == "Playlist" -> {
+                        requestKinds += "playlists"
+                        respondJson(jellyfinPlaylistsJson())
+                    }
+                    request.url.parameters["isFavorite"] == "true" -> respondJson("""{ "TotalRecordCount": 0, "Items": [] }""")
+                    else -> respond("", HttpStatusCode.NotFound)
+                }
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val http = testHttpClient(engine)
+        val media = MediaSourcesRepository(db, PlatformStorage())
+        val repo = jellyfinCatalogRepository(db, media, http)
+
+        repo.refreshAggregated(jellyfinSession())
+
+        assertTrue("artists" in requestKinds)
+        assertTrue("albums" in requestKinds)
+        assertTrue("tracks" in requestKinds)
+        assertTrue("playlists" in requestKinds)
+        assertEquals(listOf("jellyfin:artist-1"), repo.catalog.value.artists.map { it.id })
+        assertEquals(listOf("jellyfin:album-1"), repo.catalog.value.albums.map { it.id })
+        assertEquals(listOf("jellyfin:track-1"), repo.catalog.value.tracksByParent["jellyfin:album-1"].orEmpty().map { it.id })
+        assertEquals(
+            listOf(JellyfinClient.JellyfinLikedSongsPlaylistId, "jellyfin:playlist-1"),
+            repo.catalog.value.playlists.map { it.id },
+        )
+        assertEquals(600, repo.catalog.value.remotePageInfo.trackTotal)
+        assertEquals(setOf(0), repo.catalog.value.remotePageInfo.loadedTrackPages)
+        assertEquals(CatalogSyncPhase.Idle, repo.catalogSyncState.value.phase)
+        assertFalse(repo.catalogRefreshing.value)
+    }
+
+    @Test
+    fun jellyfinFullRefreshPublishesMetadataBeforeTrackIndexingFinishes() = runTest {
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        val tracksStarted = CompletableDeferred<Unit>()
+        val releaseTracks = CompletableDeferred<Unit>()
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/Items" -> when {
+                    request.url.parameters["includeItemTypes"] == "MusicAlbum" -> respondJson(jellyfinAlbumCatalogJson())
+                    request.url.parameters["includeItemTypes"] == "Audio" -> {
+                        tracksStarted.complete(Unit)
+                        val start = request.url.parameters["startIndex"]?.toIntOrNull() ?: 0
+                        if (start > 0) releaseTracks.await()
+                        respondJson(jellyfinMultiTrackPageJson(start = start))
+                    }
+                    request.url.parameters["includeItemTypes"] == "Playlist" -> respondJson(jellyfinPlaylistsJson())
+                    request.url.parameters["isFavorite"] == "true" -> respondJson("""{ "TotalRecordCount": 0, "Items": [] }""")
+                    else -> respond("", HttpStatusCode.NotFound)
+                }
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val http = testHttpClient(engine)
+        val media = MediaSourcesRepository(db, PlatformStorage())
+        val repo = jellyfinCatalogRepository(db, media, http)
+
+        val refresh = async { repo.refreshAggregated(jellyfinSession(JellyfinSyncMode.Full)) }
+        tracksStarted.await()
+        var attempts = 0
+        while (repo.catalog.value.albums.isEmpty() && attempts < 100) {
+            yield()
+            delay(10)
+            attempts++
+        }
+
+        assertFalse(repo.catalogSyncState.value.showGlobalProgress)
+        assertEquals(listOf("jellyfin:album-1"), repo.catalog.value.albums.map { it.id })
+        assertTrue(repo.catalog.value.tracksByParent.isEmpty())
+
+        releaseTracks.complete(Unit)
+        refresh.await()
+
+        assertEquals(listOf("jellyfin:track-1", "jellyfin:track-2"), repo.catalog.value.tracksByParent["jellyfin:album-1"].orEmpty().map { it.id })
+    }
+
+    @Test
+    fun jellyfinQuickPartialRefreshDoesNotDeleteCachedTracksFromUnloadedPages() = runTest {
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        db.transaction {
+            db.catalogQueries.upsertArtist("jellyfin:artist-1", "Artist One", null, 1, 0, 0, null, null, null, null, null, 0)
+            db.catalogQueries.upsertAlbum("jellyfin:album-1", "Album One", "Artist One", null, null, 0, null, null, null, null, null, 0)
+            db.catalogQueries.upsertTrack(
+                id = "jellyfin:track-old",
+                title = "Cached Song",
+                artist = "Artist One",
+                album = "Album One",
+                durationMs = 10,
+                streamUrl = "https://jellyfin.example/track-old",
+                downloadUrl = "https://jellyfin.example/track-old",
+                thumbUrl = null,
+                localArtworkUri = null,
+                localUri = null,
+                year = null,
+                genre = null,
+                mood = null,
+                style = null,
+                filepath = null,
+                audioCodec = null,
+                bitrateKbps = null,
+                dateAddedMs = null,
+                rating = null,
+                parentAlbumId = "album-1",
+            )
+            db.catalogQueries.upsertTrackParent("jellyfin:album-1", "jellyfin:track-old", 0)
+        }
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/Artists/AlbumArtists" -> respondJson(jellyfinArtistPageJson(total = 250))
+                "/Items" -> when {
+                    request.url.parameters["includeItemTypes"] == "MusicAlbum" -> respondJson(jellyfinAlbumPageJson(total = 250))
+                    request.url.parameters["includeItemTypes"] == "Audio" -> respondJson(jellyfinTrackPageJson(total = 250))
+                    request.url.parameters["includeItemTypes"] == "Playlist" -> respondJson(jellyfinPlaylistsJson())
+                    request.url.parameters["isFavorite"] == "true" -> respondJson("""{ "TotalRecordCount": 0, "Items": [] }""")
+                    else -> respond("", HttpStatusCode.NotFound)
+                }
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val http = testHttpClient(engine)
+        val media = MediaSourcesRepository(db, PlatformStorage())
+        val repo = jellyfinCatalogRepository(db, media, http)
+        repo.restoreCachedCatalog()
+
+        repo.refreshAggregated(jellyfinSession())
+
+        val albumTracks = repo.catalog.value.tracksByParent["jellyfin:album-1"].orEmpty().map { it.id }
+        assertTrue("jellyfin:track-old" in albumTracks)
+        assertTrue("jellyfin:track-1" in albumTracks)
+        assertTrue(db.catalogQueries.selectAllTrackIds().executeAsList().contains("jellyfin:track-old"))
+    }
+
+    @Test
+    fun backgroundPlaylistWarmDoesNotLeaveSyncStateStuck() = runTest {
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/library/sections/1/all" -> if (request.url.parameters["type"] == "10") {
+                    respondJson(trackPageJson())
+                } else {
+                    respondJson(artistsJson())
+                }
+                "/library/sections/1/albums" -> respondJson(albumsJson())
+                "/playlists" -> respondJson(playlistsJson(trackCount = 2))
+                "/playlists/p1/items" -> respondJson(playlistTracksJson())
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val http = testHttpClient(engine)
+        val media = MediaSourcesRepository(db, PlatformStorage())
+        val repo = CatalogRepository(
+            plexClient = PlexClient(http),
+            database = db,
+            storage = PlatformStorage(),
+            httpClient = http,
+            mediaSourcesRepository = media,
+        )
+
+        repo.refreshAggregated(testSession())
+        assertEquals(CatalogSyncPhase.Complete, repo.catalogSyncState.value.phase)
+
+        repo.warmPlaylistTracks(testSession())
+
+        assertEquals(CatalogSyncPhase.Complete, repo.catalogSyncState.value.phase)
+        assertFalse(repo.catalogSyncState.value.isRefreshingPlaylists)
+    }
+
     private fun MockRequestHandleScope.respondJson(content: String) = respond(
         content = content,
         status = HttpStatusCode.OK,
@@ -738,6 +937,84 @@ class CatalogRepositoryRefreshDesktopTest {
         selectedServer = server,
         selectedLibrary = MusicLibrary("1", "Music"),
     )
+
+    private fun jellyfinCatalogRepository(
+        db: com.phoebe.app.db.PhoebeDatabase,
+        media: MediaSourcesRepository,
+        http: io.ktor.client.HttpClient,
+    ): CatalogRepository = CatalogRepository(
+        plexClient = PlexClient(http),
+        jellyfinClient = JellyfinClient(http),
+        database = db,
+        storage = PlatformStorage(),
+        httpClient = http,
+        mediaSourcesRepository = media,
+    )
+
+    private fun jellyfinSession(
+        syncMode: JellyfinSyncMode = JellyfinSyncMode.Quick,
+    ): PlexSession = PlexSession(
+        token = "token",
+        userId = "user-1",
+        providerType = MediaProviderType.Jellyfin,
+        selectedServer = PlexServer("jellyfin:test", "Jellyfin", "https://jellyfin.example", owned = true),
+        selectedLibrary = MusicLibrary("music", "Music"),
+        jellyfinSyncMode = syncMode,
+    )
+
+    private fun jellyfinArtistPageJson(total: Int = 1): String = """
+        {
+          "Items": [
+            { "Id": "artist-1", "Type": "MusicArtist", "Name": "Artist One" }
+          ],
+          "TotalRecordCount": $total
+        }
+    """.trimIndent()
+
+    private fun jellyfinAlbumPageJson(total: Int = 1): String = """
+        {
+          "Items": [
+            { "Id": "album-1", "Type": "MusicAlbum", "Name": "Album One", "AlbumArtist": "Artist One" }
+          ],
+          "TotalRecordCount": $total
+        }
+    """.trimIndent()
+
+    private fun jellyfinAlbumCatalogJson(): String = """
+        {
+          "Items": [
+            { "Id": "album-1", "Type": "MusicAlbum", "Name": "Album One", "AlbumArtist": "Artist One" }
+          ],
+          "TotalRecordCount": 1
+        }
+    """.trimIndent()
+
+    private fun jellyfinTrackPageJson(total: Int = 1): String = """
+        {
+          "Items": [
+            { "Id": "track-1", "Type": "Audio", "Name": "Fresh Song", "Album": "Album One", "AlbumId": "album-1", "Artists": ["Artist One"], "RunTimeTicks": 10000000 }
+          ],
+          "TotalRecordCount": $total
+        }
+    """.trimIndent()
+
+    private fun jellyfinMultiTrackPageJson(start: Int): String {
+        val items = when (start) {
+            0 -> """{ "Id": "track-1", "Type": "Audio", "Name": "Song One", "Album": "Album One", "AlbumId": "album-1", "Artists": ["Artist One"], "RunTimeTicks": 10000000 }"""
+            JellyfinClient.JellyfinPageSize -> """{ "Id": "track-2", "Type": "Audio", "Name": "Song Two", "Album": "Album One", "AlbumId": "album-1", "Artists": ["Artist One"], "RunTimeTicks": 10000000 }"""
+            else -> ""
+        }
+        return """{ "Items": [ $items ], "TotalRecordCount": ${JellyfinClient.JellyfinPageSize + 1} }"""
+    }
+
+    private fun jellyfinPlaylistsJson(): String = """
+        {
+          "Items": [
+            { "Id": "playlist-1", "Type": "Playlist", "Name": "Road Mix" }
+          ],
+          "TotalRecordCount": 1
+        }
+    """.trimIndent()
 
     private fun artistsJson(): String = """
         {

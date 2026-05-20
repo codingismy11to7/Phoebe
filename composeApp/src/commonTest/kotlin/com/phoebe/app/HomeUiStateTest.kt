@@ -4,7 +4,9 @@ import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.PersonalMixPreferences
+import com.phoebe.app.domain.MostPlayedEntry
 import com.phoebe.app.domain.Playlist
+import com.phoebe.app.domain.RecentlyPlayedEntry
 import com.phoebe.app.domain.Track
 import com.phoebe.app.ui.HomePlayedTrack
 import com.phoebe.app.ui.HomeUiState
@@ -12,6 +14,7 @@ import com.phoebe.app.ui.PlayHistorySnapshot
 import com.phoebe.app.ui.availableDecades
 import com.phoebe.app.ui.decadeMix
 import com.phoebe.app.ui.defaultMixDecades
+import com.phoebe.app.ui.HomeCatalogIndexCache
 import com.phoebe.app.ui.deriveHomeUiState
 import com.phoebe.app.ui.personalMix
 import kotlin.test.Test
@@ -43,6 +46,16 @@ class HomeUiStateTest {
             playHistory = PlayHistorySnapshot(
                 byTrack = mapOf("t2" to 200L, "t5" to 500L, "t1" to 100L),
                 playCountByTrack = mapOf("t2" to 2L, "t5" to 9L, "t1" to 4L),
+                topRecentlyPlayed = listOf(
+                    RecentlyPlayedEntry("t5", 500L, "", ""),
+                    RecentlyPlayedEntry("t2", 200L, "", ""),
+                    RecentlyPlayedEntry("t1", 100L, "", ""),
+                ),
+                topMostPlayed = listOf(
+                    MostPlayedEntry("t5", 9L, 500L, "", ""),
+                    MostPlayedEntry("t1", 4L, 100L, "", ""),
+                    MostPlayedEntry("t2", 2L, 200L, "", ""),
+                ),
             ),
             randomArtistSeed = 1,
             randomAlbumSeed = 2,
@@ -251,5 +264,124 @@ class HomeUiStateTest {
 
         assertEquals(10, mix.size)
         assertTrue(mix.all { it.id.startsWith("heavy") })
+    }
+
+    @Test
+    fun playedSectionsResolveTracksWithoutFullCatalogIndex() {
+        val tracks = listOf(
+            Track("t1", "One", "Artist", "Album", 1_000L, "stream", ""),
+            Track("t2", "Two", "Artist", "Album", 1_000L, "stream", ""),
+        )
+        val catalog = CatalogSnapshot(tracksByParent = mapOf("album" to tracks))
+        val playHistory = PlayHistorySnapshot(
+            byTrack = mapOf("t1" to 50L, "t2" to 40L),
+            playCountByTrack = mapOf("t1" to 3L, "t2" to 9L),
+            topRecentlyPlayed = listOf(RecentlyPlayedEntry("t1", 50L, "", "")),
+            topMostPlayed = listOf(MostPlayedEntry("t2", 9L, 40L, "", "")),
+        )
+
+        val state = deriveHomeUiState(
+            catalog = catalog,
+            playHistory = playHistory,
+            randomArtistSeed = 1,
+            randomAlbumSeed = 2,
+            nowMs = 100L,
+            limit = 1,
+            includeTrackDerivedSections = false,
+        )
+
+        assertEquals("t1", state.recentlyPlayedTracks.single().track.id)
+        assertEquals("t2", state.mostPlayedTracks.single().track.id)
+        assertTrue(state.recentlyAddedTracks.isEmpty())
+    }
+
+    @Test
+    fun playedSectionsOmitUnresolvedTracksInsteadOfBackfillingLowerRanked() {
+        val tracks = listOf(
+            Track("loaded-recent", "Recent", "Artist", "Album", 1_000L, "stream", ""),
+            Track("loaded-most", "Most", "Artist", "Album", 1_000L, "stream", ""),
+        )
+        val catalog = CatalogSnapshot(tracksByParent = mapOf("album" to tracks))
+        val playHistory = PlayHistorySnapshot(
+            byTrack = mapOf(
+                "missing-recent-1" to 500L,
+                "missing-recent-2" to 400L,
+                "loaded-recent" to 300L,
+                "loaded-most" to 200L,
+            ),
+            playCountByTrack = mapOf(
+                "missing-most-1" to 40L,
+                "missing-most-2" to 30L,
+                "loaded-most" to 20L,
+                "loaded-recent" to 10L,
+            ),
+            topRecentlyPlayed = listOf(
+                RecentlyPlayedEntry("missing-recent-1", 500L, "", ""),
+                RecentlyPlayedEntry("missing-recent-2", 400L, "", ""),
+                RecentlyPlayedEntry("loaded-recent", 300L, "", ""),
+            ),
+            topMostPlayed = listOf(
+                MostPlayedEntry("missing-most-1", 40L, 0L, "", ""),
+                MostPlayedEntry("missing-most-2", 30L, 0L, "", ""),
+                MostPlayedEntry("loaded-most", 20L, 200L, "", ""),
+            ),
+        )
+
+        val state = deriveHomeUiState(
+            catalog = catalog,
+            playHistory = playHistory,
+            randomArtistSeed = 1,
+            randomAlbumSeed = 2,
+            nowMs = 1_000L,
+            limit = 1,
+            includeTrackDerivedSections = false,
+        )
+
+        assertTrue(state.recentlyPlayedTracks.isEmpty())
+        assertTrue(state.mostPlayedTracks.isEmpty())
+    }
+
+    @Test
+    fun homeCatalogIndexCacheMergesIncrementalTrackBatches() {
+        val album = Album("al1", "Album", "Artist", dateAddedMs = 100L)
+        val firstBatch = listOf(
+            Track("t1", "One", "Artist", "Album", 1_000L, "", "", parentAlbumId = album.id, dateAddedMs = 100L),
+        )
+        val catalogPass1 = CatalogSnapshot(
+            albums = listOf(album),
+            tracksByParent = mapOf(album.id to firstBatch),
+        )
+        val cache = HomeCatalogIndexCache()
+        val pass1 = deriveHomeUiState(
+            catalog = catalogPass1,
+            playHistory = PlayHistorySnapshot(),
+            randomArtistSeed = 1,
+            randomAlbumSeed = 2,
+            nowMs = 200L,
+            trackIndexCache = cache,
+        )
+        assertEquals(listOf("t1"), pass1.recentlyAddedTracks.map { it.id })
+
+        val secondBatch = firstBatch + Track(
+            "t2",
+            "Two",
+            "Artist",
+            "Album",
+            1_000L,
+            "",
+            "",
+            parentAlbumId = album.id,
+            dateAddedMs = 150L,
+        )
+        val catalogPass2 = catalogPass1.copy(tracksByParent = mapOf(album.id to secondBatch))
+        val pass2 = deriveHomeUiState(
+            catalog = catalogPass2,
+            playHistory = PlayHistorySnapshot(),
+            randomArtistSeed = 1,
+            randomAlbumSeed = 2,
+            nowMs = 200L,
+            trackIndexCache = cache,
+        )
+        assertEquals(listOf("t2", "t1"), pass2.recentlyAddedTracks.map { it.id })
     }
 }

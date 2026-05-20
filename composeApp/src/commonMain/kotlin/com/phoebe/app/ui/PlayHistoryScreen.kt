@@ -17,9 +17,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -30,46 +32,98 @@ import androidx.compose.ui.unit.sp
 import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.PlayHistoryKind
 import com.phoebe.app.domain.Track
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 internal fun PlayHistoryScreen(
     kind: PlayHistoryKind,
     catalog: CatalogSnapshot,
     playHistory: PlayHistorySnapshot,
+    resolvedTracksById: Map<String, Track> = emptyMap(),
     modifier: Modifier = Modifier,
     onBack: () -> Unit,
     onPlayTracks: (List<Track>, Int) -> Unit,
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
 ) {
-    val rows = remember(kind, catalog, playHistory) {
-        playHistoryRows(kind, catalog, playHistory)
+    val catalogTrackIndexKey = catalog.trackIndexKey()
+    val playHistoryKey = playHistory.derivationKey()
+    val resolvedTracksKey = resolvedTracksById.keys.fold(0L) { acc, id -> acc * 31L + id.hashCode() }
+    val rows by produceState<List<HomePlayedTrack>?>(null, kind, catalogTrackIndexKey, playHistoryKey, resolvedTracksKey) {
+        value = withContext(Dispatchers.Default) {
+            playHistoryRows(
+                kind = kind,
+                catalog = catalog,
+                playHistory = playHistory,
+                resolvedTracksById = resolvedTracksById,
+            )
+        }
     }
+    val rankedTotal = when (kind) {
+        PlayHistoryKind.MostPlayed -> playHistory.topMostPlayed.size
+        PlayHistoryKind.RecentlyPlayed -> playHistory.topRecentlyPlayed.size
+    }
+    val showResolving = rows != null && rankedTotal > 0 && (rows?.size ?: 0) < rankedTotal
     Column(
         modifier
             .fillMaxSize()
-            .padding(horizontal = 28.dp, vertical = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(18.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        PlayHistoryHeader(kind, rows.size, onBack)
+        PlayHistoryHeader(
+            kind = kind,
+            count = rows?.size,
+            rankedTotal = rankedTotal.takeIf { showResolving },
+            onBack = onBack,
+        )
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            PlayHistoryTracks(
-                rows = rows,
-                showPlayCount = kind == PlayHistoryKind.MostPlayed,
-                onPlayTracks = onPlayTracks,
-                onAddToUpNext = onAddToUpNext,
-                onDownload = onDownload,
-                modifier = Modifier.fillMaxSize(),
-            )
+            when (val loaded = rows) {
+                null -> PlayHistoryLoading(Modifier.fillMaxSize())
+                else -> PlayHistoryTracks(
+                    rows = loaded,
+                    showPlayCount = kind == PlayHistoryKind.MostPlayed,
+                    onPlayTracks = onPlayTracks,
+                    onAddToUpNext = onAddToUpNext,
+                    onDownload = onDownload,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun PlayHistoryHeader(kind: PlayHistoryKind, count: Int, onBack: () -> Unit) {
+private fun PlayHistoryLoading(modifier: Modifier = Modifier) {
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(40.dp),
+                color = PhoebeUi.accentLight,
+                strokeWidth = 3.dp,
+                trackColor = PhoebeUi.progressTrack,
+            )
+            Text("Loading listening history…", color = PhoebeUi.secondaryText, fontSize = 14.sp)
+        }
+    }
+}
+
+@Composable
+private fun PlayHistoryHeader(
+    kind: PlayHistoryKind,
+    count: Int?,
+    rankedTotal: Int?,
+    onBack: () -> Unit,
+) {
     val title = when (kind) {
         PlayHistoryKind.RecentlyPlayed -> "Recently Played"
         PlayHistoryKind.MostPlayed -> "Most Played"
+    }
+    val subtitle = when (count) {
+        null -> "Loading…"
+        0 -> "No songs yet"
+        1 -> if (rankedTotal != null && rankedTotal > 1) "1 of $rankedTotal songs" else "1 song"
+        else -> if (rankedTotal != null && count < rankedTotal) "$count of $rankedTotal songs" else "$count songs"
     }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Box(
@@ -86,8 +140,8 @@ private fun PlayHistoryHeader(kind: PlayHistoryKind, count: Int, onBack: () -> U
         Spacer(Modifier.width(14.dp))
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("Listening History".uppercase(), color = PhoebeUi.mutedText, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.08.em)
-            Text(title, color = PhoebeUi.primaryText, fontSize = 28.sp, fontWeight = FontWeight.Black)
-            Text("$count songs", color = PhoebeUi.secondaryText, fontSize = 13.sp)
+            Text(title, color = PhoebeUi.primaryText, fontSize = 26.sp, fontWeight = FontWeight.Black)
+            Text(subtitle, color = PhoebeUi.secondaryText, fontSize = 13.sp)
         }
     }
 }
@@ -120,33 +174,8 @@ private fun PlayHistoryTracks(
                 nowPlayingIsPlaying = nowPlaying.isPlaying,
                 nowPlayingIsBuffering = nowPlaying.isBuffering,
                 playCount = if (showPlayCount) row.playCount else null,
-                sharedKey = "song:${row.track.id}",
+                sharedKey = null,
             )
         }
-    }
-}
-
-private fun playHistoryRows(
-    kind: PlayHistoryKind,
-    catalog: CatalogSnapshot,
-    playHistory: PlayHistorySnapshot,
-): List<HomePlayedTrack> {
-    val tracksById = allLoadedTracks(catalog).associateBy { it.id }
-    return when (kind) {
-        PlayHistoryKind.RecentlyPlayed -> playHistory.byTrack.entries
-            .sortedByDescending { it.value }
-            .mapNotNull { (trackId, playedAt) ->
-                tracksById[trackId]?.let { track ->
-                    HomePlayedTrack(track, lastPlayedMs = playedAt, playCount = playHistory.playCountByTrack[trackId] ?: 0L)
-                }
-            }
-        PlayHistoryKind.MostPlayed -> playHistory.playCountByTrack.entries
-            .filter { it.value > 0L }
-            .sortedWith(compareByDescending<Map.Entry<String, Long>> { it.value }.thenByDescending { playHistory.byTrack[it.key] ?: 0L })
-            .mapNotNull { (trackId, count) ->
-                tracksById[trackId]?.let { track ->
-                    HomePlayedTrack(track, lastPlayedMs = playHistory.byTrack[trackId], playCount = count)
-                }
-            }
     }
 }

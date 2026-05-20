@@ -157,7 +157,9 @@ import com.phoebe.app.domain.MusicLibrary
 import com.phoebe.app.domain.PlexRadioStation
 import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.PlexSession
+import com.phoebe.app.domain.PlayerState
 import com.phoebe.app.domain.Playlist
+import com.phoebe.app.domain.ShellPlaybackState
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.isLocalMediaPlayback
@@ -180,6 +182,8 @@ import kotlin.math.max
 
 internal enum class PhoebeScreenshotScenario {
     Home,
+    HomeAccordionsCollapsed,
+    HomeAccordionsExpanded,
     HomePlayedRows,
     FavoritePlaylists,
     FavoriteArtists,
@@ -295,11 +299,11 @@ internal fun PhoebeDesktopScreenshotScenario(
         else -> AppScreen.Home
     }
     val section = when (scenario) {
-        PhoebeScreenshotScenario.Library -> DesktopSection.Library
-        PhoebeScreenshotScenario.Playlist -> DesktopSection.Library
-        PhoebeScreenshotScenario.Search -> DesktopSection.Search
-        PhoebeScreenshotScenario.Settings -> DesktopSection.Settings
-        else -> DesktopSection.Home
+        PhoebeScreenshotScenario.Library -> BrowseSection.Library
+        PhoebeScreenshotScenario.Playlist -> BrowseSection.Library
+        PhoebeScreenshotScenario.Search -> BrowseSection.Search
+        PhoebeScreenshotScenario.Settings -> BrowseSection.Settings
+        else -> BrowseSection.Home
     }
     val libraryUi = when (scenario) {
         PhoebeScreenshotScenario.HomePlayedRows -> fixture.libraryUi.copy(
@@ -308,114 +312,146 @@ internal fun PhoebeDesktopScreenshotScenario(
         else -> fixture.libraryUi
     }
     DesktopPlayer(
-        screen = screen,
-        catalog = fixture.catalog,
-        catalogRefreshing = false,
-        session = fixture.session,
-        mediaSources = fixture.mediaSources,
-        track = fixture.currentTrack,
-        homeUiState = deriveHomeUiState(fixture.catalog, fixture.playHistory, randomArtistSeed = 7, randomAlbumSeed = 11, nowMs = fixture.nowMs),
-        playHistory = fixture.playHistory,
-        upNext = fixture.upNext,
-        isPlaying = true,
-        positionMs = 96_000L,
-        bufferedPositionMs = 172_000L,
-        currentIndex = 0,
-        section = section,
-        selectedPlaylistId = if (scenario == PhoebeScreenshotScenario.Playlist) fixture.playlist.id else null,
-        searchQuery = if (scenario == PhoebeScreenshotScenario.Search) "moon" else "",
-        libraryFilter = LibraryFilterTab.Artists,
-        libraryUi = libraryUi,
-        appMessage = "Sign in to Plex or add a local music folder to get started.",
-        pinCode = "PHOEBE",
-        shuffle = true,
-        repeat = RepeatMode.All,
-        volume = 0.72f,
-        showQueue = showQueue,
-        compact = compact,
-        busy = false,
-        onNavigate = {},
-        onSearchQuery = {},
-        onLibraryFilter = {},
-        onPlaylist = {},
-        onArtist = {},
-        onAlbum = {},
-        onSong = {},
-        onRecentSongs = {},
-        onRecentArtists = {},
-        onRecentAlbums = {},
-        onFavoritePlaylists = {},
-        onFavoriteArtists = {},
-        onFavoriteAlbums = {},
-        onCollections = {},
-        onCollectionValue = { _, _ -> },
-        onRecentlyPlayed = {},
-        onMostPlayed = {},
-        onRefreshRandomArtists = {},
-        onRefreshRandomAlbums = {},
-        onPopDetail = {},
-        onToggle = {},
-        onPrevious = {},
-        onNext = {},
-        onShuffle = {},
-        onRepeat = {},
-        onVolume = {},
-        onSeek = {},
-        onPlayQueue = {},
-        onClearQueue = {},
-        onMoveUpNext = { _, _ -> },
-        onRemoveUpNext = {},
-        onPlayTracks = { _, _ -> },
-        onAddToUpNext = {},
-        onDownload = {},
-        onDownloadArtist = {},
-        artistRadioAvailability = if (scenario == PhoebeScreenshotScenario.ArtistRadio) {
-            mapOf(fixture.artist.id to ArtistRadioAvailability.Available)
-        } else {
-            emptyMap()
-        },
-        onPlayArtistRadio = {},
-        radioStations = fixture.radioStations,
-        onPlayRadioStation = {},
-        onDownloadAlbum = {},
-        onDownloadPlaylist = {},
-        onStartSignIn = {},
-        onFinishSignIn = {},
-        onSignInJellyfin = { _, _, _ -> },
-        onSignInProvider = { _, _, _, _, _ -> },
-        onSignOut = {},
-        onAddLocalFolder = {},
-        onRemoveLocalFolder = {},
-        onToggleLocalFolder = { _, _ -> },
-        onRefreshLibrary = {},
-        servers = fixture.servers,
-        libraries = fixture.libraries,
-        onSelectServer = {},
-        onSelectLibrary = { _, _ -> },
-        onCancelPlexSetup = {},
-        onBackToServerPicker = {},
-        onRetryServers = {},
-        onLibrarySortBy = {},
-        onLibraryAscending = {},
-        onLibraryColumns = {},
-        onHomeSections = {},
-        onPersonalMix = {},
-        onExportFavoritePlaylists = {},
-        onImportFavoritePlaylists = {},
-        appSettings = AppSettings.Default,
-        onCrossfadeSeconds = {},
-        onScanLibraryOnLaunch = {},
-        onNotifyWhenDownloadFinishes = {},
-        downloadDirectory = null,
-        downloadCount = fixture.catalog.downloads.size,
-        defaultDownloadDirectoryLabel = "App storage",
-        onDownloadDirectory = {},
-        onDeleteAllDownloads = {},
-        useLightAppearance = useLightAppearance,
-        onUseLightAppearanceChange = {},
-        appearanceTintId = tintId,
-        onAppearanceTintChange = {},
-        settingsInitialCategory = settingsInitialCategory,
+        shellState = DesktopShellState(
+            screen = screen,
+            catalog = fixture.catalog,
+            catalogRefreshing = false,
+            session = fixture.session,
+            mediaSources = fixture.mediaSources,
+            section = section,
+            selectedPlaylistId = if (scenario == PhoebeScreenshotScenario.Playlist) fixture.playlist.id else null,
+            showQueue = showQueue,
+            compact = compact,
+            busy = false,
+        ),
+        playbackState = PlaybackUiState(
+            shellPlayback = ShellPlaybackState(
+                currentTrack = fixture.currentTrack,
+                isPlaying = true,
+                isBuffering = false,
+            ),
+            player = PlayerState(
+                queue = listOfNotNull(fixture.currentTrack) + fixture.upNext,
+                currentIndex = 0,
+                isPlaying = true,
+                positionMs = 96_000L,
+                bufferedPositionMs = 172_000L,
+                shuffle = true,
+                repeat = RepeatMode.All,
+                volume = 0.72f,
+            ),
+            track = fixture.currentTrack,
+            upNext = fixture.upNext,
+            currentIndex = 0,
+        ),
+        playbackActions = PlaybackActions(
+            onToggle = {},
+            onPrevious = {},
+            onNext = {},
+            onShuffle = {},
+            onRepeat = {},
+            onVolume = {},
+            onSeek = {},
+            onPlayQueue = {},
+            onClearQueue = {},
+            onMoveUpNext = { _, _ -> },
+            onRemoveUpNext = {},
+        ),
+        browseState = BrowseUiState(
+            homeUiState = deriveHomeUiState(
+                fixture.catalog,
+                fixture.playHistory,
+                randomArtistSeed = 7,
+                randomAlbumSeed = 11,
+                nowMs = fixture.nowMs,
+            ),
+            playHistory = fixture.playHistory,
+            searchQuery = if (scenario == PhoebeScreenshotScenario.Search) "moon" else "",
+            libraryFilter = LibraryFilterTab.Artists,
+            libraryUi = libraryUi,
+            radioStations = fixture.radioStations,
+            artistRadioAvailability = if (scenario == PhoebeScreenshotScenario.ArtistRadio) {
+                mapOf(fixture.artist.id to ArtistRadioAvailability.Available)
+            } else {
+                emptyMap()
+            },
+        ),
+        browseActions = BrowseActions(
+            onNavigate = {},
+            onSearchQuery = {},
+            onLibraryFilter = {},
+            onPlaylist = {},
+            onArtist = {},
+            onAlbum = {},
+            onSong = {},
+            onRecentSongs = {},
+            onRecentArtists = {},
+            onRecentAlbums = {},
+            onFavoritePlaylists = {},
+            onFavoriteArtists = {},
+            onFavoriteAlbums = {},
+            onRecentlyPlayed = {},
+            onMostPlayed = {},
+            onCollections = {},
+            onCollectionValue = { _, _ -> },
+            onRefreshRandomArtists = {},
+            onRefreshRandomAlbums = {},
+            onPopDetail = {},
+            onPlayTracks = { _, _ -> },
+            onAddToUpNext = {},
+            onDownload = {},
+            onDownloadArtist = {},
+            onPlayArtistRadio = {},
+            onDownloadAlbum = {},
+            onDownloadPlaylist = {},
+            onLibrarySortBy = {},
+            onLibraryAscending = {},
+            onLibraryColumns = {},
+        ),
+        authSetupState = AuthSetupState(
+            appMessage = "Sign in to Plex or add a local music folder to get started.",
+            pinCode = "PHOEBE",
+            servers = fixture.servers,
+            libraries = fixture.libraries,
+        ),
+        authSetupActions = AuthSetupActions(
+            onStartSignIn = {},
+            onFinishSignIn = {},
+            onSignInJellyfin = { _, _, _ -> },
+            onSignInProvider = { _, _, _, _, _ -> },
+            onSignOut = {},
+            onAddLocalFolder = {},
+            onRemoveLocalFolder = {},
+            onToggleLocalFolder = { _, _ -> },
+            onRefreshLibrary = {},
+            onSelectServer = {},
+            onSelectLibrary = { _, _ -> },
+            onCancelPlexSetup = {},
+            onBackToServerPicker = {},
+            onRetryServers = {},
+        ),
+        settingsState = SettingsUiState(
+            appSettings = AppSettings.Default,
+            downloadDirectory = null,
+            downloadCount = fixture.catalog.downloads.size,
+            defaultDownloadDirectoryLabel = "App storage",
+            useLightAppearance = useLightAppearance,
+            appearanceTintId = tintId,
+            settingsInitialCategory = settingsInitialCategory,
+        ),
+        settingsActions = SettingsActions(
+            onHomeSections = {},
+            onPersonalMix = {},
+            onExportFavoritePlaylists = {},
+            onImportFavoritePlaylists = {},
+            onCrossfadeSeconds = {},
+            onScanLibraryOnLaunch = {},
+            onNotifyWhenDownloadFinishes = {},
+            onDownloadDirectory = {},
+            onDeleteAllDownloads = {},
+            onUseLightAppearanceChange = {},
+            onAppearanceTintChange = {},
+        ),
     )
 }
 
@@ -586,9 +622,17 @@ internal fun PhoebeMobileScreenshotScenario(
                 onSwipeDismiss = {},
                 initialUpNextExpanded = scenario == PhoebeScreenshotScenario.PlayerUpNextExpanded,
             )
+            PhoebeScreenshotScenario.HomeAccordionsCollapsed,
+            PhoebeScreenshotScenario.HomeAccordionsExpanded,
+            -> MobileHomeAccordionScreenshot(
+                fixture = fixture,
+                expandedSection = when (scenario) {
+                    PhoebeScreenshotScenario.HomeAccordionsExpanded -> PhoneHomeAccordionSection.Random
+                    else -> null
+                },
+            )
             PhoebeScreenshotScenario.HomePlayedRows -> MobileHomeScreen(
                 state = deriveHomeUiState(fixture.catalog, fixture.playHistory, randomArtistSeed = 7, randomAlbumSeed = 11, nowMs = fixture.nowMs),
-                catalog = fixture.catalog,
                 radioStations = fixture.radioStations,
                 homeSections = listOf(HomeSection.Played, HomeSection.Random),
                 listState = rememberLazyListState(),
@@ -616,10 +660,10 @@ internal fun PhoebeMobileScreenshotScenario(
                 catalogRefreshing = false,
                 session = fixture.session,
                 section = when (scenario) {
-                    PhoebeScreenshotScenario.Library -> DesktopSection.Library
-                    PhoebeScreenshotScenario.Search -> DesktopSection.Search
-                    PhoebeScreenshotScenario.Settings -> DesktopSection.Settings
-                    else -> DesktopSection.Home
+                    PhoebeScreenshotScenario.Library -> BrowseSection.Library
+                    PhoebeScreenshotScenario.Search -> BrowseSection.Search
+                    PhoebeScreenshotScenario.Settings -> BrowseSection.Settings
+                    else -> BrowseSection.Home
                 },
                 selectedPlaylistId = null,
                 searchQuery = if (scenario == PhoebeScreenshotScenario.Search) "moon" else "",
@@ -678,6 +722,85 @@ internal fun PhoebeMobileScreenshotScenario(
             )
         }
     }
+}
+
+@Composable
+private fun MobileHomeAccordionScreenshot(
+    fixture: PhoebeScreenshotFixtureData,
+    expandedSection: PhoneHomeAccordionSection?,
+) {
+    val homeSections = HomeAccordionScreenshotSections
+    val listState = rememberLazyListState(
+        initialFirstVisibleItemIndex = homeAccordionScreenshotScrollIndex(expandedSection, homeSections),
+    )
+    MobileBrowseShell(
+        catalog = fixture.catalog,
+        catalogRefreshing = false,
+        session = fixture.session,
+        section = BrowseSection.Home,
+        selectedPlaylistId = null,
+        searchQuery = "",
+        libraryFilter = LibraryFilterTab.Artists,
+        libraryUi = fixture.libraryUi.copy(homeSections = homeSections),
+        currentTrack = fixture.currentTrack,
+        homeUiState = deriveHomeUiState(
+            fixture.catalog,
+            fixture.playHistory,
+            randomArtistSeed = 7,
+            randomAlbumSeed = 11,
+            nowMs = fixture.nowMs,
+        ),
+        isPlaying = true,
+        onNavigate = {},
+        onSearchQuery = {},
+        onLibraryFilter = {},
+        onPlaylist = {},
+        onArtist = {},
+        onAlbum = {},
+        onSong = {},
+        onRecentSongs = {},
+        onRecentArtists = {},
+        onRecentAlbums = {},
+        onFavoritePlaylists = {},
+        onFavoriteArtists = {},
+        onFavoriteAlbums = {},
+        onCollections = {},
+        onRecentlyPlayed = {},
+        onMostPlayed = {},
+        onRefreshRandomArtists = {},
+        onRefreshRandomAlbums = {},
+        onPlayTracks = { _, _ -> },
+        onAddToUpNext = {},
+        onDownload = {},
+        onOpenNowPlaying = {},
+        onTogglePlayPause = {},
+        onSignOut = {},
+        onAddLocalFolder = {},
+        onRefreshLibrary = {},
+        onLibrarySortBy = {},
+        onLibraryAscending = {},
+        onLibraryColumns = {},
+        onHomeSections = {},
+        onPersonalMix = {},
+        onExportFavoritePlaylists = {},
+        onImportFavoritePlaylists = {},
+        appSettings = AppSettings.Default,
+        onCrossfadeSeconds = {},
+        onScanLibraryOnLaunch = {},
+        onNotifyWhenDownloadFinishes = {},
+        downloadDirectory = null,
+        downloadCount = fixture.catalog.downloads.size,
+        defaultDownloadDirectoryLabel = "App storage",
+        onDownloadDirectory = {},
+        onDeleteAllDownloads = {},
+        useLightAppearance = false,
+        onUseLightAppearanceChange = {},
+        appearanceTintId = PhoebeTintOption.Purple.id,
+        onAppearanceTintChange = {},
+        radioStations = fixture.radioStations,
+        initialExpandedPhoneSection = expandedSection,
+        homeListState = listState,
+    )
 }
 
 internal data class PhoebeScreenshotFixtureData(
@@ -790,6 +913,16 @@ internal val PhoebeScreenshotFixture = run {
                 tracks[1].id to listOf(nowMs - 60_000L, nowMs - 120_000L, nowMs - 180_000L),
                 tracks[0].id to listOf(nowMs - 3_600_000L, nowMs - 3_660_000L),
                 tracks[2].id to listOf(nowMs - 92_000_000L, nowMs - 92_060_000L),
+            ),
+            topMostPlayed = listOf(
+                com.phoebe.app.domain.MostPlayedEntry(tracks[1].id, 1284L, nowMs - 60_000L, tracks[1].artist, tracks[1].album),
+                com.phoebe.app.domain.MostPlayedEntry(tracks[0].id, 982L, nowMs - 3_600_000L, tracks[0].artist, tracks[0].album),
+                com.phoebe.app.domain.MostPlayedEntry(tracks[4].id, 876L, nowMs - 86_400_000L, tracks[4].artist, tracks[4].album),
+            ),
+            topRecentlyPlayed = listOf(
+                com.phoebe.app.domain.RecentlyPlayedEntry(tracks[1].id, nowMs - 60_000L, tracks[1].artist, tracks[1].album),
+                com.phoebe.app.domain.RecentlyPlayedEntry(tracks[0].id, nowMs - 3_600_000L, tracks[0].artist, tracks[0].album),
+                com.phoebe.app.domain.RecentlyPlayedEntry(tracks[4].id, nowMs - 86_400_000L, tracks[4].artist, tracks[4].album),
             ),
         ),
         servers = listOf(server),

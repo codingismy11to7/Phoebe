@@ -5,6 +5,7 @@ import com.phoebe.app.data.PlexClient
 import com.phoebe.app.domain.Track
 import com.phoebe.app.platform.PhoebeLog
 import javafx.application.Platform
+import javafx.scene.media.AudioSpectrumListener
 import javafx.scene.media.Media
 import javafx.scene.media.MediaPlayer
 import java.io.ByteArrayInputStream
@@ -36,7 +37,9 @@ actual fun createAudioPlayer(): AudioPlayer = DesktopAudioPlayer()
  * JavaFX does **not** decode FLAC, Ogg Vorbis, or many WAV variants reliably, so local **WAV / AIFF / FLAC / Ogg / Opus**
  * use [javax.sound.sampled] plus mp3spi / vorbisspi / jflac on the classpath (MP3 SPI is kept for non-JavaFX paths if needed).
  */
-private class DesktopAudioPlayer : SimpleAudioPlayer() {
+internal class DesktopAudioPlayer(
+    private val diagnostics: PlaybackDiagnostics = PlaybackDiagnostics.None,
+) : SimpleAudioPlayer() {
     private var player: MediaPlayer? = null
     private var fadingOutPlayer: MediaPlayer? = null
     private var desktopCrossfadeGeneration = -1
@@ -130,6 +133,8 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
                             return@execute
                         }
                         sampledClip = clip
+                        diagnostics.engineSelected(PlaybackEnginePath.SampledClip)
+                        startSampledProgressProbe(clip, generation)
                         applyVolumesFromState()
                         updateBufferedPosition(trackDurationOrClipDuration(generation, clip), generation)
                         markPlaybackReady(generation = generation)
@@ -152,6 +157,8 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
                             return@execute
                         }
                         sampledClip = clip
+                        diagnostics.engineSelected(PlaybackEnginePath.SampledClip)
+                        startSampledProgressProbe(clip, generation)
                         applyVolumesFromState()
                         updateBufferedPosition(trackDurationOrClipDuration(generation, clip), generation)
                         markPlaybackReady(generation = generation)
@@ -163,6 +170,7 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
                 val playbackUri = file?.toURI()?.toString() ?: uri
                 fullyBufferedPlayback = file != null
                 if (!playJavaFxWithRetries(playbackUri, generation)) {
+                    diagnostics.playbackError(PlaybackEnginePath.JavaFxMediaPlayer, "JavaFX playback failed to start")
                     markPlaybackFailed(generation = generation)
                     return@execute
                 }
@@ -172,6 +180,7 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
             }.onFailure { error ->
                 if (!isPlayRequestCurrent(generation)) return@execute
                 logPlaybackFailure(error)
+                diagnostics.playbackError(PlaybackEnginePath.JavaFxMediaPlayer, error.message)
                 markPlaybackFailed(generation = generation)
             }
         }
@@ -278,10 +287,12 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
                     PhoebeLog.d("DesktopAudioPlayer") {
                         "crossfade playback error: ${incoming.error?.message ?: incoming.error?.type}"
                     }
+                    diagnostics.playbackError(PlaybackEnginePath.JavaFxMediaPlayer, incoming.error?.message)
                     fallbackToNormalPlayback()
                 }
                 media.setOnError {
                     PhoebeLog.d("DesktopAudioPlayer") { "crossfade media error: ${media.error?.message}" }
+                    diagnostics.playbackError(PlaybackEnginePath.JavaFxMediaPlayer, media.error?.message)
                     fallbackToNormalPlayback()
                 }
                 incoming.setOnReady {
@@ -303,6 +314,12 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
                     if (prefetchedCrossfade?.trackId == track.id) {
                         prefetchedCrossfade = null
                     }
+                    diagnostics.crossfadeStarted(
+                        engine = PlaybackEnginePath.JavaFxMediaPlayer,
+                        outgoingTrackId = state.value.currentTrack?.id,
+                        incomingTrackId = track.id,
+                        durationMs = durationMs,
+                    )
                     runDesktopCrossfade(
                         outgoing = outgoing,
                         incoming = incoming,
@@ -325,6 +342,7 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
             }.onFailure { error ->
                 if (desktopCrossfadeGeneration == generation) desktopCrossfadeGeneration = -1
                 logPlaybackFailure(error)
+                diagnostics.playbackError(PlaybackEnginePath.JavaFxMediaPlayer, error.message)
             }
         }
         return true
@@ -346,9 +364,17 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
             repeat(steps) { index ->
                 if (!isPlayRequestCurrent(generation)) return@execute
                 val progress = (index + 1).toDouble() / steps.toDouble()
+                val outgoingVolume = (baseVolume * (1.0 - progress)).toFloat().coerceIn(0f, 1f)
+                val incomingVolume = (baseVolume * progress).toFloat().coerceIn(0f, 1f)
+                diagnostics.crossfadeVolume(
+                    engine = PlaybackEnginePath.JavaFxMediaPlayer,
+                    step = index + 1,
+                    outgoingVolume = outgoingVolume,
+                    incomingVolume = incomingVolume,
+                )
                 JavaFxRuntime.runLater {
-                    outgoing.volume = (baseVolume * (1.0 - progress)).coerceIn(0.0, 1.0)
-                    incoming.volume = (baseVolume * progress).coerceIn(0.0, 1.0)
+                    outgoing.volume = outgoingVolume.toDouble()
+                    incoming.volume = incomingVolume.toDouble()
                 }
                 Thread.sleep(stepDelay)
             }
@@ -380,6 +406,10 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
                         targetIndex = targetIndex,
                         positionMs = incoming.currentTime.toMillis().toLong().coerceAtLeast(0L),
                         generation = generation,
+                    )
+                    diagnostics.crossfadeCommitted(
+                        engine = PlaybackEnginePath.JavaFxMediaPlayer,
+                        incomingTrackId = queue[targetIndex].id,
                     )
                     syncJavaFxPlayback(incoming, generation, isBuffering = false)
                     prefetchCrossfadeCandidate(queue, targetIndex, generation)
@@ -660,10 +690,11 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
         }
         return runCatching {
             val clip = AudioSystem.getClip()
+            val diagnosticsStream = copyPcmStreamForDiagnostics(prepared)
             try {
-                clip.open(prepared)
+                clip.open(diagnosticsStream)
             } catch (e: Throwable) {
-                runCatching { prepared.close() }
+                runCatching { diagnosticsStream.close() }
                 throw e
             }
             applyVolumeToClip(clip, effectiveOutputVolume())
@@ -681,6 +712,7 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
             clip
         }.getOrElse { e ->
             logPlaybackFailure(e)
+            diagnostics.playbackError(PlaybackEnginePath.SampledClip, e.message)
             null
         }
     }
@@ -766,14 +798,26 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
         val failed = AtomicBoolean(false)
         JavaFxRuntime.runLater {
             runCatching {
+                diagnostics.engineSelected(PlaybackEnginePath.JavaFxMediaPlayer)
                 val media = Media(uri)
                 val mediaPlayer = MediaPlayer(media)
                 mediaPlayer.volume = effectiveOutputVolume().toDouble().coerceIn(0.0, 1.0)
+                mediaPlayer.audioSpectrumInterval = 0.05
+                mediaPlayer.audioSpectrumNumBands = 64
+                mediaPlayer.audioSpectrumThreshold = -80
+                mediaPlayer.audioSpectrumListener = AudioSpectrumListener { _, _, magnitudes, _ ->
+                    val maxMagnitude = magnitudes.maxOrNull() ?: return@AudioSpectrumListener
+                    val rms = Math.pow(10.0, maxMagnitude.toDouble() / 20.0)
+                    if (rms.isFinite() && rms > 0.0) {
+                        diagnostics.decodedAudioEnergy(PlaybackEnginePath.JavaFxMediaPlayer, rms)
+                    }
+                }
                 mediaPlayer.setOnError {
                     failed.set(true)
                     PhoebeLog.d("DesktopAudioPlayer") {
                         "playback error: ${mediaPlayer.error?.message ?: mediaPlayer.error?.type}"
                     }
+                    diagnostics.playbackError(PlaybackEnginePath.JavaFxMediaPlayer, mediaPlayer.error?.message)
                     if (latch.count > 0L) latch.countDown()
                 }
                 mediaPlayer.setOnEndOfMedia {
@@ -784,6 +828,7 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
                 media.setOnError {
                     failed.set(true)
                     PhoebeLog.d("DesktopAudioPlayer") { "media error: ${media.error?.message}" }
+                    diagnostics.playbackError(PlaybackEnginePath.JavaFxMediaPlayer, media.error?.message)
                     if (latch.count > 0L) latch.countDown()
                 }
                 mediaPlayer.setOnPlaying {
@@ -807,6 +852,7 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
             }.onFailure { error ->
                 failed.set(true)
                 logPlaybackFailure(error)
+                diagnostics.playbackError(PlaybackEnginePath.JavaFxMediaPlayer, error.message)
                 if (latch.count > 0L) latch.countDown()
             }
         }
@@ -844,6 +890,10 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
         val durationMs = mediaPlayer.media.duration.toMillis().toLong().coerceAtLeast(0L)
         val platformBufferedMs = mediaPlayer.bufferProgressTime.toMillis().toLong().coerceAtLeast(positionMs)
         val bufferedMs = if (fullyBufferedPlayback && durationMs > 0L) durationMs else platformBufferedMs
+        diagnostics.playbackProgress(PlaybackEnginePath.JavaFxMediaPlayer, positionMs, durationMs)
+        if (mediaPlayer.status == MediaPlayer.Status.PLAYING) {
+            diagnostics.platformPlaying(PlaybackEnginePath.JavaFxMediaPlayer, positionMs, durationMs)
+        }
         applyPlatformPlayback(
             positionMs = positionMs,
             durationMs = durationMs,
@@ -858,6 +908,44 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
         val stateDuration = state.value.durationMs.takeIf { it > 0L }
         if (stateDuration != null && isPlayRequestCurrent(generation)) return stateDuration
         return (clip.microsecondLength / 1_000L).coerceAtLeast(0L)
+    }
+
+    private fun startSampledProgressProbe(clip: Clip, generation: Int) {
+        Thread({
+            while (isPlayRequestCurrent(generation) && sampledClip === clip && clip.isOpen) {
+                val positionMs = (clip.microsecondPosition / 1_000L).coerceAtLeast(0L)
+                val durationMs = (clip.microsecondLength / 1_000L).coerceAtLeast(0L)
+                diagnostics.playbackProgress(PlaybackEnginePath.SampledClip, positionMs, durationMs)
+                if (clip.isActive || clip.isRunning) {
+                    diagnostics.platformPlaying(PlaybackEnginePath.SampledClip, positionMs, durationMs)
+                }
+                Thread.sleep(250L)
+            }
+        }, "Phoebe-sampled-playback-diagnostics").apply {
+            isDaemon = true
+            start()
+        }
+    }
+
+    private fun copyPcmStreamForDiagnostics(stream: AudioInputStream): AudioInputStream {
+        val format = stream.format
+        val bytes = stream.use { it.readAllBytes() }
+        val rms = pcmRms(bytes, format)
+        if (rms > 0.0 && rms.isFinite()) {
+            diagnostics.decodedAudioEnergy(PlaybackEnginePath.SampledClip, rms)
+        }
+        val frameSize = format.frameSize.takeIf { it > 0 } ?: 1
+        return AudioInputStream(ByteArrayInputStream(bytes), format, bytes.size.toLong() / frameSize.toLong())
+    }
+
+    internal fun releaseForTests() {
+        runCatching {
+            playbackExecutor.submit {
+                disposeAllOnPlaybackThread()
+            }.get(30, TimeUnit.SECONDS)
+        }
+        playbackExecutor.shutdownNow()
+        crossfadePrefetchExecutor.shutdownNow()
     }
 
     private fun extensionFromContentType(contentType: String): String? = when {
@@ -880,6 +968,46 @@ private class DesktopAudioPlayer : SimpleAudioPlayer() {
         const val StreamRetryBaseDelayMs = 1_000L
         const val JavaFxStartupTimeoutSeconds = 15L
     }
+}
+
+private fun pcmRms(bytes: ByteArray, format: AudioFormat): Double {
+    val frameSize = format.frameSize.takeIf { it > 0 } ?: return 0.0
+    val channels = format.channels.takeIf { it > 0 } ?: return 0.0
+    val sampleBytes = ((format.sampleSizeInBits + 7) / 8).takeIf { it in 1..4 } ?: return 0.0
+    var sumSquares = 0.0
+    var sampleCount = 0L
+    var frameOffset = 0
+    while (frameOffset + frameSize <= bytes.size) {
+        var sampleOffset = frameOffset
+        repeat(channels) {
+            if (sampleOffset + sampleBytes <= frameOffset + frameSize) {
+                val normalized = normalizedPcmSample(bytes, sampleOffset, sampleBytes, format)
+                sumSquares += normalized * normalized
+                sampleCount++
+            }
+            sampleOffset += sampleBytes
+        }
+        frameOffset += frameSize
+    }
+    return if (sampleCount == 0L) 0.0 else Math.sqrt(sumSquares / sampleCount.toDouble())
+}
+
+private fun normalizedPcmSample(bytes: ByteArray, offset: Int, sampleBytes: Int, format: AudioFormat): Double {
+    val unsigned = format.encoding == AudioFormat.Encoding.PCM_UNSIGNED
+    val littleEndian = !format.isBigEndian
+    var value = 0L
+    repeat(sampleBytes) { index ->
+        val sourceIndex = if (littleEndian) offset + index else offset + sampleBytes - 1 - index
+        value = value or ((bytes[sourceIndex].toLong() and 0xFFL) shl (8 * index))
+    }
+    if (unsigned) {
+        val midpoint = 1L shl (sampleBytes * 8 - 1)
+        return (value - midpoint).toDouble() / midpoint.toDouble()
+    }
+    val shift = 64 - sampleBytes * 8
+    val signed = (value shl shift) shr shift
+    val denominator = (1L shl (sampleBytes * 8 - 1)).toDouble()
+    return signed.toDouble() / denominator
 }
 
 private object JavaFxRuntime {

@@ -23,8 +23,13 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.launch
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import com.phoebe.app.platform.catalogTrackIndexParallelism
 
 open class JellyfinClient(
     private val httpClient: HttpClient,
@@ -138,39 +143,46 @@ open class JellyfinClient(
         library: MusicLibrary,
         token: String,
         userId: String,
-        onPage: suspend (List<Album>) -> Unit = {},
+        fastSync: Boolean = true,
+        onPage: suspend (List<Album>, Int?) -> Unit = { _, _ -> },
     ): List<Album> {
-        val scoped = pagedItems(
-            server = server,
-            token = token,
-            path = "/Items",
-            label = "albums scoped:${library.key}",
-            onPage = { items, _ -> onPage(items.map { it.toAlbum(server, token) }) },
-        ) {
-            parameter("userId", userId)
+        val collected = mutableListOf<Album>()
+        suspend fun consumePage(page: List<Album>, total: Int?) {
+            if (page.isNotEmpty()) collected += page
+            onPage(page, total)
+        }
+        val scoped = albumsForQuery(server, token, userId, fastSync, ::consumePage) {
             parameter("parentId", library.key)
             parameter("recursive", true)
-            parameter("includeItemTypes", "MusicAlbum")
-            parameter("fields", JellyfinFields)
-            parameter("enableUserData", true)
-            parameter("sortBy", "AlbumArtist,SortName")
-        }.Items.map { it.toAlbum(server, token) }
+        }
         if (scoped.isNotEmpty()) return scoped
-        return pagedItems(
-            server = server,
-            token = token,
-            path = "/Items",
-            label = "albums unscoped",
-            onPage = { items, _ -> onPage(items.map { it.toAlbum(server, token) }) },
-        ) {
-            parameter("userId", userId)
+        return albumsForQuery(server, token, userId, fastSync, ::consumePage) {
             parameter("recursive", true)
-            parameter("includeItemTypes", "MusicAlbum")
-            parameter("fields", JellyfinFields)
-            parameter("enableUserData", true)
-            parameter("sortBy", "AlbumArtist,SortName")
-        }.Items.map { it.toAlbum(server, token) }
+        }
     }
+
+    private suspend fun albumsForQuery(
+        server: PlexServer,
+        token: String,
+        userId: String,
+        fastSync: Boolean,
+        onPage: suspend (List<Album>, Int?) -> Unit,
+        block: io.ktor.client.request.HttpRequestBuilder.() -> Unit,
+    ): List<Album> = pagedItemsParallel(
+        server = server,
+        token = token,
+        path = "/Items",
+        label = "albums",
+        fetchImages = !fastSync,
+        onPage = { items, total -> onPage(items.map { it.toAlbum(server, token) }, total) },
+    ) {
+        parameter("userId", userId)
+        parameter("includeItemTypes", "MusicAlbum")
+        parameter("fields", if (fastSync) JellyfinFastAlbumFields else JellyfinFields)
+        parameter("enableUserData", true)
+        parameter("sortBy", "AlbumArtist,SortName")
+        block()
+    }.Items.map { it.toAlbum(server, token) }
 
     suspend fun albumsForArtist(
         server: PlexServer,
@@ -238,20 +250,26 @@ open class JellyfinClient(
         token: String,
         userId: String,
         includeMediaDetails: Boolean = true,
-        onPage: suspend (List<Track>) -> Unit = {},
-    ): List<Track> =
-        tracksForQuery(server, token, userId, onPage, includeMediaDetails) {
+        onPage: suspend (List<Track>, Int?) -> Unit = { _, _ -> },
+    ): List<Track> {
+        val collected = mutableListOf<Track>()
+        suspend fun consumePage(page: List<Track>, total: Int?) {
+            if (page.isNotEmpty()) collected += page
+            onPage(page, total)
+        }
+        val scoped = tracksForQuery(server, token, userId, ::consumePage, includeMediaDetails) {
             parameter("parentId", library.key)
             parameter("recursive", true)
             parameter("includeItemTypes", "Audio")
             parameter("sortBy", "AlbumArtist,Album,ParentIndexNumber,IndexNumber,SortName")
-        }.ifEmpty {
-            tracksForQuery(server, token, userId, onPage, includeMediaDetails) {
-                parameter("recursive", true)
-                parameter("includeItemTypes", "Audio")
-                parameter("sortBy", "AlbumArtist,Album,ParentIndexNumber,IndexNumber,SortName")
-            }
         }
+        if (scoped.isNotEmpty()) return scoped
+        return tracksForQuery(server, token, userId, ::consumePage, includeMediaDetails) {
+            parameter("recursive", true)
+            parameter("includeItemTypes", "Audio")
+            parameter("sortBy", "AlbumArtist,Album,ParentIndexNumber,IndexNumber,SortName")
+        }
+    }
 
     suspend fun trackPage(server: PlexServer, library: MusicLibrary, token: String, userId: String, pageIndex: Int): JellyfinItemPage<Track> {
         val scoped = pagedItems(
@@ -371,7 +389,7 @@ open class JellyfinClient(
         }.body<JellyfinItemsResponse>().Items.mapNotNull { it.toTrack(server, token) }
 
     suspend fun initiateQuickConnect(serverUrl: String): JellyfinQuickConnectResult {
-        val base = serverUrl.trimEnd('/')
+        val base = normalizeBaseUrl(serverUrl)
         val response = httpClient.post("$base/QuickConnect/Initiate") {
             jellyfinHeaders()
         }.let { postResponse ->
@@ -386,7 +404,7 @@ open class JellyfinClient(
     }
 
     suspend fun authenticateQuickConnect(serverUrl: String, secret: String): JellyfinAuthResult {
-        val base = serverUrl.trimEnd('/')
+        val base = normalizeBaseUrl(serverUrl)
         val state = quickConnectState(base, secret)
         if (!state.Authenticated) {
             state.Error?.takeIf { it.isNotBlank() }?.let { error(it) }
@@ -556,21 +574,82 @@ open class JellyfinClient(
         server: PlexServer,
         token: String,
         userId: String,
-        onPage: suspend (List<Track>) -> Unit = {},
+        onPage: suspend (List<Track>, Int?) -> Unit = { _, _ -> },
         includeMediaDetails: Boolean = true,
         block: io.ktor.client.request.HttpRequestBuilder.() -> Unit,
-    ): List<Track> = pagedItems(
+    ): List<Track> = pagedItemsParallel(
         server = server,
         token = token,
         path = "/Items",
         label = "tracks",
-        onPage = { items, _ -> onPage(items.mapNotNull { it.toTrack(server, token) }) },
+        fetchImages = false,
+        onPage = { items, total ->
+            onPage(items.mapNotNull { it.toTrack(server, token) }, total)
+        },
     ) {
         parameter("userId", userId)
         parameter("fields", if (includeMediaDetails) JellyfinFields else JellyfinFastTrackFields)
         parameter("enableUserData", true)
         block()
     }.Items.mapNotNull { it.toTrack(server, token) }
+
+    private suspend fun pagedItemsParallel(
+        server: PlexServer,
+        token: String,
+        path: String,
+        label: String,
+        parallelism: Int = catalogTrackIndexParallelism().coerceAtLeast(1),
+        fetchImages: Boolean = true,
+        onPage: suspend (List<JellyfinItemDto>, Int?) -> Unit = { _, _ -> },
+        block: io.ktor.client.request.HttpRequestBuilder.() -> Unit,
+    ): JellyfinItemsResponse = coroutineScope {
+        val limit = pageSize
+        val firstPage = items(server, token, path, fetchImages = fetchImages) {
+            parameter("startIndex", 0)
+            parameter("limit", limit)
+            block()
+        }
+        val total = firstPage.TotalRecordCount ?: firstPage.Items.size
+        PhoebeLog.d("JellyfinClient") {
+            "pagedItemsParallel $label total=${total} firstPage=${firstPage.Items.size}"
+        }
+        onPage(firstPage.Items, total)
+        if (firstPage.Items.isEmpty()) {
+            return@coroutineScope JellyfinItemsResponse(Items = emptyList(), TotalRecordCount = total)
+        }
+        val pageCount = ((total + limit - 1) / limit).coerceAtLeast(1)
+        if (pageCount <= 1) {
+            return@coroutineScope JellyfinItemsResponse(Items = firstPage.Items, TotalRecordCount = total)
+        }
+
+        val pagesByIndex = mutableMapOf(0 to firstPage.Items)
+        val pageQueue = Channel<Int>(capacity = Channel.UNLIMITED)
+        for (pageIndex in 1 until pageCount) {
+            pageQueue.send(pageIndex)
+        }
+        pageQueue.close()
+
+        val workers = List(parallelism.coerceAtMost(pageCount - 1).coerceAtLeast(1)) {
+            launch {
+                for (pageIndex in pageQueue) {
+                    val start = pageIndex * limit
+                    PhoebeLog.d("JellyfinClient") { "pagedItemsParallel $label request start=$start limit=$limit" }
+                    val page = items(server, token, path, fetchImages = fetchImages) {
+                        parameter("startIndex", start)
+                        parameter("limit", limit)
+                        block()
+                    }
+                    pagesByIndex[pageIndex] = page.Items
+                    onPage(page.Items, total)
+                }
+            }
+        }
+        workers.joinAll()
+
+        val all = (0 until pageCount).flatMap { pagesByIndex[it].orEmpty() }
+        PhoebeLog.d("JellyfinClient") { "pagedItemsParallel $label loaded=${all.size}" }
+        JellyfinItemsResponse(Items = all, TotalRecordCount = total)
+    }
 
     private suspend fun pagedItems(
         server: PlexServer,
@@ -579,6 +658,7 @@ open class JellyfinClient(
         label: String,
         startIndex: Int = 0,
         maxPages: Int? = null,
+        fetchImages: Boolean = true,
         onPage: suspend (List<JellyfinItemDto>, Int?) -> Unit = { _, _ -> },
         block: io.ktor.client.request.HttpRequestBuilder.() -> Unit,
     ): JellyfinItemsResponse {
@@ -589,7 +669,7 @@ open class JellyfinClient(
         while (true) {
             val limit = pageSize
             PhoebeLog.d("JellyfinClient") { "pagedItems $label request start=$start limit=$limit" }
-            val page = items(server, token, path) {
+            val page = items(server, token, path, fetchImages = fetchImages) {
                 parameter("startIndex", start)
                 parameter("limit", limit)
                 block()
@@ -621,12 +701,15 @@ open class JellyfinClient(
         server: PlexServer,
         token: String,
         path: String = "/Items",
+        fetchImages: Boolean = true,
         block: io.ktor.client.request.HttpRequestBuilder.() -> Unit,
     ): JellyfinItemsResponse = httpClient.get("${server.uri}$path") {
         jellyfinAuth(token)
-        parameter("enableImages", true)
-        parameter("imageTypeLimit", 1)
-        parameter("enableImageTypes", "Primary")
+        if (fetchImages) {
+            parameter("enableImages", true)
+            parameter("imageTypeLimit", 1)
+            parameter("enableImageTypes", "Primary")
+        }
         block()
     }.body()
 
@@ -660,7 +743,7 @@ open class JellyfinClient(
     }
 
     private fun normalizeBaseUrl(serverUrl: String): String {
-        val base = serverUrl.trimEnd('/')
+        val base = serverUrl.trim().trimEnd('/')
         if (family != EmbyFamily.Emby) return base
         return if (base.endsWith("/emby", ignoreCase = true)) base else "$base/emby"
     }
@@ -673,6 +756,8 @@ open class JellyfinClient(
             "Genres,Path,MediaSources,UserData,DateCreated,ProductionYear,AlbumArtist,AlbumArtists,ParentId,PrimaryImageTag,AlbumPrimaryImageTag,ParentThumbItemId,ParentThumbImageTag"
         private const val JellyfinFastTrackFields =
             "Genres,UserData,DateCreated,ProductionYear,AlbumArtist,ParentId,PrimaryImageTag,AlbumPrimaryImageTag,ParentThumbItemId,ParentThumbImageTag"
+        private const val JellyfinFastAlbumFields =
+            "Genres,UserData,DateCreated,ProductionYear,AlbumArtist,AlbumArtists,ParentId,PrimaryImageTag,AlbumPrimaryImageTag,ParentThumbItemId,ParentThumbImageTag"
         private const val JellyfinHistoryFields =
             "UserData,DateCreated,ProductionYear,AlbumArtist,AlbumArtists,ParentId,Album,AlbumId,PrimaryImageTag,AlbumPrimaryImageTag"
     }
