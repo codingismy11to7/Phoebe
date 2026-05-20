@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.phoebe.app.ui.DesktopKeyboardShortcutsEffect
 import com.phoebe.app.ui.GlobalMediaKeysEffect
+import com.phoebe.app.ui.HomeScreenLayoutMode
 import com.phoebe.app.ui.PhoebePaletteDark
 import com.phoebe.app.ui.PhoebeTheme
 import com.phoebe.app.ui.PhoebeTintOption
@@ -32,6 +33,7 @@ import kotlinx.coroutines.launch
 
 private const val AppearanceThemeFile = "appearance_theme"
 private const val AppearanceTintFile = "appearance_tint"
+private const val HomeScreenLayoutModeFile = "home_screen_layout_mode"
 
 private sealed interface AppBootstrapState {
     data object Loading : AppBootstrapState
@@ -93,6 +95,7 @@ fun App(
 
     var useLightAppearance by remember(readyDependencies) { mutableStateOf(false) }
     var appearanceTintId by remember(readyDependencies) { mutableStateOf(PhoebeTintOption.Purple.id) }
+    var homeScreenLayoutMode by remember(readyDependencies) { mutableStateOf(HomeScreenLayoutMode.Default) }
 
     LaunchedEffect(readyDependencies) {
         installPlatformPlayback(readyDependencies)
@@ -103,6 +106,9 @@ fun App(
             ?.lowercase()
             ?.let { PhoebeTintOption.fromId(it).id }
             ?: PhoebeTintOption.Purple.id
+        homeScreenLayoutMode = HomeScreenLayoutMode.fromStorage(
+            readyDependencies.platformStorage.readText(HomeScreenLayoutModeFile)?.trim(),
+        )
     }
 
     LaunchedEffect(state) {
@@ -155,6 +161,16 @@ fun App(
                         readyDependencies.platformStorage.writeText(
                             AppearanceTintFile,
                             tintId,
+                        )
+                    }
+                },
+                homeScreenLayoutMode = homeScreenLayoutMode,
+                onHomeScreenLayoutModeChange = { value ->
+                    homeScreenLayoutMode = value
+                    scope.launch {
+                        readyDependencies.platformStorage.writeText(
+                            HomeScreenLayoutModeFile,
+                            value.storageValue,
                         )
                     }
                 },

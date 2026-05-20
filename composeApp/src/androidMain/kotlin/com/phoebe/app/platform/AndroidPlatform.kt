@@ -66,6 +66,8 @@ actual fun createPlatformHttpClient(): HttpClient = HttpClient(OkHttp) {
 
 actual fun isDesktopPlatform(): Boolean = false
 
+actual fun supportsPredictiveBack(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+
 actual class PlatformStorage actual constructor() {
     private val root: File
         get() {

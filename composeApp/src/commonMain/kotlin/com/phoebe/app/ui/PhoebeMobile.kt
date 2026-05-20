@@ -191,7 +191,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
-import kotlinx.coroutines.yield
 import kotlin.math.abs
 import kotlin.math.max
 
@@ -443,6 +442,8 @@ internal fun MobileBrowseShell(
     onPlayArtistRadio: (Artist) -> Unit = {},
     onOpenNowPlaying: () -> Unit,
     onTogglePlayPause: () -> Unit,
+    onPreviousTrack: () -> Unit,
+    onNextTrack: () -> Unit,
     onSignOut: () -> Unit,
     onAddLocalFolder: (String?) -> Unit,
     onRefreshLibrary: () -> Unit,
@@ -455,6 +456,7 @@ internal fun MobileBrowseShell(
     onExportFavoritePlaylists: () -> Unit,
     onImportFavoritePlaylists: () -> Unit,
     appSettings: AppSettings,
+    homeScreenLayoutMode: HomeScreenLayoutMode = HomeScreenLayoutMode.Default,
     onCrossfadeSeconds: (Int) -> Unit,
     onScanLibraryOnLaunch: (Boolean) -> Unit,
     onNotifyWhenDownloadFinishes: (Boolean) -> Unit,
@@ -467,6 +469,7 @@ internal fun MobileBrowseShell(
     onUseLightAppearanceChange: (Boolean) -> Unit,
     appearanceTintId: String,
     onAppearanceTintChange: (String) -> Unit,
+    onHomeScreenLayoutModeChange: (HomeScreenLayoutMode) -> Unit = {},
     initialExpandedPhoneSection: PhoneHomeAccordionSection? = null,
     homeListState: LazyListState? = null,
 ) {
@@ -477,9 +480,46 @@ internal fun MobileBrowseShell(
         selectedPlaylistId != null -> "Playlist"
         else -> mobileSectionTitle(section)
     }
+    val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     val navigationBottomPadding = with(density) {
         WindowInsets.navigationBars.getBottom(this).toDp()
+    }
+    val miniPlayerOpenDragThresholdPx = with(density) { 48.dp.toPx() }
+    val miniPlayerSkipDragThresholdPx = with(density) { 56.dp.toPx() }
+    val miniPlayerSkipPreviewMaxPx = miniPlayerSkipDragThresholdPx * 1.45f
+    var miniPlayerDragOffsetPx by remember { mutableFloatStateOf(0f) }
+    var isDraggingMiniPlayer by remember { mutableStateOf(false) }
+    val miniPlayerSettleOffsetPx = remember { Animatable(0f) }
+    var miniPlayerSettleJob by remember { mutableStateOf<Job?>(null) }
+    fun resistedMiniPlayerOffset(rawOffsetPx: Float): Float {
+        val direction = if (rawOffsetPx < 0f) -1f else 1f
+        val distance = abs(rawOffsetPx)
+        val resistedDistance = when {
+            distance <= miniPlayerSkipDragThresholdPx -> distance
+            else -> miniPlayerSkipDragThresholdPx + (distance - miniPlayerSkipDragThresholdPx) * 0.38f
+        }.coerceAtMost(miniPlayerSkipPreviewMaxPx)
+        return direction * resistedDistance
+    }
+    fun settleMiniPlayer(fromOffsetPx: Float, targetOffsetPx: Float, onTargetReached: (() -> Unit)? = null) {
+        miniPlayerSettleJob?.cancel()
+        miniPlayerSettleJob = scope.launch {
+            miniPlayerSettleOffsetPx.snapTo(fromOffsetPx)
+            if (targetOffsetPx != 0f) {
+                miniPlayerSettleOffsetPx.animateTo(
+                    targetValue = targetOffsetPx,
+                    animationSpec = tween(durationMillis = 120, easing = FastOutSlowInEasing),
+                )
+                onTargetReached?.invoke()
+            }
+            miniPlayerSettleOffsetPx.animateTo(
+                targetValue = 0f,
+                animationSpec = spring(
+                    stiffness = Spring.StiffnessMedium,
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                ),
+            )
+        }
     }
     val chromePadding = MobileChromePadding(
         top = MobileToolbarChromeHeight + MobileChromeScrollGap,
@@ -501,6 +541,8 @@ internal fun MobileBrowseShell(
                     onLightModeChange = onUseLightAppearanceChange,
                     tintId = appearanceTintId,
                     onTintChange = onAppearanceTintChange,
+                    homeScreenLayoutMode = homeScreenLayoutMode,
+                    onHomeScreenLayoutModeChange = onHomeScreenLayoutModeChange,
                     downloadDirectory = downloadDirectory,
                     downloadCount = downloadCount,
                     appSettings = appSettings,
@@ -532,6 +574,7 @@ internal fun MobileBrowseShell(
                         homeUiState.randomArtists,
                         homeUiState.randomAlbums,
                         homeUiState.artistThumbs,
+                        homeScreenLayoutMode,
                         catalogRefreshing,
                         libraryUi.homeSections,
                         supportedCollectionEntries,
@@ -547,6 +590,7 @@ internal fun MobileBrowseShell(
                             radioStations = radioStations,
                             radioStartingIds = radioStartingIds,
                             decadeMixNotice = decadeMixNotice,
+                            homeScreenLayoutMode = homeScreenLayoutMode,
                         )
                     }
                     val mobileHomeCallbacks = remember(
@@ -751,6 +795,83 @@ internal fun MobileBrowseShell(
                 Row(
                     Modifier
                         .fillMaxWidth()
+                        .pointerInput(
+                            onOpenNowPlaying,
+                            onPreviousTrack,
+                            onNextTrack,
+                            miniPlayerOpenDragThresholdPx,
+                            miniPlayerSkipDragThresholdPx,
+                            miniPlayerSkipPreviewMaxPx,
+                        ) {
+                            var upwardDragPx = 0f
+                            var horizontalDragPx = 0f
+                            fun resetMiniPlayerDrag(offsetPx: Float = 0f, horizontalOffsetPx: Float = 0f) {
+                                upwardDragPx = 0f
+                                horizontalDragPx = horizontalOffsetPx
+                                miniPlayerDragOffsetPx = offsetPx
+                            }
+                            fun horizontalDragIsDominant(): Boolean =
+                                abs(horizontalDragPx) > upwardDragPx * 1.2f
+
+                            detectDragGestures(
+                                onDragStart = {
+                                    miniPlayerSettleJob?.cancel()
+                                    isDraggingMiniPlayer = true
+                                    resetMiniPlayerDrag(miniPlayerSettleOffsetPx.value)
+                                    scope.launch { miniPlayerSettleOffsetPx.stop() }
+                                },
+                                onDragEnd = {
+                                    isDraggingMiniPlayer = false
+                                    val releaseOffsetPx = miniPlayerDragOffsetPx
+                                    val horizontalDominant = horizontalDragIsDominant()
+                                    val shouldSkip = abs(horizontalDragPx) > miniPlayerSkipDragThresholdPx && horizontalDominant
+                                    val shouldOpen = upwardDragPx > miniPlayerOpenDragThresholdPx && !horizontalDominant
+                                    when {
+                                        shouldSkip && horizontalDragPx < 0f -> {
+                                            settleMiniPlayer(releaseOffsetPx, -miniPlayerSkipPreviewMaxPx, onNextTrack)
+                                        }
+                                        shouldSkip -> {
+                                            settleMiniPlayer(releaseOffsetPx, miniPlayerSkipPreviewMaxPx, onPreviousTrack)
+                                        }
+                                        else -> {
+                                            settleMiniPlayer(releaseOffsetPx, 0f)
+                                            if (shouldOpen) onOpenNowPlaying()
+                                        }
+                                    }
+                                    resetMiniPlayerDrag()
+                                },
+                                onDragCancel = {
+                                    isDraggingMiniPlayer = false
+                                    val releaseOffsetPx = miniPlayerDragOffsetPx
+                                    settleMiniPlayer(releaseOffsetPx, 0f)
+                                    resetMiniPlayerDrag()
+                                },
+                                onDrag = { change, dragAmount ->
+                                    change.consume()
+                                    upwardDragPx = (upwardDragPx - dragAmount.y).coerceAtLeast(0f)
+                                    horizontalDragPx += dragAmount.x
+                                    miniPlayerDragOffsetPx = if (horizontalDragIsDominant()) {
+                                        val targetOffset = resistedMiniPlayerOffset(horizontalDragPx)
+                                        miniPlayerDragOffsetPx + (targetOffset - miniPlayerDragOffsetPx) * 0.72f
+                                    } else {
+                                        0f
+                                    }
+                                },
+                            )
+                        }
+                        .graphicsLayer {
+                            val offsetPx = if (isDraggingMiniPlayer) {
+                                miniPlayerDragOffsetPx
+                            } else {
+                                miniPlayerSettleOffsetPx.value
+                            }
+                            val swipeProgress = (abs(offsetPx) / miniPlayerSkipDragThresholdPx).coerceIn(0f, 1f)
+                            translationX = offsetPx
+                            alpha = 1f - swipeProgress * 0.14f
+                            val scale = 1f - swipeProgress * 0.025f
+                            scaleX = scale
+                            scaleY = scale
+                        }
                         .clip(RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp))
                         .background(PhoebeUi.navBar)
                         .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp))
@@ -803,11 +924,10 @@ internal fun SwipeableMobileArtwork(
     val settleOffset = remember { Animatable(0f) }
     var dragOffset by remember { mutableFloatStateOf(0f) }
     var isDragging by remember { mutableStateOf(false) }
-    var isSwipeAnimating by remember { mutableStateOf(false) }
     var settleJob by remember { mutableStateOf<Job?>(null) }
+    val latestTrackId by rememberUpdatedState(track.id)
 
     LaunchedEffect(track.id) {
-        if (isSwipeAnimating) return@LaunchedEffect
         settleJob?.cancel()
         settleOffset.stop()
         settleOffset.snapTo(0f)
@@ -825,8 +945,7 @@ internal fun SwipeableMobileArtwork(
     ) {
         val widthPx = with(density) { maxWidth.toPx() }
         val swipeThresholdPx = with(density) { 56.dp.toPx() }
-        val displayOffset = if (isDragging) dragOffset else settleOffset.value
-        val dragProgress = (abs(displayOffset) / widthPx).coerceIn(0f, 1f)
+        fun artworkOffsetPx(): Float = if (isDragging) dragOffset else settleOffset.value
 
         fun settleToCenter(fromOffset: Float) {
             settleJob?.cancel()
@@ -845,29 +964,44 @@ internal fun SwipeableMobileArtwork(
         fun animateSwipeCommit(releaseOffset: Float) {
             settleJob?.cancel()
             settleJob = scope.launch {
+                val startingTrackId = latestTrackId
                 settleOffset.snapTo(releaseOffset)
                 when {
-                    releaseOffset < -swipeThresholdPx -> {
-                        isSwipeAnimating = true
+                    releaseOffset < -swipeThresholdPx && nextTrack != null -> {
                         settleOffset.animateTo(
                             targetValue = -widthPx,
-                            animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing),
+                            animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing),
                         )
                         val steps = (abs(releaseOffset) / widthPx).toInt().coerceIn(1, 5)
                         onSkipQueueBy(steps)
-                        settleOffset.snapTo(0f)
-                        isSwipeAnimating = false
+                        delay(120L)
+                        if (latestTrackId == startingTrackId) {
+                            settleOffset.animateTo(
+                                0f,
+                                animationSpec = spring(
+                                    stiffness = Spring.StiffnessMedium,
+                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                ),
+                            )
+                        }
                     }
-                    releaseOffset > swipeThresholdPx -> {
-                        isSwipeAnimating = true
+                    releaseOffset > swipeThresholdPx && previousTrack != null -> {
                         settleOffset.animateTo(
                             targetValue = widthPx,
-                            animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing),
+                            animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing),
                         )
                         val steps = -(abs(releaseOffset) / widthPx).toInt().coerceIn(1, 5)
                         onSkipQueueBy(steps)
-                        settleOffset.snapTo(0f)
-                        isSwipeAnimating = false
+                        delay(120L)
+                        if (latestTrackId == startingTrackId) {
+                            settleOffset.animateTo(
+                                0f,
+                                animationSpec = spring(
+                                    stiffness = Spring.StiffnessMedium,
+                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                ),
+                            )
+                        }
                     }
                     else -> {
                         settleOffset.animateTo(
@@ -909,29 +1043,36 @@ internal fun SwipeableMobileArtwork(
                     )
                 },
         ) {
-            if (displayOffset < 0f && nextTrack != null) {
+            if (nextTrack != null) {
                 TrackArtworkImage(
                     nextTrack,
                     Modifier
                         .fillMaxSize()
-                        .offset { IntOffset((widthPx + displayOffset).roundToInt(), 0) },
+                        .offset { IntOffset((widthPx + artworkOffsetPx()).roundToInt(), 0) }
+                        .graphicsLayer {
+                            alpha = if (artworkOffsetPx() < 0f) 1f else 0f
+                        },
                     radius = 10.dp,
                 )
             }
-            if (displayOffset > 0f && previousTrack != null) {
+            if (previousTrack != null) {
                 TrackArtworkImage(
                     previousTrack,
                     Modifier
                         .fillMaxSize()
-                        .offset { IntOffset((displayOffset - widthPx).roundToInt(), 0) },
+                        .offset { IntOffset((artworkOffsetPx() - widthPx).roundToInt(), 0) }
+                        .graphicsLayer {
+                            alpha = if (artworkOffsetPx() > 0f) 1f else 0f
+                        },
                     radius = 10.dp,
                 )
             }
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .offset { IntOffset(displayOffset.roundToInt(), 0) }
+                    .offset { IntOffset(artworkOffsetPx().roundToInt(), 0) }
                     .graphicsLayer {
+                        val dragProgress = (abs(artworkOffsetPx()) / widthPx).coerceIn(0f, 1f)
                         val scale = 1f - dragProgress * 0.03f
                         scaleX = scale
                         scaleY = scale
@@ -997,6 +1138,7 @@ internal fun MobilePlayer(
     onLyrics: () -> Unit = {},
     onBack: () -> Unit,
     onSwipeDismiss: () -> Unit,
+    handleSystemBack: Boolean = true,
     initialUpNextExpanded: Boolean = false,
 ) {
     val scope = rememberCoroutineScope()
@@ -1068,9 +1210,27 @@ internal fun MobilePlayer(
         },
         label = "player-swipe-settle",
     )
-    val displayOffset = if (isDraggingDismiss) dragOffset.coerceAtLeast(0f) else animatedOffset
+    var predictiveBackProgress by remember { mutableFloatStateOf(0f) }
+    val displayOffset = when {
+        predictiveBackProgress > 0f -> offScreenPx * predictiveBackProgress.coerceIn(0f, 1f)
+        isDraggingDismiss -> dragOffset.coerceAtLeast(0f)
+        else -> animatedOffset
+    }
     val hasTrack = track != null
     val trackNavigationActions = LocalTrackNavigationActions.current
+    PlatformBackHandler(
+        enabled = handleSystemBack,
+        onBack = {
+            predictiveBackProgress = 0f
+            onBack()
+        },
+        onBackProgress = { progress ->
+            predictiveBackProgress = progress.coerceIn(0f, 1f)
+        },
+        onBackCancel = {
+            predictiveBackProgress = 0f
+        },
+    )
     Column(
         modifier = Modifier
             .fillMaxSize()

@@ -38,3 +38,8 @@
 -keep class com.sun.prism.** {
     *;
 }
+
+# Kotlin default-arg stubs + large home derivation break ProGuard stack maps (VerifyError on macOS release).
+-keep class com.phoebe.app.ui.HomeUiStateKt {
+    *;
+}

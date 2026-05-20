@@ -36,6 +36,8 @@ actual fun createPlatformHttpClient(): HttpClient = HttpClient(CIO) {
 
 actual fun isDesktopPlatform(): Boolean = true
 
+actual fun supportsPredictiveBack(): Boolean = false
+
 private val storageRoot: File by lazy {
     com.phoebe.app.data.db.desktopDatabaseRoot()
 }

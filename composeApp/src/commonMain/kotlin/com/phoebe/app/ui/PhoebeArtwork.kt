@@ -253,6 +253,8 @@ internal fun rememberRemoteImage(
         artworkLoadsEnabled,
         artworkStaggerMs,
     ) {
+        value = RemoteArtworkCache.cached(target, maxDecodeDimension)
+            ?: fallback?.let { RemoteArtworkCache.cached(it, maxDecodeDimension) }
         while (isActive && value == null) {
             if (!artworkLoadsEnabled) {
                 delay(250L)

@@ -8,6 +8,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -194,6 +195,7 @@ import com.phoebe.app.platform.createPlatformHttpClient
 import com.phoebe.app.platform.currentTimeMs
 import com.phoebe.app.platform.isDesktopPlatform
 import com.phoebe.app.platform.prefersReducedArtworkEffects
+import com.phoebe.app.platform.supportsPredictiveBack
 import com.phoebe.app.telemetry.Telemetry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -224,6 +226,8 @@ fun PhoebeRoot(
     onUseLightAppearanceChange: (Boolean) -> Unit,
     appearanceTintId: String,
     onAppearanceTintChange: (String) -> Unit,
+    homeScreenLayoutMode: HomeScreenLayoutMode = HomeScreenLayoutMode.Default,
+    onHomeScreenLayoutModeChange: (HomeScreenLayoutMode) -> Unit = {},
 ) {
     PhoebeRootStateHolder(
         state = state,
@@ -231,6 +235,8 @@ fun PhoebeRoot(
         onUseLightAppearanceChange = onUseLightAppearanceChange,
         appearanceTintId = appearanceTintId,
         onAppearanceTintChange = onAppearanceTintChange,
+        homeScreenLayoutMode = homeScreenLayoutMode,
+        onHomeScreenLayoutModeChange = onHomeScreenLayoutModeChange,
     )
 }
 
@@ -242,6 +248,8 @@ private fun PhoebeRootStateHolder(
     onUseLightAppearanceChange: (Boolean) -> Unit,
     appearanceTintId: String,
     onAppearanceTintChange: (String) -> Unit,
+    homeScreenLayoutMode: HomeScreenLayoutMode,
+    onHomeScreenLayoutModeChange: (HomeScreenLayoutMode) -> Unit,
 ) {
     val navigator = rememberPhoebeNavigator(state.initialNavigationRequest().toPhoebeRoute())
     val catalog by state.catalog.collectAsState()
@@ -531,14 +539,20 @@ private fun PhoebeRootStateHolder(
     val personalMixCatalog = rememberUpdatedState(catalog)
     val personalMixHomeUiState = rememberUpdatedState(homeUiState)
     val personalMixPreferences = rememberUpdatedState(libraryUi.personalMix)
+    val personalMixPlayHistory = rememberUpdatedState(playHistory)
+    var recentPersonalMixKeys by remember { mutableStateOf(emptySet<String>()) }
     val playPersonalMix = remember(state) {
         {
             val tracks = personalMix(
                 catalog = personalMixCatalog.value,
                 state = personalMixHomeUiState.value,
                 preferences = personalMixPreferences.value,
+                playHistory = personalMixPlayHistory.value,
+                recentMixTrackKeys = recentPersonalMixKeys,
             )
             if (tracks.isNotEmpty()) {
+                recentPersonalMixKeys = (recentPersonalMixKeys + tracks.map { it.personalMixIdentityKey() })
+                    .let { keys -> if (keys.size > 100) keys.drop(keys.size - 100).toSet() else keys.toSet() }
                 playTracks(tracks, 0)
                 navigator.openPlayer()
             }
@@ -815,10 +829,13 @@ private fun PhoebeRootStateHolder(
                     LocalSharedTransitionScope provides sharedTransitionScope,
                     LocalSharedElementTransitionsEnabled provides trackHeavySectionsEnabled,
                 ) {
+                val mobileRoutes = navigator.routes
+                val mobilePlayerAsSheet = mobileRoutes.lastOrNull() == PhoebeRoute.Player && mobileRoutes.size > 1
+                val mobileContentRoutes = if (mobilePlayerAsSheet) mobileRoutes.dropLast(1) else mobileRoutes
                 PhoebeNavDisplay(
-                    backStack = navigator.routes,
+                    backStack = mobileContentRoutes,
                     modifier = Modifier.fillMaxSize(),
-                    animateTransitions = false,
+                    animateTransitions = supportsPredictiveBack(),
                     opaqueSceneBackgrounds = true,
                     onBack = {
                         when (navigator.currentRoute) {
@@ -1060,6 +1077,7 @@ private fun PhoebeRootStateHolder(
                             playerSwipeDismiss = true
                             navigator.pop()
                         },
+                        handleSystemBack = navigator.routes.size > 1,
                     )
                     AppScreen.Home -> {
                     val onHomeBrowse = browseSection == BrowseSection.Home && selectedPlaylistId == null
@@ -1144,6 +1162,8 @@ private fun PhoebeRootStateHolder(
                         onDownload = state::download,
                         onOpenNowPlaying = { navigator.openPlayer() },
                         onTogglePlayPause = state::togglePlayPause,
+                        onPreviousTrack = state::previous,
+                        onNextTrack = state::next,
                         onSignOut = state::signOut,
                         onAddLocalFolder = state::addLocalFolderFromUri,
                         onRefreshLibrary = state::refreshCatalog,
@@ -1156,6 +1176,7 @@ private fun PhoebeRootStateHolder(
                         onExportFavoritePlaylists = state::exportFavoritePlaylists,
                         onImportFavoritePlaylists = state::importFavoritePlaylists,
                         appSettings = appSettings,
+                        homeScreenLayoutMode = homeScreenLayoutMode,
                         onCrossfadeSeconds = state::setCrossfadeSeconds,
                         onScanLibraryOnLaunch = state::setScanLibraryOnLaunch,
                         onNotifyWhenDownloadFinishes = state::setNotifyWhenDownloadFinishes,
@@ -1168,10 +1189,63 @@ private fun PhoebeRootStateHolder(
                         onUseLightAppearanceChange = onUseLightAppearanceChange,
                         appearanceTintId = appearanceTintId,
                         onAppearanceTintChange = onAppearanceTintChange,
+                        onHomeScreenLayoutModeChange = onHomeScreenLayoutModeChange,
                     )
                     }
                 }
                 }
+                }
+                if (mobilePlayerAsSheet) {
+                    val playerSheetVisibility = remember {
+                        MutableTransitionState(false)
+                    }.apply {
+                        targetState = true
+                    }
+                    AnimatedVisibility(
+                        visibleState = playerSheetVisibility,
+                        enter = slideInVertically(
+                            animationSpec = spring(
+                                stiffness = Spring.StiffnessMedium,
+                                dampingRatio = Spring.DampingRatioNoBouncy,
+                            ),
+                            initialOffsetY = { it },
+                        ),
+                        exit = ExitTransition.None,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .zIndex(4f),
+                    ) {
+                        MobilePlayerHost(
+                            appState = state,
+                            track = currentTrack,
+                            upNext = upNext,
+                            previousTrack = playerQueue.queue.getOrNull(currentIndex - 1),
+                            currentIndex = currentIndex,
+                            castState = cast,
+                            remotePlaybackTarget = musicAssistantRemotePlayback?.target,
+                            onToggle = state::togglePlayPause,
+                            onPrevious = state::previous,
+                            onNext = state::next,
+                            onSkipQueueBy = state::skipQueueBy,
+                            onShuffle = state::toggleShuffle,
+                            onRepeat = state::cycleRepeat,
+                            onSeek = state::seekTo,
+                            onPlayQueue = state::playUpNext,
+                            onMoveUpNext = state::moveUpNext,
+                            onRemoveUpNext = state::removeUpNext,
+                            onOpenSongDetail = { navigator.open(it.route()) },
+                            onCast = state::showCastPicker,
+                            onLyrics = {
+                                currentTrack?.let { navigator.open(PhoebeRoute.Lyrics(it.id)) }
+                            },
+                            onBack = { navigator.pop() },
+                            onSwipeDismiss = {
+                                playerSwipeDismiss = true
+                                navigator.pop()
+                            },
+                            handleSystemBack = true,
+                        )
+                    }
                 }
                 }
                 }
@@ -1348,6 +1422,7 @@ private fun PhoebeRootStateHolder(
                         defaultDownloadDirectoryLabel = state.defaultDownloadDirectoryLabel,
                         useLightAppearance = useLightAppearance,
                         appearanceTintId = appearanceTintId,
+                        homeScreenLayoutMode = homeScreenLayoutMode,
                     ),
                     settingsActions = SettingsActions(
                         onHomeSections = state::setHomeSections,
@@ -1361,6 +1436,7 @@ private fun PhoebeRootStateHolder(
                         onDeleteAllDownloads = state::deleteAllDownloads,
                         onUseLightAppearanceChange = onUseLightAppearanceChange,
                         onAppearanceTintChange = onAppearanceTintChange,
+                        onHomeScreenLayoutModeChange = onHomeScreenLayoutModeChange,
                     ),
                 )
             }
@@ -1581,6 +1657,7 @@ private fun MobilePlayerHost(
     onLyrics: () -> Unit,
     onBack: () -> Unit,
     onSwipeDismiss: () -> Unit,
+    handleSystemBack: Boolean = true,
 ) {
     val player by appState.player.collectAsState()
     MobilePlayer(
@@ -1611,6 +1688,7 @@ private fun MobilePlayerHost(
         onLyrics = onLyrics,
         onBack = onBack,
         onSwipeDismiss = onSwipeDismiss,
+        handleSystemBack = handleSystemBack,
     )
 }
 

@@ -168,6 +168,7 @@ internal data class SettingsUiState(
     val defaultDownloadDirectoryLabel: String,
     val useLightAppearance: Boolean,
     val appearanceTintId: String,
+    val homeScreenLayoutMode: HomeScreenLayoutMode = HomeScreenLayoutMode.Default,
     val settingsInitialCategory: SettingsCategory = SettingsCategory.AudioPlayback,
 )
 
@@ -183,4 +184,5 @@ internal data class SettingsActions(
     val onDeleteAllDownloads: () -> Unit,
     val onUseLightAppearanceChange: (Boolean) -> Unit,
     val onAppearanceTintChange: (String) -> Unit,
+    val onHomeScreenLayoutModeChange: (HomeScreenLayoutMode) -> Unit = {},
 )

@@ -18,6 +18,7 @@ import org.robolectric.annotation.GraphicsMode
 @Config(sdk = [35], application = ScreenshotTestApplication::class)
 class PhoebeAndroidPhoneScreenshotTest {
     @Test fun phoneHomeDark() = capturePhone("home", PhoebeScreenshotScenario.Home)
+    @Test fun phoneHomeExpandedDark() = capturePhone("home-expanded", PhoebeScreenshotScenario.HomeExpanded)
     @Test fun phoneHomeAccordionsCollapsedDark() = capturePhone("home-accordions-collapsed", PhoebeScreenshotScenario.HomeAccordionsCollapsed)
     @Test fun phoneHomeAccordionsExpandedDark() = capturePhone("home-accordions-expanded", PhoebeScreenshotScenario.HomeAccordionsExpanded)
     @Test fun phoneHomePlayedRowsDark() = capturePhone("home-played-rows", PhoebeScreenshotScenario.HomePlayedRows)
@@ -42,6 +43,7 @@ class PhoebeAndroidPhoneScreenshotTest {
     )
 
     @Test fun phoneHomeLight() = capturePhone("home", PhoebeScreenshotScenario.Home, useLightAppearance = true)
+    @Test fun phoneHomeExpandedLight() = capturePhone("home-expanded", PhoebeScreenshotScenario.HomeExpanded, useLightAppearance = true)
     @Test fun phoneHomeAccordionsCollapsedLight() = capturePhone("home-accordions-collapsed", PhoebeScreenshotScenario.HomeAccordionsCollapsed, useLightAppearance = true)
     @Test fun phoneHomeAccordionsExpandedLight() = capturePhone("home-accordions-expanded", PhoebeScreenshotScenario.HomeAccordionsExpanded, useLightAppearance = true)
     @Test fun phoneLibraryLight() = capturePhone("library", PhoebeScreenshotScenario.Library, useLightAppearance = true)

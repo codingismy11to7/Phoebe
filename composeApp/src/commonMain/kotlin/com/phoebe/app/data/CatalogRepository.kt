@@ -3226,30 +3226,39 @@ class CatalogRepository(
         val existing = snapshot.tracksByParent[playlist.id]
         if (!existing.isNullOrEmpty()) {
             if (existing.size != playlistMeta.trackCount) {
-                persistenceScope.launch {
-                    runCatching { refetchPlaylistTracksFromPlex(session, playlistMeta, showRefreshing = false) }
-                        .onFailure { error ->
-                            PhoebeLog.d("CatalogRepository") {
-                                "background playlist refresh failed for '${playlistMeta.title}': ${error.message}"
-                            }
+                runCatching { refetchPlaylistTracksFromPlex(session, playlistMeta, showRefreshing = false) }
+                    .onFailure { error ->
+                        PhoebeLog.d("CatalogRepository") {
+                            "playlist refresh failed for '${playlistMeta.title}': ${error.message}"
                         }
+                    }
+                val refreshed = mutableCatalog.value.tracksByParent[playlist.id]
+                if (!refreshed.isNullOrEmpty()) {
+                    return refreshed
                 }
             }
             return existing
         }
         readTracksForParentFromDatabase(playlist.id)?.let { cached ->
             if (cached.isNotEmpty()) {
+                if (cached.size != playlistMeta.trackCount) {
+                    runCatching { refetchPlaylistTracksFromPlex(session, playlistMeta, showRefreshing = false) }
+                        .onFailure { error ->
+                            PhoebeLog.d("CatalogRepository") {
+                                "playlist database refresh failed for '${playlistMeta.title}': ${error.message}"
+                            }
+                        }
+                    val refreshed = mutableCatalog.value.tracksByParent[playlist.id]
+                    if (!refreshed.isNullOrEmpty()) {
+                        return refreshed
+                    }
+                }
                 publish(
                     mutableCatalog.value.copy(
                         tracksByParent = mutableCatalog.value.tracksByParent + (playlist.id to cached),
                     ),
                     persist = false,
                 )
-                if (cached.size != playlistMeta.trackCount) {
-                    persistenceScope.launch {
-                        runCatching { refetchPlaylistTracksFromPlex(session, playlistMeta, showRefreshing = false) }
-                    }
-                }
                 return cached
             }
         }

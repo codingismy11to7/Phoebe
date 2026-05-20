@@ -182,6 +182,7 @@ import kotlin.math.max
 
 internal enum class PhoebeScreenshotScenario {
     Home,
+    HomeExpanded,
     HomeAccordionsCollapsed,
     HomeAccordionsExpanded,
     HomePlayedRows,
@@ -672,6 +673,11 @@ internal fun PhoebeMobileScreenshotScenario(
                 currentTrack = fixture.currentTrack,
                 homeUiState = deriveHomeUiState(fixture.catalog, fixture.playHistory, randomArtistSeed = 7, randomAlbumSeed = 11, nowMs = fixture.nowMs),
                 isPlaying = true,
+                homeScreenLayoutMode = if (scenario == PhoebeScreenshotScenario.HomeExpanded) {
+                    HomeScreenLayoutMode.Expanded
+                } else {
+                    HomeScreenLayoutMode.Default
+                },
                 onNavigate = {},
                 onSearchQuery = {},
                 onLibraryFilter = {},
@@ -695,6 +701,8 @@ internal fun PhoebeMobileScreenshotScenario(
                 onDownload = {},
                 onOpenNowPlaying = {},
                 onTogglePlayPause = {},
+                onPreviousTrack = {},
+                onNextTrack = {},
                 onSignOut = {},
                 onAddLocalFolder = {},
                 onRefreshLibrary = {},
@@ -774,6 +782,8 @@ private fun MobileHomeAccordionScreenshot(
         onDownload = {},
         onOpenNowPlaying = {},
         onTogglePlayPause = {},
+        onPreviousTrack = {},
+        onNextTrack = {},
         onSignOut = {},
         onAddLocalFolder = {},
         onRefreshLibrary = {},
@@ -797,6 +807,7 @@ private fun MobileHomeAccordionScreenshot(
         onUseLightAppearanceChange = {},
         appearanceTintId = PhoebeTintOption.Purple.id,
         onAppearanceTintChange = {},
+        homeScreenLayoutMode = HomeScreenLayoutMode.Default,
         radioStations = fixture.radioStations,
         initialExpandedPhoneSection = expandedSection,
         homeListState = listState,
