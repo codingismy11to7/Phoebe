@@ -2,8 +2,10 @@ package com.phoebe.app.sources
 
 import com.phoebe.app.data.PlexClient
 import com.phoebe.app.data.MusicBrainzReleaseGroupSearchResponse
+import com.phoebe.app.data.CatalogSyncTrace
 import com.phoebe.app.data.enrichArtistAlbumCountsOnly
 import com.phoebe.app.data.enrichArtistArtwork
+import com.phoebe.app.data.metadataFetchProgress
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.CatalogSnapshot
@@ -11,20 +13,25 @@ import com.phoebe.app.domain.MusicLibrary
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.Track
-import com.phoebe.app.platform.catalogTrackPrefetchAlbumCount
-import com.phoebe.app.platform.catalogTrackPrefetchParallelism
+import com.phoebe.app.platform.PhoebeLog
+import com.phoebe.app.platform.catalogTrackIndexParallelism
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.parameter
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.yield
+
+/** Plex metadata list endpoints can be slow on large libraries; fail open after this. */
+private const val PlexMetadataFetchTimeoutMs = 120_000L
 
 /**
  * Builds a Plex-only catalog snapshot (IDs are raw Plex keys; wrap with [CatalogMerge.withPrefix] before merging).
@@ -73,20 +80,107 @@ class PlexCatalogBuilder(
         )
     }
 
-    suspend fun buildMetadataCatalog(server: PlexServer, library: MusicLibrary, token: String): CatalogSnapshot = coroutineScope {
-        val artistsDeferred = async { plexClient.artists(server, library, token) }
-        val albumsDeferred = async { plexClient.albums(server, library, token) }
-        val playlistsDeferred = async { plexClient.playlists(server, token) }
+    suspend fun buildMetadataCatalog(
+        server: PlexServer,
+        library: MusicLibrary,
+        token: String,
+        onProgress: ((message: String, detail: String?) -> Unit)? = null,
+    ): CatalogSnapshot = buildMetadataCatalog(
+        server = server,
+        library = library,
+        token = token,
+        onProgress = onProgress,
+        trace = null,
+    )
 
-        val rawAlbums = albumsDeferred.await()
+    internal suspend fun buildMetadataCatalog(
+        server: PlexServer,
+        library: MusicLibrary,
+        token: String,
+        onProgress: ((message: String, detail: String?) -> Unit)?,
+        trace: CatalogSyncTrace?,
+    ): CatalogSnapshot = coroutineScope {
+        var albumsDone = false
+        var albumCount = 0
+        var artistsDone = false
+        var artistCount = 0
+        var playlistsDone = false
+        var playlistCount = 0
+        fun report() {
+            val progress = metadataFetchProgress(
+                albumsDone = albumsDone,
+                albumCount = albumCount,
+                artistsDone = artistsDone,
+                artistCount = artistCount,
+                playlistsDone = playlistsDone,
+                playlistCount = playlistCount,
+            )
+            onProgress?.invoke(progress.message, progress.detail)
+        }
+
+        report()
+        val artistsDeferred = async {
+            trace?.network("plex.artists", detail = { "${it.size} artists" }) {
+                plexClient.artists(server, library, token)
+            } ?: plexClient.artists(server, library, token)
+        }
+        val albumsDeferred = async {
+            trace?.network("plex.albums", detail = { "${it.size} albums" }) {
+                plexClient.albums(server, library, token)
+            } ?: plexClient.albums(server, library, token)
+        }
+        val playlistsDeferred = async {
+            trace?.network("plex.playlists", detail = { "${it.size} playlists" }) {
+                plexClient.playlists(server, token)
+            } ?: plexClient.playlists(server, token)
+        }
+
+        val rawAlbums = awaitPlexMetadata("albums", albumsDeferred)
+        albumsDone = true
+        albumCount = rawAlbums.size
+        report()
         yield()
-        val artists = artistsDeferred.await()
+        val artists = awaitPlexMetadata("artists", artistsDeferred)
+        artistsDone = true
+        artistCount = artists.size
+        report()
         yield()
-        val playlistsRaw = playlistsDeferred.await()
+        val playlistsRaw = awaitPlexMetadata("playlists", playlistsDeferred)
+        playlistsDone = true
+        playlistCount = playlistsRaw.size
+        report()
+        onProgress?.invoke(
+            "Organizing library metadata…",
+            "$artistCount artists · $albumCount albums · $playlistCount playlists",
+        )
         yield()
 
-        val artistsWithArtwork = enrichArtistArtwork(artists, rawAlbums)
-        val artistsResolved = enrichArtistAlbumCountsOnly(
+        onProgress?.invoke("Organizing library metadata…", "Matching artist artwork…")
+        val artistsWithArtwork = trace?.memory("enrichArtistArtwork", detail = { "${it.size} artists" }) {
+            enrichArtistArtwork(artists, rawAlbums)
+        } ?: enrichArtistArtwork(artists, rawAlbums)
+        yield()
+        onProgress?.invoke("Organizing library metadata…", "Counting albums per artist…")
+        val artistsResolved = trace?.memory("enrichArtistAlbumCountsOnly", detail = { "${it.size} artists" }) {
+            enrichArtistAlbumCountsOnly(
+                artistsWithArtwork.ifEmpty {
+                    rawAlbums.groupBy { it.artist }.values.map { list ->
+                        val first = list.first()
+                        Artist(
+                            id = "album-artist-${first.id}",
+                            title = first.artist,
+                            thumbUrl = first.thumbUrl,
+                            albumCount = list.size,
+                            genre = first.genre,
+                            mood = first.mood,
+                            style = first.style,
+                            rating = first.rating,
+                        )
+                    }
+                },
+                rawAlbums,
+            )
+        } ?: enrichArtistAlbumCountsOnly(
             artistsWithArtwork.ifEmpty {
                 rawAlbums.groupBy { it.artist }.values.map { list ->
                     val first = list.first()
@@ -114,18 +208,36 @@ class PlexCatalogBuilder(
         )
     }
 
+    private suspend fun <T> awaitPlexMetadata(
+        label: String,
+        deferred: kotlinx.coroutines.Deferred<List<T>>,
+    ): List<T> {
+        val result = withContext(Dispatchers.Default.limitedParallelism(1)) {
+            withTimeoutOrNull(PlexMetadataFetchTimeoutMs) {
+                runCatching { deferred.await() }.getOrElse { error ->
+                    PhoebeLog.d("PlexCatalogBuilder") { "failed fetching $label: ${error.message}" }
+                    emptyList()
+                }
+            }
+        }
+        if (result == null) {
+            PhoebeLog.d("PlexCatalogBuilder") { "timed out fetching $label after ${PlexMetadataFetchTimeoutMs}ms" }
+            return emptyList()
+        }
+        return result
+    }
+
     suspend fun prefetchAlbumTracks(
         server: PlexServer,
         albums: List<Album>,
         token: String,
         onAlbumTracks: suspend (Album, List<Track>) -> Unit = { _, _ -> },
     ): Map<String, List<Track>> = coroutineScope {
-        val albumsSlice = albums.take(catalogTrackPrefetchAlbumCount())
         val mutex = Mutex()
         val tracksAccum = mutableMapOf<String, List<Track>>()
 
-        albumsSlice
-            .chunked(catalogTrackPrefetchParallelism().coerceAtLeast(1))
+        albums
+            .chunked(catalogTrackIndexParallelism().coerceAtLeast(1))
             .forEach { albumChunk ->
                 albumChunk.map { album ->
                     async {

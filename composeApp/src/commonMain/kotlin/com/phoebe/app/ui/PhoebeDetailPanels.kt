@@ -855,7 +855,13 @@ private fun ArtistStatsPanel(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         Box(Modifier.size(32.dp)) {
-                            ArtworkImage(album.title, album.thumbUrl, Modifier.fillMaxSize(), radius = 6.dp)
+                            ArtworkImage(
+                                album.title,
+                                album.thumbUrl,
+                                Modifier.fillMaxSize(),
+                                radius = 6.dp,
+                                maxDecodeDimension = 512,
+                            )
                         }
                         Column(Modifier.weight(1f)) {
                             Text(
@@ -1159,15 +1165,19 @@ internal fun ArtistDetailPanel(
                     columns = libraryUi.columns,
                     onColumns = onLibraryColumns,
                 )
-                if (catalogRefreshing && searchQuery.isBlank()) {
+                val tracksLoadingIds = LocalTracksLoading.current
+                val artistAlbumsLoading = catalogAlbumsForArtist(catalog, artist.title).any { it.id in tracksLoadingIds }
+                if (artistAlbumsLoading && searchQuery.isBlank()) {
                     CatalogLoadingStrip()
                 }
             }
         }
         if (visibleTracks.isEmpty() && searchQuery.isBlank()) {
             item(contentType = "artist-song-empty") {
+                val tracksLoadingIds = LocalTracksLoading.current
+                val artistAlbumsLoading = catalogAlbumsForArtist(catalog, artist.title).any { it.id in tracksLoadingIds }
                 Text(
-                    if (catalogRefreshing) "Fetching songs…" else "No songs loaded yet.",
+                    if (artistAlbumsLoading) "Fetching songs…" else "No songs loaded yet.",
                     color = PhoebeUi.mutedText,
                     fontSize = 14.sp,
                 )
@@ -1585,7 +1595,7 @@ internal fun AlbumDetailPanel(
                         }
                     },
                 )
-                if (catalogRefreshing && searchQuery.isBlank()) {
+                if (album.id in LocalTracksLoading.current && searchQuery.isBlank()) {
                     CatalogLoadingStrip()
                 }
             }
@@ -1595,7 +1605,7 @@ internal fun AlbumDetailPanel(
                 Text(
                     when {
                         searchQuery.isNotBlank() -> "No tracks on ${album.title} match \"$searchQuery\"."
-                        catalogRefreshing -> "Fetching songs…"
+                        album.id in LocalTracksLoading.current -> "Fetching songs…"
                         else -> "No tracks loaded yet."
                     },
                     color = PhoebeUi.mutedText,
@@ -1864,11 +1874,11 @@ internal fun PlaylistDetailPanel(
         if (visibleTracks.isEmpty()) {
             item(contentType = "playlist-empty") {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (catalogRefreshing && searchQuery.isBlank()) CatalogLoadingStrip()
+                    if (playlist.id in LocalTracksLoading.current && searchQuery.isBlank()) CatalogLoadingStrip()
                     Text(
                         when {
                             searchQuery.isNotBlank() -> "No tracks / artists in this playlist match \"$searchQuery\"."
-                            catalogRefreshing -> "Fetching songs…"
+                            playlist.id in LocalTracksLoading.current -> "Fetching songs…"
                             else -> "No tracks loaded for this playlist yet."
                         },
                         color = PhoebeUi.mutedText,

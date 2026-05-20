@@ -186,6 +186,7 @@ internal fun SignInWelcomeScreen(
     jellyfinServers: List<PlexServer>,
     jellyfinDiscoveryLoading: Boolean,
     jellyfinQuickConnect: JellyfinQuickConnectResult?,
+    authInProgress: Boolean,
     onStartSignIn: () -> Unit,
     onFinishSignIn: () -> Unit,
     onSignInJellyfin: (String, String, String) -> Unit,
@@ -205,6 +206,12 @@ internal fun SignInWelcomeScreen(
     var providerUser by remember { mutableStateOf("") }
     var providerPassword by remember { mutableStateOf("") }
     val scrollState = rememberScrollState()
+    LaunchedEffect(jellyfinExpanded, expandedProvider) {
+        if (jellyfinExpanded || expandedProvider != null) {
+            delay(180)
+            scrollState.scrollTo(scrollState.maxValue)
+        }
+    }
     Column(
         modifier
             .fillMaxSize()
@@ -311,20 +318,21 @@ internal fun SignInWelcomeScreen(
                 if (provider == MediaProviderType.Navidrome) {
                     SyncModeButtons(
                         providerName = MediaProviderType.Navidrome.providerButtonLabel(),
-                        busy = false,
+                        busy = authInProgress,
                         enabled = providerUrl.isNotBlank() && providerUser.isNotBlank() && providerPassword.isNotBlank(),
                         onMode = { mode -> onSignInProvider(MediaProviderType.Navidrome, providerUrl, providerUser, providerPassword, mode) },
                     )
                 } else {
-                    FilledTonalButton(
+                    ProviderSignInButton(
+                        label = "Sign in to ${provider?.providerButtonLabel() ?: "provider"}",
+                        enabled = provider != null &&
+                            providerUrl.isNotBlank() &&
+                            (providerUser.isNotBlank() || providerPassword.isNotBlank()),
+                        inProgress = authInProgress,
                         onClick = { provider?.let { onSignInProvider(it, providerUrl, providerUser, providerPassword, null) } },
-                        enabled = provider != null && providerUrl.isNotBlank() && (providerUser.isNotBlank() || providerPassword.isNotBlank()),
-                        colors = ButtonDefaults.filledTonalButtonColors(
-                            containerColor = PhoebeUi.accent.copy(alpha = 0.22f),
-                            contentColor = PhoebeUi.primaryText,
-                        ),
-                    ) { Text("Sign in to ${provider?.providerButtonLabel() ?: "provider"}", fontSize = 14.sp) }
+                    )
                 }
+                AuthInlineStatus(message)
             }
         }
         AnimatedVisibility(jellyfinExpanded) {
@@ -334,7 +342,7 @@ internal fun SignInWelcomeScreen(
                     .widthIn(max = 420.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                AuthTextField(jellyfinUrl, { jellyfinUrl = it }, "Server URL")
+                AuthTextField(jellyfinUrl, { jellyfinUrl = it }, JellyfinServerUrlPlaceholder)
                 JellyfinServerDiscoveryControls(
                     servers = jellyfinServers,
                     loading = jellyfinDiscoveryLoading,
@@ -346,22 +354,21 @@ internal fun SignInWelcomeScreen(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     OutlinedButton(
                         onClick = { onStartJellyfinQuickConnect(jellyfinUrl) },
-                        enabled = jellyfinUrl.isNotBlank(),
+                        enabled = jellyfinUrl.isNotBlank() && !authInProgress,
                     ) { Text("Quick Connect", fontSize = 14.sp) }
                     if (jellyfinQuickConnect != null) {
-                        OutlinedButton(onClick = onFinishJellyfinQuickConnect) {
+                        OutlinedButton(onClick = onFinishJellyfinQuickConnect, enabled = !authInProgress) {
                             Text("Finish: ${jellyfinQuickConnect.Code}", fontSize = 14.sp)
                         }
                     }
                 }
-                FilledTonalButton(
-                    onClick = { onSignInJellyfin(jellyfinUrl, jellyfinUser, jellyfinPassword) },
+                ProviderSignInButton(
+                    label = "Sign in to Jellyfin",
                     enabled = jellyfinUrl.isNotBlank() && jellyfinUser.isNotBlank(),
-                    colors = ButtonDefaults.filledTonalButtonColors(
-                        containerColor = PhoebeUi.accent.copy(alpha = 0.22f),
-                        contentColor = PhoebeUi.primaryText,
-                    ),
-                ) { Text("Sign in to Jellyfin", fontSize = 14.sp) }
+                    inProgress = authInProgress,
+                    onClick = { onSignInJellyfin(jellyfinUrl, jellyfinUser, jellyfinPassword) },
+                )
+                AuthInlineStatus(message)
             }
         }
         if (showLocalFolderHint) {
@@ -424,9 +431,10 @@ private fun MediaProviderType.providerButtonLabel(): String = when (this) {
     MediaProviderType.MusicAssistant -> "Music Assistant"
 }
 
-private const val DefaultNavidromeServerUrl = "http://192.168.86.43:30043/"
+private const val DefaultNavidromeServerUrl = ""
 private const val DefaultJellyfinServerUrl = "http://192.168.86.43:30013/"
-private const val DefaultEmbyServerUrl = "http://192.168.86.43:36983/"
+private const val DefaultEmbyServerUrl = ""
+private const val JellyfinServerUrlPlaceholder = "http://hostname:8096"
 
 @Composable
 private fun SyncModeButtons(
@@ -460,6 +468,7 @@ internal fun MobileSignInWelcomeScreen(
     jellyfinServers: List<PlexServer>,
     jellyfinDiscoveryLoading: Boolean,
     jellyfinQuickConnect: JellyfinQuickConnectResult?,
+    authInProgress: Boolean = false,
     onStartSignIn: () -> Unit,
     onFinishSignIn: () -> Unit,
     onSignInJellyfin: (String, String, String) -> Unit,
@@ -482,6 +491,13 @@ internal fun MobileSignInWelcomeScreen(
     var providerPassword by remember { mutableStateOf("") }
     val pickLocalFolder = rememberPickLocalFolder(onPicked = onAddLocalFolder)
     val lightMode = LocalPhoebePalette.current == PhoebePaletteLight
+    val scrollState = rememberScrollState()
+    LaunchedEffect(jellyfinExpanded, expandedProvider) {
+        if (jellyfinExpanded || expandedProvider != null) {
+            delay(180)
+            scrollState.scrollTo(scrollState.maxValue)
+        }
+    }
 
     BoxWithConstraints(
         modifier = modifier
@@ -502,7 +518,7 @@ internal fun MobileSignInWelcomeScreen(
         Column(
             Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(scrollState)
                 .padding(start = 24.dp, top = topPadding, end = 24.dp, bottom = 24.dp)
                 .navigationBarsPadding(),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -604,8 +620,9 @@ internal fun MobileSignInWelcomeScreen(
                         painter = painterResource(Res.drawable.jellyfin),
                         painterTint = Color(0xFF00A4DC),
                         title = "Sign in with Jellyfin (alpha / not fully supported)",
-                        subtitle = "Connect to a Jellyfin music server",
+                        subtitle = if (jellyfinExpanded) "Enter your server details below" else "Connect to a Jellyfin music server",
                         lightMode = lightMode,
+                        expanded = jellyfinExpanded,
                         onClick = {
                             expandedProvider = null
                             if (jellyfinUrl.isBlank()) {
@@ -616,7 +633,7 @@ internal fun MobileSignInWelcomeScreen(
                     )
                     AnimatedVisibility(jellyfinExpanded) {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            AuthTextField(jellyfinUrl, { jellyfinUrl = it }, "Server URL")
+                            AuthTextField(jellyfinUrl, { jellyfinUrl = it }, JellyfinServerUrlPlaceholder)
                             JellyfinServerDiscoveryControls(
                                 servers = jellyfinServers,
                                 loading = jellyfinDiscoveryLoading,
@@ -632,28 +649,29 @@ internal fun MobileSignInWelcomeScreen(
                             ) {
                                 OutlinedButton(
                                     onClick = { onStartJellyfinQuickConnect(jellyfinUrl) },
-                                    enabled = jellyfinUrl.isNotBlank(),
+                                    enabled = jellyfinUrl.isNotBlank() && !authInProgress,
                                     modifier = Modifier.weight(1f),
                                 ) { Text("Quick Connect") }
                                 if (jellyfinQuickConnect != null) {
                                     OutlinedButton(
                                         onClick = onFinishJellyfinQuickConnect,
+                                        enabled = !authInProgress,
                                         modifier = Modifier.weight(1f),
                                     ) { Text("Finish: ${jellyfinQuickConnect.Code}") }
                                 }
                             }
-                            FilledTonalButton(
-                                onClick = { onSignInJellyfin(jellyfinUrl, jellyfinUser, jellyfinPassword) },
+                            ProviderSignInButton(
+                                label = "Sign in to Jellyfin",
                                 enabled = jellyfinUrl.isNotBlank() && jellyfinUser.isNotBlank(),
+                                inProgress = authInProgress,
+                                onClick = { onSignInJellyfin(jellyfinUrl, jellyfinUser, jellyfinPassword) },
                                 modifier = Modifier.fillMaxWidth(),
-                                colors = ButtonDefaults.filledTonalButtonColors(
-                                    containerColor = PhoebeUi.accent.copy(alpha = 0.22f),
-                                    contentColor = PhoebeUi.primaryText,
-                                ),
-                            ) { Text("Sign in to Jellyfin") }
+                            )
+                            AuthInlineStatus(message)
                         }
                     }
                     listOf(MediaProviderType.Emby, MediaProviderType.Navidrome, MediaProviderType.MusicAssistant).forEach { provider ->
+                        val providerExpanded = expandedProvider == provider
                         ProviderChoiceRow(
                             painter = when (provider) {
                                 MediaProviderType.Emby -> painterResource(Res.drawable.emby)
@@ -668,13 +686,15 @@ internal fun MobileSignInWelcomeScreen(
                                 else -> null
                             },
                             title = "Sign in with ${provider.providerButtonLabel()} (alpha / not fully supported)",
-                            subtitle = when (provider) {
-                                MediaProviderType.Emby -> "Connect to an Emby music server"
-                                MediaProviderType.Navidrome -> "Connect via the Subsonic API"
-                                MediaProviderType.MusicAssistant -> "Alpha: sync library items and control MA players"
+                            subtitle = when {
+                                providerExpanded -> "Enter your server details below"
+                                provider == MediaProviderType.Emby -> "Connect to an Emby music server"
+                                provider == MediaProviderType.Navidrome -> "Connect via the Subsonic API"
+                                provider == MediaProviderType.MusicAssistant -> "Alpha: sync library items and control MA players"
                                 else -> ""
                             },
                             lightMode = lightMode,
+                            expanded = providerExpanded,
                             onClick = {
                                 jellyfinExpanded = false
                                 if (providerUrl.isBlank()) {
@@ -687,7 +707,7 @@ internal fun MobileSignInWelcomeScreen(
                                 expandedProvider = if (expandedProvider == provider) null else provider
                             },
                         )
-                        AnimatedVisibility(expandedProvider == provider) {
+                        AnimatedVisibility(providerExpanded) {
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 if (provider == MediaProviderType.MusicAssistant) {
                                     Text(
@@ -703,21 +723,20 @@ internal fun MobileSignInWelcomeScreen(
                                 if (provider == MediaProviderType.Navidrome) {
                                     SyncModeButtons(
                                         providerName = provider.providerButtonLabel(),
-                                        busy = false,
+                                        busy = authInProgress,
                                         enabled = providerUrl.isNotBlank() && providerUser.isNotBlank() && providerPassword.isNotBlank(),
                                         onMode = { mode -> onSignInProvider(provider, providerUrl, providerUser, providerPassword, mode) },
                                     )
                                 } else {
-                                    FilledTonalButton(
-                                        onClick = { onSignInProvider(provider, providerUrl, providerUser, providerPassword, null) },
+                                    ProviderSignInButton(
+                                        label = "Sign in to ${provider.providerButtonLabel()}",
                                         enabled = providerUrl.isNotBlank() && (providerUser.isNotBlank() || providerPassword.isNotBlank()),
+                                        inProgress = authInProgress,
+                                        onClick = { onSignInProvider(provider, providerUrl, providerUser, providerPassword, null) },
                                         modifier = Modifier.fillMaxWidth(),
-                                        colors = ButtonDefaults.filledTonalButtonColors(
-                                            containerColor = PhoebeUi.accent.copy(alpha = 0.22f),
-                                            contentColor = PhoebeUi.primaryText,
-                                        ),
-                                    ) { Text("Sign in to ${provider.providerButtonLabel()}") }
+                                    )
                                 }
+                                AuthInlineStatus(message)
                             }
                         }
                     }
@@ -768,6 +787,60 @@ private fun JellyfinServerDiscoveryControls(
                     Text(server.uri, color = PhoebeUi.mutedText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun AuthInlineStatus(message: String) {
+    if (message.isBlank()) return
+    Text(
+        message,
+        color = PhoebeUi.secondaryText,
+        fontSize = 13.sp,
+        lineHeight = 18.sp,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+@Composable
+private fun ProviderSignInButton(
+    label: String,
+    enabled: Boolean,
+    inProgress: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (!enabled && !inProgress) {
+            Text(
+                "Enter your server URL and credentials to continue.",
+                color = PhoebeUi.mutedText,
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+            )
+        }
+        FilledTonalButton(
+            onClick = onClick,
+            enabled = enabled && !inProgress,
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.filledTonalButtonColors(
+                containerColor = PhoebeUi.accent.copy(alpha = 0.22f),
+                contentColor = PhoebeUi.primaryText,
+                disabledContainerColor = PhoebeUi.subtleFill,
+                disabledContentColor = PhoebeUi.mutedText,
+            ),
+        ) {
+            if (inProgress) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    strokeWidth = 2.dp,
+                    color = PhoebeUi.accent,
+                )
+                Spacer(Modifier.width(10.dp))
+            }
+            Text(label, fontSize = 14.sp)
         }
     }
 }
@@ -861,10 +934,15 @@ internal fun ProviderChoiceRow(
     title: String,
     subtitle: String,
     lightMode: Boolean,
+    expanded: Boolean = false,
     onClick: () -> Unit,
 ) {
     val rowShape = RoundedCornerShape(18.dp)
-    val rowBackground = if (lightMode) PhoebeUi.glass else PhoebeUi.subtleFill
+    val rowBackground = when {
+        expanded -> PhoebeUi.accent.copy(alpha = 0.14f)
+        lightMode -> PhoebeUi.glass
+        else -> PhoebeUi.subtleFill
+    }
     val rowShadow = if (lightMode) Modifier.shadow(12.dp, rowShape, ambientColor = Color(0x14141820), spotColor = Color(0x14141820)) else Modifier
     Row(
         modifier = Modifier
@@ -872,7 +950,7 @@ internal fun ProviderChoiceRow(
             .then(rowShadow)
             .clip(rowShape)
             .background(rowBackground)
-            .border(BorderStroke(1.dp, PhoebeUi.border), rowShape)
+            .border(BorderStroke(1.dp, if (expanded) PhoebeUi.accent else PhoebeUi.border), rowShape)
             .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -900,7 +978,11 @@ internal fun ProviderChoiceRow(
             Text(title, color = PhoebeUi.primaryText, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             Text(subtitle, color = PhoebeUi.secondaryText, fontSize = 12.sp, lineHeight = 16.sp)
         }
-        PhoebeIconView(PhoebeIcon.Forward, tint = PhoebeUi.mutedText, modifier = Modifier.size(18.dp))
+        PhoebeIconView(
+            if (expanded) PhoebeIcon.ChevronUp else PhoebeIcon.Forward,
+            tint = PhoebeUi.mutedText,
+            modifier = Modifier.size(18.dp),
+        )
     }
 }
 

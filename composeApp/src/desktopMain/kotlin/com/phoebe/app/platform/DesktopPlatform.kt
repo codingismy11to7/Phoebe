@@ -222,9 +222,7 @@ actual fun currentTimeMs(): Long = System.currentTimeMillis()
 
 actual fun prefersReducedArtworkEffects(): Boolean = false
 
-actual fun catalogTrackPrefetchAlbumCount(): Int = 24
-
-actual fun catalogTrackPrefetchParallelism(): Int = 6
+actual fun catalogTrackIndexParallelism(): Int = 6
 
 actual fun isDebugBuild(): Boolean =
     System.getProperty("phoebe.debug")?.toBooleanStrictOrNull() ?: false

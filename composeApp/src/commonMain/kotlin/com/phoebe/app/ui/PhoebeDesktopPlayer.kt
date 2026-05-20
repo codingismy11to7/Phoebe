@@ -1,324 +1,185 @@
 package com.phoebe.app.ui
 
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExperimentalSharedTransitionApi
-import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SharedTransitionLayout
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.Image
-import phoebe.composeapp.generated.resources.Res
-import phoebe.composeapp.generated.resources.phoebe_bird
-import phoebe.composeapp.generated.resources.phoebe_icon_rounded
-import org.jetbrains.compose.resources.painterResource
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CheckboxDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.boundsInRoot
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInRoot
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.composed
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.em
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.zIndex
-import kotlin.math.roundToInt
-import com.phoebe.app.AppState
-import com.phoebe.app.data.JellyfinQuickConnectResult
-import com.phoebe.app.data.catalogAlbumsForArtist
-import com.phoebe.app.data.catalogTracksForArtist
-import com.phoebe.app.domain.Album
-import com.phoebe.app.domain.AppSettings
 import com.phoebe.app.domain.AppScreen
-import com.phoebe.app.domain.Artist
-import com.phoebe.app.domain.ArtistRadioAvailability
-import com.phoebe.app.domain.HomeSection
-import com.phoebe.app.domain.JellyfinLibraryPageKind
 import com.phoebe.app.domain.JellyfinSyncMode
-import com.phoebe.app.domain.LibraryColumnVisibility
-import com.phoebe.app.domain.LibrarySortBy
-import com.phoebe.app.domain.LibraryUiPreferences
-import com.phoebe.app.domain.LyricsLoadState
 import com.phoebe.app.domain.MediaProviderType
-import com.phoebe.app.domain.CatalogSnapshot
-import com.phoebe.app.domain.CollectionEntry
-import com.phoebe.app.domain.LocalFolderMediaSourceConfig
-import com.phoebe.app.domain.MediaSourcesState
-import com.phoebe.app.domain.MusicLibrary
-import com.phoebe.app.domain.PersonalMixPreferences
-import com.phoebe.app.domain.PlexServer
-import com.phoebe.app.domain.PlexSession
-import com.phoebe.app.domain.Playlist
-import com.phoebe.app.domain.PlexRadioStation
-import com.phoebe.app.domain.RepeatMode
-import com.phoebe.app.domain.Track
-import com.phoebe.app.domain.defaultCollectionEntries
 import com.phoebe.app.domain.isEmbyFamily
-import com.phoebe.app.domain.isLocalMediaPlayback
-import com.phoebe.app.domain.isJellyfin
 import com.phoebe.app.domain.isNavidrome
-import com.phoebe.app.player.CastState
-import com.phoebe.app.domain.isRemoteLibraryTrack
-import com.phoebe.app.domain.supportsPlexPlaylists
-import com.phoebe.app.platform.createPlatformHttpClient
-import com.phoebe.app.platform.currentTimeMs
-import com.phoebe.app.platform.prefersReducedArtworkEffects
-import kotlinx.coroutines.delay
-import com.phoebe.app.sources.rememberPickLocalFolder
-import io.ktor.client.HttpClient
-import io.ktor.client.call.body
-import io.ktor.client.request.get
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.sync.withPermit
-import kotlinx.coroutines.yield
-import kotlin.math.max
 
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 internal fun DesktopPlayer(
-    screen: AppScreen,
-    catalog: CatalogSnapshot,
-    catalogRefreshing: Boolean,
-    session: PlexSession?,
-    mediaSources: MediaSourcesState,
-    track: Track?,
-    homeUiState: HomeUiState,
-    playHistory: PlayHistorySnapshot,
-    upNext: List<Track>,
-    isPlaying: Boolean,
-    isBuffering: Boolean = false,
-    positionMs: Long,
-    bufferedPositionMs: Long,
-    currentIndex: Int,
-    lyricsTrack: Track? = null,
-    lyricsState: LyricsLoadState = LyricsLoadState.Idle,
-    section: DesktopSection,
-    selectedPlaylistId: String?,
-    searchQuery: String,
-    libraryFilter: LibraryFilterTab,
-    libraryUi: LibraryUiPreferences,
-    appMessage: String,
-    pinCode: String?,
-    shuffle: Boolean,
-    repeat: RepeatMode,
-    volume: Float,
-    castState: CastState = CastState(),
-    remotePlaybackTarget: String? = null,
-    showQueue: Boolean,
-    compact: Boolean,
-    busy: Boolean,
-    serversLoading: Boolean = false,
-    onNavigate: (DesktopSection) -> Unit,
-    onSearchQuery: (String) -> Unit,
-    onLibraryFilter: (LibraryFilterTab) -> Unit,
-    onPlaylist: (Playlist) -> Unit,
-    onArtist: (Artist) -> Unit,
-    onAlbum: (Album) -> Unit,
-    onSong: (Track) -> Unit,
-    onOpenLyrics: (Track) -> Unit = {},
-    onRecentSongs: () -> Unit,
-    onRecentArtists: () -> Unit,
-    onRecentAlbums: () -> Unit,
-    onFavoritePlaylists: () -> Unit = {},
-    onFavoriteArtists: () -> Unit = {},
-    onFavoriteAlbums: () -> Unit = {},
-    onRecentlyPlayed: () -> Unit,
-    onMostPlayed: () -> Unit,
-    onCollections: (CollectionEntry) -> Unit,
-    onCollectionValue: (CollectionEntry, String) -> Unit,
-    supportedCollectionEntries: Set<CollectionEntry> = defaultCollectionEntries.toSet(),
-    onRefreshRandomArtists: () -> Unit,
-    onRefreshRandomAlbums: () -> Unit,
-    onPrefetchHomeArtist: (Artist) -> Unit = {},
-    onPrefetchHomeAlbum: (Album) -> Unit = {},
-    onPlayDecadeMix: (Int) -> Unit = {},
-    decadeMixNotice: String? = null,
-    onClearDecadeMixNotice: () -> Unit = {},
-    radioStations: List<PlexRadioStation> = emptyList(),
-    onPlayRadioStation: (PlexRadioStation) -> Unit = {},
-    onPopDetail: () -> Unit,
-    onToggle: () -> Unit,
-    onPrevious: () -> Unit,
-    onNext: () -> Unit,
-    onShuffle: () -> Unit,
-    onRepeat: () -> Unit,
-    onVolume: (Float) -> Unit,
-    onSeek: (Long) -> Unit,
-    onCast: () -> Unit = {},
-    onLyrics: () -> Unit = {},
-    onPlayQueue: (Int) -> Unit,
-    onClearQueue: () -> Unit,
-    onMoveUpNext: (Int, Int) -> Unit,
-    onRemoveUpNext: (Int) -> Unit,
-    onPlayTracks: (List<Track>, Int) -> Unit,
-    onAddToUpNext: (Track) -> Unit,
-    onDownload: (Track) -> Unit,
-    onDownloadArtist: (Artist) -> Unit,
-    artistRadioAvailability: Map<String, ArtistRadioAvailability> = emptyMap(),
-    radioStartingIds: Set<String> = emptySet(),
-    onProbeArtistRadio: (Artist) -> Unit = {},
-    onPlayArtistRadio: (Artist) -> Unit,
-    onDownloadAlbum: (Album) -> Unit,
-    onDownloadPlaylist: (Playlist) -> Unit,
-    onStartSignIn: () -> Unit,
-    onFinishSignIn: () -> Unit,
-    onSignInJellyfin: (String, String, String) -> Unit,
-    onSignInProvider: (MediaProviderType, String, String, String, JellyfinSyncMode?) -> Unit = { _, _, _, _, _ -> },
-    jellyfinServers: List<PlexServer> = emptyList(),
-    jellyfinDiscoveryLoading: Boolean = false,
-    jellyfinQuickConnect: JellyfinQuickConnectResult? = null,
-    onDiscoverJellyfinServers: () -> Unit = {},
-    onStartJellyfinQuickConnect: (String) -> Unit = {},
-    onFinishJellyfinQuickConnect: () -> Unit = {},
-    onSignOut: () -> Unit,
-    onAddLocalFolder: (String?) -> Unit,
-    onRemoveLocalFolder: (String) -> Unit,
-    onToggleLocalFolder: (String, Boolean) -> Unit,
-    onRefreshLibrary: () -> Unit,
-    onJellyfinPage: (JellyfinLibraryPageKind, Int) -> Unit = { _, _ -> },
-    servers: List<PlexServer>,
-    libraries: List<MusicLibrary>,
-    librariesLoading: Boolean = false,
-    onSelectServer: (PlexServer) -> Unit,
-    onSelectLibrary: (MusicLibrary, JellyfinSyncMode?) -> Unit,
-    onCancelPlexSetup: () -> Unit,
-    onBackToServerPicker: () -> Unit,
-    onRetryServers: () -> Unit,
-    onLibrarySortBy: (LibrarySortBy) -> Unit,
-    onLibraryAscending: (Boolean) -> Unit,
-    onLibraryColumns: (LibraryColumnVisibility) -> Unit,
-    onHomeSections: (List<HomeSection>) -> Unit,
-    onPersonalMix: (PersonalMixPreferences) -> Unit,
-    onExportFavoritePlaylists: () -> Unit,
-    onImportFavoritePlaylists: () -> Unit,
-    appSettings: AppSettings,
-    onCrossfadeSeconds: (Int) -> Unit,
-    onScanLibraryOnLaunch: (Boolean) -> Unit,
-    onNotifyWhenDownloadFinishes: (Boolean) -> Unit,
-    downloadDirectory: String?,
-    downloadCount: Int,
-    defaultDownloadDirectoryLabel: String,
-    onDownloadDirectory: (String?) -> Unit,
-    onDeleteAllDownloads: () -> Unit,
-    useLightAppearance: Boolean,
-    onUseLightAppearanceChange: (Boolean) -> Unit,
-    appearanceTintId: String,
-    onAppearanceTintChange: (String) -> Unit,
-    settingsInitialCategory: SettingsCategory = SettingsCategory.AudioPlayback,
-    onRetryLyrics: () -> Unit = {},
+    shellState: DesktopShellState,
+    playbackState: PlaybackUiState,
+    playbackActions: PlaybackActions,
+    browseState: BrowseUiState,
+    browseActions: BrowseActions,
+    authSetupState: AuthSetupState,
+    authSetupActions: AuthSetupActions,
+    settingsState: SettingsUiState,
+    settingsActions: SettingsActions,
 ) {
+    val screen = shellState.screen
+    val routes = shellState.routes
+    val catalog = shellState.catalog
+    val catalogRefreshing = shellState.catalogRefreshing
+    val session = shellState.session
+    val mediaSources = shellState.mediaSources
+    val section = shellState.section
+    val selectedPlaylistId = shellState.selectedPlaylistId
+    val showQueue = shellState.showQueue
+    val compact = shellState.compact
+    val busy = shellState.busy
+    val shellPlayback = playbackState.shellPlayback
+    val player = playbackState.player
+    val track = playbackState.track
+    val upNext = playbackState.upNext
+    val lyricsTrack = playbackState.lyricsTrack
+    val lyricsState = playbackState.lyricsState
+    val castState = playbackState.castState
+    val remotePlaybackTarget = playbackState.remotePlaybackTarget
+    val homeUiState = browseState.homeUiState
+    val playHistory = browseState.playHistory
+    val searchQuery = browseState.searchQuery
+    val libraryFilter = browseState.libraryFilter
+    val libraryUi = browseState.libraryUi
+    val supportedCollectionEntries = browseState.supportedCollectionEntries
+    val decadeMixNotice = browseState.decadeMixNotice
+    val radioStations = browseState.radioStations
+    val artistRadioAvailability = browseState.artistRadioAvailability
+    val radioStartingIds = browseState.radioStartingIds
+    val appMessage = authSetupState.appMessage
+    val pinCode = authSetupState.pinCode
+    val authInProgress = authSetupState.authInProgress
+    val serversLoading = authSetupState.serversLoading
+    val jellyfinServers = authSetupState.jellyfinServers
+    val jellyfinDiscoveryLoading = authSetupState.jellyfinDiscoveryLoading
+    val jellyfinQuickConnect = authSetupState.jellyfinQuickConnect
+    val servers = authSetupState.servers
+    val libraries = authSetupState.libraries
+    val librariesLoading = authSetupState.librariesLoading
+    val appSettings = settingsState.appSettings
+    val downloadDirectory = settingsState.downloadDirectory
+    val downloadCount = settingsState.downloadCount
+    val defaultDownloadDirectoryLabel = settingsState.defaultDownloadDirectoryLabel
+    val useLightAppearance = settingsState.useLightAppearance
+    val appearanceTintId = settingsState.appearanceTintId
+    val settingsInitialCategory = settingsState.settingsInitialCategory
+    val onNavigate = browseActions.onNavigate
+    val onSearchQuery = browseActions.onSearchQuery
+    val onLibraryFilter = browseActions.onLibraryFilter
+    val onPlaylist = browseActions.onPlaylist
+    val onArtist = browseActions.onArtist
+    val onAlbum = browseActions.onAlbum
+    val onSong = browseActions.onSong
+    val onOpenLyrics = browseActions.onOpenLyrics
+    val onRecentSongs = browseActions.onRecentSongs
+    val onRecentArtists = browseActions.onRecentArtists
+    val onRecentAlbums = browseActions.onRecentAlbums
+    val onFavoritePlaylists = browseActions.onFavoritePlaylists
+    val onFavoriteArtists = browseActions.onFavoriteArtists
+    val onFavoriteAlbums = browseActions.onFavoriteAlbums
+    val onRecentlyPlayed = browseActions.onRecentlyPlayed
+    val onMostPlayed = browseActions.onMostPlayed
+    val onCollections = browseActions.onCollections
+    val onCollectionValue = browseActions.onCollectionValue
+    val onRefreshRandomArtists = browseActions.onRefreshRandomArtists
+    val onRefreshRandomAlbums = browseActions.onRefreshRandomAlbums
+    val onPrefetchHomeArtist = browseActions.onPrefetchHomeArtist
+    val onPrefetchHomeAlbum = browseActions.onPrefetchHomeAlbum
+    val onPlayDecadeMix = browseActions.onPlayDecadeMix
+    val onClearDecadeMixNotice = browseActions.onClearDecadeMixNotice
+    val onPlayRadioStation = browseActions.onPlayRadioStation
+    val onPlayPersonalMix = browseActions.onPlayPersonalMix
+    val onPopDetail = browseActions.onPopDetail
+    val onPlayTracks = browseActions.onPlayTracks
+    val onAddToUpNext = browseActions.onAddToUpNext
+    val onDownload = browseActions.onDownload
+    val onDownloadArtist = browseActions.onDownloadArtist
+    val onProbeArtistRadio = browseActions.onProbeArtistRadio
+    val onPlayArtistRadio = browseActions.onPlayArtistRadio
+    val onDownloadAlbum = browseActions.onDownloadAlbum
+    val onDownloadPlaylist = browseActions.onDownloadPlaylist
+    val onLibrarySortBy = browseActions.onLibrarySortBy
+    val onLibraryAscending = browseActions.onLibraryAscending
+    val onLibraryColumns = browseActions.onLibraryColumns
+    val onToggle = playbackActions.onToggle
+    val onPrevious = playbackActions.onPrevious
+    val onNext = playbackActions.onNext
+    val onShuffle = playbackActions.onShuffle
+    val onRepeat = playbackActions.onRepeat
+    val onVolume = playbackActions.onVolume
+    val onSeek = playbackActions.onSeek
+    val onCast = playbackActions.onCast
+    val onLyrics = playbackActions.onLyrics
+    val onPlayQueue = playbackActions.onPlayQueue
+    val onClearQueue = playbackActions.onClearQueue
+    val onMoveUpNext = playbackActions.onMoveUpNext
+    val onRemoveUpNext = playbackActions.onRemoveUpNext
+    val onRetryLyrics = playbackActions.onRetryLyrics
+    val onStartSignIn = authSetupActions.onStartSignIn
+    val onFinishSignIn = authSetupActions.onFinishSignIn
+    val onSignInJellyfin = authSetupActions.onSignInJellyfin
+    val onSignInProvider = authSetupActions.onSignInProvider
+    val onDiscoverJellyfinServers = authSetupActions.onDiscoverJellyfinServers
+    val onStartJellyfinQuickConnect = authSetupActions.onStartJellyfinQuickConnect
+    val onFinishJellyfinQuickConnect = authSetupActions.onFinishJellyfinQuickConnect
+    val onSignOut = authSetupActions.onSignOut
+    val onAddLocalFolder = authSetupActions.onAddLocalFolder
+    val onRemoveLocalFolder = authSetupActions.onRemoveLocalFolder
+    val onToggleLocalFolder = authSetupActions.onToggleLocalFolder
+    val onRefreshLibrary = authSetupActions.onRefreshLibrary
+    val onJellyfinPage = authSetupActions.onJellyfinPage
+    val onSelectServer = authSetupActions.onSelectServer
+    val onSelectLibrary = authSetupActions.onSelectLibrary
+    val onCancelPlexSetup = authSetupActions.onCancelPlexSetup
+    val onBackToServerPicker = authSetupActions.onBackToServerPicker
+    val onRetryServers = authSetupActions.onRetryServers
+    val onHomeSections = settingsActions.onHomeSections
+    val onPersonalMix = settingsActions.onPersonalMix
+    val onExportFavoritePlaylists = settingsActions.onExportFavoritePlaylists
+    val onImportFavoritePlaylists = settingsActions.onImportFavoritePlaylists
+    val onCrossfadeSeconds = settingsActions.onCrossfadeSeconds
+    val onScanLibraryOnLaunch = settingsActions.onScanLibraryOnLaunch
+    val onNotifyWhenDownloadFinishes = settingsActions.onNotifyWhenDownloadFinishes
+    val onDownloadDirectory = settingsActions.onDownloadDirectory
+    val onDeleteAllDownloads = settingsActions.onDeleteAllDownloads
+    val onUseLightAppearanceChange = settingsActions.onUseLightAppearanceChange
+    val onAppearanceTintChange = settingsActions.onAppearanceTintChange
+    val isPlaying = shellPlayback.isPlaying
+    val isBuffering = shellPlayback.isBuffering
+    val positionMs = player.positionMs
+    val bufferedPositionMs = player.bufferedPositionMs
+    val shuffle = player.shuffle
+    val repeat = player.repeat
+    val volume = player.volume
+    val displayRoutes = routes.ifEmpty { previewRoutesFor(screen, section) }
     var desktopUpNextExpanded by remember { mutableStateOf(true) }
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Surface(
@@ -366,16 +227,22 @@ internal fun DesktopPlayer(
                                     LocalSharedTransitionScope provides sharedTransitionScope,
                                     LocalSharedElementTransitionsEnabled provides sharedElementsEnabled,
                                 ) {
-                                    AnimatedContent(
-                                        targetState = screen,
+                                    PhoebeNavDisplay(
+                                        backStack = displayRoutes,
                                         modifier = Modifier.fillMaxSize(),
-                                        transitionSpec = {
-                                            fadeIn(tween(180, easing = FastOutSlowInEasing)) togetherWith
-                                                fadeOut(tween(160, easing = FastOutSlowInEasing))
-                                        },
-                                        label = "desktop-screen",
-                                    ) { targetScreen ->
-                                        CompositionLocalProvider(LocalAnimatedVisibilityScope provides this@AnimatedContent) {
+                                        onBack = onPopDetail,
+                                    ) { targetRoute ->
+                                        val targetResolution = resolvePhoebeRoute(targetRoute, catalog, track)
+                                        val missingRoute = targetResolution as? PhoebeRouteResolution.Missing
+                                        val targetScreen = (targetResolution as? PhoebeRouteResolution.Resolved)?.screen ?: AppScreen.Home
+                                        if (missingRoute != null) {
+                                            MissingRouteFallback(
+                                                title = missingRoute.title,
+                                                message = missingRoute.message,
+                                                onBack = onPopDetail,
+                                                modifier = Modifier.fillMaxSize(),
+                                            )
+                                        } else {
                             when (targetScreen) {
                                 is AppScreen.ServerPicker -> PlexServerPickerPanel(
                                     servers = servers,
@@ -404,6 +271,7 @@ internal fun DesktopPlayer(
                                     jellyfinServers = jellyfinServers,
                                     jellyfinDiscoveryLoading = jellyfinDiscoveryLoading,
                                     jellyfinQuickConnect = jellyfinQuickConnect,
+                                    authInProgress = authInProgress,
                                     onStartSignIn = onStartSignIn,
                                     onFinishSignIn = onFinishSignIn,
                                     onSignInJellyfin = onSignInJellyfin,
@@ -520,6 +388,7 @@ internal fun DesktopPlayer(
                                         kind = targetScreen.kind,
                                         catalog = catalog,
                                         playHistory = playHistory,
+                                        resolvedTracksById = browseState.resolvedTracksById,
                                         modifier = Modifier.weight(1f).fillMaxWidth(),
                                         onBack = onPopDetail,
                                         onPlayTracks = onPlayTracks,
@@ -558,11 +427,10 @@ internal fun DesktopPlayer(
                                     modifier = Modifier.fillMaxSize(),
                                 )
                                 else -> when {
-                                    section == DesktopSection.Home && selectedPlaylistId == null -> {
+                                    section == BrowseSection.Home && selectedPlaylistId == null -> {
                                         val homeListState = RetainedLazyListStates.remember("desktop-home")
                                         DesktopHomeScreen(
                                         state = homeUiState,
-                                        catalog = catalog,
                                         catalogRefreshing = catalogRefreshing,
                                         listState = homeListState,
                                         modifier = Modifier.fillMaxSize(),
@@ -589,15 +457,15 @@ internal fun DesktopPlayer(
                                         radioStations = radioStations,
                                         radioStartingIds = radioStartingIds,
                                         onPlayRadioStation = onPlayRadioStation,
+                                        onPlayPersonalMix = onPlayPersonalMix,
                                         onPlayTracks = onPlayTracks,
                                         onAddToUpNext = onAddToUpNext,
                                         onDownload = onDownload,
                                         homeSections = libraryUi.homeSections,
-                                        personalMixPreferences = libraryUi.personalMix,
                                         supportedCollectionEntries = supportedCollectionEntries,
                                     )
                                     }
-                                    section == DesktopSection.Search && selectedPlaylistId == null -> SearchDesktopView(
+                                    section == BrowseSection.Search && selectedPlaylistId == null -> SearchDesktopView(
                                         catalog = catalog,
                                         catalogRefreshing = catalogRefreshing,
                                         searchQuery = searchQuery,
@@ -609,7 +477,7 @@ internal fun DesktopPlayer(
                                         onAddToUpNext = onAddToUpNext,
                                         onDownload = onDownload,
                                     )
-                                    section == DesktopSection.Library && selectedPlaylistId == null -> {
+                                    section == BrowseSection.Library && selectedPlaylistId == null -> {
                                         LibraryDesktopView(
                                             catalog = catalog,
                                             catalogRefreshing = catalogRefreshing,
@@ -631,7 +499,7 @@ internal fun DesktopPlayer(
                                             modifier = Modifier.fillMaxSize(),
                                         )
                                     }
-                                    section == DesktopSection.Lyrics && selectedPlaylistId == null -> LyricsView(
+                                    section == BrowseSection.Lyrics && selectedPlaylistId == null -> LyricsView(
                                         track = lyricsTrack,
                                         currentTrackId = track?.id,
                                         positionMs = positionMs,
@@ -640,7 +508,7 @@ internal fun DesktopPlayer(
                                         onBack = null,
                                         onRetry = onRetryLyrics,
                                     )
-                                    section == DesktopSection.Settings && selectedPlaylistId == null -> SettingsDesktopView(
+                                    section == BrowseSection.Settings && selectedPlaylistId == null -> SettingsDesktopView(
                                         isLightMode = useLightAppearance,
                                         onLightModeChange = onUseLightAppearanceChange,
                                         tintId = appearanceTintId,
@@ -726,7 +594,7 @@ internal fun DesktopPlayer(
                             castState = castState,
                             remotePlaybackTarget = remotePlaybackTarget,
                             compact = compact,
-                            lyricsVisible = section == DesktopSection.Lyrics && selectedPlaylistId == null,
+                            lyricsVisible = section == BrowseSection.Lyrics && selectedPlaylistId == null,
                             upNextVisible = showQueue && desktopUpNextExpanded,
                             upNextToggleEnabled = showQueue,
                             onToggle = onToggle,
@@ -773,4 +641,28 @@ private fun AppScreen.hasDesktopSharedElements(): Boolean = when (this) {
     AppScreen.ServerPicker,
     AppScreen.SignIn,
     -> false
+}
+
+private fun previewRoutesFor(screen: AppScreen, section: BrowseSection): List<PhoebeRoute> {
+    val root = PhoebeRoute.Browse(section)
+    val route = when (screen) {
+        AppScreen.SignIn -> return listOf(PhoebeRoute.SignIn)
+        AppScreen.ServerPicker -> return listOf(PhoebeRoute.SignIn, PhoebeRoute.ServerPicker)
+        AppScreen.LibraryPicker -> return listOf(PhoebeRoute.SignIn, PhoebeRoute.ServerPicker, PhoebeRoute.LibraryPicker)
+        AppScreen.Home -> root
+        is AppScreen.Collections -> PhoebeRoute.Collections(screen.entry)
+        is AppScreen.CollectionItems -> PhoebeRoute.CollectionItems(screen.entry, screen.value)
+        is AppScreen.AlbumDetail -> PhoebeRoute.AlbumDetail(screen.album.id)
+        is AppScreen.ArtistDetail -> PhoebeRoute.ArtistDetail(screen.artist.id)
+        is AppScreen.SongDetail -> PhoebeRoute.SongDetail(screen.track.id)
+        is AppScreen.Lyrics -> PhoebeRoute.Lyrics(screen.track?.id)
+        is AppScreen.RecentlyAdded -> PhoebeRoute.RecentlyAdded(screen.kind)
+        is AppScreen.PlayHistory -> PhoebeRoute.PlayHistory(screen.kind)
+        AppScreen.FavoritePlaylists -> PhoebeRoute.FavoritePlaylists
+        AppScreen.FavoriteArtists -> PhoebeRoute.FavoriteArtists
+        AppScreen.FavoriteAlbums -> PhoebeRoute.FavoriteAlbums
+        is AppScreen.PlaylistDetail -> PhoebeRoute.PlaylistDetail(screen.playlist.id)
+        AppScreen.Player -> PhoebeRoute.Player
+    }
+    return if (route == root) listOf(root) else listOf(root, route)
 }

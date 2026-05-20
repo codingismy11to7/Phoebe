@@ -40,7 +40,7 @@ object CatalogMerge {
         return CatalogSnapshot(
             artists = all.flatMap { it.artists },
             albums = all.flatMap { it.albums },
-            playlists = all.flatMap { it.playlists },
+            playlists = all.flatMap { it.playlists }.distinctBy { it.id },
             tracksByParent = all.fold(emptyMap()) { acc, s -> acc + s.tracksByParent },
             collectionValues = all.flatMap { it.collectionValues }.distinct(),
             collectionValueLoads = all.flatMap { it.collectionValueLoads }.distinct(),

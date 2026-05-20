@@ -82,10 +82,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -154,6 +153,7 @@ import com.phoebe.app.platform.PlatformStorage
 import com.phoebe.app.platform.prefersReducedArtworkEffects
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlin.concurrent.Volatile
 import com.phoebe.app.sources.rememberPickLocalFolder
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
@@ -172,6 +172,9 @@ import kotlin.math.max
 
 internal const val ThumbnailArtworkMaxDecodeDimension = 160
 
+/** Default decode cap for list/grid tiles (~48–92dp). Hero art should pass a larger value explicitly. */
+internal const val ListArtworkMaxDecodeDimension = 256
+
 @Composable
 internal fun SectionLabel(label: String, color: Color) {
     Text(label.uppercase(), color = color, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.08.em)
@@ -184,10 +187,11 @@ internal fun ArtworkImage(
     modifier: Modifier = Modifier,
     radius: Dp = 10.dp,
     elevated: Boolean = true,
-    maxDecodeDimension: Int = 512,
+    maxDecodeDimension: Int = ListArtworkMaxDecodeDimension,
     fallbackThumbUrl: String? = null,
+    artworkStaggerMs: Long = 0L,
 ) {
-    val image = rememberRemoteImage(thumbUrl, maxDecodeDimension, fallbackThumbUrl)
+    val image = rememberRemoteImage(thumbUrl, maxDecodeDimension, fallbackThumbUrl, artworkStaggerMs)
     val shape = RoundedCornerShape(radius)
     val imageModifier = when {
         !elevated || prefersReducedArtworkEffects() -> modifier.clip(shape)
@@ -213,7 +217,8 @@ internal fun TrackArtworkImage(
     modifier: Modifier = Modifier,
     radius: Dp = 10.dp,
     elevated: Boolean = true,
-    maxDecodeDimension: Int = 512,
+    maxDecodeDimension: Int = ListArtworkMaxDecodeDimension,
+    artworkStaggerMs: Long = 0L,
 ) {
     ArtworkImage(
         seed = track.album,
@@ -223,37 +228,44 @@ internal fun TrackArtworkImage(
         elevated = elevated,
         maxDecodeDimension = maxDecodeDimension,
         fallbackThumbUrl = track.thumbUrl,
+        artworkStaggerMs = artworkStaggerMs,
     )
 }
 
 @Composable
-internal fun rememberRemoteImage(url: String?, maxDecodeDimension: Int = 512, fallbackUrl: String? = null): ImageBitmap? {
+internal fun rememberRemoteImage(
+    url: String?,
+    maxDecodeDimension: Int = ListArtworkMaxDecodeDimension,
+    fallbackUrl: String? = null,
+    artworkStaggerMs: Long = 0L,
+): ImageBitmap? {
     val primary = url?.takeIf { it.isNotBlank() }
     val fallbackSource = fallbackUrl?.takeIf { it.isNotBlank() }
     val target = primary ?: fallbackSource ?: return null
     val fallback = fallbackSource?.takeIf { it != target }
-    var image by remember(target, fallback, maxDecodeDimension) {
-        mutableStateOf(
-            RemoteArtworkCache.cached(target, maxDecodeDimension)
-                ?: fallback?.let { RemoteArtworkCache.cached(it, maxDecodeDimension) },
-        )
-    }
-    // Stay subscribed to cache writes from any concurrent loader for this URL.
-    val cached = RemoteArtworkCache.cached(target, maxDecodeDimension)
-        ?: fallback?.let { RemoteArtworkCache.cached(it, maxDecodeDimension) }
-    if (cached != null) {
-        image = cached
-    }
-    LaunchedEffect(target, fallback, maxDecodeDimension) {
-        while (isActive && image == null) {
-            image = RemoteArtworkCache.awaitLoad(target, maxDecodeDimension)
+    val artworkLoadsEnabled = LocalArtworkLoadingEnabled.current
+    return produceState(
+        initialValue = RemoteArtworkCache.cached(target, maxDecodeDimension)
+            ?: fallback?.let { RemoteArtworkCache.cached(it, maxDecodeDimension) },
+        target,
+        fallback,
+        maxDecodeDimension,
+        artworkLoadsEnabled,
+        artworkStaggerMs,
+    ) {
+        while (isActive && value == null) {
+            if (!artworkLoadsEnabled) {
+                delay(250L)
+                continue
+            }
+            delay(RemoteArtworkCache.staggerDelayMs(target) + artworkStaggerMs)
+            value = RemoteArtworkCache.awaitLoad(target, maxDecodeDimension)
                 ?: fallback?.let { RemoteArtworkCache.awaitLoad(it, maxDecodeDimension) }
                 ?: RemoteArtworkCache.cached(target, maxDecodeDimension)
                 ?: fallback?.let { RemoteArtworkCache.cached(it, maxDecodeDimension) }
-            if (image == null) delay(10_000L)
+            if (value == null) delay(10_000L)
         }
-    }
-    return image
+    }.value
 }
 
 internal data class ArtworkCacheStats(
@@ -266,18 +278,27 @@ internal object RemoteArtworkCache {
     private const val DefaultMaxEntries = 300
     private const val DefaultMaxEstimatedBytes = 96L * 1024L * 1024L
     private const val FailedLoadRetryMs = 10L * 60L * 1000L
+    private const val DefaultLoadPermits = 2
+    private const val PacedMinIntervalMs = 72L
+    private const val BurstMinIntervalMs = 24L
+
+    @Volatile
+    private var pacingEnabled: Boolean = false
+
+    @Volatile
+    private var lastLoadStartMs = 0L
 
     private data class CacheKey(
         val url: String,
         val maxDecodeDimension: Int,
     )
 
-    private val images = mutableStateMapOf<CacheKey, ImageBitmap>()
+    private val images = mutableMapOf<CacheKey, ImageBitmap>()
 
     internal val httpClient: HttpClient by lazy { createPlatformHttpClient() }
     private val storage: PlatformStorage by lazy { PlatformStorage() }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val gate = Semaphore(permits = 6)
+    private var gate = Semaphore(permits = DefaultLoadPermits)
     private val mutex = Mutex()
     private val inFlight = mutableMapOf<CacheKey, Deferred<ImageBitmap?>>()
     private val estimatedBytesByKey = mutableMapOf<CacheKey, Long>()
@@ -287,14 +308,29 @@ internal object RemoteArtworkCache {
     private var maxEstimatedBytes = DefaultMaxEstimatedBytes
     private var estimatedBytes = 0L
 
-    fun cached(url: String, maxDecodeDimension: Int = 512): ImageBitmap? {
+    fun cached(url: String, maxDecodeDimension: Int = ListArtworkMaxDecodeDimension): ImageBitmap? {
         val key = CacheKey(url, maxDecodeDimension.normalizedDecodeDimension())
         val image = images[key] ?: return null
         touch(key)
         return image
     }
 
-    suspend fun awaitLoad(url: String, maxDecodeDimension: Int = 512): ImageBitmap? {
+    fun staggerDelayMs(url: String): Long = (url.hashCode() and 0x3F).toLong() * 12L
+
+    /** Spreads decode/network work across frames — use after a large catalog snapshot lands in the UI. */
+    fun configurePacingEnabled(enabled: Boolean) {
+        pacingEnabled = enabled
+    }
+
+    private suspend fun paceBeforeLoad() {
+        val minInterval = if (pacingEnabled) PacedMinIntervalMs else BurstMinIntervalMs
+        val now = currentTimeMs()
+        val wait = minInterval - (now - lastLoadStartMs)
+        if (wait > 0) delay(wait)
+        lastLoadStartMs = currentTimeMs()
+    }
+
+    suspend fun awaitLoad(url: String, maxDecodeDimension: Int = ListArtworkMaxDecodeDimension): ImageBitmap? {
         val key = CacheKey(url, maxDecodeDimension.normalizedDecodeDimension())
         cached(key)?.let { return it }
         if (!shouldRetryFailedLoad(key)) return null
@@ -317,11 +353,13 @@ internal object RemoteArtworkCache {
         cached(key)?.let { return it }
         return gate.withPermit {
             cached(key)?.let { return@withPermit it }
+            paceBeforeLoad()
             val url = key.url
             val remote = url.startsWith("http://") || url.startsWith("https://")
             val decoded = runCatching {
+                val fetchUrl = url.withRequestImageSize(key.maxDecodeDimension)
                 val bytes: ByteArray = if (remote) {
-                    runCatching { httpClient.get(url).body<ByteArray>() }
+                    runCatching { httpClient.get(fetchUrl).body<ByteArray>() }
                         .getOrElse {
                             storage.readBytes(cachedArtworkPathForUrl(url)) ?: return@runCatching null
                         }
@@ -413,6 +451,15 @@ internal object RemoteArtworkCache {
 
     private fun ImageBitmap.estimatedBytes(): Long =
         width.toLong() * height.toLong() * 4L
+}
+
+/** Ask Plex/Jellyfin-style servers for a smaller JPEG when the URL supports width/height query params. */
+private fun String.withRequestImageSize(maxDecodeDimension: Int): String {
+    if (!startsWith("http://") && !startsWith("https://")) return this
+    if (contains("width=", ignoreCase = true) || contains("height=", ignoreCase = true)) return this
+    val pixels = maxDecodeDimension.coerceIn(64, 512)
+    val separator = if (contains('?')) "&" else "?"
+    return "$this${separator}width=$pixels&height=$pixels"
 }
 
 @Composable

@@ -1,0 +1,2 @@
+ALTER TABLE SessionRow ADD COLUMN providerType TEXT NOT NULL DEFAULT 'Plex';
+ALTER TABLE SessionRow ADD COLUMN jellyfinSyncMode TEXT NOT NULL DEFAULT 'Quick';

@@ -133,6 +133,12 @@ SELECT * FROM PlaylistRow ORDER BY sortKey, title COLLATE NOCASE;
 selectAllTracks:
 SELECT * FROM TrackRow;
 
+selectTrackById:
+SELECT * FROM TrackRow WHERE id = ? LIMIT 1;
+
+selectTrackDateAddedForIds:
+SELECT id, dateAddedMs FROM TrackRow WHERE id IN :ids;
+
 selectTrackParents:
 SELECT parentId, trackId, position FROM TrackParentRow ORDER BY parentId, position;
 
@@ -151,6 +157,24 @@ FROM TrackRow t
 INNER JOIN TrackParentRow tp ON tp.trackId = t.id
 WHERE tp.parentId = ?
 ORDER BY tp.position;
+
+selectAllTrackIds:
+SELECT id FROM TrackRow;
+
+deleteTrackById:
+DELETE FROM TrackRow WHERE id = ?;
+
+deleteTrackParentsForParent:
+DELETE FROM TrackParentRow WHERE parentId = ?;
+
+deleteArtistById:
+DELETE FROM ArtistRow WHERE id = ?;
+
+deleteAlbumById:
+DELETE FROM AlbumRow WHERE id = ?;
+
+deletePlaylistById:
+DELETE FROM PlaylistRow WHERE id = ?;
 
 upsertArtist:
 INSERT OR REPLACE INTO ArtistRow(id, title, thumbUrl, albumCount, songCount, sortKey, dateAddedMs, genre, mood, style, rating, favorite)

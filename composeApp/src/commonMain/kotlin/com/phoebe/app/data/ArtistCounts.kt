@@ -13,22 +13,111 @@ import com.phoebe.app.domain.Track
 internal fun enrichArtistAlbumCountsOnly(
     artists: List<Artist>,
     albums: List<Album>,
-): List<Artist> =
-    artists.map { artist ->
-        val n = albums.count { albumMatchesArtist(it, artist.title) }
-        val newAlbumCount = if (artist.albumCount > 0) artist.albumCount else n
-        val newSongCount = if (artist.songCount > 0) artist.songCount else 0
-        artist.copy(albumCount = newAlbumCount, songCount = newSongCount)
+): List<Artist> {
+    if (artists.isEmpty()) return artists
+    val needsDerivedCount = artists.any { it.albumCount <= 0 }
+    val derivedCounts = if (needsDerivedCount && albums.isNotEmpty()) {
+        buildDerivedArtistAlbumCounts(artists, albums)
+    } else {
+        emptyMap()
     }
+    return artists.map { artist ->
+        val newAlbumCount = when {
+            artist.albumCount > 0 -> artist.albumCount
+            else -> derivedCounts[artist.title.trim().lowercase()] ?: 0
+        }
+        artist.copy(
+            albumCount = newAlbumCount,
+            songCount = if (artist.songCount > 0) artist.songCount else 0,
+        )
+    }
+}
 
-internal fun enrichArtistArtwork(artists: List<Artist>, albums: List<Album>): List<Artist> =
-    artists.map { artist ->
+internal fun enrichJellyfinCatalogArtwork(snapshot: CatalogSnapshot): CatalogSnapshot {
+    val albumsById = snapshot.albums.associateBy { it.id }
+    val tracksByParent = snapshot.tracksByParent.mapValues { (_, tracks) ->
+        tracks.map { track ->
+            val album = track.parentAlbumId?.let(albumsById::get)
+            if (album == null) {
+                track
+            } else {
+                track.copy(
+                    thumbUrl = track.thumbUrl ?: album.thumbUrl,
+                    artist = track.artist.takeUnless { it == "Unknown artist" } ?: album.artist,
+                    album = track.album.takeUnless { it == "Unknown album" } ?: album.title,
+                )
+            }
+        }
+    }
+    return snapshot.copy(
+        artists = enrichArtistArtwork(snapshot.artists, snapshot.albums),
+        tracksByParent = tracksByParent,
+    )
+}
+
+internal fun enrichArtistArtwork(artists: List<Artist>, albums: List<Album>): List<Artist> {
+    if (artists.isEmpty()) return artists
+    val thumbByAlbumArtist = buildMap<String, String> {
+        albums.asSequence()
+            .filter { !it.thumbUrl.isNullOrBlank() }
+            .forEach { album ->
+                if (album.artist !in this) {
+                    put(album.artist, album.thumbUrl!!)
+                }
+            }
+    }
+    return artists.map { artist ->
         if (!artist.thumbUrl.isNullOrBlank()) {
             artist
         } else {
-            artist.copy(thumbUrl = albums.firstOrNull { it.artist == artist.title }?.thumbUrl)
+            artist.copy(thumbUrl = thumbByAlbumArtist[artist.title])
         }
     }
+}
+
+/**
+ * Counts albums per artist title for artists that did not already have [Artist.albumCount] from the server.
+ * Uses one album pass with an exact title index, then a fuzzy pass only for unmatched albums.
+ */
+private fun buildDerivedArtistAlbumCounts(
+    artists: List<Artist>,
+    albums: List<Album>,
+): Map<String, Int> {
+    val titlesNeedingCount = artists
+        .asSequence()
+        .filter { it.albumCount <= 0 }
+        .map { it.title.trim() }
+        .distinctBy { it.lowercase() }
+        .toList()
+    if (titlesNeedingCount.isEmpty()) return emptyMap()
+
+    val counts = titlesNeedingCount.associate { it.lowercase() to 0 }.toMutableMap()
+    val titleByLower = titlesNeedingCount.associateBy { it.lowercase() }
+    val fuzzyTitles = titlesNeedingCount.sortedByDescending { it.length }
+    val unmatchedAlbums = ArrayList<Album>()
+
+    for (album in albums) {
+        val exactKey = album.artist.trim().lowercase()
+        if (exactKey in counts) {
+            counts[exactKey] = counts.getValue(exactKey) + 1
+        } else {
+            unmatchedAlbums += album
+        }
+    }
+
+    if (unmatchedAlbums.isEmpty()) return counts
+
+    for (album in unmatchedAlbums) {
+        for (title in fuzzyTitles) {
+            if (albumMatchesArtist(album, title)) {
+                val key = title.lowercase()
+                counts[key] = counts.getValue(key) + 1
+                break
+            }
+        }
+    }
+    return counts
+}
 
 fun catalogAlbumsForArtist(catalog: CatalogSnapshot, artistTitle: String): List<Album> =
     catalog.albums.filter { albumMatchesArtist(it, artistTitle) }.sortedBy { it.title.lowercase() }

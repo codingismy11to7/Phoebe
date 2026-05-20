@@ -10,7 +10,7 @@ import com.phoebe.app.data.LocalFileMetadataCacheEntry
 import com.phoebe.app.data.enrichArtistAlbumCountsOnly
 import com.phoebe.app.data.enrichArtistArtwork
 import com.phoebe.app.platform.PhoebeLog
-import com.phoebe.app.platform.catalogTrackPrefetchParallelism
+import com.phoebe.app.platform.catalogTrackIndexParallelism
 import com.phoebe.app.platform.currentTimeMs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
@@ -123,7 +123,7 @@ object LocalFolderCatalogBuilder {
         indexedAtMs: Long,
         reader: LocalAudioLibraryReader,
     ): LocalFolderBuildEntries = coroutineScope {
-        val parallelism = minOf(catalogTrackPrefetchParallelism().coerceAtLeast(1), 4)
+        val parallelism = minOf(catalogTrackIndexParallelism().coerceAtLeast(1), 4)
         val entries = MutableList<LocalFileMetadataCacheEntry?>(files.size) { null }
         val changedFiles = mutableListOf<Pair<Int, LocalAudioFile>>()
         for ((index, file) in files.withIndex()) {

@@ -1,8 +1,11 @@
 package com.phoebe.app.ui
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
@@ -42,12 +45,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -66,32 +73,118 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import com.phoebe.app.data.catalogAlbumGenre
-import com.phoebe.app.data.catalogAlbumTrackStatsLoading
-import com.phoebe.app.data.catalogAlbumsForArtist
-import com.phoebe.app.data.catalogArtistAlbumCountLoading
-import com.phoebe.app.data.catalogArtistGenre
-import com.phoebe.app.data.catalogArtistTrackStatsLoading
-import com.phoebe.app.data.catalogTracksForAlbum
-import com.phoebe.app.data.catalogTracksForArtist
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.Artist
-import com.phoebe.app.domain.CatalogSnapshot
+import com.phoebe.app.domain.CatalogSyncPhase
+import com.phoebe.app.domain.CatalogSyncState
 import com.phoebe.app.domain.CollectionEntry
 import com.phoebe.app.domain.CollectionFacet
 import com.phoebe.app.domain.CollectionTarget
 import com.phoebe.app.domain.HomeSection
-import com.phoebe.app.domain.PersonalMixPreferences
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.PlexRadioStation
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.canTogglePlexLike
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+
+private val PhoneHomeAccordionBreakpoint: Dp = 600.dp
+
+@Immutable
+internal data class MobileHomeRouteState(
+    val homeUiState: HomeUiState,
+    val catalogRefreshing: Boolean,
+    val homeSections: List<HomeSection>,
+    val supportedCollectionEntries: Set<CollectionEntry>,
+    val radioStations: List<PlexRadioStation>,
+    val radioStartingIds: Set<String>,
+    val decadeMixNotice: String?,
+)
+
+@Immutable
+internal class MobileHomeCallbacks(
+    val onArtist: (Artist) -> Unit,
+    val onAlbum: (Album) -> Unit,
+    val onPlaylist: (Playlist) -> Unit,
+    val onRecentSongs: () -> Unit,
+    val onRecentArtists: () -> Unit,
+    val onRecentAlbums: () -> Unit,
+    val onFavoritePlaylists: () -> Unit,
+    val onFavoriteArtists: () -> Unit,
+    val onFavoriteAlbums: () -> Unit,
+    val onCollections: (CollectionEntry) -> Unit,
+    val onRecentlyPlayed: () -> Unit,
+    val onMostPlayed: () -> Unit,
+    val onRefreshArtists: () -> Unit,
+    val onRefreshAlbums: () -> Unit,
+    val onPlayDecadeMix: (Int) -> Unit,
+    val onClearDecadeMixNotice: () -> Unit,
+    val onPlayRadioStation: (PlexRadioStation) -> Unit,
+    val onPlayPersonalMix: () -> Unit,
+    val onPlayTracks: (List<Track>, Int) -> Unit,
+    val onAddToUpNext: (Track) -> Unit,
+    val onDownload: (Track) -> Unit,
+)
+
+@Composable
+internal fun MobileHomeRoute(
+    routeState: MobileHomeRouteState,
+    listState: LazyListState,
+    callbacks: MobileHomeCallbacks,
+    modifier: Modifier = Modifier,
+    initialExpandedPhoneSection: PhoneHomeAccordionSection? = null,
+) {
+    MobileHomeScreen(
+        state = routeState.homeUiState,
+        catalogRefreshing = routeState.catalogRefreshing,
+        listState = listState,
+        modifier = modifier,
+        onArtist = callbacks.onArtist,
+        onAlbum = callbacks.onAlbum,
+        onPlaylist = callbacks.onPlaylist,
+        onRecentSongs = callbacks.onRecentSongs,
+        onRecentArtists = callbacks.onRecentArtists,
+        onRecentAlbums = callbacks.onRecentAlbums,
+        onFavoritePlaylists = callbacks.onFavoritePlaylists,
+        onFavoriteArtists = callbacks.onFavoriteArtists,
+        onFavoriteAlbums = callbacks.onFavoriteAlbums,
+        onCollections = callbacks.onCollections,
+        onRecentlyPlayed = callbacks.onRecentlyPlayed,
+        onMostPlayed = callbacks.onMostPlayed,
+        onRefreshArtists = callbacks.onRefreshArtists,
+        onRefreshAlbums = callbacks.onRefreshAlbums,
+        onPlayDecadeMix = callbacks.onPlayDecadeMix,
+        decadeMixNotice = routeState.decadeMixNotice,
+        onClearDecadeMixNotice = callbacks.onClearDecadeMixNotice,
+        radioStations = routeState.radioStations,
+        radioStartingIds = routeState.radioStartingIds,
+        onPlayRadioStation = callbacks.onPlayRadioStation,
+        onPlayPersonalMix = callbacks.onPlayPersonalMix,
+        onPlayTracks = callbacks.onPlayTracks,
+        onAddToUpNext = callbacks.onAddToUpNext,
+        onDownload = callbacks.onDownload,
+        homeSections = routeState.homeSections,
+        supportedCollectionEntries = routeState.supportedCollectionEntries,
+        initialExpandedPhoneSection = initialExpandedPhoneSection,
+    )
+}
+
+@Composable
+private fun HomeHorizontalCarousel(
+    modifier: Modifier = Modifier,
+    horizontalSpacing: Dp = 10.dp,
+    content: LazyListScope.() -> Unit,
+) {
+    LazyRow(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(horizontalSpacing),
+        content = content,
+    )
+}
 
 @Composable
 internal fun DesktopHomeScreen(
     state: HomeUiState,
-    catalog: CatalogSnapshot,
     catalogRefreshing: Boolean = false,
     listState: LazyListState = rememberLazyListState(),
     modifier: Modifier = Modifier,
@@ -118,11 +211,11 @@ internal fun DesktopHomeScreen(
     radioStations: List<PlexRadioStation> = emptyList(),
     radioStartingIds: Set<String> = emptySet(),
     onPlayRadioStation: (PlexRadioStation) -> Unit = {},
+    onPlayPersonalMix: () -> Unit = {},
     onPlayTracks: (List<Track>, Int) -> Unit,
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
     homeSections: List<HomeSection> = HomeSection.defaultOrder,
-    personalMixPreferences: PersonalMixPreferences = PersonalMixPreferences.Default,
     supportedCollectionEntries: Set<CollectionEntry> = allCollectionEntries().toSet(),
 ) {
     var showDecadeMix by remember { mutableStateOf(false) }
@@ -148,12 +241,8 @@ internal fun DesktopHomeScreen(
     val sharedKeyForPlayedTrack: (Track) -> String? = { track ->
         if (sharedPlayedTrackKeys[track.id] == 1) "song:${track.id}" else null
     }
-    val desktopVisibleArtists = remember(state.recentlyAddedArtists, state.favoriteArtists) {
-        (state.recentlyAddedArtists + state.favoriteArtists).distinctBy { it.id }
-    }
-    val artistThumbs = remember(desktopVisibleArtists, catalog.albums) {
-        artistThumbsFor(desktopVisibleArtists, catalog.albums)
-    }
+    val artistThumbs = state.artistThumbs
+    val catalogSyncInProgress = LocalCatalogSyncInProgress.current
     LazyColumn(
         state = listState,
         modifier = modifier.fillMaxSize().padding(
@@ -167,13 +256,13 @@ internal fun DesktopHomeScreen(
                 Text("Pick up where you left off", color = PhoebeUi.secondaryText, fontSize = 13.sp)
             }
         }
-        if (catalogRefreshing) {
+        if (catalogSyncInProgress) {
             item(contentType = "loading") { CatalogLoadingStrip() }
         }
         normalizedHomeSections(homeSections).forEach { section ->
             when (section) {
                 HomeSection.Mixes -> item("mixes") {
-                    DesktopMixesPanel(catalog, state, personalMixPreferences, radioStations, radioStartingIds, onPlayTracks, onPlayRadioStation, onClearDecadeMixNotice) {
+                    DesktopMixesPanel(onPlayPersonalMix, radioStations, radioStartingIds, onPlayRadioStation, onClearDecadeMixNotice) {
                         showDecadeMix = true
                     }
                 }
@@ -184,13 +273,13 @@ internal fun DesktopHomeScreen(
                     }
                 }
                 HomeSection.Favorites -> {
-                    item("favorite-playlists") { DesktopFavoritePlaylistsPanel(state.favoritePlaylists, onPlaylist, onFavoritePlaylists) }
-                    item("favorite-artists") { DesktopFavoriteArtistsPanel(catalog.artists.filter { it.favorite }.sortedBy { it.title.lowercase() }, artistThumbs, onArtist, onFavoriteArtists) }
-                    item("favorite-albums") { DesktopFavoriteAlbumsPanel(catalog.albums.filter { it.favorite }.sortedBy { it.title.lowercase() }, onAlbum, onFavoriteAlbums) }
+                    item("favorite-playlists") { DesktopFavoritePlaylistsPanel(state.favoritePlaylists, onPlaylist, onFavoritePlaylists, totalCount = state.favoritePlaylistCount) }
+                    item("favorite-artists") { DesktopFavoriteArtistsPanel(state.favoriteArtists, artistThumbs, onArtist, onFavoriteArtists, totalCount = state.favoriteArtistCount) }
+                    item("favorite-albums") { DesktopFavoriteAlbumsPanel(state.favoriteAlbums, onAlbum, onFavoriteAlbums, totalCount = state.favoriteAlbumCount) }
                 }
-                HomeSection.FavoritePlaylists -> item("favorite-playlists") { DesktopFavoritePlaylistsPanel(state.favoritePlaylists, onPlaylist, onFavoritePlaylists) }
-                HomeSection.FavoriteArtists -> item("favorite-artists") { DesktopFavoriteArtistsPanel(catalog.artists.filter { it.favorite }.sortedBy { it.title.lowercase() }, artistThumbs, onArtist, onFavoriteArtists) }
-                HomeSection.FavoriteAlbums -> item("favorite-albums") { DesktopFavoriteAlbumsPanel(catalog.albums.filter { it.favorite }.sortedBy { it.title.lowercase() }, onAlbum, onFavoriteAlbums) }
+                HomeSection.FavoritePlaylists -> item("favorite-playlists") { DesktopFavoritePlaylistsPanel(state.favoritePlaylists, onPlaylist, onFavoritePlaylists, totalCount = state.favoritePlaylistCount) }
+                HomeSection.FavoriteArtists -> item("favorite-artists") { DesktopFavoriteArtistsPanel(state.favoriteArtists, artistThumbs, onArtist, onFavoriteArtists, totalCount = state.favoriteArtistCount) }
+                HomeSection.FavoriteAlbums -> item("favorite-albums") { DesktopFavoriteAlbumsPanel(state.favoriteAlbums, onAlbum, onFavoriteAlbums, totalCount = state.favoriteAlbumCount) }
                 HomeSection.Recents -> {
                     item("recent-songs") { DesktopRecentSongsPanel(state.recentlyAddedTracks, onRecentSongs, onPlayTracks) }
                     item("recent-artists") { DesktopRecentArtistsPanel(state.recentlyAddedArtists, artistThumbs, onRecentArtists, onArtist) }
@@ -203,7 +292,7 @@ internal fun DesktopHomeScreen(
                     DesktopPlayedPanels(state, onPlayTracks, onAddToUpNext, onDownload, onMostPlayed, onRecentlyPlayed, playedPanelMaxRows, sharedKeyForPlayedTrack)
                 }
                 HomeSection.Random -> item("random") {
-                    DesktopRandomPanels(state, catalog, catalogRefreshing, onArtist, onAlbum, onRefreshArtists, onRefreshAlbums, onPrefetchArtist, onPrefetchAlbum)
+                    DesktopRandomPanels(state, catalogRefreshing, onArtist, onAlbum, onRefreshArtists, onRefreshAlbums, onPrefetchArtist, onPrefetchAlbum)
                 }
             }
         }
@@ -213,7 +302,6 @@ internal fun DesktopHomeScreen(
 @Composable
 internal fun MobileHomeScreen(
     state: HomeUiState,
-    catalog: CatalogSnapshot,
     catalogRefreshing: Boolean = false,
     listState: LazyListState = rememberLazyListState(),
     modifier: Modifier = Modifier,
@@ -239,12 +327,13 @@ internal fun MobileHomeScreen(
     radioStations: List<PlexRadioStation> = emptyList(),
     radioStartingIds: Set<String> = emptySet(),
     onPlayRadioStation: (PlexRadioStation) -> Unit = {},
+    onPlayPersonalMix: () -> Unit = {},
     onPlayTracks: (List<Track>, Int) -> Unit,
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
     homeSections: List<HomeSection> = HomeSection.defaultOrder,
-    personalMixPreferences: PersonalMixPreferences = PersonalMixPreferences.Default,
     supportedCollectionEntries: Set<CollectionEntry> = allCollectionEntries().toSet(),
+    initialExpandedPhoneSection: PhoneHomeAccordionSection? = null,
 ) {
     var showDecadeMix by remember { mutableStateOf(false) }
     if (showDecadeMix) {
@@ -260,71 +349,722 @@ internal fun MobileHomeScreen(
             },
         )
     }
-    val recentTracks = remember(state.recentlyAddedTracks) { state.recentlyAddedTracks.take(10) }
-    val recentArtists = remember(state.recentlyAddedArtists) { state.recentlyAddedArtists.take(10) }
-    val recentAlbums = remember(state.recentlyAddedAlbums) { state.recentlyAddedAlbums.take(10) }
-    val randomArtists = remember(state.randomArtists) { state.randomArtists.take(10) }
-    val randomAlbums = remember(state.randomAlbums) { state.randomAlbums.take(10) }
-    val playedPanelMaxRows = 3
-    val visibleArtists = remember(recentArtists, randomArtists, state.favoriteArtists) {
-        (recentArtists + randomArtists + state.favoriteArtists).distinctBy { it.id }
+    val sectionOrder = remember(homeSections) { normalizedHomeSections(homeSections) }
+    val collectionRows = remember(supportedCollectionEntries) { collectionEntryRows(supportedCollectionEntries) }
+    val artistThumbs = state.artistThumbs
+    val catalogSyncInProgress = LocalCatalogSyncInProgress.current
+    val chromePadding = LocalMobileChromePadding.current
+    val supportedCollections = remember(supportedCollectionEntries) { collectionEntries(supportedCollectionEntries) }
+    var expandedPhoneSection by remember(initialExpandedPhoneSection) {
+        mutableStateOf(initialExpandedPhoneSection)
     }
-    val artistThumbs = remember(visibleArtists, catalog.albums) {
-        artistThumbsFor(visibleArtists, catalog.albums)
+    BoxWithConstraints(modifier.fillMaxSize()) {
+        val usePhoneAccordions = maxWidth < PhoneHomeAccordionBreakpoint
+        MobileHomeContent(
+            state = state,
+            listState = listState,
+            modifier = Modifier.fillMaxSize(),
+            chromePadding = chromePadding,
+            catalogSyncInProgress = catalogSyncInProgress,
+            sectionOrder = sectionOrder,
+            collectionRows = collectionRows,
+            collectionEntries = supportedCollections,
+            artistThumbs = artistThumbs,
+            usePhoneAccordions = usePhoneAccordions,
+            expandedPhoneSection = if (usePhoneAccordions) expandedPhoneSection else null,
+            onExpandedPhoneSection = { expandedPhoneSection = it },
+            onArtist = onArtist,
+            onAlbum = onAlbum,
+            onPlaylist = onPlaylist,
+            onRecentSongs = onRecentSongs,
+            onRecentArtists = onRecentArtists,
+            onRecentAlbums = onRecentAlbums,
+            onFavoritePlaylists = onFavoritePlaylists,
+            onFavoriteArtists = onFavoriteArtists,
+            onFavoriteAlbums = onFavoriteAlbums,
+            onCollections = onCollections,
+            onRecentlyPlayed = onRecentlyPlayed,
+            onMostPlayed = onMostPlayed,
+            onRefreshArtists = onRefreshArtists,
+            onRefreshAlbums = onRefreshAlbums,
+            onPlayPersonalMix = onPlayPersonalMix,
+            radioStations = radioStations,
+            radioStartingIds = radioStartingIds,
+            onPlayRadioStation = onPlayRadioStation,
+            onShowDecadeMix = { showDecadeMix = true },
+            onClearDecadeMixNotice = onClearDecadeMixNotice,
+            onPlayTracks = onPlayTracks,
+        )
+    }
+}
+
+internal enum class PhoneHomeAccordionSection {
+    Mixes,
+    Collections,
+    Played,
+    Recents,
+    Random,
+}
+
+private sealed interface MobileHomeSectionItem {
+    data class Standard(val section: HomeSection) : MobileHomeSectionItem
+    data class RecentsGroup(val subsections: List<HomeSection>) : MobileHomeSectionItem
+}
+
+private fun mobileHomeSectionItems(sectionOrder: List<HomeSection>): List<MobileHomeSectionItem> {
+    val recentSections = setOf(HomeSection.RecentSongs, HomeSection.RecentArtists, HomeSection.RecentAlbums)
+    val items = mutableListOf<MobileHomeSectionItem>()
+    val pendingRecents = mutableListOf<HomeSection>()
+    fun flushRecents() {
+        if (pendingRecents.isNotEmpty()) {
+            items.add(MobileHomeSectionItem.RecentsGroup(pendingRecents.toList()))
+            pendingRecents.clear()
+        }
+    }
+    sectionOrder.forEach { section ->
+        if (section in recentSections) {
+            pendingRecents.add(section)
+        } else {
+            flushRecents()
+            items.add(MobileHomeSectionItem.Standard(section))
+        }
+    }
+    flushRecents()
+    return items
+}
+
+private fun recentActionsFor(
+    subsections: List<HomeSection>,
+    onRecentSongs: () -> Unit,
+    onRecentArtists: () -> Unit,
+    onRecentAlbums: () -> Unit,
+): List<PhoneHomeAction> = buildList {
+    if (HomeSection.RecentSongs in subsections) {
+        add(PhoneHomeAction("Songs", PhoebeIcon.Music, onClick = onRecentSongs))
+    }
+    if (HomeSection.RecentArtists in subsections) {
+        add(PhoneHomeAction("Artists", PhoebeIcon.Person, onClick = onRecentArtists))
+    }
+    if (HomeSection.RecentAlbums in subsections) {
+        add(PhoneHomeAction("Albums", PhoebeIcon.Grid, onClick = onRecentAlbums))
+    }
+}
+
+internal val HomeAccordionScreenshotSections = listOf(
+    HomeSection.Mixes,
+    HomeSection.Collections,
+    HomeSection.Recents,
+    HomeSection.Played,
+    HomeSection.Random,
+)
+
+internal fun homeAccordionScreenshotScrollIndex(
+    expandedSection: PhoneHomeAccordionSection?,
+    homeSections: List<HomeSection> = HomeAccordionScreenshotSections,
+): Int =
+    expandedSection?.let {
+        phoneAccordionLazyItemIndex(it, normalizedHomeSections(homeSections), catalogSyncInProgress = false)
+    } ?: 0
+
+private fun phoneAccordionLazyItemIndex(
+    target: PhoneHomeAccordionSection,
+    sectionOrder: List<HomeSection>,
+    catalogSyncInProgress: Boolean,
+): Int? {
+    var index = 0
+    if (catalogSyncInProgress) index++
+    mobileHomeSectionItems(sectionOrder).forEach { item ->
+        when (item) {
+            is MobileHomeSectionItem.RecentsGroup -> {
+                if (target == PhoneHomeAccordionSection.Recents) return index
+                index++
+            }
+            is MobileHomeSectionItem.Standard -> when (item.section) {
+                HomeSection.Mixes -> {
+                    if (target == PhoneHomeAccordionSection.Mixes) return index
+                    index++
+                }
+                HomeSection.Collections -> {
+                    if (target == PhoneHomeAccordionSection.Collections) return index
+                    index++
+                }
+                HomeSection.Favorites -> index += 3
+                HomeSection.FavoritePlaylists,
+                HomeSection.FavoriteArtists,
+                HomeSection.FavoriteAlbums -> index++
+                HomeSection.Played -> {
+                    if (target == PhoneHomeAccordionSection.Played) return index
+                    index++
+                }
+                HomeSection.Random -> {
+                    if (target == PhoneHomeAccordionSection.Random) return index
+                    index++
+                }
+                else -> index++
+            }
+        }
+    }
+    return null
+}
+
+private fun phoneAccordionNeedsScrollIntoView(listState: LazyListState, index: Int): Boolean {
+    val layoutInfo = listState.layoutInfo
+    val visibleItems = layoutInfo.visibleItemsInfo
+    if (visibleItems.isEmpty()) return true
+
+    val itemInfo = visibleItems.find { it.index == index } ?: run {
+        return index > visibleItems.last().index
+    }
+
+    val itemBottom = itemInfo.offset + itemInfo.size
+    return itemBottom > layoutInfo.viewportEndOffset
+}
+
+@Composable
+private fun MobileHomeContent(
+    state: HomeUiState,
+    listState: LazyListState,
+    modifier: Modifier,
+    chromePadding: MobileChromePadding,
+    catalogSyncInProgress: Boolean,
+    sectionOrder: List<HomeSection>,
+    collectionRows: List<List<HomeCollectionEntry>>,
+    collectionEntries: List<HomeCollectionEntry>,
+    artistThumbs: Map<String, String>,
+    usePhoneAccordions: Boolean,
+    expandedPhoneSection: PhoneHomeAccordionSection?,
+    onExpandedPhoneSection: (PhoneHomeAccordionSection?) -> Unit,
+    onArtist: (Artist) -> Unit,
+    onAlbum: (Album) -> Unit,
+    onPlaylist: (Playlist) -> Unit,
+    onRecentSongs: () -> Unit,
+    onRecentArtists: () -> Unit,
+    onRecentAlbums: () -> Unit,
+    onFavoritePlaylists: () -> Unit,
+    onFavoriteArtists: () -> Unit,
+    onFavoriteAlbums: () -> Unit,
+    onCollections: (CollectionEntry) -> Unit,
+    onRecentlyPlayed: () -> Unit,
+    onMostPlayed: () -> Unit,
+    onRefreshArtists: () -> Unit,
+    onRefreshAlbums: () -> Unit,
+    onPlayPersonalMix: () -> Unit,
+    radioStations: List<PlexRadioStation>,
+    radioStartingIds: Set<String>,
+    onPlayRadioStation: (PlexRadioStation) -> Unit,
+    onShowDecadeMix: () -> Unit,
+    onClearDecadeMixNotice: () -> Unit,
+    onPlayTracks: (List<Track>, Int) -> Unit,
+) {
+    LaunchedEffect(expandedPhoneSection, sectionOrder, catalogSyncInProgress, usePhoneAccordions) {
+        val target = expandedPhoneSection ?: return@LaunchedEffect
+        if (!usePhoneAccordions) return@LaunchedEffect
+        delay(240)
+        val index = phoneAccordionLazyItemIndex(target, sectionOrder, catalogSyncInProgress) ?: return@LaunchedEffect
+        if (phoneAccordionNeedsScrollIntoView(listState, index)) {
+            listState.animateScrollToItem(index)
+        }
     }
     LazyColumn(
         state = listState,
-        modifier = modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 10.dp),
+        modifier = modifier.padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(
+            top = chromePadding.top + 10.dp,
+            bottom = chromePadding.bottom + 10.dp,
+        ),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        if (catalogRefreshing) {
-            item(contentType = "loading") { CatalogLoadingStrip() }
+        if (catalogSyncInProgress) {
+            item(key = "loading", contentType = "loading") { CatalogLoadingStrip() }
         }
-        normalizedHomeSections(homeSections).forEach { section ->
-            when (section) {
-                HomeSection.Mixes -> item("mix") {
-                    MobileMixesSection(catalog, state, personalMixPreferences, radioStations, radioStartingIds, onPlayTracks, onPlayRadioStation, onClearDecadeMixNotice) {
-                        showDecadeMix = true
-                    }
-                }
-                HomeSection.Collections -> item("collections") { MobileCollectionsSection(supportedCollectionEntries, onCollections) }
-                HomeSection.Favorites -> {
-                    item("favorite-playlists") { MobileFavoritePlaylistsSection(state.favoritePlaylists, onPlaylist, onFavoritePlaylists) }
-                    item("favorite-artists") { MobileFavoriteArtistsSection(catalog.artists.filter { it.favorite }.sortedBy { it.title.lowercase() }, artistThumbs, onArtist, onFavoriteArtists) }
-                    item("favorite-albums") { MobileFavoriteAlbumsSection(catalog.albums.filter { it.favorite }.sortedBy { it.title.lowercase() }, onAlbum, onFavoriteAlbums) }
-                }
-                HomeSection.FavoritePlaylists -> item("favorite-playlists") { MobileFavoritePlaylistsSection(state.favoritePlaylists, onPlaylist, onFavoritePlaylists) }
-                HomeSection.FavoriteArtists -> item("favorite-artists") { MobileFavoriteArtistsSection(catalog.artists.filter { it.favorite }.sortedBy { it.title.lowercase() }, artistThumbs, onArtist, onFavoriteArtists) }
-                HomeSection.FavoriteAlbums -> item("favorite-albums") { MobileFavoriteAlbumsSection(catalog.albums.filter { it.favorite }.sortedBy { it.title.lowercase() }, onAlbum, onFavoriteAlbums) }
-                HomeSection.Recents -> {
-                    item("recent-songs") { MobileRecentSongsSection(recentTracks, onRecentSongs, onPlayTracks) }
-                    item("recent-artists") { MobileRecentArtistsSection(recentArtists, artistThumbs, onRecentArtists, onArtist) }
-                    item("recent-albums") { MobileRecentAlbumsSection(recentAlbums, onRecentAlbums, onAlbum) }
-                }
-                HomeSection.RecentSongs -> item("recent-songs") { MobileRecentSongsSection(recentTracks, onRecentSongs, onPlayTracks) }
-                HomeSection.RecentArtists -> item("recent-artists") { MobileRecentArtistsSection(recentArtists, artistThumbs, onRecentArtists, onArtist) }
-                HomeSection.RecentAlbums -> item("recent-albums") { MobileRecentAlbumsSection(recentAlbums, onRecentAlbums, onAlbum) }
-                HomeSection.Played -> {
-                    item("played") { MobileRecentlyPlayedSection(state, onRecentlyPlayed, onPlayTracks, onAddToUpNext, onDownload, maxRows = playedPanelMaxRows) }
-                    item("most-played") {
-                        MostPlayedPanel(
-                            rows = state.mostPlayedTracks,
-                            onPlayTracks = onPlayTracks,
-                            onAddToUpNext = onAddToUpNext,
-                            onDownload = onDownload,
-                            onViewAll = onMostPlayed,
-                            modifier = Modifier.fillMaxWidth(),
-                            maxRows = playedPanelMaxRows,
-                            showFavoriteAction = false,
+        mobileHomeSectionItems(sectionOrder).forEach { item ->
+            when (item) {
+                is MobileHomeSectionItem.RecentsGroup -> item(key = "recents", contentType = "recents-section") {
+                    if (usePhoneAccordions) {
+                        PhoneRecentsAccordionSection(
+                            subsections = item.subsections,
+                            expanded = expandedPhoneSection == PhoneHomeAccordionSection.Recents,
+                            onToggle = {
+                                onExpandedPhoneSection(
+                                    toggledPhoneHomeAccordion(expandedPhoneSection, PhoneHomeAccordionSection.Recents),
+                                )
+                            },
+                            onRecentSongs = onRecentSongs,
+                            onRecentArtists = onRecentArtists,
+                            onRecentAlbums = onRecentAlbums,
+                        )
+                    } else {
+                        MobileRecentsShortcutsSection(
+                            subsections = item.subsections,
+                            onRecentSongs = onRecentSongs,
+                            onRecentArtists = onRecentArtists,
+                            onRecentAlbums = onRecentAlbums,
                         )
                     }
                 }
-                HomeSection.Random -> {
-                    item("artists") {
-                        MobileRandomArtistsPanel(randomArtists, artistThumbs, onArtist, onRefreshArtists, Modifier.fillMaxWidth())
+                is MobileHomeSectionItem.Standard -> when (item.section) {
+                HomeSection.Mixes -> item(key = "mix", contentType = "mix-section") {
+                    if (usePhoneAccordions) {
+                        PhoneMixesAccordionSection(
+                            expanded = expandedPhoneSection == PhoneHomeAccordionSection.Mixes,
+                            onToggle = {
+                                onExpandedPhoneSection(
+                                    toggledPhoneHomeAccordion(expandedPhoneSection, PhoneHomeAccordionSection.Mixes),
+                                )
+                            },
+                            onPlayPersonalMix = onPlayPersonalMix,
+                            radioStations = radioStations,
+                            radioStartingIds = radioStartingIds,
+                            onPlayRadioStation = onPlayRadioStation,
+                            onClearDecadeMixNotice = onClearDecadeMixNotice,
+                            onShowDecadeMix = onShowDecadeMix,
+                        )
+                    } else {
+                        MobileMixesSection(onPlayPersonalMix, radioStations, radioStartingIds, onPlayRadioStation, onClearDecadeMixNotice, onShowDecadeMix)
                     }
-                    item("albums") {
-                        MobileRandomAlbumsPanel(randomAlbums, onAlbum, onRefreshAlbums, Modifier.fillMaxWidth())
+                }
+                HomeSection.Collections -> item(key = "collections", contentType = "collections-section") {
+                    if (usePhoneAccordions) {
+                        PhoneCollectionsAccordionSection(
+                            collectionEntries = collectionEntries,
+                            expanded = expandedPhoneSection == PhoneHomeAccordionSection.Collections,
+                            onToggle = {
+                                onExpandedPhoneSection(
+                                    toggledPhoneHomeAccordion(expandedPhoneSection, PhoneHomeAccordionSection.Collections),
+                                )
+                            },
+                            onCollections = onCollections,
+                        )
+                    } else {
+                        MobileCollectionsSection(collectionRows, onCollections)
+                    }
+                }
+                HomeSection.Favorites -> {
+                    item(key = "favorite-playlists", contentType = "favorite-playlists-section") { MobileFavoritePlaylistsSection(state.favoritePlaylists, onPlaylist, onFavoritePlaylists, totalCount = state.favoritePlaylistCount) }
+                    item(key = "favorite-artists", contentType = "favorite-artists-section") { MobileFavoriteArtistsSection(state.favoriteArtists, artistThumbs, onArtist, onFavoriteArtists, totalCount = state.favoriteArtistCount) }
+                    item(key = "favorite-albums", contentType = "favorite-albums-section") { MobileFavoriteAlbumsSection(state.favoriteAlbums, onAlbum, onFavoriteAlbums, totalCount = state.favoriteAlbumCount) }
+                }
+                HomeSection.FavoritePlaylists -> item(key = "favorite-playlists", contentType = "favorite-playlists-section") { MobileFavoritePlaylistsSection(state.favoritePlaylists, onPlaylist, onFavoritePlaylists, totalCount = state.favoritePlaylistCount) }
+                HomeSection.FavoriteArtists -> item(key = "favorite-artists", contentType = "favorite-artists-section") { MobileFavoriteArtistsSection(state.favoriteArtists, artistThumbs, onArtist, onFavoriteArtists, totalCount = state.favoriteArtistCount) }
+                HomeSection.FavoriteAlbums -> item(key = "favorite-albums", contentType = "favorite-albums-section") { MobileFavoriteAlbumsSection(state.favoriteAlbums, onAlbum, onFavoriteAlbums, totalCount = state.favoriteAlbumCount) }
+                HomeSection.Played -> item(key = "played-shortcuts", contentType = "played-shortcuts-section") {
+                    if (usePhoneAccordions) {
+                        PhonePlayedAccordionSection(
+                            expanded = expandedPhoneSection == PhoneHomeAccordionSection.Played,
+                            onToggle = {
+                                onExpandedPhoneSection(
+                                    toggledPhoneHomeAccordion(expandedPhoneSection, PhoneHomeAccordionSection.Played),
+                                )
+                            },
+                            onRecentlyPlayed = onRecentlyPlayed,
+                            onMostPlayed = onMostPlayed,
+                        )
+                    } else {
+                        MobilePlayedHistoryShortcuts(
+                            onRecentlyPlayed = onRecentlyPlayed,
+                            onMostPlayed = onMostPlayed,
+                        )
+                    }
+                }
+                HomeSection.Random -> item(key = "random", contentType = "random-section") {
+                    val randomArtists = remember(state.randomArtists) { state.randomArtists.take(10) }
+                    val randomAlbums = remember(state.randomAlbums) { state.randomAlbums.take(10) }
+                    if (usePhoneAccordions) {
+                        PhoneRandomAccordionSection(
+                            randomArtists = randomArtists,
+                            randomAlbums = randomAlbums,
+                            artistThumbs = artistThumbs,
+                            expanded = expandedPhoneSection == PhoneHomeAccordionSection.Random,
+                            onToggle = {
+                                onExpandedPhoneSection(
+                                    toggledPhoneHomeAccordion(expandedPhoneSection, PhoneHomeAccordionSection.Random),
+                                )
+                            },
+                            onArtist = onArtist,
+                            onAlbum = onAlbum,
+                            onRefreshArtists = onRefreshArtists,
+                            onRefreshAlbums = onRefreshAlbums,
+                        )
+                    } else {
+                        MobileRandomSection(
+                            randomArtists = randomArtists,
+                            randomAlbums = randomAlbums,
+                            artistThumbs = artistThumbs,
+                            onArtist = onArtist,
+                            onAlbum = onAlbum,
+                            onRefreshArtists = onRefreshArtists,
+                            onRefreshAlbums = onRefreshAlbums,
+                        )
+                    }
+                }
+                else -> Unit
+                }
+            }
+        }
+    }
+}
+
+private fun toggledPhoneHomeAccordion(
+    expandedSection: PhoneHomeAccordionSection?,
+    target: PhoneHomeAccordionSection,
+): PhoneHomeAccordionSection? =
+    if (expandedSection == target) null else target
+
+private data class PhoneHomeAction(
+    val label: String,
+    val icon: PhoebeIcon,
+    val enabled: Boolean = true,
+    val onClick: () -> Unit,
+)
+
+@Composable
+private fun PhoneMixesAccordionSection(
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    onPlayPersonalMix: () -> Unit,
+    radioStations: List<PlexRadioStation>,
+    radioStartingIds: Set<String>,
+    onPlayRadioStation: (PlexRadioStation) -> Unit,
+    onClearDecadeMixNotice: () -> Unit,
+    onShowDecadeMix: () -> Unit,
+) {
+    val actions = listOf(
+        PhoneHomeAction("Personal", PhoebeIcon.Person, onClick = onPlayPersonalMix),
+        PhoneHomeAction(
+            label = "Decade",
+            icon = PhoebeIcon.Calendar,
+            onClick = {
+                onClearDecadeMixNotice()
+                onShowDecadeMix()
+            },
+        ),
+    ) + radioStations.map { station ->
+        val starting = station.key in radioStartingIds
+        PhoneHomeAction(
+            label = if (starting) "Starting..." else station.title,
+            icon = station.homeRadioIcon(),
+            enabled = !starting,
+            onClick = { onPlayRadioStation(station) },
+        )
+    }
+    PhoneHomeAccordionGroup(
+        title = "Mixes",
+        subtitle = optionCountLabel(actions.size),
+        icon = PhoebeIcon.InterwovenArrows,
+        expanded = expanded,
+        onToggle = onToggle,
+    ) {
+        PhoneHomeActionGrid(actions)
+    }
+}
+
+@Composable
+private fun PhoneCollectionsAccordionSection(
+    collectionEntries: List<HomeCollectionEntry>,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    onCollections: (CollectionEntry) -> Unit,
+) {
+    PhoneHomeAccordionGroup(
+        title = "Collections",
+        subtitle = optionCountLabel(collectionEntries.size),
+        icon = PhoebeIcon.Book,
+        expanded = expanded,
+        onToggle = onToggle,
+    ) {
+        if (collectionEntries.isEmpty()) {
+            HomeEmptyState("No collections are available.")
+        } else {
+            PhoneHomeActionGrid(
+                collectionEntries.map { entry ->
+                    PhoneHomeAction(
+                        label = entry.mobileTitle,
+                        icon = entry.icon,
+                        onClick = { onCollections(entry.collectionEntry) },
+                    )
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun PhonePlayedAccordionSection(
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    onRecentlyPlayed: () -> Unit,
+    onMostPlayed: () -> Unit,
+) {
+    PhoneHomeAccordionGroup(
+        title = "Listening History",
+        subtitle = "2 options",
+        icon = PhoebeIcon.Music,
+        expanded = expanded,
+        onToggle = onToggle,
+    ) {
+        PhoneHomeActionGrid(
+            listOf(
+                PhoneHomeAction("Recently Played", PhoebeIcon.Music, onClick = onRecentlyPlayed),
+                PhoneHomeAction("Most Played", PhoebeIcon.PlaylistPlay, onClick = onMostPlayed),
+            ),
+        )
+    }
+}
+
+@Composable
+private fun PhoneRecentsAccordionSection(
+    subsections: List<HomeSection>,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    onRecentSongs: () -> Unit,
+    onRecentArtists: () -> Unit,
+    onRecentAlbums: () -> Unit,
+) {
+    val actions = recentActionsFor(subsections, onRecentSongs, onRecentArtists, onRecentAlbums)
+    PhoneHomeAccordionGroup(
+        title = "Recently Added",
+        subtitle = optionCountLabel(actions.size),
+        icon = PhoebeIcon.Bell,
+        expanded = expanded,
+        onToggle = onToggle,
+    ) {
+        if (actions.isEmpty()) {
+            HomeEmptyState("No recently added sections are enabled.")
+        } else {
+            PhoneHomeActionGrid(actions)
+        }
+    }
+}
+
+@Composable
+private fun PhoneRandomAccordionSection(
+    randomArtists: List<Artist>,
+    randomAlbums: List<Album>,
+    artistThumbs: Map<String, String>,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    onArtist: (Artist) -> Unit,
+    onAlbum: (Album) -> Unit,
+    onRefreshArtists: () -> Unit,
+    onRefreshAlbums: () -> Unit,
+) {
+    PhoneHomeAccordionGroup(
+        title = "Random",
+        subtitle = "Artists and albums",
+        icon = PhoebeIcon.InterwovenArrows,
+        expanded = expanded,
+        onToggle = onToggle,
+    ) {
+        MobileRandomExpandedContent(
+            randomArtists = randomArtists,
+            randomAlbums = randomAlbums,
+            artistThumbs = artistThumbs,
+            onArtist = onArtist,
+            onAlbum = onAlbum,
+            onRefreshArtists = onRefreshArtists,
+            onRefreshAlbums = onRefreshAlbums,
+        )
+    }
+}
+
+@Composable
+private fun MobileRecentsShortcutsSection(
+    subsections: List<HomeSection>,
+    onRecentSongs: () -> Unit,
+    onRecentArtists: () -> Unit,
+    onRecentAlbums: () -> Unit,
+) {
+    val actions = recentActionsFor(subsections, onRecentSongs, onRecentArtists, onRecentAlbums)
+    HomePanel(Modifier.fillMaxWidth()) {
+        SectionLabel("RECENTLY ADDED", PhoebeUi.mutedText)
+        if (actions.isEmpty()) {
+            HomeEmptyState("No recently added sections are enabled.")
+        } else {
+            PhoneHomeActionGrid(actions)
+        }
+    }
+}
+
+@Composable
+private fun MobileRandomSection(
+    randomArtists: List<Artist>,
+    randomAlbums: List<Album>,
+    artistThumbs: Map<String, String>,
+    onArtist: (Artist) -> Unit,
+    onAlbum: (Album) -> Unit,
+    onRefreshArtists: () -> Unit,
+    onRefreshAlbums: () -> Unit,
+) {
+    HomePanel(Modifier.fillMaxWidth()) {
+        SectionLabel("RANDOM", PhoebeUi.mutedText)
+        MobileRandomExpandedContent(
+            randomArtists = randomArtists,
+            randomAlbums = randomAlbums,
+            artistThumbs = artistThumbs,
+            onArtist = onArtist,
+            onAlbum = onAlbum,
+            onRefreshArtists = onRefreshArtists,
+            onRefreshAlbums = onRefreshAlbums,
+        )
+    }
+}
+
+@Composable
+private fun MobileRandomExpandedContent(
+    randomArtists: List<Artist>,
+    randomAlbums: List<Album>,
+    artistThumbs: Map<String, String>,
+    onArtist: (Artist) -> Unit,
+    onAlbum: (Album) -> Unit,
+    onRefreshArtists: () -> Unit,
+    onRefreshAlbums: () -> Unit,
+) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        MobileRandomArtistsList(randomArtists, artistThumbs, onArtist, onRefreshArtists)
+        MobileRandomAlbumsList(randomAlbums, onAlbum, onRefreshAlbums)
+    }
+}
+
+@Composable
+private fun PhoneHomeAccordionGroup(
+    title: String,
+    subtitle: String,
+    icon: PhoebeIcon,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        PhoneHomeAccordionHeader(
+            title = title,
+            subtitle = subtitle,
+            icon = icon,
+            expanded = expanded,
+            onClick = onToggle,
+        )
+        AnimatedVisibility(
+            visible = expanded,
+            enter = expandVertically(animationSpec = tween(220, easing = FastOutSlowInEasing)) + fadeIn(tween(160)),
+            exit = shrinkVertically(animationSpec = tween(180, easing = FastOutSlowInEasing)) + fadeOut(tween(120)),
+        ) {
+            Column(
+                Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(9.dp),
+                content = content,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PhoneHomeAccordionHeader(
+    title: String,
+    subtitle: String,
+    icon: PhoebeIcon,
+    expanded: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 68.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .background(PhoebeUi.subtleFill)
+            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(8.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        HomeActionIcon(icon, 40.dp)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(title, color = PhoebeUi.primaryText, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(subtitle, color = PhoebeUi.secondaryText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        PhoebeIconView(
+            if (expanded) PhoebeIcon.ChevronUp else PhoebeIcon.ChevronDown,
+            tint = PhoebeUi.secondaryText,
+            modifier = Modifier.size(18.dp),
+        )
+    }
+}
+
+@Composable
+private fun PhoneHomeActionGrid(actions: List<PhoneHomeAction>) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+        actions.chunked(2).forEach { rowActions ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                rowActions.forEach { action ->
+                    MobileActionCard(
+                        label = action.label,
+                        icon = action.icon,
+                        modifier = Modifier.weight(1f),
+                        enabled = action.enabled,
+                        onClick = action.onClick,
+                    )
+                }
+                if (rowActions.size == 1) {
+                    Spacer(Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+private fun optionCountLabel(count: Int): String =
+    if (count == 1) "1 option" else "$count options"
+
+@Composable
+private fun MobileRandomArtistsList(
+    artists: List<Artist>,
+    artistThumbs: Map<String, String>,
+    onArtist: (Artist) -> Unit,
+    onRefresh: () -> Unit,
+) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        SectionHeader("RANDOM ARTISTS", "Refresh", onRefresh)
+        if (artists.isEmpty()) {
+            HomeEmptyState("Add music to your library to discover artists here.")
+        } else {
+            ShuffleAnimatedRow(targetKey = artists.joinToString("|") { it.id }) {
+                HomeHorizontalCarousel(Modifier.fillMaxWidth(), horizontalSpacing = 12.dp) {
+                    items(artists, key = { it.id }, contentType = { "mobile-random-artist" }) { artist ->
+                        MobileArtistTile(
+                            artist = artist,
+                            thumbUrl = artistThumbs[artist.id],
+                            sharedKey = "artist:${artist.id}",
+                            onClick = { onArtist(artist) },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MobileRandomAlbumsList(
+    albums: List<Album>,
+    onAlbum: (Album) -> Unit,
+    onRefresh: () -> Unit,
+) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        SectionHeader("RANDOM ALBUMS", "Refresh", onRefresh)
+        if (albums.isEmpty()) {
+            HomeEmptyState("Add music to your library to discover albums here.")
+        } else {
+            ShuffleAnimatedRow(targetKey = albums.joinToString("|") { it.id }) {
+                HomeHorizontalCarousel(Modifier.fillMaxWidth()) {
+                    items(albums, key = { it.id }, contentType = { "mobile-random-album" }) { album ->
+                        HomeArtworkTile(
+                            title = album.title,
+                            subtitle = album.artist,
+                            thumbUrl = album.thumbUrl,
+                            modifier = Modifier.width(92.dp),
+                            maxDecodeDimension = 180,
+                            sharedKey = "album:${album.id}",
+                            onClick = { onAlbum(album) },
+                        )
                     }
                 }
             }
@@ -344,32 +1084,14 @@ private fun normalizedHomeSections(sections: List<HomeSection>): List<HomeSectio
         .filterNot { it == HomeSection.Favorites || it == HomeSection.Recents }
         .let { (it + HomeSection.defaultOrder).distinct() }
 
-private fun artistThumbsFor(artists: List<Artist>, albums: List<Album>): Map<String, String> {
-    val artistNames = artists.map { it.title.lowercase() }.toSet()
-    val albumThumbByArtist = buildMap {
-        albums.asSequence()
-            .filter { album -> album.thumbUrl != null && album.artist.lowercase() in artistNames }
-            .forEach { album ->
-                val artistName = album.artist.lowercase()
-                if (artistName !in this) put(artistName, album.thumbUrl!!)
-            }
-    }
-    return buildMap {
-        artists.forEach { artist ->
-            val thumb = artist.thumbUrl ?: albumThumbByArtist[artist.title.lowercase()]
-            if (thumb != null) put(artist.id, thumb)
-        }
-    }
-}
-
 @Composable
 private fun MobileCollectionsSection(
-    supportedCollectionEntries: Set<CollectionEntry>,
+    collectionRows: List<List<HomeCollectionEntry>>,
     onCollections: (CollectionEntry) -> Unit,
 ) {
     SectionLabel("COLLECTIONS", PhoebeUi.mutedText)
     Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-        collectionEntryRows(supportedCollectionEntries).forEach { row ->
+        collectionRows.forEach { row ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                 row.forEach { entry ->
                     MobileActionCard(entry.mobileTitle, entry.icon, Modifier.weight(1f)) {
@@ -382,87 +1104,22 @@ private fun MobileCollectionsSection(
 }
 
 @Composable
-private fun MobileRecentSongsSection(
-    recentTracks: List<Track>,
-    onRecentSongs: () -> Unit,
-    onPlayTracks: (List<Track>, Int) -> Unit,
-) {
-    SectionHeader("RECENTLY ADDED SONGS", "See all", onRecentSongs)
-    if (recentTracks.isEmpty()) {
-        HomeEmptyState("New songs from Plex and local folders will appear here.")
-    } else {
-        LazyRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            itemsIndexed(recentTracks, key = { _, track -> track.id }, contentType = { _, _ -> "recent-song" }) { index, track ->
-                HomeArtworkTile(
-                    title = track.title,
-                    subtitle = track.artist,
-                    thumbUrl = track.localArtworkUri,
-                    fallbackThumbUrl = track.thumbUrl,
-                    modifier = Modifier.width(78.dp),
-                    maxDecodeDimension = 160,
-                    sharedKey = "song:${track.id}",
-                    onClick = { onPlayTracks(recentTracks, index) },
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun MobileRecentArtistsSection(
-    recentArtists: List<Artist>,
-    artistThumbs: Map<String, String>,
-    onRecentArtists: () -> Unit,
-    onArtist: (Artist) -> Unit,
-) {
-    SectionHeader("RECENTLY ADDED ARTISTS", "See all", onRecentArtists)
-    if (recentArtists.isEmpty()) {
-        HomeEmptyState("New artists from Plex and local folders will appear here.")
-    } else {
-        LazyRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            items(recentArtists, key = { it.id }, contentType = { "recent-artist" }) { artist ->
-                MobileArtistTile(artist, artistThumbs[artist.id], "artist:${artist.id}") { onArtist(artist) }
-            }
-        }
-    }
-}
-
-@Composable
-private fun MobileRecentAlbumsSection(
-    recentAlbums: List<Album>,
-    onRecentAlbums: () -> Unit,
-    onAlbum: (Album) -> Unit,
-) {
-    SectionHeader("RECENTLY ADDED ALBUMS", "See all", onRecentAlbums)
-    if (recentAlbums.isEmpty()) {
-        HomeEmptyState("New albums from Plex and local folders will appear here.")
-    } else {
-        LazyRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            items(recentAlbums, key = { it.id }, contentType = { "recent-album" }) { album ->
-                HomeArtworkTile(album.title, album.artist, album.thumbUrl, modifier = Modifier.width(92.dp), maxDecodeDimension = 180, sharedKey = "album:${album.id}") {
-                    onAlbum(album)
-                }
-            }
-        }
-    }
-}
-
-@Composable
 private fun MobileFavoritePlaylistsSection(
     playlists: List<Playlist>,
     onPlaylist: (Playlist) -> Unit,
     onViewAll: () -> Unit,
+    totalCount: Int = playlists.size,
 ) {
     if (playlists.isEmpty()) {
         SectionLabel("FAVORITE PLAYLISTS", PhoebeUi.mutedText)
         HomeEmptyState("Favorite playlists will appear here.")
     } else {
-        SectionHeader("FAVORITE PLAYLISTS", if (playlists.size > 10) "View all" else null, onViewAll)
-        LazyRow(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            items(playlists.take(10), key = { "playlist:${it.id}" }, contentType = { "mobile-favorite-playlist" }) { playlist ->
+        val visiblePlaylists = remember(playlists) {
+            playlists.distinctBy { it.id }.filter { it.id.isNotBlank() }.take(10)
+        }
+        SectionHeader("FAVORITE PLAYLISTS", if (totalCount > 10) "View all" else null, onViewAll)
+        HomeHorizontalCarousel(Modifier.fillMaxWidth()) {
+            items(visiblePlaylists, key = { it.id }, contentType = { "mobile-favorite-playlist" }) { playlist ->
                 FavoriteActionTile(
                     playlist.title,
                     "${playlist.trackCount} songs",
@@ -482,14 +1139,16 @@ private fun MobileFavoriteArtistsSection(
     artistThumbs: Map<String, String>,
     onArtist: (Artist) -> Unit,
     onViewAll: () -> Unit,
+    totalCount: Int = artists.size,
 ) {
     if (artists.isEmpty()) {
         SectionLabel("FAVORITE ARTISTS", PhoebeUi.mutedText)
         HomeEmptyState("Favorite artists will appear here.")
     } else {
-        SectionHeader("FAVORITE ARTISTS", if (artists.size > 10) "View all" else null, onViewAll)
-        LazyRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            items(artists.take(10), key = { "artist:${it.id}" }, contentType = { "mobile-favorite-artist" }) { artist ->
+        val visibleArtists = remember(artists) { artists.take(10) }
+        SectionHeader("FAVORITE ARTISTS", if (totalCount > 10) "View all" else null, onViewAll)
+        HomeHorizontalCarousel(Modifier.fillMaxWidth(), horizontalSpacing = 12.dp) {
+            items(visibleArtists, key = { it.id }, contentType = { "mobile-favorite-artist" }) { artist ->
                 MobileArtistTile(artist, artistThumbs[artist.id], "artist:${artist.id}") {
                     onArtist(artist)
                 }
@@ -503,14 +1162,16 @@ private fun MobileFavoriteAlbumsSection(
     albums: List<Album>,
     onAlbum: (Album) -> Unit,
     onViewAll: () -> Unit,
+    totalCount: Int = albums.size,
 ) {
     if (albums.isEmpty()) {
         SectionLabel("FAVORITE ALBUMS", PhoebeUi.mutedText)
         HomeEmptyState("Favorite albums will appear here.")
     } else {
-        SectionHeader("FAVORITE ALBUMS", if (albums.size > 10) "View all" else null, onViewAll)
-        LazyRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            items(albums.take(10), key = { "album:${it.id}" }, contentType = { "mobile-favorite-album" }) { album ->
+        val visibleAlbums = remember(albums) { albums.take(10) }
+        SectionHeader("FAVORITE ALBUMS", if (totalCount > 10) "View all" else null, onViewAll)
+        HomeHorizontalCarousel(Modifier.fillMaxWidth()) {
+            items(visibleAlbums, key = { it.id }, contentType = { "mobile-favorite-album" }) { album ->
                 HomeArtworkTile(album.title, album.artist, album.thumbUrl, modifier = Modifier.width(92.dp), maxDecodeDimension = 180, sharedKey = "album:${album.id}") {
                     onAlbum(album)
                 }
@@ -520,41 +1181,24 @@ private fun MobileFavoriteAlbumsSection(
 }
 
 @Composable
-private fun MobileRecentlyPlayedSection(
-    state: HomeUiState,
+private fun MobilePlayedHistoryShortcuts(
     onRecentlyPlayed: () -> Unit,
-    onPlayTracks: (List<Track>, Int) -> Unit,
-    onAddToUpNext: (Track) -> Unit,
-    onDownload: (Track) -> Unit,
-    maxRows: Int,
+    onMostPlayed: () -> Unit,
 ) {
     HomePanel(Modifier.fillMaxWidth()) {
-        SectionHeader("RECENTLY PLAYED", "See all", onRecentlyPlayed)
-        if (state.recentlyPlayedTracks.isEmpty()) {
-            HomeEmptyState("Play a song and your recent listening history will show up here.")
-        } else {
-            val tracks = state.recentlyPlayedTracks.map { it.track }
-            state.recentlyPlayedTracks.take(maxRows).forEachIndexed { index, row ->
-                HomePlayedTrackRow(
-                    track = row.track,
-                    onPlay = { onPlayTracks(tracks, index) },
-                    onAddToUpNext = { onAddToUpNext(row.track) },
-                    onDownload = { onDownload(row.track) },
-                    showFavoriteAction = false,
-                )
-            }
+        SectionLabel("LISTENING HISTORY", PhoebeUi.mutedText)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            MobileActionCard("Recently Played", PhoebeIcon.Music, Modifier.weight(1f), onClick = onRecentlyPlayed)
+            MobileActionCard("Most Played", PhoebeIcon.PlaylistPlay, Modifier.weight(1f), onClick = onMostPlayed)
         }
     }
 }
 
 @Composable
 private fun DesktopMixesPanel(
-    catalog: CatalogSnapshot,
-    state: HomeUiState,
-    personalMixPreferences: PersonalMixPreferences,
+    onPlayPersonalMix: () -> Unit,
     radioStations: List<PlexRadioStation>,
     radioStartingIds: Set<String>,
-    onPlayTracks: (List<Track>, Int) -> Unit,
     onPlayRadioStation: (PlexRadioStation) -> Unit,
     onClearDecadeMixNotice: () -> Unit,
     onShowDecadeMix: () -> Unit,
@@ -571,10 +1215,8 @@ private fun DesktopMixesPanel(
                     "Recent favorites, familiar anchors, and a little discovery",
                     PhoebeIcon.Person,
                     Modifier.width(260.dp),
-                ) {
-                    val tracks = personalMix(catalog, state, personalMixPreferences)
-                    if (tracks.isNotEmpty()) onPlayTracks(tracks, 0)
-                }
+                    onClick = onPlayPersonalMix,
+                )
             }
             item("decade-mix", contentType = "mix-action") {
                 HomeActionCard(
@@ -605,33 +1247,32 @@ private fun DesktopMixesPanel(
 
 @Composable
 private fun MobileMixesSection(
-    catalog: CatalogSnapshot,
-    state: HomeUiState,
-    personalMixPreferences: PersonalMixPreferences,
+    onPlayPersonalMix: () -> Unit,
     radioStations: List<PlexRadioStation>,
     radioStartingIds: Set<String>,
-    onPlayTracks: (List<Track>, Int) -> Unit,
     onPlayRadioStation: (PlexRadioStation) -> Unit,
     onClearDecadeMixNotice: () -> Unit,
     onShowDecadeMix: () -> Unit,
 ) {
     SectionLabel("CREATE A MIX", PhoebeUi.mutedText)
-    LazyRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-        item("personal-mix", contentType = "mobile-mix-action") {
-            MobileActionCard("Personal", PhoebeIcon.Person, Modifier.width(126.dp)) {
-                val tracks = personalMix(catalog, state, personalMixPreferences)
-                if (tracks.isNotEmpty()) onPlayTracks(tracks, 0)
-            }
+    HomeHorizontalCarousel(Modifier.fillMaxWidth(), horizontalSpacing = 9.dp) {
+        item(key = "personal-mix", contentType = "mobile-mix-action") {
+            MobileActionCard("Personal", PhoebeIcon.Person, Modifier.width(126.dp), onClick = onPlayPersonalMix)
         }
-        item("decade-mix", contentType = "mobile-mix-action") {
+        item(key = "decade-mix", contentType = "mobile-mix-action") {
             MobileActionCard("Decade", PhoebeIcon.Calendar, Modifier.width(126.dp)) {
                 onClearDecadeMixNotice()
                 onShowDecadeMix()
             }
         }
-        items(radioStations, key = { "radio:${it.id}:${it.key}" }, contentType = { "mobile-plex-radio-station" }) { station ->
+        items(radioStations, key = { it.key }, contentType = { "mobile-radio-station" }) { station ->
             val starting = station.key in radioStartingIds
-            MobileActionCard(if (starting) "Starting..." else station.title, station.homeRadioIcon(), Modifier.width(156.dp), enabled = !starting) {
+            MobileActionCard(
+                if (starting) "Starting..." else station.title,
+                station.homeRadioIcon(),
+                Modifier.width(156.dp),
+                enabled = !starting,
+            ) {
                 onPlayRadioStation(station)
             }
         }
@@ -707,19 +1348,22 @@ private fun DesktopFavoritePlaylistsPanel(
     playlists: List<Playlist>,
     onPlaylist: (Playlist) -> Unit,
     onViewAll: () -> Unit,
+    totalCount: Int = playlists.size,
 ) {
     HomePanel(Modifier.fillMaxWidth()) {
         if (playlists.isEmpty()) {
             SectionLabel("FAVORITE PLAYLISTS", PhoebeUi.mutedText)
             HomeEmptyState("Favorite playlists will appear here.")
         } else {
-            val displayPlaylists = remember(playlists) { playlists.take(10) }
+            val displayPlaylists = remember(playlists) {
+                playlists.distinctBy { it.id }.filter { it.id.isNotBlank() }.take(10)
+            }
             DesktopFavoriteScrollableRow(
                 title = "FAVORITE PLAYLISTS",
-                showViewAll = playlists.size > 10,
+                showViewAll = totalCount > 10,
                 onViewAll = onViewAll,
             ) {
-                items(displayPlaylists, key = { "playlist:${it.id}" }, contentType = { "favorite-playlist" }) { playlist ->
+                items(displayPlaylists, key = { it.id }, contentType = { "favorite-playlist" }) { playlist ->
                         FavoriteActionTile(playlist.title, "${playlist.trackCount} songs", PhoebeIcon.Heart, Modifier.width(260.dp)) { onPlaylist(playlist) }
                 }
             }
@@ -733,6 +1377,7 @@ private fun DesktopFavoriteArtistsPanel(
     artistThumbs: Map<String, String>,
     onArtist: (Artist) -> Unit,
     onViewAll: () -> Unit,
+    totalCount: Int = artists.size,
 ) {
     HomePanel(Modifier.fillMaxWidth()) {
         if (artists.isEmpty()) {
@@ -742,7 +1387,7 @@ private fun DesktopFavoriteArtistsPanel(
             val displayArtists = remember(artists) { artists.take(10) }
             DesktopFavoriteScrollableRow(
                 title = "FAVORITE ARTISTS",
-                showViewAll = artists.size > 10,
+                showViewAll = totalCount > 10,
                 onViewAll = onViewAll,
                 horizontalGap = 12.dp,
             ) {
@@ -759,6 +1404,7 @@ private fun DesktopFavoriteAlbumsPanel(
     albums: List<Album>,
     onAlbum: (Album) -> Unit,
     onViewAll: () -> Unit,
+    totalCount: Int = albums.size,
 ) {
     HomePanel(Modifier.fillMaxWidth()) {
         if (albums.isEmpty()) {
@@ -768,7 +1414,7 @@ private fun DesktopFavoriteAlbumsPanel(
             val displayAlbums = remember(albums) { albums.take(10) }
             DesktopFavoriteScrollableRow(
                 title = "FAVORITE ALBUMS",
-                showViewAll = albums.size > 10,
+                showViewAll = totalCount > 10,
                 onViewAll = onViewAll,
             ) {
                 items(displayAlbums, key = { "album:${it.id}" }, contentType = { "favorite-album" }) { album ->
@@ -789,6 +1435,12 @@ private fun DesktopFavoriteScrollableRow(
 ) {
     val rowState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    val canScrollPrevious by remember(rowState) {
+        derivedStateOf { rowState.canScrollBackward }
+    }
+    val canScrollNext by remember(rowState) {
+        derivedStateOf { rowState.canScrollForward }
+    }
     val scrollDistance = {
         (rowState.layoutInfo.viewportSize.width * 0.86f).coerceAtLeast(240f)
     }
@@ -797,8 +1449,8 @@ private fun DesktopFavoriteScrollableRow(
         title = title,
         action = if (showViewAll) "View all" else null,
         onAction = onViewAll,
-        canScrollPrevious = rowState.canScrollBackward,
-        canScrollNext = rowState.canScrollForward,
+        canScrollPrevious = canScrollPrevious,
+        canScrollNext = canScrollNext,
         onPrevious = {
             scope.launch { rowState.animateScrollBy(-scrollDistance()) }
         },
@@ -849,7 +1501,6 @@ private fun DesktopPlayedPanels(
 @Composable
 private fun DesktopRandomPanels(
     state: HomeUiState,
-    catalog: CatalogSnapshot,
     catalogRefreshing: Boolean,
     onArtist: (Artist) -> Unit,
     onAlbum: (Album) -> Unit,
@@ -862,13 +1513,13 @@ private fun DesktopRandomPanels(
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         if (maxWidth < 820.dp) {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                RandomArtistPanel(state.randomArtists.firstOrNull(), catalog, catalogRefreshing, onArtist, onRefreshArtists, onPrefetchArtist, Modifier.fillMaxWidth().height(randomPanelHeight))
-                RandomAlbumPanel(state.randomAlbums.firstOrNull(), catalog, catalogRefreshing, onAlbum, onRefreshAlbums, onPrefetchAlbum, Modifier.fillMaxWidth().height(randomPanelHeight))
+                RandomArtistPanel(state.randomArtists.firstOrNull(), state.randomArtistStats, catalogRefreshing, onArtist, onRefreshArtists, onPrefetchArtist, Modifier.fillMaxWidth().height(randomPanelHeight))
+                RandomAlbumPanel(state.randomAlbums.firstOrNull(), state.randomAlbumStats, catalogRefreshing, onAlbum, onRefreshAlbums, onPrefetchAlbum, Modifier.fillMaxWidth().height(randomPanelHeight))
             }
         } else {
             Row(Modifier.fillMaxWidth().height(randomPanelHeight), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                RandomArtistPanel(state.randomArtists.firstOrNull(), catalog, catalogRefreshing, onArtist, onRefreshArtists, onPrefetchArtist, Modifier.weight(1f).fillMaxHeight())
-                RandomAlbumPanel(state.randomAlbums.firstOrNull(), catalog, catalogRefreshing, onAlbum, onRefreshAlbums, onPrefetchAlbum, Modifier.weight(1f).fillMaxHeight())
+                RandomArtistPanel(state.randomArtists.firstOrNull(), state.randomArtistStats, catalogRefreshing, onArtist, onRefreshArtists, onPrefetchArtist, Modifier.weight(1f).fillMaxHeight())
+                RandomAlbumPanel(state.randomAlbums.firstOrNull(), state.randomAlbumStats, catalogRefreshing, onAlbum, onRefreshAlbums, onPrefetchAlbum, Modifier.weight(1f).fillMaxHeight())
             }
         }
     }
@@ -1021,7 +1672,13 @@ private fun HomeActionCard(title: String, subtitle: String, icon: PhoebeIcon, mo
 }
 
 @Composable
-private fun MobileActionCard(label: String, icon: PhoebeIcon, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
+private fun MobileActionCard(
+    label: String,
+    icon: PhoebeIcon,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
     Column(
         modifier
             .height(84.dp)
@@ -1035,7 +1692,7 @@ private fun MobileActionCard(label: String, icon: PhoebeIcon, modifier: Modifier
     ) {
         HomeActionIcon(icon, 38.dp)
         Spacer(Modifier.height(7.dp))
-        Text(label, color = PhoebeUi.primaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        Text(label, color = PhoebeUi.primaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -1096,7 +1753,7 @@ private fun DecadeMixDialog(
 
 @Composable
 private fun HomeActionIcon(icon: PhoebeIcon, size: androidx.compose.ui.unit.Dp) {
-    val palette = homeIconPalette(icon)
+    val palette = remember(icon) { homeIconPalette(icon) }
     val shape = RoundedCornerShape(8.dp)
     Box(
         Modifier
@@ -1113,12 +1770,6 @@ private fun HomeActionIcon(icon: PhoebeIcon, size: androidx.compose.ui.unit.Dp) 
             .border(BorderStroke(1.dp, palette.first.copy(alpha = 0.30f)), shape),
         contentAlignment = Alignment.Center,
     ) {
-        Box(
-            Modifier
-                .size(size * 0.70f)
-                .clip(CircleShape)
-                .background(palette.second.copy(alpha = 0.22f)),
-        )
         PhoebeIconView(icon, tint = palette.foreground, modifier = Modifier.size(size * 0.48f))
     }
 }
@@ -1129,7 +1780,6 @@ private data class HomeIconPalette(
     val foreground: Color,
 )
 
-@Composable
 private fun homeIconPalette(icon: PhoebeIcon): HomeIconPalette = when (icon) {
     PhoebeIcon.Person -> HomeIconPalette(Color(0xFF8B5CF6), Color(0xFF22D3EE), Color(0xFFDDE7FF))
     PhoebeIcon.Calendar -> HomeIconPalette(Color(0xFFFF4D7D), Color(0xFFFFC857), Color(0xFFFFE4ED))
@@ -1140,13 +1790,18 @@ private fun homeIconPalette(icon: PhoebeIcon): HomeIconPalette = when (icon) {
     PhoebeIcon.SunglassesFace -> HomeIconPalette(Color(0xFF06B6D4), Color(0xFFA855F7), Color(0xFFE3FAFF))
     PhoebeIcon.GenreMasks -> HomeIconPalette(Color(0xFFFF3D6E), Color(0xFFFACC15), Color(0xFFFFE1EA))
     PhoebeIcon.Heart -> HomeIconPalette(Color(0xFFFB7185), Color(0xFFBE123C), Color(0xFFFFDCE5))
-    else -> HomeIconPalette(PhoebeUi.accentLight, Color(0xFF5EEAD4), PhoebeUi.accentLight)
+    PhoebeIcon.Music -> HomeIconPalette(Color(0xFF2563EB), Color(0xFF06B6D4), Color.White)
+    PhoebeIcon.PlaylistPlay -> HomeIconPalette(Color(0xFF0F766E), Color(0xFF22C55E), Color.White)
+    PhoebeIcon.Bell -> HomeIconPalette(Color(0xFFF97316), Color(0xFFFACC15), Color.White)
+    PhoebeIcon.Grid -> HomeIconPalette(Color(0xFF14B8A6), Color(0xFF7C3AED), Color.White)
+    else -> HomeIconPalette(PhoebePaletteDark.accentLight, Color(0xFF5EEAD4), PhoebePaletteDark.accentLight)
 }
 
 private fun PlexRadioStation.homeRadioIcon(): PhoebeIcon {
     val normalized = title.lowercase()
     return when {
         "deep" in normalized && "cut" in normalized -> PhoebeIcon.Knife
+        "time" in normalized && "travel" in normalized -> PhoebeIcon.Calendar
         "random" in normalized && "album" in normalized -> PhoebeIcon.InterwovenArrows
         "library" in normalized -> PhoebeIcon.Book
         else -> PhoebeIcon.Play
@@ -1182,72 +1837,6 @@ private fun RecentPlayedPanel(
                     showFavoriteAction = showFavoriteAction,
                     rowHeight = rowHeight,
                 )
-            }
-        }
-    }
-}
-
-@Composable
-private fun MobileRandomArtistsPanel(
-    artists: List<Artist>,
-    artistThumbs: Map<String, String>,
-    onArtist: (Artist) -> Unit,
-    onRefresh: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    HomePanel(modifier) {
-        SectionHeader("RANDOM ARTISTS", "Refresh", onRefresh)
-        if (artists.isEmpty()) {
-            HomeEmptyState("Add music to your library to discover artists here.")
-        } else {
-            ShuffleAnimatedRow(targetKey = artists.joinToString("|") { it.id }) {
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    items(artists, key = { it.id }, contentType = { "random-artist" }) { artist ->
-                        MobileArtistTile(
-                            artist = artist,
-                            thumbUrl = artistThumbs[artist.id],
-                            sharedKey = "artist:${artist.id}",
-                            onClick = { onArtist(artist) },
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun MobileRandomAlbumsPanel(
-    albums: List<Album>,
-    onAlbum: (Album) -> Unit,
-    onRefresh: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    HomePanel(modifier) {
-        SectionHeader("RANDOM ALBUMS", "Refresh", onRefresh)
-        if (albums.isEmpty()) {
-            HomeEmptyState("Add music to your library to discover albums here.")
-        } else {
-            ShuffleAnimatedRow(targetKey = albums.joinToString("|") { it.id }) {
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    items(albums, key = { it.id }, contentType = { "random-album" }) { album ->
-                        HomeArtworkTile(
-                            title = album.title,
-                            subtitle = album.artist,
-                            thumbUrl = album.thumbUrl,
-                            modifier = Modifier.width(92.dp),
-                            maxDecodeDimension = 180,
-                            sharedKey = "album:${album.id}",
-                            onClick = { onAlbum(album) },
-                        )
-                    }
-                }
             }
         }
     }
@@ -1311,14 +1900,16 @@ private fun MobileArtistTile(
 @Composable
 private fun RandomArtistPanel(
     artist: Artist?,
-    catalog: CatalogSnapshot,
+    stats: HomeFeaturedArtistStats?,
     catalogRefreshing: Boolean,
     onArtist: (Artist) -> Unit,
     onRefresh: () -> Unit,
     onPrefetch: (Artist) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    LaunchedEffect(artist?.id) {
+    val homeTracksReady = LocalHomeTrackSectionsReady.current
+    LaunchedEffect(artist?.id, homeTracksReady) {
+        if (!homeTracksReady) return@LaunchedEffect
         artist?.let(onPrefetch)
     }
     HomePanel(modifier) {
@@ -1329,7 +1920,7 @@ private fun RandomArtistPanel(
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 FeaturedArtistCard(
                     artist = artist,
-                    catalog = catalog,
+                    stats = stats?.takeIf { it.artistId == artist.id },
                     catalogRefreshing = catalogRefreshing,
                     modifier = Modifier.fillMaxWidth(0.92f),
                     onClick = { onArtist(artist) },
@@ -1342,14 +1933,16 @@ private fun RandomArtistPanel(
 @Composable
 private fun RandomAlbumPanel(
     album: Album?,
-    catalog: CatalogSnapshot,
+    stats: HomeFeaturedAlbumStats?,
     catalogRefreshing: Boolean,
     onAlbum: (Album) -> Unit,
     onRefresh: () -> Unit,
     onPrefetch: (Album) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    LaunchedEffect(album?.id) {
+    val homeTracksReady = LocalHomeTrackSectionsReady.current
+    LaunchedEffect(album?.id, homeTracksReady) {
+        if (!homeTracksReady) return@LaunchedEffect
         album?.let(onPrefetch)
     }
     HomePanel(modifier) {
@@ -1360,7 +1953,7 @@ private fun RandomAlbumPanel(
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 FeaturedAlbumCard(
                     album = album,
-                    catalog = catalog,
+                    stats = stats?.takeIf { it.albumId == album.id },
                     catalogRefreshing = catalogRefreshing,
                     modifier = Modifier.fillMaxWidth(0.92f),
                     onClick = { onAlbum(album) },
@@ -1373,33 +1966,23 @@ private fun RandomAlbumPanel(
 @Composable
 private fun FeaturedArtistCard(
     artist: Artist,
-    catalog: CatalogSnapshot,
+    stats: HomeFeaturedArtistStats?,
     catalogRefreshing: Boolean,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
     val syncState = LocalCatalogSyncState.current
-    val albums = remember(catalog, artist.title) { catalogAlbumsForArtist(catalog, artist.title) }
-    val artistThumbUrl = remember(artist.thumbUrl, albums) {
-        artist.thumbUrl ?: albums.firstNotNullOfOrNull { it.thumbUrl }
-    }
-    val tracks = remember(catalog, artist.title) { catalogTracksForArtist(catalog, artist.title) }
-    val albumsLoading = remember(catalog, artist, syncState) { catalogArtistAlbumCountLoading(catalog, artist, syncState) }
-    val trackStatsLoading = remember(catalog, artist, syncState, catalogRefreshing) {
-        catalogArtistTrackStatsLoading(catalog, artist, syncState, catalogRefreshing)
-    }
-    val genre = remember(catalog, artist.title, trackStatsLoading) {
-        if (trackStatsLoading) null else catalogArtistGenre(catalog, artist.title)
-    }
-    val totalDuration = remember(tracks) { tracks.sumOf { it.durationMs } }
-    val playHistory = LocalPlayHistory.current
     val nowMs = LocalNowMs.current
-    val lastPlayed = remember(tracks, playHistory.byTrack, playHistory.byArtist, artist.title) {
-        resolveArtistLastPlayed(artist.title, tracks, playHistory)
-    }
-    val lastPlayedLabel = remember(lastPlayed, nowMs) { formatLastPlayed(lastPlayed, nowMs) }
-    val albumWord = if (albums.size == 1) "album" else "albums"
-    val songWord = if (tracks.size == 1) "song" else "songs"
+    val albumsLoading = homeArtistAlbumCountLoading(stats, syncState)
+    val trackStatsLoading = homeArtistTrackStatsLoading(stats, syncState, catalogRefreshing)
+    val artistThumbUrl = stats?.artworkUrl ?: artist.thumbUrl
+    val albumCount = stats?.albumCount ?: artist.albumCount
+    val trackCount = stats?.trackCount ?: artist.songCount
+    val genre = stats?.genre.takeUnless { trackStatsLoading }
+    val totalDuration = stats?.totalDurationMs ?: 0L
+    val lastPlayedLabel = remember(stats?.lastPlayedMs, nowMs) { formatLastPlayed(stats?.lastPlayedMs, nowMs) }
+    val albumWord = if (albumCount == 1) "album" else "albums"
+    val songWord = if (trackCount == 1) "song" else "songs"
 
     Row(
         modifier
@@ -1444,13 +2027,13 @@ private fun FeaturedArtistCard(
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             HomeArtistStat(
-                value = "${albums.size} $albumWord",
+                value = "$albumCount $albumWord",
                 label = "Albums",
                 icon = PhoebeIcon.Library,
                 loading = albumsLoading,
             )
             HomeArtistStat(
-                value = "${tracks.size} $songWord",
+                value = "$trackCount $songWord",
                 label = "Songs",
                 icon = PhoebeIcon.Music,
                 loading = trackStatsLoading,
@@ -1515,24 +2098,48 @@ private fun HomeStatLoadingBar(modifier: Modifier = Modifier) {
     )
 }
 
+private fun homeArtistAlbumCountLoading(
+    stats: HomeFeaturedArtistStats?,
+    sync: CatalogSyncState,
+): Boolean =
+    stats?.hasAlbums != true && sync.isActive && sync.phase <= CatalogSyncPhase.LoadingLibrary
+
+private fun homeArtistTrackStatsLoading(
+    stats: HomeFeaturedArtistStats?,
+    sync: CatalogSyncState,
+    catalogRefreshing: Boolean,
+): Boolean {
+    if (stats?.hasTracks == true) return false
+    if (stats?.hasAlbums != true) {
+        return sync.isActive &&
+            (sync.phase == CatalogSyncPhase.LoadingSongs || sync.phase == CatalogSyncPhase.LoadingLibrary)
+    }
+    if (!stats.hasPendingTrackStats) return false
+    return (sync.isActive && sync.phase == CatalogSyncPhase.LoadingSongs) || catalogRefreshing
+}
+
+private fun homeAlbumTrackStatsLoading(
+    stats: HomeFeaturedAlbumStats?,
+    sync: CatalogSyncState,
+    catalogRefreshing: Boolean,
+): Boolean =
+    stats?.tracksLoaded != true &&
+        ((sync.isActive && sync.phase == CatalogSyncPhase.LoadingSongs) || catalogRefreshing)
+
 @Composable
 private fun FeaturedAlbumCard(
     album: Album,
-    catalog: CatalogSnapshot,
+    stats: HomeFeaturedAlbumStats?,
     catalogRefreshing: Boolean,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
     val syncState = LocalCatalogSyncState.current
-    val tracks = remember(catalog, album.id) { catalogTracksForAlbum(catalog, album.id) }
-    val trackStatsLoading = remember(catalog, album, syncState, catalogRefreshing) {
-        catalogAlbumTrackStatsLoading(catalog, album, syncState, catalogRefreshing)
-    }
-    val genre = remember(catalog, album.id, trackStatsLoading) {
-        if (trackStatsLoading) null else catalogAlbumGenre(catalog, album.id)
-    }
-    val duration = remember(tracks) { tracks.sumOf { it.durationMs } }
-    val songWord = if (tracks.size == 1) "song" else "songs"
+    val trackStatsLoading = homeAlbumTrackStatsLoading(stats, syncState, catalogRefreshing)
+    val genre = stats?.genre.takeUnless { trackStatsLoading }
+    val duration = stats?.totalDurationMs ?: 0L
+    val trackCount = stats?.trackCount ?: 0
+    val songWord = if (trackCount == 1) "song" else "songs"
 
     Row(
         modifier
@@ -1586,7 +2193,7 @@ private fun FeaturedAlbumCard(
                 HomeArtistStat(year.toString(), "Release year", PhoebeIcon.Grid)
             }
             HomeArtistStat(
-                value = "${tracks.size} $songWord",
+                value = "$trackCount $songWord",
                 label = "Tracks",
                 icon = PhoebeIcon.Music,
                 loading = trackStatsLoading,
@@ -1613,11 +2220,24 @@ private fun MostPlayedPanel(
     sharedKeyForTrack: (Track) -> String? = { track -> "song:${track.id}" },
     showFavoriteAction: Boolean = true,
     rowHeight: Dp = 88.dp,
+    maxDecodeDimension: Int = ListArtworkMaxDecodeDimension,
 ) {
+    val mostPlayedResolving = LocalMostPlayedResolving.current
     HomePanel(modifier) {
         SectionHeader("MOST PLAYED", "View all", onViewAll)
         if (rows.isEmpty()) {
-            HomeEmptyState("Your most-played tracks will appear here after you've listened for a while.")
+            if (mostPlayedResolving) {
+                Box(Modifier.fillMaxWidth().padding(vertical = 24.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(28.dp),
+                        color = PhoebeUi.accentLight,
+                        strokeWidth = 2.dp,
+                        trackColor = PhoebeUi.progressTrack,
+                    )
+                }
+            } else {
+                HomeEmptyState("Your most-played tracks will appear here after you've listened for a while.")
+            }
         } else {
             val tracks = rows.map { it.track }
             rows.take(maxRows).forEachIndexed { index, row ->
@@ -1630,6 +2250,7 @@ private fun MostPlayedPanel(
                     sharedKey = sharedKeyForTrack(row.track),
                     showFavoriteAction = showFavoriteAction,
                     rowHeight = rowHeight,
+                    maxDecodeDimension = maxDecodeDimension,
                 )
             }
         }
@@ -1775,6 +2396,7 @@ private fun HomePlayedTrackRow(
     onDownload: () -> Unit,
     showFavoriteAction: Boolean = true,
     rowHeight: Dp = 88.dp,
+    maxDecodeDimension: Int = ListArtworkMaxDecodeDimension,
 ) {
     var menuExpanded by remember(track.id) { mutableStateOf(false) }
     val nowPlaying = LocalNowPlaying.current
@@ -1803,6 +2425,7 @@ private fun HomePlayedTrackRow(
                 track,
                 Modifier.fillMaxSize().sharedArtworkTransition(sharedKey),
                 elevated = false,
+                maxDecodeDimension = maxDecodeDimension,
             )
             if (isNowPlaying) {
                 Box(

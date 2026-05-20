@@ -29,4 +29,4 @@ fun phoebeDatabaseFromDriver(driver: SqlDriver): PhoebeDatabase = PhoebeDatabase
  * is cheap. Replace this with proper SQLDelight migration files (and a `verifyMigrations`
  * task) before any public release.
  */
-internal const val LocalDbRevision: Long = 14L
+internal const val LocalDbRevision: Long = 17L

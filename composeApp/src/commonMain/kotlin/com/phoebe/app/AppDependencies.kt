@@ -20,6 +20,7 @@ import com.phoebe.app.data.EmbyProviderAdapter
 import com.phoebe.app.data.JellyfinProviderAdapter
 import com.phoebe.app.data.SessionRepository
 import com.phoebe.app.data.SubsonicClient
+import com.phoebe.app.data.db.DatabaseWriteGate
 import com.phoebe.app.data.db.clearAllAppData
 import com.phoebe.app.data.db.createPhoebeDatabase
 import com.phoebe.app.db.PhoebeDatabase
@@ -35,6 +36,7 @@ import com.phoebe.app.player.createSystemVolumeController
 
 class AppDependencies(
     val database: PhoebeDatabase,
+    val databaseWriteGate: DatabaseWriteGate,
     val sessionRepository: SessionRepository,
     val mediaSourcesRepository: MediaSourcesRepository,
     val catalogRepository: CatalogRepository,
@@ -54,7 +56,10 @@ class AppDependencies(
     val platformStorage: PlatformStorage,
 ) {
     suspend fun deleteDatabaseDataForSignOut() {
-        database.clearAllAppData(clearPlayHistory = false)
+        catalogRepository.awaitDatabaseIdle()
+        databaseWriteGate.withWrite {
+            database.clearAllAppData(clearPlayHistory = false)
+        }
         listOf("session.json", "catalog.json", "media_sources.json", "library_ui_prefs.json").forEach {
             platformStorage.delete(it)
         }
@@ -83,17 +88,26 @@ class AppDependencies(
             )
             val storage = PlatformStorage()
             val database = createPhoebeDatabase()
+            val databaseWriteGate = DatabaseWriteGate()
             val mediaSourcesRepository = MediaSourcesRepository(database, storage)
             val libraryUiRepository = LibraryUiRepository(database, storage)
             val appSettingsRepository = AppSettingsRepository(database)
             val playHistoryRepository = PlayHistoryRepository(database)
             val audioPlayer = createAudioPlayer()
             val castController = createCastController(audioPlayer)
-            val sessionRepository = SessionRepository(plexClient, jellyfinClient, providerRegistry, database, storage)
+            val sessionRepository = SessionRepository(
+                plexClient = plexClient,
+                jellyfinClient = jellyfinClient,
+                providerRegistry = providerRegistry,
+                database = database,
+                storage = storage,
+                databaseWriteGate = databaseWriteGate,
+            )
             sessionRepository.restore(refreshConnections = false)
             mediaSourcesRepository.restore()
             return AppDependencies(
                 database = database,
+                databaseWriteGate = databaseWriteGate,
                 sessionRepository = sessionRepository,
                 mediaSourcesRepository = mediaSourcesRepository,
                 catalogRepository = CatalogRepository(
@@ -105,6 +119,7 @@ class AppDependencies(
                     storage = storage,
                     httpClient = httpClient,
                     mediaSourcesRepository = mediaSourcesRepository,
+                    databaseWriteGate = databaseWriteGate,
                 ),
                 libraryUiRepository = libraryUiRepository,
                 lyricsRepository = LyricsRepository(database, httpClient),

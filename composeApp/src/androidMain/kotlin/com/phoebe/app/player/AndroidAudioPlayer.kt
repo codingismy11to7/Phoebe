@@ -28,6 +28,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -44,7 +45,9 @@ internal object AndroidAudioPlayerHolder {
     }
 }
 
-private class AndroidAudioPlayer : SimpleAudioPlayer() {
+internal class AndroidAudioPlayer(
+    private val diagnostics: PlaybackDiagnostics = AndroidPlaybackDiagnostics.diagnostics,
+) : SimpleAudioPlayer() {
     override val useProgressTicker: Boolean = false
 
     private val appContext: Context
@@ -82,6 +85,7 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
 
         override fun onPlayerError(error: PlaybackException) {
             PhoebeLog.d("AndroidAudioPlayer") { "playback failed: ${error.message}" }
+            diagnostics.playbackError(PlaybackEnginePath.Media3, error.message)
             stopBufferingTimeout()
             schedulePlaybackRetry(error, activePlayGeneration)
             stopPositionSyncLoop()
@@ -89,6 +93,7 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
     }
 
     init {
+        AndroidPlaybackDiagnostics.diagnostics = diagnostics
         AndroidPlaybackBridge.onSkipNext = { next() }
         AndroidPlaybackBridge.onSkipPrevious = { previous() }
         AndroidPlaybackBridge.onTrackEnded = { next() }
@@ -104,6 +109,32 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
     fun ensureConnected() {
         if (controller == null) {
             scope.launch { ensureController() }
+        }
+    }
+
+    internal suspend fun releaseForTests() {
+        withContext(Dispatchers.Main.immediate) {
+            platformLoadJob?.cancel()
+            platformLoadJob = null
+            seekJob?.cancel()
+            seekJob = null
+            stopAndroidCrossfade()
+            stopPositionSyncLoop()
+            stopBufferingTimeout()
+            stopFullTrackBufferProbe()
+            stopRetry()
+            controllerMutex.withLock {
+                controller?.removeListener(controllerListener)
+                controller?.run {
+                    pause()
+                    stop()
+                    clearMediaItems()
+                    release()
+                }
+                controller = null
+            }
+            appContext.stopService(Intent(appContext, PlaybackService::class.java))
+            AndroidPlaybackDiagnostics.reset()
         }
     }
 
@@ -246,7 +277,13 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
             try {
                 val outgoingOwnedByPlayback = ownedCrossfadePlayer()
                 val outgoing: Player = outgoingOwnedByPlayback ?: controller ?: return@launch
-                incoming = ExoPlayer.Builder(appContext)
+                diagnostics.crossfadeStarted(
+                    engine = PlaybackEnginePath.Media3Crossfade,
+                    outgoingTrackId = state.value.currentTrack?.id,
+                    incomingTrackId = track.id,
+                    durationMs = durationMs,
+                )
+                incoming = AndroidPlaybackDiagnostics.newPlayerBuilder(appContext, PlaybackEnginePath.Media3Crossfade)
                     .setAudioAttributes(AudioAttributes.DEFAULT, /* handleAudioFocus= */ false)
                     .build()
                 incoming.volume = 0f
@@ -287,12 +324,14 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
                 crossfadePlayer = incoming
                 crossfadeOwnedTrackId = track.id
                 adoptCrossfadeTarget(queue, targetIndex, incoming.currentPosition.coerceAtLeast(0L), generation)
+                diagnostics.crossfadeCommitted(PlaybackEnginePath.Media3Crossfade, track.id)
                 startFullTrackBufferProbe(track, generation)
                 startCrossfadeOwnedSync(incoming, queue, targetIndex, generation)
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Throwable) {
                 PhoebeLog.d("AndroidAudioPlayer") { "android crossfade failed: ${error.message}" }
+                diagnostics.playbackError(PlaybackEnginePath.Media3Crossfade, error.message)
             } finally {
                 AndroidPlaybackBridge.suppressServiceEndedCallback = false
                 if (!incomingOwnedByPlayback) {
@@ -367,8 +406,16 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
         repeat(CrossfadeSteps) { index ->
             if (!isPlayRequestCurrent(generation)) return
             val progress = (index + 1).toFloat() / CrossfadeSteps.toFloat()
-            outgoing.volume = (baseVolume * (1f - progress)).coerceIn(0f, 1f)
-            incoming.volume = (baseVolume * progress).coerceIn(0f, 1f)
+            val outgoingVolume = (baseVolume * (1f - progress)).coerceIn(0f, 1f)
+            val incomingVolume = (baseVolume * progress).coerceIn(0f, 1f)
+            diagnostics.crossfadeVolume(
+                engine = PlaybackEnginePath.Media3Crossfade,
+                step = index + 1,
+                outgoingVolume = outgoingVolume,
+                incomingVolume = incomingVolume,
+            )
+            outgoing.volume = outgoingVolume
+            incoming.volume = incomingVolume
             delay(stepDelayMs)
         }
     }
@@ -383,6 +430,12 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
         positionSyncJob = scope.launch {
             while (isActive && isPlayRequestCurrent(generation) && crossfadePlayer === player) {
                 val positionMs = player.currentPosition.coerceAtLeast(0L)
+                reportPlaybackDiagnostics(
+                    engine = PlaybackEnginePath.Media3Crossfade,
+                    positionMs = positionMs,
+                    durationMs = player.duration.coerceAtLeast(queue.getOrNull(targetIndex)?.durationMs ?: 0L),
+                    isPlaying = player.isPlaying,
+                )
                 applyPlatformPlayback(
                     positionMs = positionMs,
                     durationMs = player.duration.coerceAtLeast(queue.getOrNull(targetIndex)?.durationMs ?: 0L),
@@ -406,6 +459,12 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
     ) {
         if (!isPlayRequestCurrent(generation) || crossfadePlayer !== player) return
         val positionMs = player.currentPosition.coerceAtLeast(0L)
+        reportPlaybackDiagnostics(
+            engine = PlaybackEnginePath.Media3Crossfade,
+            positionMs = positionMs,
+            durationMs = player.duration.coerceAtLeast(state.value.currentTrack?.durationMs ?: 0L),
+            isPlaying = player.isPlaying && player.playbackState != Player.STATE_BUFFERING,
+        )
         applyPlatformPlayback(
             positionMs = positionMs,
             durationMs = player.duration.coerceAtLeast(state.value.currentTrack?.durationMs ?: 0L),
@@ -423,6 +482,7 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
         stopBufferingTimeout()
         stopRetry()
         resetRetries(generation)
+        diagnostics.engineSelected(PlaybackEnginePath.Media3)
         platformLoadJob = scope.launch {
             try {
                 startPlaybackService()
@@ -575,6 +635,12 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
             return
         }
         val buffering = player.playbackState == Player.STATE_BUFFERING
+        reportPlaybackDiagnostics(
+            engine = PlaybackEnginePath.Media3,
+            positionMs = controllerPosition,
+            durationMs = player.duration.coerceAtLeast(0L),
+            isPlaying = player.isPlaying && !buffering,
+        )
         applyPlatformPlayback(
             positionMs = controllerPosition,
             durationMs = player.duration.coerceAtLeast(0L),
@@ -612,6 +678,12 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
                 delay(250)
                 val player = controller ?: break
                 if (!player.isPlaying || !controllerMatchesAppState(player, generation)) break
+                reportPlaybackDiagnostics(
+                    engine = PlaybackEnginePath.Media3,
+                    positionMs = player.currentPosition.coerceAtLeast(0L),
+                    durationMs = player.duration.coerceAtLeast(0L),
+                    isPlaying = true,
+                )
                 applyPlatformPlayback(
                     positionMs = player.currentPosition.coerceAtLeast(0L),
                     durationMs = player.duration.coerceAtLeast(0L),
@@ -706,6 +778,18 @@ private class AndroidAudioPlayer : SimpleAudioPlayer() {
             errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ||
             errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ||
             errorCode == PlaybackException.ERROR_CODE_IO_UNSPECIFIED
+
+    private fun reportPlaybackDiagnostics(
+        engine: PlaybackEnginePath,
+        positionMs: Long,
+        durationMs: Long,
+        isPlaying: Boolean,
+    ) {
+        diagnostics.playbackProgress(engine, positionMs, durationMs)
+        if (isPlaying) {
+            diagnostics.platformPlaying(engine, positionMs, durationMs)
+        }
+    }
 
     private suspend fun <T> com.google.common.util.concurrent.ListenableFuture<T>.await(): T =
         suspendCancellableCoroutine { continuation ->

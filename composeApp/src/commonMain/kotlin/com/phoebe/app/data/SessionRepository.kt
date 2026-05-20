@@ -1,6 +1,7 @@
 package com.phoebe.app.data
 
 import app.cash.sqldelight.async.coroutines.awaitAsOneOrNull
+import com.phoebe.app.data.db.DatabaseWriteGate
 import com.phoebe.app.db.PhoebeDatabase
 import com.phoebe.app.domain.MusicLibrary
 import com.phoebe.app.domain.JellyfinSyncMode
@@ -11,6 +12,7 @@ import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.isEmbyFamily
 import com.phoebe.app.domain.isJellyfin
 import com.phoebe.app.domain.isPlex
+import com.phoebe.app.domain.serverAuthToken
 import com.phoebe.app.platform.PhoebeLog
 import com.phoebe.app.platform.PlatformStorage
 import kotlinx.coroutines.Dispatchers
@@ -27,6 +29,7 @@ class SessionRepository(
     private val providerRegistry: MusicProviderRegistry = MusicProviderRegistry(emptyList()),
     private val database: PhoebeDatabase,
     private val storage: PlatformStorage,
+    private val databaseWriteGate: DatabaseWriteGate = DatabaseWriteGate(),
 ) {
     constructor(
         plexClient: PlexClient,
@@ -50,7 +53,7 @@ class SessionRepository(
             val parsed = runCatching {
                 json.decodeFromString<PlexSession>(legacy)
             }.getOrNull() ?: return
-            withContext(Dispatchers.Default) { persist(parsed) }
+            databaseWriteGate.withWrite { persist(parsed) }
             mutableSession.value = parsed
             storage.delete(LegacySessionFile)
         }
@@ -75,6 +78,15 @@ class SessionRepository(
             PhoebeLog.d("SessionRepository") { "updated server connections for '${fresh.name}'" }
             save(current.copy(selectedServer = fresh))
         }
+    }
+
+    /** Probes server connections and caches the fastest reachable base URL for subsequent API calls. */
+    suspend fun warmServerConnection() {
+        val current = mutableSession.value ?: return
+        val server = current.selectedServer ?: return
+        if (!current.isPlex()) return
+        val token = current.serverAuthToken() ?: return
+        runCatching { plexClient.prepareForCatalogRequests(server, token) }
     }
 
     suspend fun createPin(): PlexPin = plexClient.createPin()
@@ -189,12 +201,14 @@ class SessionRepository(
     suspend fun signOut() {
         PhoebeLog.d("SessionRepository") { "signOut" }
         mutableSession.value = null
-        withContext(Dispatchers.Default) { database.sessionQueries.clear() }
+        databaseWriteGate.withWrite {
+            database.sessionQueries.clear()
+        }
     }
 
     private suspend fun save(session: PlexSession) {
         mutableSession.value = session
-        withContext(Dispatchers.Default) {
+        databaseWriteGate.withWrite {
             if (session.token.isBlank()) {
                 database.sessionQueries.clear()
             } else {

@@ -18,6 +18,8 @@ import org.robolectric.annotation.GraphicsMode
 @Config(sdk = [35], application = ScreenshotTestApplication::class)
 class PhoebeAndroidPhoneScreenshotTest {
     @Test fun phoneHomeDark() = capturePhone("home", PhoebeScreenshotScenario.Home)
+    @Test fun phoneHomeAccordionsCollapsedDark() = capturePhone("home-accordions-collapsed", PhoebeScreenshotScenario.HomeAccordionsCollapsed)
+    @Test fun phoneHomeAccordionsExpandedDark() = capturePhone("home-accordions-expanded", PhoebeScreenshotScenario.HomeAccordionsExpanded)
     @Test fun phoneHomePlayedRowsDark() = capturePhone("home-played-rows", PhoebeScreenshotScenario.HomePlayedRows)
     @Test fun phoneFavoritePlaylistsDark() = capturePhone("favorite-playlists", PhoebeScreenshotScenario.FavoritePlaylists)
     @Test fun phoneFavoriteArtistsDark() = capturePhone("favorite-artists", PhoebeScreenshotScenario.FavoriteArtists)
@@ -40,6 +42,8 @@ class PhoebeAndroidPhoneScreenshotTest {
     )
 
     @Test fun phoneHomeLight() = capturePhone("home", PhoebeScreenshotScenario.Home, useLightAppearance = true)
+    @Test fun phoneHomeAccordionsCollapsedLight() = capturePhone("home-accordions-collapsed", PhoebeScreenshotScenario.HomeAccordionsCollapsed, useLightAppearance = true)
+    @Test fun phoneHomeAccordionsExpandedLight() = capturePhone("home-accordions-expanded", PhoebeScreenshotScenario.HomeAccordionsExpanded, useLightAppearance = true)
     @Test fun phoneLibraryLight() = capturePhone("library", PhoebeScreenshotScenario.Library, useLightAppearance = true)
     @Test fun phoneSearchLight() = capturePhone("search", PhoebeScreenshotScenario.Search, useLightAppearance = true)
     @Test fun phonePlayerLight() = capturePhone("player", PhoebeScreenshotScenario.Player, useLightAppearance = true)

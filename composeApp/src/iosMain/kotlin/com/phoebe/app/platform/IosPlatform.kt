@@ -40,6 +40,11 @@ import kotlin.native.Platform
 actual fun isDebugBuild(): Boolean = Platform.isDebugBinary
 
 actual fun createPlatformHttpClient(): HttpClient = HttpClient(Darwin) {
+    engine {
+        configureRequest {
+            setAllowsCellularAccess(true)
+        }
+    }
     install(HttpTimeout) {
         requestTimeoutMillis = 60_000
         connectTimeoutMillis = 15_000
@@ -223,9 +228,7 @@ actual fun currentTimeMs(): Long = (NSDate().timeIntervalSince1970 * 1000.0).toL
 
 actual fun prefersReducedArtworkEffects(): Boolean = false
 
-actual fun catalogTrackPrefetchAlbumCount(): Int = 6
-
-actual fun catalogTrackPrefetchParallelism(): Int = 2
+actual fun catalogTrackIndexParallelism(): Int = 6
 
 internal actual fun platformLog(tag: String, message: String) {
     println("[$tag] $message")

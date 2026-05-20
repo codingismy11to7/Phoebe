@@ -37,11 +37,8 @@ expect fun currentTimeMs(): Long
 /** Browser canvas rendering is much more sensitive to repeated shadows / custom draws. */
 expect fun prefersReducedArtworkEffects(): Boolean
 
-/** Number of album track lists to eagerly fetch while building the first catalog snapshot. */
-expect fun catalogTrackPrefetchAlbumCount(): Int
-
-/** Maximum number of catalog prefetch requests to transform at once. */
-expect fun catalogTrackPrefetchParallelism(): Int
+/** Concurrent Plex library track-index page fetches during catalog sync. */
+expect fun catalogTrackIndexParallelism(): Int
 
 expect class DownloadNotifier() {
     suspend fun notifyDownloadFinished(title: String, body: String): Boolean

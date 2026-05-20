@@ -13,10 +13,14 @@ import platform.Foundation.NSUserDomainMask
 
 actual suspend fun createSqlDriver(schema: SqlSchema<QueryResult.AsyncValue<Unit>>): SqlDriver {
     wipeIfRevisionChanged()
-    return NativeSqliteDriver(
+    val driver = NativeSqliteDriver(
         schema = schema.synchronous(),
         name = localDatabaseFileName(),
     )
+    driver.execute(null, "PRAGMA journal_mode=WAL", 0)
+    driver.execute(null, "PRAGMA synchronous=NORMAL", 0)
+    driver.execute(null, "PRAGMA temp_store=MEMORY", 0)
+    return driver
 }
 
 /**
@@ -31,7 +35,7 @@ private fun wipeIfRevisionChanged() {
     val dbFileName = localDatabaseFileName()
     val present = defaults.objectForKey(revisionKey) != null
     val onDisk = if (present) defaults.integerForKey(revisionKey) else null
-    if (onDisk != null && onDisk < 6L) {
+    if (onDisk != null && onDisk != LocalDbRevision) {
         val docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, true)
             .firstOrNull() as? String
         if (docs != null) {

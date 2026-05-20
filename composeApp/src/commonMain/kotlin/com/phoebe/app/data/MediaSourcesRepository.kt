@@ -56,15 +56,13 @@ class MediaSourcesRepository(
         PhoebeLog.d("MediaSourcesRepository") { "addLocalFolder label='$label' uri=$rootUri" }
         val id = "lf-${(Random.nextLong() and Long.MAX_VALUE).toString(16)}"
         val cleanLabel = label.ifBlank { "Local folder" }
-        withContext(Dispatchers.Default) {
-            database.mediaSourcesQueries.insertOrReplace(
-                id = id,
-                rootUri = rootUri,
-                label = cleanLabel,
-                enabled = 1L,
-            )
-            reload()
-        }
+        database.mediaSourcesQueries.insertOrReplace(
+            id = id,
+            rootUri = rootUri,
+            label = cleanLabel,
+            enabled = 1L,
+        )
+        reload()
     }
 
     suspend fun removeLocalFolder(id: String) {

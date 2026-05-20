@@ -1,0 +1,454 @@
+package com.phoebe.app.ui
+
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSerializable
+import androidx.compose.runtime.snapshots.SnapshotStateList
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Text
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.navigation3.runtime.NavBackStack
+import androidx.navigation3.runtime.entryProvider
+import androidx.navigation3.runtime.NavKey
+import androidx.navigation3.runtime.serialization.NavBackStackSerializer
+import androidx.navigation3.scene.Scene
+import androidx.navigation3.ui.LocalNavAnimatedContentScope
+import androidx.navigation3.ui.NavDisplay
+import androidx.navigation3.ui.defaultPopTransitionSpec
+import androidx.navigation3.ui.defaultPredictivePopTransitionSpec
+import androidx.navigation3.ui.defaultTransitionSpec
+import androidx.savedstate.serialization.SavedStateConfiguration
+import com.phoebe.app.AppNavigationRequest
+import com.phoebe.app.CollectionMixSeed
+import com.phoebe.app.domain.Album
+import com.phoebe.app.domain.AppScreen
+import com.phoebe.app.domain.Artist
+import com.phoebe.app.domain.CatalogSnapshot
+import com.phoebe.app.domain.CollectionEntry
+import com.phoebe.app.domain.PlayHistoryKind
+import com.phoebe.app.domain.Playlist
+import com.phoebe.app.domain.RecentlyAddedKind
+import com.phoebe.app.domain.Track
+import kotlinx.serialization.PolymorphicSerializer
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.modules.SerializersModule
+import kotlinx.serialization.modules.polymorphic
+import kotlinx.serialization.modules.subclass
+
+@Serializable
+internal sealed interface PhoebeRoute : NavKey {
+    @Serializable
+    data object SignIn : PhoebeRoute
+
+    @Serializable
+    data object ServerPicker : PhoebeRoute
+
+    @Serializable
+    data object LibraryPicker : PhoebeRoute
+
+    @Serializable
+    data class Browse(val section: BrowseSection = BrowseSection.Home) : PhoebeRoute
+
+    @Serializable
+    data class Collections(
+        val entry: CollectionEntry,
+    ) : PhoebeRoute
+
+    @Serializable
+    data class CollectionItems(
+        val entry: CollectionEntry,
+        val value: String,
+    ) : PhoebeRoute
+
+    @Serializable
+    data class ArtistDetail(val artistId: String) : PhoebeRoute
+
+    @Serializable
+    data class AlbumDetail(val albumId: String) : PhoebeRoute
+
+    @Serializable
+    data class SongDetail(val trackId: String) : PhoebeRoute
+
+    @Serializable
+    data class Lyrics(val trackId: String? = null) : PhoebeRoute
+
+    @Serializable
+    data class RecentlyAdded(val kind: RecentlyAddedKind) : PhoebeRoute
+
+    @Serializable
+    data class PlayHistory(val kind: PlayHistoryKind) : PhoebeRoute
+
+    @Serializable
+    data object FavoritePlaylists : PhoebeRoute
+
+    @Serializable
+    data object FavoriteArtists : PhoebeRoute
+
+    @Serializable
+    data object FavoriteAlbums : PhoebeRoute
+
+    @Serializable
+    data class PlaylistDetail(val playlistId: String) : PhoebeRoute
+
+    @Serializable
+    data object Player : PhoebeRoute
+}
+
+internal val phoebeRouteSerializersModule = SerializersModule {
+    polymorphic(NavKey::class) {
+        subclass(PhoebeRoute.SignIn::class, PhoebeRoute.SignIn.serializer())
+        subclass(PhoebeRoute.ServerPicker::class, PhoebeRoute.ServerPicker.serializer())
+        subclass(PhoebeRoute.LibraryPicker::class, PhoebeRoute.LibraryPicker.serializer())
+        subclass(PhoebeRoute.Browse::class, PhoebeRoute.Browse.serializer())
+        subclass(PhoebeRoute.Collections::class, PhoebeRoute.Collections.serializer())
+        subclass(PhoebeRoute.CollectionItems::class, PhoebeRoute.CollectionItems.serializer())
+        subclass(PhoebeRoute.ArtistDetail::class, PhoebeRoute.ArtistDetail.serializer())
+        subclass(PhoebeRoute.AlbumDetail::class, PhoebeRoute.AlbumDetail.serializer())
+        subclass(PhoebeRoute.SongDetail::class, PhoebeRoute.SongDetail.serializer())
+        subclass(PhoebeRoute.Lyrics::class, PhoebeRoute.Lyrics.serializer())
+        subclass(PhoebeRoute.RecentlyAdded::class, PhoebeRoute.RecentlyAdded.serializer())
+        subclass(PhoebeRoute.PlayHistory::class, PhoebeRoute.PlayHistory.serializer())
+        subclass(PhoebeRoute.FavoritePlaylists::class, PhoebeRoute.FavoritePlaylists.serializer())
+        subclass(PhoebeRoute.FavoriteArtists::class, PhoebeRoute.FavoriteArtists.serializer())
+        subclass(PhoebeRoute.FavoriteAlbums::class, PhoebeRoute.FavoriteAlbums.serializer())
+        subclass(PhoebeRoute.PlaylistDetail::class, PhoebeRoute.PlaylistDetail.serializer())
+        subclass(PhoebeRoute.Player::class, PhoebeRoute.Player.serializer())
+    }
+}
+
+internal val phoebeRouteSavedStateConfiguration = SavedStateConfiguration {
+    serializersModule = phoebeRouteSerializersModule
+}
+
+@Composable
+internal fun MissingRouteFallback(
+    title: String,
+    message: String,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+            modifier = Modifier
+                .widthIn(max = 380.dp)
+                .padding(24.dp),
+        ) {
+            Text(
+                text = title,
+                color = PhoebeUi.primaryText,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                text = message,
+                color = PhoebeUi.secondaryText,
+                fontSize = 14.sp,
+                lineHeight = 20.sp,
+                textAlign = TextAlign.Center,
+            )
+            FilledTonalButton(onClick = onBack) {
+                Text("Back")
+            }
+        }
+    }
+}
+
+@Composable
+internal fun PhoebeNavDisplay(
+    backStack: List<PhoebeRoute>,
+    modifier: Modifier = Modifier,
+    animateTransitions: Boolean = true,
+    opaqueSceneBackgrounds: Boolean = false,
+    onBack: () -> Unit,
+    content: @Composable (PhoebeRoute) -> Unit,
+) {
+    val transitionSpec: AnimatedContentTransitionScope<Scene<PhoebeRoute>>.() -> ContentTransform =
+        if (animateTransitions) defaultTransitionSpec() else noPhoebeRouteTransition()
+    val popTransitionSpec: AnimatedContentTransitionScope<Scene<PhoebeRoute>>.() -> ContentTransform =
+        if (animateTransitions) defaultPopTransitionSpec() else noPhoebeRouteTransition()
+    val predictivePopTransitionSpec: AnimatedContentTransitionScope<Scene<PhoebeRoute>>.(Int) -> ContentTransform =
+        if (animateTransitions) {
+            { edge -> defaultPredictivePopTransitionSpec<PhoebeRoute>().invoke(this, edge) }
+        } else {
+            { _ -> noPhoebeRouteContentTransform() }
+        }
+
+    NavDisplay(
+        backStack = backStack.ifEmpty { listOf(PhoebeRoute.SignIn) },
+        modifier = modifier,
+        transitionSpec = transitionSpec,
+        popTransitionSpec = popTransitionSpec,
+        predictivePopTransitionSpec = predictivePopTransitionSpec,
+        onBack = onBack,
+        entryProvider = entryProvider {
+            entry<PhoebeRoute.SignIn> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
+            entry<PhoebeRoute.ServerPicker> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
+            entry<PhoebeRoute.LibraryPicker> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
+            entry<PhoebeRoute.Browse>(clazzContentKey = { "browse" }) { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
+            entry<PhoebeRoute.Collections> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
+            entry<PhoebeRoute.CollectionItems> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
+            entry<PhoebeRoute.ArtistDetail> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
+            entry<PhoebeRoute.AlbumDetail> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
+            entry<PhoebeRoute.SongDetail> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
+            entry<PhoebeRoute.Lyrics> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
+            entry<PhoebeRoute.RecentlyAdded> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
+            entry<PhoebeRoute.PlayHistory> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
+            entry<PhoebeRoute.FavoritePlaylists> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
+            entry<PhoebeRoute.FavoriteArtists> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
+            entry<PhoebeRoute.FavoriteAlbums> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
+            entry<PhoebeRoute.PlaylistDetail> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
+            entry<PhoebeRoute.Player> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
+        },
+    )
+}
+
+private fun noPhoebeRouteTransition():
+    AnimatedContentTransitionScope<Scene<PhoebeRoute>>.() -> ContentTransform = {
+    noPhoebeRouteContentTransform()
+}
+
+private fun noPhoebeRouteContentTransform(): ContentTransform =
+    ContentTransform(EnterTransition.None, ExitTransition.None)
+
+@Composable
+private fun PhoebeNavEntryContent(
+    route: PhoebeRoute,
+    opaqueSceneBackground: Boolean,
+    content: @Composable (PhoebeRoute) -> Unit,
+) {
+    CompositionLocalProvider(
+        LocalAnimatedVisibilityScope provides LocalNavAnimatedContentScope.current,
+    ) {
+        if (opaqueSceneBackground) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(PhoebeUi.shellTop),
+            ) {
+                content(route)
+            }
+        } else {
+            content(route)
+        }
+    }
+}
+
+@Composable
+internal fun rememberPhoebeNavigator(initialRoute: PhoebeRoute): PhoebeNavigator {
+    val backStack = rememberSerializable(
+        configuration = phoebeRouteSavedStateConfiguration,
+        serializer = NavBackStackSerializer(PolymorphicSerializer(NavKey::class)),
+    ) {
+        NavBackStack(initialRoute)
+    }
+    return remember(backStack) { PhoebeNavigator(backStack) }
+}
+
+internal class PhoebeNavigator(
+    private val backStack: MutableList<NavKey>,
+) {
+    constructor(initialRoute: PhoebeRoute) : this(mutableStateListOf<NavKey>(initialRoute))
+    @Suppress("UNCHECKED_CAST")
+    constructor(backStack: SnapshotStateList<PhoebeRoute>) : this(backStack as MutableList<NavKey>)
+
+    val routes: List<PhoebeRoute>
+        get() = backStack.mapNotNull { it as? PhoebeRoute }
+
+    val currentRoute: PhoebeRoute
+        get() = routes.lastOrNull() ?: PhoebeRoute.SignIn
+
+    fun open(route: PhoebeRoute) {
+        if (currentRoute != route) {
+            backStack.add(route)
+        }
+    }
+
+    fun replaceRoot(route: PhoebeRoute) {
+        if (backStack.size == 1 && backStack.firstOrNull() == route) return
+        if (backStack.isEmpty()) {
+            backStack.add(route)
+            return
+        }
+        backStack[0] = route
+        while (backStack.size > 1) {
+            backStack.removeAt(backStack.lastIndex)
+        }
+    }
+
+    fun pop(): Boolean {
+        if (backStack.size <= 1) return false
+        backStack.removeAt(backStack.lastIndex)
+        return true
+    }
+
+    fun openPlayer() {
+        open(PhoebeRoute.Player)
+    }
+
+    fun handle(request: AppNavigationRequest) {
+        when (request) {
+            AppNavigationRequest.SignIn -> replaceRoot(PhoebeRoute.SignIn)
+            AppNavigationRequest.ServerPicker -> openSetupRoute(PhoebeRoute.ServerPicker)
+            AppNavigationRequest.LibraryPicker -> openSetupRoute(PhoebeRoute.LibraryPicker)
+            AppNavigationRequest.Home -> replaceRoot(PhoebeRoute.Browse())
+            AppNavigationRequest.Player -> openPlayer()
+            is AppNavigationRequest.PlaylistDetail -> {
+                replaceRoot(PhoebeRoute.Browse())
+                open(PhoebeRoute.PlaylistDetail(request.playlistId))
+            }
+        }
+    }
+
+    fun openBrowse(section: BrowseSection) {
+        replaceRoot(PhoebeRoute.Browse(section))
+    }
+
+    private fun openSetupRoute(route: PhoebeRoute) {
+        if (routes.firstOrNull() != PhoebeRoute.SignIn) {
+            replaceRoot(PhoebeRoute.SignIn)
+        }
+        when (route) {
+            PhoebeRoute.ServerPicker -> {
+                while (backStack.size > 1) {
+                    backStack.removeAt(backStack.lastIndex)
+                }
+                open(route)
+            }
+            PhoebeRoute.LibraryPicker -> {
+                openSetupRoute(PhoebeRoute.ServerPicker)
+                open(route)
+            }
+            else -> open(route)
+        }
+    }
+}
+
+internal fun AppNavigationRequest.toPhoebeRoute(): PhoebeRoute = when (this) {
+    AppNavigationRequest.SignIn -> PhoebeRoute.SignIn
+    AppNavigationRequest.ServerPicker -> PhoebeRoute.ServerPicker
+    AppNavigationRequest.LibraryPicker -> PhoebeRoute.LibraryPicker
+    AppNavigationRequest.Home -> PhoebeRoute.Browse()
+    AppNavigationRequest.Player -> PhoebeRoute.Player
+    is AppNavigationRequest.PlaylistDetail -> PhoebeRoute.PlaylistDetail(playlistId)
+}
+
+internal sealed interface PhoebeRouteResolution {
+    val route: PhoebeRoute
+
+    data class Resolved(
+        override val route: PhoebeRoute,
+        val screen: AppScreen,
+    ) : PhoebeRouteResolution
+
+    data class Missing(
+        override val route: PhoebeRoute,
+        val title: String,
+        val message: String,
+    ) : PhoebeRouteResolution
+}
+
+internal fun resolvePhoebeRoute(
+    route: PhoebeRoute,
+    catalog: CatalogSnapshot,
+    currentTrack: Track?,
+): PhoebeRouteResolution = when (route) {
+    PhoebeRoute.SignIn -> route.resolved(AppScreen.SignIn)
+    PhoebeRoute.ServerPicker -> route.resolved(AppScreen.ServerPicker)
+    PhoebeRoute.LibraryPicker -> route.resolved(AppScreen.LibraryPicker)
+    is PhoebeRoute.Browse -> route.resolved(AppScreen.Home)
+    is PhoebeRoute.Collections -> route.resolved(AppScreen.Collections(route.entry))
+    is PhoebeRoute.CollectionItems -> route.resolved(AppScreen.CollectionItems(route.entry, route.value))
+    is PhoebeRoute.ArtistDetail -> catalog.findArtist(route.artistId)
+        ?.let { route.resolved(AppScreen.ArtistDetail(it)) }
+        ?: route.missing("Artist not found", "This artist is no longer available in the current library.")
+    is PhoebeRoute.AlbumDetail -> catalog.findAlbum(route.albumId)
+        ?.let { route.resolved(AppScreen.AlbumDetail(it)) }
+        ?: route.missing("Album not found", "This album is no longer available in the current library.")
+    is PhoebeRoute.SongDetail -> catalog.findTrack(route.trackId, currentTrack)
+        ?.let { route.resolved(AppScreen.SongDetail(it)) }
+        ?: route.missing("Song not found", "This song is no longer available in the current library.")
+    is PhoebeRoute.Lyrics -> {
+        val track = route.trackId?.let { catalog.findTrack(it, currentTrack) } ?: currentTrack
+        if (route.trackId != null && track == null) {
+            route.missing("Lyrics unavailable", "The selected song is no longer available in the current library.")
+        } else {
+            route.resolved(AppScreen.Lyrics(track))
+        }
+    }
+    is PhoebeRoute.RecentlyAdded -> route.resolved(AppScreen.RecentlyAdded(route.kind))
+    is PhoebeRoute.PlayHistory -> route.resolved(AppScreen.PlayHistory(route.kind))
+    PhoebeRoute.FavoritePlaylists -> route.resolved(AppScreen.FavoritePlaylists)
+    PhoebeRoute.FavoriteArtists -> route.resolved(AppScreen.FavoriteArtists)
+    PhoebeRoute.FavoriteAlbums -> route.resolved(AppScreen.FavoriteAlbums)
+    is PhoebeRoute.PlaylistDetail -> catalog.findPlaylist(route.playlistId)
+        ?.let { route.resolved(AppScreen.PlaylistDetail(it)) }
+        ?: route.missing("Playlist not found", "This playlist is no longer available in the current library.")
+    PhoebeRoute.Player -> route.resolved(AppScreen.Player)
+}
+
+internal fun Collection<PhoebeRoute>.collectionMixSeed(): CollectionMixSeed? {
+    val route = filterIsInstance<PhoebeRoute.CollectionItems>().lastOrNull() ?: return null
+    return CollectionMixSeed(route.entry.facet, route.value)
+}
+
+internal fun Artist.route(): PhoebeRoute = PhoebeRoute.ArtistDetail(id)
+internal fun Album.route(): PhoebeRoute = PhoebeRoute.AlbumDetail(id)
+internal fun Track.route(): PhoebeRoute = PhoebeRoute.SongDetail(id)
+internal fun Playlist.route(): PhoebeRoute = PhoebeRoute.PlaylistDetail(id)
+
+internal val PhoebeRoute.telemetryName: String
+    get() = when (this) {
+        PhoebeRoute.SignIn -> "sign_in"
+        PhoebeRoute.ServerPicker -> "server_picker"
+        PhoebeRoute.LibraryPicker -> "library_picker"
+        is PhoebeRoute.Browse -> "home"
+        is PhoebeRoute.Collections -> "collections"
+        is PhoebeRoute.CollectionItems -> "collection_items"
+        is PhoebeRoute.AlbumDetail -> "album_detail"
+        is PhoebeRoute.ArtistDetail -> "artist_detail"
+        is PhoebeRoute.SongDetail -> "song_detail"
+        is PhoebeRoute.Lyrics -> "lyrics"
+        is PhoebeRoute.RecentlyAdded -> "recently_added"
+        is PhoebeRoute.PlayHistory -> "play_history"
+        PhoebeRoute.FavoritePlaylists -> "favorite_playlists"
+        PhoebeRoute.FavoriteArtists -> "favorite_artists"
+        PhoebeRoute.FavoriteAlbums -> "favorite_albums"
+        is PhoebeRoute.PlaylistDetail -> "playlist_detail"
+        PhoebeRoute.Player -> "player"
+    }
+
+private fun PhoebeRoute.resolved(screen: AppScreen) = PhoebeRouteResolution.Resolved(this, screen)
+
+private fun PhoebeRoute.missing(title: String, message: String) =
+    PhoebeRouteResolution.Missing(this, title, message)
+
+private fun CatalogSnapshot.findArtist(id: String): Artist? = artists.firstOrNull { it.id == id }
+
+private fun CatalogSnapshot.findAlbum(id: String): Album? = albums.firstOrNull { it.id == id }
+
+private fun CatalogSnapshot.findPlaylist(id: String): Playlist? = playlists.firstOrNull { it.id == id }
+
+private fun CatalogSnapshot.findTrack(id: String, currentTrack: Track?): Track? =
+    currentTrack?.takeIf { it.id == id }
+        ?: tracksByParent.values.asSequence().flatten().firstOrNull { it.id == id }

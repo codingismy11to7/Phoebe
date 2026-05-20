@@ -64,6 +64,8 @@ Desktop, Android, and iOS folder roots (web: stubbed). Indexed tracks merge with
 
 ## Features
 
+For UI architecture and navigation rules, see [Compose Architecture Guidelines](docs/compose-architecture.md).
+
 ### Library and catalog
 
 - **Remote providers** — See [Music providers](#music-providers) for per-backend capabilities; sign in from the welcome screen (Plex PIN or direct URL for the others).

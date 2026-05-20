@@ -1,7 +1,12 @@
 package com.phoebe.app
 
 import com.phoebe.app.data.PlexClient
+import com.phoebe.app.data.defaultPlexRadioStations
+import com.phoebe.app.data.mergePlexLibraryRadioStations
+import com.phoebe.app.data.plexLibraryStationKeysToTry
+import com.phoebe.app.data.plexLibraryStationSlug
 import com.phoebe.app.domain.MusicLibrary
+import com.phoebe.app.domain.PlexRadioStation
 import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.testing.createdPlaylistJson
 import com.phoebe.app.testing.identityJson
@@ -362,6 +367,88 @@ class PlexClientPlaylistEndToEndTest {
     }
 
     @Test
+    fun musicStationsIgnoresArtistRadioInOtherHubs() = runTest {
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/hubs/sections/1" -> respond(
+                    """{
+                        "MediaContainer": {
+                          "Hub": [
+                            {
+                              "title": "Recommended Artists",
+                              "context": "hub.music.recommended",
+                              "Metadata": [
+                                {
+                                  "ratingKey": "radiohead",
+                                  "key": "/library/metadata/123/station/abc-uuid",
+                                  "title": "Radiohead",
+                                  "type": "artist"
+                                }
+                              ]
+                            },
+                            {
+                              "title": "Stations",
+                              "context": "hub.music.stations",
+                              "Metadata": [
+                                {
+                                  "ratingKey": "library-radio",
+                                  "key": "/library/sections/1/stations/library",
+                                  "title": "Library Radio"
+                                },
+                                {
+                                  "ratingKey": "deep-cuts",
+                                  "key": "/library/sections/1/stations/deepCuts",
+                                  "title": "Deep Cuts Radio"
+                                },
+                                {
+                                  "ratingKey": "time-travel",
+                                  "key": "/library/sections/1/stations/timeTravel",
+                                  "title": "Time Travel Radio"
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                    }""".trimIndent(),
+                    HttpStatusCode.OK,
+                    headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val client = PlexClient(testHttpClient(engine))
+        val server = PlexServer("server", "Plex", "https://plex.example:32400", owned = true)
+
+        val stations = client.musicStations(server, MusicLibrary("1", "Music"), "token")
+
+        assertEquals(
+            listOf("Library Radio", "Deep Cuts Radio", "Time Travel Radio"),
+            stations.map { it.title },
+        )
+    }
+
+    @Test
+    fun mergePlexLibraryRadioStationsFillsMissingDefaults() {
+        val library = MusicLibrary("1", "Music")
+        val defaults = defaultPlexRadioStations(library)
+        val apiOnlyDeepCuts = listOf(
+            PlexRadioStation(
+                id = "deep-cuts",
+                title = "Deep Cuts",
+                subtitle = "Hidden gems",
+                key = "/library/sections/1/stations/deepCuts",
+            ),
+        )
+
+        val merged = mergePlexLibraryRadioStations(apiOnlyDeepCuts, defaults)
+
+        assertEquals(
+            listOf("library", "deepCuts", "timeTravel"),
+            merged.map { it.key.plexLibraryStationSlug() },
+        )
+    }
+
+    @Test
     fun artistStationReadsIncludeStationsResponse() = runTest {
         val engine = MockEngine { request ->
             when (request.url.encodedPath) {
@@ -529,11 +616,13 @@ class PlexClientPlaylistEndToEndTest {
     fun createStationPlayQueuePostsStationUriAndReturnsTracks() = runTest {
         var capturedType: String? = null
         var capturedUri: String? = null
+        var capturedContinuous: String? = null
         val engine = MockEngine { request ->
             when (request.url.encodedPath) {
                 "/playQueues" -> {
                     capturedType = request.url.parameters["type"]
                     capturedUri = request.url.parameters["uri"]
+                    capturedContinuous = request.url.parameters["continuous"]
                     respond(
                         """{
                             "MediaContainer": {
@@ -570,9 +659,139 @@ class PlexClientPlaylistEndToEndTest {
         val tracks = client.createStationPlayQueue(server, "token", "machine1", "/library/sections/1/stations/library")
 
         assertEquals("audio", capturedType)
+        assertEquals("1", capturedContinuous)
         assertEquals("server://machine1/com.plexapp.plugins.library/library/sections/1/stations/library", capturedUri)
         assertEquals(1, tracks.size)
         assertEquals("t1", tracks.single().id)
         assertEquals("Radio Song", tracks.single().title)
+    }
+
+    @Test
+    fun createStationPlayQueueBatchHydratesMissingMedia() = runTest {
+        val engine = MockEngine { request ->
+            when {
+                request.url.encodedPath == "/playQueues" -> respond(
+                    """{
+                        "MediaContainer": {
+                          "playQueueID": 42,
+                          "Metadata": [
+                            { "ratingKey": "t1", "title": "One", "type": "track", "duration": 1000 },
+                            { "ratingKey": "t2", "title": "Two", "type": "track", "duration": 1000 }
+                          ]
+                        }
+                    }""".trimIndent(),
+                    HttpStatusCode.OK,
+                    headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+                request.url.encodedPath == "/library/metadata/t1,t2" -> respond(
+                    """{
+                        "MediaContainer": {
+                          "Metadata": [
+                            {
+                              "ratingKey": "t1",
+                              "title": "One",
+                              "type": "track",
+                              "duration": 1000,
+                              "Media": [
+                                { "Part": [ { "key": "/library/parts/t1/file.flac" } ] }
+                              ]
+                            },
+                            {
+                              "ratingKey": "t2",
+                              "title": "Two",
+                              "type": "track",
+                              "duration": 1000,
+                              "Media": [
+                                { "Part": [ { "key": "/library/parts/t2/file.flac" } ] }
+                              ]
+                            }
+                          ]
+                        }
+                    }""".trimIndent(),
+                    HttpStatusCode.OK,
+                    headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val client = PlexClient(testHttpClient(engine))
+        val server = PlexServer("server", "Plex", "https://plex.example:32400", owned = true)
+
+        val tracks = client.createStationPlayQueue(server, "token", "machine1", "/library/sections/1/stations/deepCuts")
+
+        assertEquals(listOf("t1", "t2"), tracks.map { it.id })
+    }
+
+    @Test
+    fun createStationPlayQueueHydratesTracksMissingMedia() = runTest {
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/playQueues" -> respond(
+                    """{
+                        "MediaContainer": {
+                          "playQueueID": 42,
+                          "Metadata": [
+                            {
+                              "ratingKey": "t1",
+                              "key": "/library/metadata/t1",
+                              "title": "Radio Song",
+                              "type": "track",
+                              "parentTitle": "Radio Album",
+                              "grandparentTitle": "Radio Artist",
+                              "duration": 123000
+                            }
+                          ]
+                        }
+                    }""".trimIndent(),
+                    HttpStatusCode.OK,
+                    headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+                "/library/metadata/t1" -> respond(
+                    """{
+                        "MediaContainer": {
+                          "Metadata": [
+                            {
+                              "ratingKey": "t1",
+                              "key": "/library/metadata/t1",
+                              "title": "Radio Song",
+                              "type": "track",
+                              "parentTitle": "Radio Album",
+                              "grandparentTitle": "Radio Artist",
+                              "duration": 123000,
+                              "Media": [
+                                {
+                                  "audioCodec": "flac",
+                                  "Part": [ { "key": "/library/parts/t1/file.flac", "file": "/music/t1.flac" } ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                    }""".trimIndent(),
+                    HttpStatusCode.OK,
+                    headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val client = PlexClient(testHttpClient(engine))
+        val server = PlexServer("server", "Plex", "https://plex.example:32400", owned = true)
+
+        val tracks = client.createStationPlayQueue(server, "token", "machine1", "/library/sections/1/stations/library")
+
+        assertEquals(1, tracks.size)
+        assertEquals("t1", tracks.single().id)
+        assertTrue(tracks.single().streamUrl.contains("/library/parts/t1/file.flac"))
+    }
+
+    @Test
+    fun plexLibraryStationKeysToTryIncludesNumericFallback() {
+        assertEquals(
+            listOf(
+                "/library/sections/3/stations/deepCuts",
+                "/library/sections/3/stations/8",
+            ),
+            plexLibraryStationKeysToTry("/library/sections/3/stations/deepCuts"),
+        )
     }
 }

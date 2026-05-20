@@ -1,6 +1,7 @@
 package com.phoebe.app
 
 import com.phoebe.app.domain.Track
+import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.player.SimpleAudioPlayer
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -266,6 +267,69 @@ class PlayerStateTest {
     }
 
     @Test
+    fun automaticCrossfadeOnlyStartsInsideRemainingWindow() {
+        val player = CrossfadeTestPlayer()
+        val tracks = listOf(
+            Track("t1", "One", "Artist", "Album", 60_000, "http://a", ""),
+            Track("t2", "Two", "Artist", "Album", 90_000, "http://b", ""),
+        )
+
+        player.play(tracks, 0)
+        player.setCrossfadeDurationMs(6_000)
+        player.platformPlayback(positionMs = 53_000, durationMs = 60_000, bufferedPositionMs = 60_000)
+
+        assertEquals(0, player.crossfadeStarts)
+
+        player.platformPlayback(positionMs = 54_000, durationMs = 60_000, bufferedPositionMs = 60_000)
+
+        assertEquals(1, player.crossfadeStarts)
+        assertEquals(1, player.lastTargetIndex)
+    }
+
+    @Test
+    fun pausedPlaybackDoesNotStartAutomaticCrossfade() {
+        val player = CrossfadeTestPlayer()
+        val tracks = listOf(
+            Track("t1", "One", "Artist", "Album", 60_000, "http://a", ""),
+            Track("t2", "Two", "Artist", "Album", 90_000, "http://b", ""),
+        )
+
+        player.play(tracks, 0)
+        player.setCrossfadeDurationMs(6_000)
+        player.platformPlayback(
+            positionMs = 55_000,
+            durationMs = 60_000,
+            bufferedPositionMs = 60_000,
+            isPlaying = false,
+        )
+
+        assertEquals(0, player.crossfadeStarts)
+        assertEquals(tracks[0], player.state.value.currentTrack)
+    }
+
+    @Test
+    fun repeatAllCrossfadeTargetsFirstTrackFromQueueEnd() {
+        val player = CrossfadeTestPlayer()
+        val tracks = listOf(
+            Track("t1", "One", "Artist", "Album", 60_000, "http://a", ""),
+            Track("t2", "Two", "Artist", "Album", 90_000, "http://b", ""),
+        )
+
+        player.play(tracks, 1)
+        player.setRepeat(RepeatMode.All)
+        player.setCrossfadeDurationMs(6_000)
+        player.platformPlayback(positionMs = 85_000, durationMs = 90_000, bufferedPositionMs = 90_000)
+
+        assertEquals(1, player.crossfadeStarts)
+        assertEquals(0, player.lastTargetIndex)
+
+        player.commitCrossfade(positionMs = 4_000)
+
+        assertEquals(tracks[0], player.state.value.currentTrack)
+        assertEquals(4_000, player.state.value.positionMs)
+    }
+
+    @Test
     fun manualNextSkipsImmediatelyWhenCrossfadeIsEnabled() {
         val player = CrossfadeTestPlayer()
         val tracks = listOf(
@@ -434,6 +498,7 @@ private class PlatformStateTestPlayer : SimpleAudioPlayer() {
 
 private class CrossfadeTestPlayer : SimpleAudioPlayer() {
     var crossfadeStarts = 0
+    var lastTargetIndex = -1
     private var pendingQueue: List<Track> = emptyList()
     private var pendingTargetIndex = -1
     private var pendingGeneration = -1
@@ -451,17 +516,23 @@ private class CrossfadeTestPlayer : SimpleAudioPlayer() {
         generation: Int,
     ): Boolean {
         crossfadeStarts++
+        lastTargetIndex = targetIndex
         pendingQueue = queue
         pendingTargetIndex = targetIndex
         pendingGeneration = generation
         return true
     }
 
-    fun platformPlayback(positionMs: Long, durationMs: Long, bufferedPositionMs: Long) {
+    fun platformPlayback(
+        positionMs: Long,
+        durationMs: Long,
+        bufferedPositionMs: Long,
+        isPlaying: Boolean = true,
+    ) {
         applyPlatformPlayback(
             positionMs = positionMs,
             durationMs = durationMs,
-            isPlaying = true,
+            isPlaying = isPlaying,
             isBuffering = false,
             bufferedPositionMs = bufferedPositionMs,
         )
