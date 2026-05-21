@@ -18,6 +18,7 @@ import com.phoebe.app.data.PlexPlayHistorySyncer
 import com.phoebe.app.data.PlexPlaybackReporter
 import com.phoebe.app.data.EmbyProviderAdapter
 import com.phoebe.app.data.JellyfinProviderAdapter
+import com.phoebe.app.data.SearchHistoryRepository
 import com.phoebe.app.data.SessionRepository
 import com.phoebe.app.data.SubsonicClient
 import com.phoebe.app.data.db.DatabaseWriteGate
@@ -44,6 +45,7 @@ class AppDependencies(
     val lyricsRepository: LyricsRepository,
     val playHistoryRepository: PlayHistoryRepository,
     val appSettingsRepository: AppSettingsRepository,
+    val searchHistoryRepository: SearchHistoryRepository,
     val providerRegistry: MusicProviderRegistry,
     val plexPlayHistorySyncer: PlexPlayHistorySyncer,
     val jellyfinPlayHistorySyncer: JellyfinPlayHistorySyncer,
@@ -67,6 +69,7 @@ class AppDependencies(
         mediaSourcesRepository.clearInMemoryState()
         libraryUiRepository.resetInMemoryState()
         appSettingsRepository.resetInMemoryState()
+        searchHistoryRepository.clear()
         lyricsRepository.clearMemoryCache()
     }
 
@@ -93,6 +96,7 @@ class AppDependencies(
             val libraryUiRepository = LibraryUiRepository(database, storage)
             val appSettingsRepository = AppSettingsRepository(database)
             val playHistoryRepository = PlayHistoryRepository(database)
+            val searchHistoryRepository = SearchHistoryRepository(storage)
             val audioPlayer = createAudioPlayer()
             val castController = createCastController(audioPlayer)
             val sessionRepository = SessionRepository(
@@ -105,6 +109,7 @@ class AppDependencies(
             )
             sessionRepository.restore(refreshConnections = false)
             mediaSourcesRepository.restore()
+            searchHistoryRepository.restore()
             return AppDependencies(
                 database = database,
                 databaseWriteGate = databaseWriteGate,
@@ -125,6 +130,7 @@ class AppDependencies(
                 lyricsRepository = LyricsRepository(database, httpClient),
                 playHistoryRepository = playHistoryRepository,
                 appSettingsRepository = appSettingsRepository,
+                searchHistoryRepository = searchHistoryRepository,
                 providerRegistry = providerRegistry,
                 plexPlayHistorySyncer = PlexPlayHistorySyncer(
                     plexClient = plexClient,

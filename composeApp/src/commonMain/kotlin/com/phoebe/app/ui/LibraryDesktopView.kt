@@ -45,6 +45,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
@@ -221,6 +223,7 @@ internal fun FavoriteArtistsDesktopView(
             catalog = catalog,
             artists = visibleArtists,
             viewMode = viewMode,
+            gridColumns = libraryUi.gridColumns,
             onArtist = onArtist,
             modifier = Modifier.fillMaxSize(),
         )
@@ -276,6 +279,7 @@ internal fun FavoriteAlbumsDesktopView(
             albums = visibleAlbums,
             selectedAlbumId = selectedAlbumId,
             viewMode = viewMode,
+            gridColumns = libraryUi.gridColumns,
             onSelect = { selectedAlbumId = it.id },
             onOpen = onAlbum,
             modifier = Modifier.fillMaxSize(),
@@ -553,6 +557,7 @@ internal fun LibraryDesktopView(
                         catalog = catalog,
                         artists = artistPage.items,
                         viewMode = libraryViewMode,
+                        gridColumns = libraryUi.gridColumns,
                         onArtist = onArtist,
                         modifier = Modifier.weight(1f).fillMaxWidth(),
                     )
@@ -561,6 +566,7 @@ internal fun LibraryDesktopView(
                         albums = albumPage.items,
                         selectedAlbumId = selectedAlbumId,
                         viewMode = libraryViewMode,
+                        gridColumns = libraryUi.gridColumns,
                         onSelect = { selectedAlbumId = it.id },
                         onOpen = onAlbum,
                         modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -587,6 +593,7 @@ internal fun LibraryDesktopView(
                             albums = albumPage.items,
                             selectedAlbumId = selectedAlbumId,
                             viewMode = libraryViewMode,
+                            gridColumns = libraryUi.gridColumns,
                             onSelect = { selectedAlbumId = it.id },
                             onOpen = onAlbum,
                             modifier = Modifier.weight(1f).fillMaxHeight(),
@@ -715,67 +722,18 @@ private fun LibraryToolbarRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         LibraryTabsPill(filter, onFilter)
-        Spacer(Modifier.width(14.dp))
-        Row(
-            modifier = Modifier
-                .weight(1f)
-                .horizontalScroll(rememberScrollState()),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.Start),
-        ) {
-            LibraryDropdown(
-                label = "Sort by",
-                value = sortLabelFor(filter, prefs.sortBy),
-            ) { close ->
-                when (filter) {
-                    LibraryFilterTab.Artists -> {
-                        DropdownMenuItem(text = { Text("Artist name") }, onClick = { onSortBy(LibrarySortBy.Name); close() })
-                    }
-                    LibraryFilterTab.Albums -> {
-                        DropdownMenuItem(text = { Text("Album name") }, onClick = { onSortBy(LibrarySortBy.Name); close() })
-                        DropdownMenuItem(text = { Text("Artist") }, onClick = { onSortBy(LibrarySortBy.Artist); close() })
-                        DropdownMenuItem(text = { Text("Release date") }, onClick = { onSortBy(LibrarySortBy.Year); close() })
-                    }
-                    LibraryFilterTab.Songs -> {
-                        DropdownMenuItem(text = { Text("Song name") }, onClick = { onSortBy(LibrarySortBy.Name); close() })
-                        DropdownMenuItem(text = { Text("Album name") }, onClick = { onSortBy(LibrarySortBy.Album); close() })
-                        DropdownMenuItem(text = { Text("Artist") }, onClick = { onSortBy(LibrarySortBy.Artist); close() })
-                        DropdownMenuItem(text = { Text("Release date") }, onClick = { onSortBy(LibrarySortBy.Year); close() })
-                    }
-                }
-            }
-            LibraryDropdown(
-                label = "Order",
-                value = if (prefs.ascending) "A–Z" else "Desc",
-            ) {
-                DropdownMenuItem(text = { Text("A–Z") }, onClick = { onAscending(true); it() })
-                DropdownMenuItem(text = { Text("Z–A / Desc") }, onClick = { onAscending(false); it() })
-            }
-            when (filter) {
-                LibraryFilterTab.Artists, LibraryFilterTab.Albums -> LibraryDropdown(
-                    label = "View",
-                    value = if (libraryViewMode == LibraryViewMode.Grid) "Grid" else "List",
-                ) {
-                    DropdownMenuItem(text = { Text("Grid") }, onClick = { onLibraryViewMode(LibraryViewMode.Grid); it() })
-                    DropdownMenuItem(text = { Text("List") }, onClick = { onLibraryViewMode(LibraryViewMode.List); it() })
-                }
-                LibraryFilterTab.Songs -> LibraryDropdown(
-                    label = "Filter",
-                    value = when (songFilter) {
-                        SongFileFilter.All -> "All Files"
-                        SongFileFilter.Lossless -> "Lossless"
-                        SongFileFilter.Lossy -> "Lossy"
-                    },
-                ) {
-                    DropdownMenuItem(text = { Text("All Files") }, onClick = { onSongFilter(SongFileFilter.All); it() })
-                    DropdownMenuItem(text = { Text("Lossless") }, onClick = { onSongFilter(SongFileFilter.Lossless); it() })
-                    DropdownMenuItem(text = { Text("Lossy") }, onClick = { onSongFilter(SongFileFilter.Lossy); it() })
-                }
-            }
-            if (filter != LibraryFilterTab.Artists) {
-                ColumnsPickerButton(prefs.columns, onColumns)
-            }
-        }
+        Spacer(Modifier.weight(1f))
+        LibraryFilterOptionsMenu(
+            filter = filter,
+            prefs = prefs,
+            onSortBy = onSortBy,
+            onAscending = onAscending,
+            libraryViewMode = libraryViewMode,
+            onLibraryViewMode = onLibraryViewMode,
+            onColumns = onColumns,
+            songFilter = if (filter == LibraryFilterTab.Songs) songFilter else null,
+            onSongFilter = if (filter == LibraryFilterTab.Songs) onSongFilter else null,
+        )
     }
 }
 
@@ -860,40 +818,320 @@ internal fun DetailSectionToolbar(
     actions: @Composable RowScope.() -> Unit = {},
 ) {
     Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState()),
+        modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.Start),
+        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
     ) {
-        if (sortBy != null && onSortBy != null && sortKeys.isNotEmpty()) {
-            LibraryDropdown(label = "Sort by", value = sortLabel(sortBy)) { close ->
-                sortKeys.forEach { key ->
-                    DropdownMenuItem(text = { Text(sortLabel(key)) }, onClick = { onSortBy(key); close() })
-                }
-            }
-        }
-        if (ascending != null && onAscending != null) {
-            LibraryDropdown(label = "Order", value = if (ascending) "A–Z" else "Desc") {
-                DropdownMenuItem(text = { Text("A–Z") }, onClick = { onAscending(true); it() })
-                DropdownMenuItem(text = { Text("Z–A / Desc") }, onClick = { onAscending(false); it() })
-            }
-        }
-        if (viewMode != null && onViewMode != null) {
-            LibraryDropdown(
-                label = "View",
-                value = if (viewMode == LibraryViewMode.Grid) "Grid" else "List",
-            ) {
-                DropdownMenuItem(text = { Text("Grid") }, onClick = { onViewMode(LibraryViewMode.Grid); it() })
-                DropdownMenuItem(text = { Text("List") }, onClick = { onViewMode(LibraryViewMode.List); it() })
-            }
-        }
-        if (columns != null && onColumns != null) {
-            ColumnsPickerButton(columns, onColumns)
-        }
         actions()
+        LibrarySectionOptionsMenu(
+            sortBy = sortBy,
+            sortKeys = sortKeys,
+            sortLabel = sortLabel,
+            onSortBy = onSortBy,
+            ascending = ascending,
+            onAscending = onAscending,
+            viewMode = viewMode,
+            onViewMode = onViewMode,
+            columns = columns,
+            onColumns = onColumns,
+        )
     }
 }
+
+@Composable
+internal fun DetailSectionHeader(
+    title: String,
+    titleColor: Color = PhoebeUi.primaryText,
+    sortBy: LibrarySortBy?,
+    sortKeys: List<LibrarySortBy>,
+    sortLabel: (LibrarySortBy) -> String,
+    onSortBy: ((LibrarySortBy) -> Unit)?,
+    ascending: Boolean?,
+    onAscending: ((Boolean) -> Unit)?,
+    viewMode: LibraryViewMode? = null,
+    onViewMode: ((LibraryViewMode) -> Unit)? = null,
+    columns: LibraryColumnVisibility? = null,
+    onColumns: ((LibraryColumnVisibility) -> Unit)? = null,
+    modifier: Modifier = Modifier,
+    actions: @Composable RowScope.() -> Unit = {},
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        SectionLabel(title, titleColor)
+        Spacer(Modifier.weight(1f))
+        actions()
+        LibrarySectionOptionsMenu(
+            sortBy = sortBy,
+            sortKeys = sortKeys,
+            sortLabel = sortLabel,
+            onSortBy = onSortBy,
+            ascending = ascending,
+            onAscending = onAscending,
+            viewMode = viewMode,
+            onViewMode = onViewMode,
+            columns = columns,
+            onColumns = onColumns,
+        )
+    }
+}
+
+@Composable
+internal fun LibrarySectionOptionsMenu(
+    sortBy: LibrarySortBy?,
+    sortKeys: List<LibrarySortBy>,
+    sortLabel: (LibrarySortBy) -> String,
+    onSortBy: ((LibrarySortBy) -> Unit)?,
+    ascending: Boolean?,
+    onAscending: ((Boolean) -> Unit)?,
+    viewMode: LibraryViewMode? = null,
+    onViewMode: ((LibraryViewMode) -> Unit)? = null,
+    columns: LibraryColumnVisibility? = null,
+    onColumns: ((LibraryColumnVisibility) -> Unit)? = null,
+    modifier: Modifier = Modifier,
+) {
+    val hasSort = sortBy != null && onSortBy != null && sortKeys.isNotEmpty()
+    val hasOrder = ascending != null && onAscending != null
+    val hasView = viewMode != null && onViewMode != null
+    val hasColumns = columns != null && onColumns != null
+    if (!hasSort && !hasOrder && !hasView && !hasColumns) return
+
+    var expanded by remember { mutableStateOf(false) }
+    Box(modifier) {
+        Box(
+            Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .clickable { expanded = true }
+                .semantics { contentDescription = "Section options" },
+            contentAlignment = Alignment.Center,
+        ) {
+            PhoebeIconView(PhoebeIcon.More, tint = PhoebeUi.mutedText, modifier = Modifier.size(18.dp))
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            if (hasSort) {
+                sortKeys.forEach { key ->
+                    DropdownMenuItem(
+                        text = {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                if (key == sortBy) {
+                                    PhoebeIconView(PhoebeIcon.Check, tint = PhoebeUi.accentLight, modifier = Modifier.size(14.dp))
+                                } else {
+                                    Spacer(Modifier.size(14.dp))
+                                }
+                                Text("Sort: ${sortLabel(key)}")
+                            }
+                        },
+                        onClick = {
+                            onSortBy?.invoke(key)
+                            expanded = false
+                        },
+                    )
+                }
+            }
+            if (hasOrder) {
+                DropdownMenuItem(
+                    text = { Text(if (ascending == true) "Order: A–Z (tap for Z–A)" else "Order: Z–A / Desc (tap for A–Z)") },
+                    onClick = {
+                        onAscending?.invoke(!(ascending ?: true))
+                        expanded = false
+                    },
+                )
+            }
+            if (hasView) {
+                DropdownMenuItem(
+                    text = {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            if (viewMode == LibraryViewMode.Grid) {
+                                PhoebeIconView(PhoebeIcon.Check, tint = PhoebeUi.accentLight, modifier = Modifier.size(14.dp))
+                            } else {
+                                Spacer(Modifier.size(14.dp))
+                            }
+                            Text("View: Grid")
+                        }
+                    },
+                    onClick = {
+                        onViewMode?.invoke(LibraryViewMode.Grid)
+                        expanded = false
+                    },
+                )
+                DropdownMenuItem(
+                    text = {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            if (viewMode == LibraryViewMode.List) {
+                                PhoebeIconView(PhoebeIcon.Check, tint = PhoebeUi.accentLight, modifier = Modifier.size(14.dp))
+                            } else {
+                                Spacer(Modifier.size(14.dp))
+                            }
+                            Text("View: List")
+                        }
+                    },
+                    onClick = {
+                        onViewMode?.invoke(LibraryViewMode.List)
+                        expanded = false
+                    },
+                )
+            }
+            if (hasColumns && columns != null && onColumns != null) {
+                DropdownMenuItem(
+                    text = { Text("Columns", color = PhoebeUi.mutedText, fontWeight = FontWeight.SemiBold) },
+                    onClick = {},
+                    enabled = false,
+                )
+                ColumnsToggleRow("Duration", columns.duration) { onColumns(columns.copy(duration = !columns.duration)) }
+                ColumnsToggleRow("Audio codec", columns.audioCodec) { onColumns(columns.copy(audioCodec = !columns.audioCodec)) }
+                ColumnsToggleRow("Bitrate", columns.bitrate) { onColumns(columns.copy(bitrate = !columns.bitrate)) }
+                ColumnsToggleRow("Sample rate", columns.sampleRate) { onColumns(columns.copy(sampleRate = !columns.sampleRate)) }
+                ColumnsToggleRow("File type", columns.fileType) { onColumns(columns.copy(fileType = !columns.fileType)) }
+                ColumnsToggleRow("Date added", columns.dateAdded) { onColumns(columns.copy(dateAdded = !columns.dateAdded)) }
+                ColumnsToggleRow("Rating", columns.rating) { onColumns(columns.copy(rating = !columns.rating)) }
+                ColumnsToggleRow("Favorite", columns.favorite) { onColumns(columns.copy(favorite = !columns.favorite)) }
+                ColumnsToggleRow("File path", columns.filepath) { onColumns(columns.copy(filepath = !columns.filepath)) }
+                ColumnsToggleRow("Year", columns.year) { onColumns(columns.copy(year = !columns.year)) }
+                ColumnsToggleRow("Genre", columns.genre) { onColumns(columns.copy(genre = !columns.genre)) }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun LibraryFilterOptionsMenu(
+    filter: LibraryFilterTab,
+    prefs: LibraryUiPreferences,
+    onSortBy: (LibrarySortBy) -> Unit,
+    onAscending: (Boolean) -> Unit,
+    libraryViewMode: LibraryViewMode,
+    onLibraryViewMode: (LibraryViewMode) -> Unit,
+    onColumns: (LibraryColumnVisibility) -> Unit,
+    songFilter: SongFileFilter? = null,
+    onSongFilter: ((SongFileFilter) -> Unit)? = null,
+    modifier: Modifier = Modifier,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box(modifier) {
+        Box(
+            Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .clickable { expanded = true }
+                .semantics { contentDescription = "Library options" },
+            contentAlignment = Alignment.Center,
+        ) {
+            PhoebeIconView(PhoebeIcon.More, tint = PhoebeUi.mutedText, modifier = Modifier.size(18.dp))
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            sortKeysFor(filter).forEach { key ->
+                DropdownMenuItem(
+                    text = {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            if (key == prefs.sortBy) {
+                                PhoebeIconView(PhoebeIcon.Check, tint = PhoebeUi.accentLight, modifier = Modifier.size(14.dp))
+                            } else {
+                                Spacer(Modifier.size(14.dp))
+                            }
+                            Text("Sort: ${sortLabelFor(filter, key)}")
+                        }
+                    },
+                    onClick = {
+                        onSortBy(key)
+                        expanded = false
+                    },
+                )
+            }
+            DropdownMenuItem(
+                text = { Text(if (prefs.ascending) "Order: A–Z (tap for Z–A)" else "Order: Z–A / Desc (tap for A–Z)") },
+                onClick = {
+                    onAscending(!prefs.ascending)
+                    expanded = false
+                },
+            )
+            if (filter != LibraryFilterTab.Songs) {
+                DropdownMenuItem(
+                    text = {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            if (libraryViewMode == LibraryViewMode.Grid) {
+                                PhoebeIconView(PhoebeIcon.Check, tint = PhoebeUi.accentLight, modifier = Modifier.size(14.dp))
+                            } else {
+                                Spacer(Modifier.size(14.dp))
+                            }
+                            Text("View: Grid")
+                        }
+                    },
+                    onClick = {
+                        onLibraryViewMode(LibraryViewMode.Grid)
+                        expanded = false
+                    },
+                )
+                DropdownMenuItem(
+                    text = {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            if (libraryViewMode == LibraryViewMode.List) {
+                                PhoebeIconView(PhoebeIcon.Check, tint = PhoebeUi.accentLight, modifier = Modifier.size(14.dp))
+                            } else {
+                                Spacer(Modifier.size(14.dp))
+                            }
+                            Text("View: List")
+                        }
+                    },
+                    onClick = {
+                        onLibraryViewMode(LibraryViewMode.List)
+                        expanded = false
+                    },
+                )
+            }
+            if (filter == LibraryFilterTab.Songs && songFilter != null && onSongFilter != null) {
+                SongFileFilter.entries.forEach { option ->
+                    DropdownMenuItem(
+                        text = {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                if (option == songFilter) {
+                                    PhoebeIconView(PhoebeIcon.Check, tint = PhoebeUi.accentLight, modifier = Modifier.size(14.dp))
+                                } else {
+                                    Spacer(Modifier.size(14.dp))
+                                }
+                                Text(
+                                    when (option) {
+                                        SongFileFilter.All -> "Filter: All files"
+                                        SongFileFilter.Lossless -> "Filter: Lossless"
+                                        SongFileFilter.Lossy -> "Filter: Lossy"
+                                    },
+                                )
+                            }
+                        },
+                        onClick = {
+                            onSongFilter(option)
+                            expanded = false
+                        },
+                    )
+                }
+            }
+            if (filter == LibraryFilterTab.Songs) {
+                DropdownMenuItem(
+                    text = { Text("Columns", color = PhoebeUi.mutedText, fontWeight = FontWeight.SemiBold) },
+                    onClick = {},
+                    enabled = false,
+                )
+                val columns = prefs.columns
+                ColumnsToggleRow("Duration", columns.duration) { onColumns(columns.copy(duration = !columns.duration)) }
+                ColumnsToggleRow("Audio codec", columns.audioCodec) { onColumns(columns.copy(audioCodec = !columns.audioCodec)) }
+                ColumnsToggleRow("Bitrate", columns.bitrate) { onColumns(columns.copy(bitrate = !columns.bitrate)) }
+                ColumnsToggleRow("Sample rate", columns.sampleRate) { onColumns(columns.copy(sampleRate = !columns.sampleRate)) }
+                ColumnsToggleRow("File type", columns.fileType) { onColumns(columns.copy(fileType = !columns.fileType)) }
+                ColumnsToggleRow("Date added", columns.dateAdded) { onColumns(columns.copy(dateAdded = !columns.dateAdded)) }
+                ColumnsToggleRow("Rating", columns.rating) { onColumns(columns.copy(rating = !columns.rating)) }
+                ColumnsToggleRow("Favorite", columns.favorite) { onColumns(columns.copy(favorite = !columns.favorite)) }
+                ColumnsToggleRow("File path", columns.filepath) { onColumns(columns.copy(filepath = !columns.filepath)) }
+                ColumnsToggleRow("Year", columns.year) { onColumns(columns.copy(year = !columns.year)) }
+                ColumnsToggleRow("Genre", columns.genre) { onColumns(columns.copy(genre = !columns.genre)) }
+            }
+        }
+    }
+}
+
+internal fun libraryGridCells(columns: Int): GridCells =
+    GridCells.Fixed(columns.coerceIn(LibraryUiPreferences.MinGridColumns, LibraryUiPreferences.MaxGridColumns))
 
 @Composable
 internal fun LibraryToolbarButton(
@@ -1034,6 +1272,7 @@ private fun ArtistsContent(
     catalog: CatalogSnapshot,
     artists: List<Artist>,
     viewMode: LibraryViewMode,
+    gridColumns: Int,
     onArtist: (Artist) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -1045,7 +1284,7 @@ private fun ArtistsContent(
     }
     when (viewMode) {
         LibraryViewMode.Grid -> LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = 156.dp),
+            columns = libraryGridCells(gridColumns),
             verticalArrangement = Arrangement.spacedBy(20.dp),
             horizontalArrangement = Arrangement.spacedBy(18.dp),
             modifier = modifier,
@@ -1207,6 +1446,7 @@ private fun AlbumsGrid(
     albums: List<Album>,
     selectedAlbumId: String?,
     viewMode: LibraryViewMode,
+    gridColumns: Int,
     onSelect: (Album) -> Unit,
     onOpen: (Album) -> Unit,
     modifier: Modifier = Modifier,
@@ -1219,7 +1459,7 @@ private fun AlbumsGrid(
     }
     when (viewMode) {
         LibraryViewMode.Grid -> LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = 168.dp),
+            columns = libraryGridCells(gridColumns),
             verticalArrangement = Arrangement.spacedBy(20.dp),
             horizontalArrangement = Arrangement.spacedBy(18.dp),
             modifier = modifier,
@@ -1965,7 +2205,7 @@ internal fun isLossless(track: Track): Boolean {
 /** Sort keys that apply to each tab. The first entry is the tab default. */
 internal fun sortKeysFor(filter: LibraryFilterTab): List<LibrarySortBy> = when (filter) {
     LibraryFilterTab.Artists -> listOf(LibrarySortBy.Name, LibrarySortBy.DateAdded)
-    LibraryFilterTab.Albums -> listOf(LibrarySortBy.Name, LibrarySortBy.Artist, LibrarySortBy.Year, LibrarySortBy.DateAdded)
+    LibraryFilterTab.Albums -> listOf(LibrarySortBy.Year, LibrarySortBy.Name, LibrarySortBy.Artist, LibrarySortBy.DateAdded)
     LibraryFilterTab.Songs -> listOf(LibrarySortBy.Name, LibrarySortBy.Album, LibrarySortBy.Artist, LibrarySortBy.Year, LibrarySortBy.DateAdded)
 }
 

@@ -83,7 +83,6 @@ fun App(
     val state = remember(readyDependencies, scope) { AppState(readyDependencies, scope) }
     val session by state.session.collectAsState()
     val mediaSources by state.mediaSources.collectAsState()
-    val player by state.player.collectAsState()
 
     // Keep navigation in sync when session / local folders appear after async restore.
     // Catalog refresh is handled by explicit user actions (manual refresh, post sign-in library
@@ -121,7 +120,7 @@ fun App(
 
     PhoebeTheme(useLightAppearance = useLightAppearance, tintId = appearanceTintId) {
         GlobalMediaKeysEffect(
-            player = player,
+            playerFlow = state.player,
             onTogglePlayPause = { state.mediaKeyTogglePlayPause() },
             onPlay = { state.mediaKeyPlay() },
             onPause = { state.mediaKeyPause() },

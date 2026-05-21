@@ -175,6 +175,7 @@ internal data class SettingsUiState(
 internal data class SettingsActions(
     val onHomeSections: (List<HomeSection>) -> Unit,
     val onPersonalMix: (PersonalMixPreferences) -> Unit,
+    val onGridColumns: (Int) -> Unit,
     val onExportFavoritePlaylists: () -> Unit,
     val onImportFavoritePlaylists: () -> Unit,
     val onCrossfadeSeconds: (Int) -> Unit,

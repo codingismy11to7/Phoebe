@@ -170,6 +170,7 @@ import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.PlayHistoryKind
+import com.phoebe.app.domain.RecentSearchItem
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.RecentlyAddedKind
 import com.phoebe.app.domain.supportedCollectionEntries
@@ -260,7 +261,6 @@ private fun PhoebeRootStateHolder(
     val supportedCollectionEntries = remember(session) { session.supportedCollectionEntries().toSet() }
     val mediaSources by state.mediaSources.collectAsState()
     val shellPlayback by state.shellPlayback.collectAsState()
-    val player by state.player.collectAsState()
     val playerQueue by state.playerQueue.collectAsState()
     val musicAssistantRemotePlayback by state.musicAssistantRemotePlayback.collectAsState()
     val cast by state.cast.collectAsState()
@@ -350,7 +350,7 @@ private fun PhoebeRootStateHolder(
             playerSwipeDismiss = false
         }
     }
-    var recentSearches by remember { mutableStateOf(emptyList<String>()) }
+    val recentSearchItems by state.recentSearchItems.collectAsState()
     var libraryFilter by remember { mutableStateOf(LibraryFilterTab.Artists) }
 
     LaunchedEffect(currentRoute) {
@@ -632,30 +632,18 @@ private fun PhoebeRootStateHolder(
             navigator.open(PhoebeRoute.CollectionItems(entry, value))
         }
     }
-    val commitSearch: (String) -> Unit = { rawQuery ->
-        val trimmed = rawQuery.trim()
-        if (trimmed.isNotBlank()) {
-            recentSearches = listOf(trimmed) + recentSearches.filterNot { it.equals(trimmed, ignoreCase = true) }
-            recentSearches = recentSearches.take(6)
-        }
+    fun prependRecentSearch(item: RecentSearchItem) {
+        state.prependRecentSearch(item)
     }
-    val searchHistory = remember(recentSearches) {
+    val searchHistory = remember(recentSearchItems) {
         SearchHistoryState(
-            recentSearches = recentSearches,
-            commitSearch = commitSearch,
-            removeSearch = { search ->
-                recentSearches = recentSearches.filterNot { it.equals(search, ignoreCase = true) }
-            },
-            clearSearches = { recentSearches = emptyList() },
+            recentItems = recentSearchItems,
+            recordArtist = { artist -> prependRecentSearch(RecentSearchItem.ArtistHit(artist)) },
+            recordAlbum = { album -> prependRecentSearch(RecentSearchItem.AlbumHit(album)) },
+            recordTrack = { track -> prependRecentSearch(RecentSearchItem.TrackHit(track)) },
+            removeItem = { item -> state.removeRecentSearch(item) },
+            clearItems = { state.clearRecentSearches() },
         )
-    }
-    LaunchedEffect(browseSection, selectedPlaylistId, searchQuery) {
-        if (browseSection == BrowseSection.Search && selectedPlaylistId == null && searchQuery.isNotBlank()) {
-            delay(900L)
-            if (searchQuery.isNotBlank()) {
-                commitSearch(searchQuery)
-            }
-        }
     }
     var createPlaylistFor by remember { mutableStateOf<List<Track>?>(null) }
     var metadataEditorTrack by remember { mutableStateOf<Track?>(null) }
@@ -932,6 +920,7 @@ private fun PhoebeRootStateHolder(
                         onAddToUpNext = state::addToUpNext,
                         onDownload = state::download,
                         onDownloadAlbum = state::download,
+                        onArtist = { navigator.open(it.route()) },
                         onLibraryColumns = state::setLibraryColumns,
                     )
                     is AppScreen.SongDetail -> SongDetailPanel(
@@ -973,6 +962,7 @@ private fun PhoebeRootStateHolder(
                     is AppScreen.Collections -> CollectionsScreen(
                         entry = scr.entry,
                         catalog = catalog,
+                        gridColumns = libraryUi.gridColumns,
                         modifier = Modifier.fillMaxSize(),
                         supportedCollectionEntries = supportedCollectionEntries,
                         onBack = { navigator.pop() },
@@ -982,6 +972,7 @@ private fun PhoebeRootStateHolder(
                         entry = scr.entry,
                         value = scr.value,
                         catalog = catalog,
+                        gridColumns = libraryUi.gridColumns,
                         modifier = Modifier.fillMaxSize(),
                         supportedCollectionEntries = supportedCollectionEntries,
                         onBack = { navigator.pop() },
@@ -1173,6 +1164,7 @@ private fun PhoebeRootStateHolder(
                         onLibraryColumns = state::setLibraryColumns,
                         onHomeSections = state::setHomeSections,
                         onPersonalMix = state::setPersonalMixPreferences,
+                        onGridColumns = state::setGridColumns,
                         onExportFavoritePlaylists = state::exportFavoritePlaylists,
                         onImportFavoritePlaylists = state::importFavoritePlaylists,
                         appSettings = appSettings,
@@ -1251,6 +1243,7 @@ private fun PhoebeRootStateHolder(
                 }
             } else {
                 DesktopPlayer(
+                    playerFlow = state.player,
                     shellState = DesktopShellState(
                         screen = screen,
                         routes = navigator.routes,
@@ -1266,7 +1259,6 @@ private fun PhoebeRootStateHolder(
                     ),
                     playbackState = PlaybackUiState(
                         shellPlayback = shellPlayback,
-                        player = player,
                         track = currentTrack,
                         upNext = upNext,
                         currentIndex = currentIndex,
@@ -1427,6 +1419,7 @@ private fun PhoebeRootStateHolder(
                     settingsActions = SettingsActions(
                         onHomeSections = state::setHomeSections,
                         onPersonalMix = state::setPersonalMixPreferences,
+                        onGridColumns = state::setGridColumns,
                         onExportFavoritePlaylists = state::exportFavoritePlaylists,
                         onImportFavoritePlaylists = state::importFavoritePlaylists,
                         onCrossfadeSeconds = state::setCrossfadeSeconds,

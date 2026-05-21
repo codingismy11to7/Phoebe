@@ -6,6 +6,7 @@ import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.db.SqlSchema
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import java.io.File
+import java.sql.DriverManager
 import java.util.Properties
 
 actual suspend fun createSqlDriver(schema: SqlSchema<QueryResult.AsyncValue<Unit>>): SqlDriver {
@@ -16,21 +17,38 @@ actual suspend fun createSqlDriver(schema: SqlSchema<QueryResult.AsyncValue<Unit
 
     wipeIfRevisionChanged(dbFile, revFile)
 
-    // Passing the schema parameter lets the JDBC driver invoke Schema.create / Schema.migrate
-    // automatically based on PRAGMA user_version, so future schema changes "just work".
     val properties = Properties().apply {
         setProperty("busy_timeout", "10000")
         setProperty("journal_mode", "WAL")
         setProperty("synchronous", "NORMAL")
     }
-    val driver = JdbcSqliteDriver(
+    val driver = openDriver(dbFile, properties, schema)
+
+    // Guard against a revision marker that was written even though the wipe failed.
+    if (dbFile.exists() && !libraryPrefsSchemaCompatible(dbFile)) {
+        driver.close()
+        deleteDatabaseFiles(dbFile)
+        val rebuilt = openDriver(dbFile, properties, schema)
+        revFile.writeText(LocalDbRevision.toString())
+        rebuilt.execute(null, "PRAGMA busy_timeout=30000", 0)
+        return rebuilt
+    }
+
+    revFile.writeText(LocalDbRevision.toString())
+    driver.execute(null, "PRAGMA busy_timeout=30000", 0)
+    return driver
+}
+
+private fun openDriver(
+    dbFile: File,
+    properties: Properties,
+    schema: SqlSchema<QueryResult.AsyncValue<Unit>>,
+): JdbcSqliteDriver =
+    JdbcSqliteDriver(
         url = "jdbc:sqlite:${dbFile.absolutePath}",
         properties = properties,
         schema = schema.synchronous(),
     )
-    driver.execute(null, "PRAGMA busy_timeout=30000", 0)
-    return driver
-}
 
 /**
  * Pre-release shortcut: if the on-disk revision marker doesn't match [LocalDbRevision],
@@ -38,17 +56,35 @@ actual suspend fun createSqlDriver(schema: SqlSchema<QueryResult.AsyncValue<Unit
  * with real migrations once we ship.
  */
 private fun wipeIfRevisionChanged(dbFile: File, revFile: File) {
+    if (!dbFile.exists()) return
     val onDiskRev = revFile.takeIf { it.exists() }?.runCatching { readText().trim().toLong() }?.getOrNull()
-    if (dbFile.exists() && onDiskRev != null && onDiskRev != LocalDbRevision) {
-        dbFile.delete()
-        // SQLite may leave auxiliary journal/WAL/SHM files alongside the main db; drop
-        // them too so the rebuilt schema doesn't pick up half-written pages.
-        File(dbFile.parentFile, "${dbFile.name}-journal").delete()
-        File(dbFile.parentFile, "${dbFile.name}-wal").delete()
-        File(dbFile.parentFile, "${dbFile.name}-shm").delete()
+    val revisionStale = onDiskRev != null && onDiskRev != LocalDbRevision
+    val schemaStale = !libraryPrefsSchemaCompatible(dbFile)
+    if (revisionStale || schemaStale) {
+        deleteDatabaseFiles(dbFile)
     }
-    revFile.writeText(LocalDbRevision.toString())
 }
+
+internal fun deleteDatabaseFiles(dbFile: File) {
+    dbFile.delete()
+    // SQLite may leave auxiliary journal/WAL/SHM files alongside the main db; drop
+    // them too so the rebuilt schema doesn't pick up half-written pages.
+    File(dbFile.parentFile, "${dbFile.name}-journal").delete()
+    File(dbFile.parentFile, "${dbFile.name}-wal").delete()
+    File(dbFile.parentFile, "${dbFile.name}-shm").delete()
+}
+
+internal fun libraryPrefsSchemaCompatible(dbFile: File): Boolean =
+    runCatching {
+        DriverManager.getConnection("jdbc:sqlite:${dbFile.absolutePath}").use { connection ->
+            connection.createStatement().use { statement ->
+                statement.executeQuery("PRAGMA table_info(LibraryPrefsRow)").use { rows ->
+                    generateSequence { if (rows.next()) rows.getString("name") else null }
+                        .any { it == LocalDbRevision18Column }
+                }
+            }
+        }
+    }.getOrDefault(false)
 
 internal fun desktopDatabaseRoot(): File =
     System.getProperty("phoebe.storage.root")?.let(::File)

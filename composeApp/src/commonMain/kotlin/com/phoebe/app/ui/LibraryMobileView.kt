@@ -63,7 +63,7 @@ import com.phoebe.app.domain.isRemoteLibraryTrack
 private val MobileLibraryChromeTopPadding = 8.dp
 private val MobileLibraryTabsHeight = 50.dp
 private val MobileLibraryTabsToToolbarGap = 14.dp
-private val MobileLibraryToolbarHeight = 36.dp
+private val MobileLibraryToolbarHeight = 0.dp
 private val MobileLibraryToolbarToContentGap = 10.dp
 private val MobileLibraryLoadingStripHeight = 16.dp
 private val MobileLibraryPaginationHeight = 36.dp
@@ -145,6 +145,7 @@ internal fun LibraryMobileView(
                 LibraryFilterTab.Artists -> MobileArtistsContent(
                     artists = artistPage.items,
                     viewMode = libraryViewMode,
+                    gridColumns = libraryUi.gridColumns,
                     onArtist = onArtist,
                     contentPadding = listContentPadding,
                 )
@@ -152,6 +153,7 @@ internal fun LibraryMobileView(
                     catalog = catalog,
                     albums = albumPage.items,
                     viewMode = libraryViewMode,
+                    gridColumns = libraryUi.gridColumns,
                     onAlbum = onAlbum,
                     contentPadding = listContentPadding,
                 )
@@ -171,11 +173,10 @@ internal fun LibraryMobileView(
                 .background(PhoebeUi.shellTop)
                 .padding(top = chromePadding.top + MobileLibraryChromeTopPadding),
         ) {
-            MobileLibraryTabs(filter, onFilter)
-            Spacer(Modifier.height(14.dp))
-            MobileLibraryToolbar(
-                prefs = libraryUi,
+            MobileLibraryTabs(
                 filter = filter,
+                onFilter = onFilter,
+                prefs = libraryUi,
                 onSortBy = onLibrarySortBy,
                 onAscending = onLibraryAscending,
                 libraryViewMode = libraryViewMode,
@@ -227,19 +228,22 @@ internal fun FavoriteArtistsMobileView(
             onBack = onBack,
         )
         Spacer(Modifier.height(14.dp))
-        MobileLibraryToolbar(
-            prefs = libraryUi,
-            filter = LibraryFilterTab.Artists,
-            onSortBy = onLibrarySortBy,
-            onAscending = onLibraryAscending,
-            libraryViewMode = viewMode,
-            onLibraryViewMode = { viewMode = it },
-            onColumns = onLibraryColumns,
-        )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            LibraryFilterOptionsMenu(
+                filter = LibraryFilterTab.Artists,
+                prefs = libraryUi,
+                onSortBy = onLibrarySortBy,
+                onAscending = onLibraryAscending,
+                libraryViewMode = viewMode,
+                onLibraryViewMode = { viewMode = it },
+                onColumns = onLibraryColumns,
+            )
+        }
         Spacer(Modifier.height(10.dp))
         MobileArtistsContent(
             artists = favoriteArtists,
             viewMode = viewMode,
+            gridColumns = libraryUi.gridColumns,
             onArtist = onArtist,
         )
     }
@@ -268,20 +272,23 @@ internal fun FavoriteAlbumsMobileView(
             onBack = onBack,
         )
         Spacer(Modifier.height(14.dp))
-        MobileLibraryToolbar(
-            prefs = libraryUi,
-            filter = LibraryFilterTab.Albums,
-            onSortBy = onLibrarySortBy,
-            onAscending = onLibraryAscending,
-            libraryViewMode = viewMode,
-            onLibraryViewMode = { viewMode = it },
-            onColumns = onLibraryColumns,
-        )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            LibraryFilterOptionsMenu(
+                filter = LibraryFilterTab.Albums,
+                prefs = libraryUi,
+                onSortBy = onLibrarySortBy,
+                onAscending = onLibraryAscending,
+                libraryViewMode = viewMode,
+                onLibraryViewMode = { viewMode = it },
+                onColumns = onLibraryColumns,
+            )
+        }
         Spacer(Modifier.height(10.dp))
         MobileAlbumsContent(
             catalog = catalog,
             albums = favoriteAlbums,
             viewMode = viewMode,
+            gridColumns = libraryUi.gridColumns,
             onAlbum = onAlbum,
         )
     }
@@ -312,170 +319,63 @@ private fun FavoriteLibraryHeader(
 }
 
 @Composable
-private fun MobileLibraryTabs(filter: LibraryFilterTab, onFilter: (LibraryFilterTab) -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(Color.White.copy(alpha = 0.04f))
-            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(12.dp))
-            .padding(4.dp),
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
-        LibraryFilterTab.entries.forEach { tab ->
-            val active = filter == tab
-            Box(
-                Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable { onFilter(tab) }
-                    .background(if (active) PhoebeUi.accent.copy(alpha = 0.22f) else Color.Transparent)
-                    .padding(vertical = 10.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    when (tab) {
-                        LibraryFilterTab.Artists -> "Artists"
-                        LibraryFilterTab.Albums -> "Albums"
-                        LibraryFilterTab.Songs -> "Songs"
-                    },
-                    color = if (active) PhoebeUi.primaryText else PhoebeUi.secondaryText,
-                    fontSize = 13.sp,
-                    fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun MobileLibraryToolbar(
-    prefs: LibraryUiPreferences,
+private fun MobileLibraryTabs(
     filter: LibraryFilterTab,
+    onFilter: (LibraryFilterTab) -> Unit,
+    prefs: LibraryUiPreferences,
     onSortBy: (LibrarySortBy) -> Unit,
     onAscending: (Boolean) -> Unit,
     libraryViewMode: LibraryViewMode,
     onLibraryViewMode: (LibraryViewMode) -> Unit,
     onColumns: (LibraryColumnVisibility) -> Unit,
 ) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        var sortExpanded by remember { mutableStateOf(false) }
-        Box {
-            Row(
-                Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable { sortExpanded = true }
-                    .padding(horizontal = 6.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Text("Sort: ", color = PhoebeUi.mutedText, fontSize = 12.sp)
-                Text(
-                    sortLabelFor(filter, prefs.sortBy),
-                    color = PhoebeUi.primaryText,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                PhoebeIconView(PhoebeIcon.ChevronDown, tint = PhoebeUi.mutedText, modifier = Modifier.size(12.dp))
-            }
-            DropdownMenu(expanded = sortExpanded, onDismissRequest = { sortExpanded = false }) {
-                when (filter) {
-                    LibraryFilterTab.Artists -> {
-                        DropdownMenuItem(
-                            text = { Text("Artist name") },
-                            onClick = { onSortBy(LibrarySortBy.Name); sortExpanded = false },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Date added") },
-                            onClick = { onSortBy(LibrarySortBy.DateAdded); sortExpanded = false },
-                        )
-                    }
-                    LibraryFilterTab.Albums -> {
-                        DropdownMenuItem(
-                            text = { Text("Album name") },
-                            onClick = { onSortBy(LibrarySortBy.Name); sortExpanded = false },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Artist") },
-                            onClick = { onSortBy(LibrarySortBy.Artist); sortExpanded = false },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Release date") },
-                            onClick = { onSortBy(LibrarySortBy.Year); sortExpanded = false },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Date added") },
-                            onClick = { onSortBy(LibrarySortBy.DateAdded); sortExpanded = false },
-                        )
-                    }
-                    LibraryFilterTab.Songs -> {
-                        DropdownMenuItem(
-                            text = { Text("Song name") },
-                            onClick = { onSortBy(LibrarySortBy.Name); sortExpanded = false },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Album name") },
-                            onClick = { onSortBy(LibrarySortBy.Album); sortExpanded = false },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Artist") },
-                            onClick = { onSortBy(LibrarySortBy.Artist); sortExpanded = false },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Release date") },
-                            onClick = { onSortBy(LibrarySortBy.Year); sortExpanded = false },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Date added") },
-                            onClick = { onSortBy(LibrarySortBy.DateAdded); sortExpanded = false },
-                        )
-                    }
-                }
-                DropdownMenuItem(
-                    text = { Text(if (prefs.ascending) "Switch to Descending" else "Switch to Ascending") },
-                    onClick = { onAscending(!prefs.ascending); sortExpanded = false },
-                )
-            }
-        }
-        Spacer(Modifier.weight(1f))
-        when (filter) {
-            LibraryFilterTab.Artists, LibraryFilterTab.Albums -> Row(
-                Modifier.clip(RoundedCornerShape(8.dp)).background(PhoebeUi.subtleFill).border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(8.dp)).padding(3.dp),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                IconToggle(PhoebeIcon.Grid, libraryViewMode == LibraryViewMode.Grid) { onLibraryViewMode(LibraryViewMode.Grid) }
-                IconToggle(PhoebeIcon.Library, libraryViewMode == LibraryViewMode.List) { onLibraryViewMode(LibraryViewMode.List) }
-            }
-            LibraryFilterTab.Songs -> {
-                var columnsExpanded by remember { mutableStateOf(false) }
-                Box {
-                    Box(
-                        Modifier
-                            .size(34.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { columnsExpanded = true }
-                            .background(Color.White.copy(alpha = 0.04f))
-                            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(8.dp)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        PhoebeIconView(PhoebeIcon.Library, tint = PhoebeUi.secondaryText, modifier = Modifier.size(14.dp))
-                    }
-                    DropdownMenu(expanded = columnsExpanded, onDismissRequest = { columnsExpanded = false }) {
-                        MobileColumnRow("Duration", prefs.columns.duration) { onColumns(prefs.columns.copy(duration = !prefs.columns.duration)) }
-                        MobileColumnRow("Audio codec", prefs.columns.audioCodec) { onColumns(prefs.columns.copy(audioCodec = !prefs.columns.audioCodec)) }
-                        MobileColumnRow("Bitrate", prefs.columns.bitrate) { onColumns(prefs.columns.copy(bitrate = !prefs.columns.bitrate)) }
-                        MobileColumnRow("Sample rate", prefs.columns.sampleRate) { onColumns(prefs.columns.copy(sampleRate = !prefs.columns.sampleRate)) }
-                        MobileColumnRow("File type", prefs.columns.fileType) { onColumns(prefs.columns.copy(fileType = !prefs.columns.fileType)) }
-                        MobileColumnRow("Date added", prefs.columns.dateAdded) { onColumns(prefs.columns.copy(dateAdded = !prefs.columns.dateAdded)) }
-                        MobileColumnRow("Rating", prefs.columns.rating) { onColumns(prefs.columns.copy(rating = !prefs.columns.rating)) }
-                        MobileColumnRow("Favorite", prefs.columns.favorite) { onColumns(prefs.columns.copy(favorite = !prefs.columns.favorite)) }
-                        MobileColumnRow("File path", prefs.columns.filepath) { onColumns(prefs.columns.copy(filepath = !prefs.columns.filepath)) }
-                        MobileColumnRow("Year", prefs.columns.year) { onColumns(prefs.columns.copy(year = !prefs.columns.year)) }
-                        MobileColumnRow("Genre", prefs.columns.genre) { onColumns(prefs.columns.copy(genre = !prefs.columns.genre)) }
-                    }
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(
+            Modifier
+                .weight(1f)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color.White.copy(alpha = 0.04f))
+                .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(12.dp))
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            LibraryFilterTab.entries.forEach { tab ->
+                val active = filter == tab
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { onFilter(tab) }
+                        .background(if (active) PhoebeUi.accent.copy(alpha = 0.22f) else Color.Transparent)
+                        .padding(vertical = 10.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        when (tab) {
+                            LibraryFilterTab.Artists -> "Artists"
+                            LibraryFilterTab.Albums -> "Albums"
+                            LibraryFilterTab.Songs -> "Songs"
+                        },
+                        color = if (active) PhoebeUi.primaryText else PhoebeUi.secondaryText,
+                        fontSize = 13.sp,
+                        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+                    )
                 }
             }
         }
+        LibraryFilterOptionsMenu(
+            filter = filter,
+            prefs = prefs,
+            onSortBy = onSortBy,
+            onAscending = onAscending,
+            libraryViewMode = libraryViewMode,
+            onLibraryViewMode = onLibraryViewMode,
+            onColumns = onColumns,
+        )
     }
 }
 
@@ -491,20 +391,6 @@ private fun MobileColumnRow(label: String, checked: Boolean, onToggle: () -> Uni
     }
 }
 
-@Composable
-private fun IconToggle(icon: PhoebeIcon, active: Boolean, onClick: () -> Unit) {
-    Box(
-        Modifier
-            .size(28.dp)
-            .clip(RoundedCornerShape(6.dp))
-            .clickable(onClick = onClick)
-            .background(if (active) PhoebeUi.accent.copy(alpha = 0.22f) else Color.Transparent),
-        contentAlignment = Alignment.Center,
-    ) {
-        PhoebeIconView(icon, tint = if (active) PhoebeUi.primaryText else PhoebeUi.secondaryText, modifier = Modifier.size(14.dp))
-    }
-}
-
 // =====================================================================
 // Artists (mobile grid/list)
 // =====================================================================
@@ -513,6 +399,7 @@ private fun IconToggle(icon: PhoebeIcon, active: Boolean, onClick: () -> Unit) {
 private fun MobileArtistsContent(
     artists: List<Artist>,
     viewMode: LibraryViewMode,
+    gridColumns: Int,
     onArtist: (Artist) -> Unit,
     contentPadding: PaddingValues = PaddingValues(),
 ) {
@@ -526,7 +413,7 @@ private fun MobileArtistsContent(
         LibraryViewMode.Grid -> {
             val gridState = RetainedLazyGridStates.remember("library-artists-grid")
             LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
+                columns = libraryGridCells(gridColumns),
                 state = gridState,
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -671,6 +558,7 @@ private fun MobileAlbumsContent(
     catalog: CatalogSnapshot,
     albums: List<Album>,
     viewMode: LibraryViewMode,
+    gridColumns: Int,
     onAlbum: (Album) -> Unit,
     contentPadding: PaddingValues = PaddingValues(),
 ) {
@@ -684,7 +572,7 @@ private fun MobileAlbumsContent(
         LibraryViewMode.Grid -> {
             val gridState = RetainedLazyGridStates.remember("library-albums-grid")
             LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
+                columns = libraryGridCells(gridColumns),
                 state = gridState,
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 horizontalArrangement = Arrangement.spacedBy(14.dp),

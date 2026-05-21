@@ -16,9 +16,19 @@ import com.phoebe.app.platform.PhoebeLog
 import java.util.logging.Level
 import java.util.logging.LogManager
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 
 private val isMacOs: Boolean
     get() = System.getProperty("os.name").orEmpty().lowercase().contains("mac")
+
+private data class MacNowPlayingSnapshot(
+    val title: String,
+    val artist: String,
+    val positionBucketMs: Long,
+    val durationMs: Long,
+    val playing: Boolean,
+)
 
 @Composable
 actual fun GlobalMediaKeysEffect(
@@ -58,21 +68,32 @@ actual fun GlobalMediaKeysEffect(
                 return@LaunchedEffect
             }
             try {
-                snapshotFlow { playerState.value }.collectLatest { p ->
-                    val t = p.currentTrack
-                    val duration = when {
-                        p.durationMs > 0L -> p.durationMs
-                        t != null && t.durationMs > 0L -> t.durationMs
-                        else -> 0L
+                snapshotFlow { playerState.value }
+                    .map { state ->
+                        val track = state.currentTrack
+                        val durationMs = when {
+                            state.durationMs > 0L -> state.durationMs
+                            track != null && track.durationMs > 0L -> track.durationMs
+                            else -> 0L
+                        }
+                        MacNowPlayingSnapshot(
+                            title = track?.title.orEmpty(),
+                            artist = track?.artist.orEmpty(),
+                            positionBucketMs = state.positionMs / 1_000L,
+                            durationMs = durationMs,
+                            playing = state.isPlaying,
+                        )
                     }
-                    MacMediaSession.nativeUpdateNowPlaying(
-                        t?.title.orEmpty(),
-                        t?.artist.orEmpty(),
-                        p.positionMs,
-                        duration,
-                        p.isPlaying,
-                    )
-                }
+                    .distinctUntilChanged()
+                    .collectLatest { snapshot ->
+                        MacMediaSession.nativeUpdateNowPlaying(
+                            snapshot.title,
+                            snapshot.artist,
+                            snapshot.positionBucketMs * 1_000L,
+                            snapshot.durationMs,
+                            snapshot.playing,
+                        )
+                    }
             } finally {
                 runCatching { MacMediaSession.nativeShutdown() }
             }

@@ -7,6 +7,7 @@ import com.phoebe.app.domain.HomeSection
 import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryUiPreferences
 import com.phoebe.app.domain.PersonalMixPreferences
+import com.phoebe.app.platform.PhoebeLog
 import com.phoebe.app.platform.PlatformStorage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,8 +28,13 @@ class LibraryUiRepository(
      * the legacy JSON file (and imports its values into SQLite before deleting the file).
      */
     suspend fun restore() {
-        val row = withContext(Dispatchers.Default) {
-            database.libraryPrefsQueries.selectCurrent().awaitAsOneOrNull()
+        val row = runCatching {
+            withContext(Dispatchers.Default) {
+                database.libraryPrefsQueries.selectCurrent().awaitAsOneOrNull()
+            }
+        }.getOrElse { error ->
+            PhoebeLog.d("LibraryUiRepository") { "Could not read library prefs: ${error.message}" }
+            null
         }
         if (row != null) {
             mutableState.value = row.toPreferences()
@@ -63,6 +69,10 @@ class LibraryUiRepository(
 
     suspend fun setPersonalMix(personalMix: PersonalMixPreferences) {
         save(mutableState.value.copy(personalMix = personalMix.normalized()))
+    }
+
+    suspend fun setGridColumns(gridColumns: Int) {
+        save(mutableState.value.normalized().copy(gridColumns = gridColumns))
     }
 
     /** Updates UI state immediately; pair with [persistCurrentToDisk] on a background coroutine. */
@@ -101,6 +111,7 @@ class LibraryUiRepository(
             colFavorite = c.favorite.toDb(),
             homeSections = prefs.homeSections.joinToString(",") { it.name },
             personalMix = json.encodeToString(PersonalMixPreferences.serializer(), prefs.personalMix.normalized()),
+            gridColumns = prefs.normalized().gridColumns.toLong(),
         )
     }
 
@@ -123,6 +134,7 @@ class LibraryUiRepository(
             ),
             homeSections = homeSections.toHomeSections(),
             personalMix = personalMix.toPersonalMixPreferences(),
+            gridColumns = gridColumns.toInt(),
         )
 
     private companion object {

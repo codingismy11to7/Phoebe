@@ -147,6 +147,7 @@ import com.phoebe.app.domain.MusicLibrary
 import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.Playlist
+import com.phoebe.app.domain.RecentSearchItem
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.isLocalMediaPlayback
@@ -265,17 +266,21 @@ internal val SongIdentityColumns = LibraryColumnVisibility(
 )
 
 internal data class SearchHistoryState(
-    val recentSearches: List<String>,
-    val commitSearch: (String) -> Unit,
-    val removeSearch: (String) -> Unit,
-    val clearSearches: () -> Unit,
+    val recentItems: List<RecentSearchItem>,
+    val recordArtist: (Artist) -> Unit,
+    val recordAlbum: (Album) -> Unit,
+    val recordTrack: (Track) -> Unit,
+    val removeItem: (RecentSearchItem) -> Unit,
+    val clearItems: () -> Unit,
 )
 
 internal val LocalSearchHistory = compositionLocalOf {
     SearchHistoryState(
-        recentSearches = emptyList(),
-        commitSearch = {},
-        removeSearch = {},
-        clearSearches = {},
+        recentItems = emptyList(),
+        recordArtist = {},
+        recordAlbum = {},
+        recordTrack = {},
+        removeItem = {},
+        clearItems = {},
     )
 }

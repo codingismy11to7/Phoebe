@@ -54,6 +54,7 @@ import com.phoebe.app.playlists.PlaylistExportFormat
 import com.phoebe.app.playlists.PlaylistExporter
 import com.phoebe.app.player.asPlayerState
 import com.phoebe.app.player.isChromecastPlayableQueue
+import com.phoebe.app.domain.RecentSearchItem
 import com.phoebe.app.platform.PhoebeLog
 import com.phoebe.app.platform.currentTimeMs
 import com.phoebe.app.platform.discoverJellyfinServers as discoverJellyfinServersOnNetwork
@@ -174,6 +175,7 @@ class AppState(
     val playEventsByTrack = dependencies.playHistoryRepository.playEventsByTrack
     val topMostPlayed = dependencies.playHistoryRepository.topMostPlayed
     val topRecentlyPlayed = dependencies.playHistoryRepository.topRecentlyPlayed
+    val recentSearchItems = dependencies.searchHistoryRepository.items
     val defaultDownloadDirectoryLabel: String = dependencies.platformStorage.defaultDownloadDirectoryLabel()
 
     private val mutableNavigationRequests = MutableSharedFlow<AppNavigationRequest>(
@@ -254,6 +256,7 @@ class AppState(
             dependencies.mediaSourcesRepository.restore()
             dependencies.appSettingsRepository.restore()
             dependencies.libraryUiRepository.restore()
+            dependencies.searchHistoryRepository.restore()
             dependencies.audioPlayer.setCrossfadeDurationMs(appSettings.value.crossfadeSeconds * 1_000L)
             dependencies.playHistoryRepository.restore()
             mutableDownloadDirectory.value = dependencies.platformStorage.readDownloadDirectory()
@@ -1365,6 +1368,22 @@ class AppState(
 
     fun setPersonalMixPreferences(preferences: PersonalMixPreferences) = scope.launch {
         dependencies.libraryUiRepository.setPersonalMix(preferences)
+    }
+
+    fun setGridColumns(gridColumns: Int) = scope.launch {
+        dependencies.libraryUiRepository.setGridColumns(gridColumns)
+    }
+
+    fun prependRecentSearch(item: RecentSearchItem) = scope.launch {
+        dependencies.searchHistoryRepository.prepend(item)
+    }
+
+    fun removeRecentSearch(item: RecentSearchItem) = scope.launch {
+        dependencies.searchHistoryRepository.remove(item)
+    }
+
+    fun clearRecentSearches() = scope.launch {
+        dependencies.searchHistoryRepository.clear()
     }
 
     fun setCrossfadeSeconds(seconds: Int) = scope.launch {

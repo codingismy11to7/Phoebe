@@ -65,6 +65,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -2565,7 +2566,8 @@ private fun DecadeMixDialog(
 
 @Composable
 private fun HomeActionIcon(icon: PhoebeIcon, size: androidx.compose.ui.unit.Dp) {
-    val palette = remember(icon) { homeIconPalette(icon) }
+    val lightMode = LocalPhoebePalette.current.canvasBackground.luminance() > 0.5f
+    val palette = remember(icon, lightMode) { homeIconPalette(icon, lightMode) }
     val shape = RoundedCornerShape(8.dp)
     Box(
         Modifier
@@ -2592,21 +2594,21 @@ private data class HomeIconPalette(
     val foreground: Color,
 )
 
-private fun homeIconPalette(icon: PhoebeIcon): HomeIconPalette = when (icon) {
-    PhoebeIcon.Person -> HomeIconPalette(Color(0xFF8B5CF6), Color(0xFF22D3EE), Color(0xFFDDE7FF))
-    PhoebeIcon.Calendar -> HomeIconPalette(Color(0xFFFF4D7D), Color(0xFFFFC857), Color(0xFFFFE4ED))
-    PhoebeIcon.Book -> HomeIconPalette(Color(0xFF14B8A6), Color(0xFF7C3AED), Color(0xFFD8FFF8))
-    PhoebeIcon.Knife -> HomeIconPalette(Color(0xFFFF6B35), Color(0xFFEF4444), Color(0xFFFFECE3))
-    PhoebeIcon.InterwovenArrows -> HomeIconPalette(Color(0xFF3B82F6), Color(0xFFA3E635), Color(0xFFE5F0FF))
-    PhoebeIcon.MoodFace -> HomeIconPalette(Color(0xFFF97316), Color(0xFFFACC15), Color(0xFFFFF2D6))
-    PhoebeIcon.SunglassesFace -> HomeIconPalette(Color(0xFF06B6D4), Color(0xFFA855F7), Color(0xFFE3FAFF))
-    PhoebeIcon.GenreMasks -> HomeIconPalette(Color(0xFFFF3D6E), Color(0xFFFACC15), Color(0xFFFFE1EA))
-    PhoebeIcon.Heart -> HomeIconPalette(Color(0xFFFB7185), Color(0xFFBE123C), Color(0xFFFFDCE5))
-    PhoebeIcon.Music -> HomeIconPalette(Color(0xFF2563EB), Color(0xFF06B6D4), Color.White)
-    PhoebeIcon.PlaylistPlay -> HomeIconPalette(Color(0xFF0F766E), Color(0xFF22C55E), Color.White)
-    PhoebeIcon.Bell -> HomeIconPalette(Color(0xFFF97316), Color(0xFFFACC15), Color.White)
-    PhoebeIcon.Grid -> HomeIconPalette(Color(0xFF14B8A6), Color(0xFF7C3AED), Color.White)
-    else -> HomeIconPalette(PhoebePaletteDark.accentLight, Color(0xFF5EEAD4), PhoebePaletteDark.accentLight)
+private fun homeIconPalette(icon: PhoebeIcon, lightMode: Boolean): HomeIconPalette = when (icon) {
+    PhoebeIcon.Person -> HomeIconPalette(Color(0xFF8B5CF6), Color(0xFF22D3EE), if (lightMode) Color(0xFF5B21B6) else Color(0xFFDDE7FF))
+    PhoebeIcon.Calendar -> HomeIconPalette(Color(0xFFFF4D7D), Color(0xFFFFC857), if (lightMode) Color(0xFFBE123C) else Color(0xFFFFE4ED))
+    PhoebeIcon.Book -> HomeIconPalette(Color(0xFF14B8A6), Color(0xFF7C3AED), if (lightMode) Color(0xFF0F766E) else Color(0xFFD8FFF8))
+    PhoebeIcon.Knife -> HomeIconPalette(Color(0xFFFF6B35), Color(0xFFEF4444), if (lightMode) Color(0xFFC2410C) else Color(0xFFFFECE3))
+    PhoebeIcon.InterwovenArrows -> HomeIconPalette(Color(0xFF3B82F6), Color(0xFFA3E635), if (lightMode) Color(0xFF1D4ED8) else Color(0xFFE5F0FF))
+    PhoebeIcon.MoodFace -> HomeIconPalette(Color(0xFFF97316), Color(0xFFFACC15), if (lightMode) Color(0xFFC2410C) else Color(0xFFFFF2D6))
+    PhoebeIcon.SunglassesFace -> HomeIconPalette(Color(0xFF06B6D4), Color(0xFFA855F7), if (lightMode) Color(0xFF0E7490) else Color(0xFFE3FAFF))
+    PhoebeIcon.GenreMasks -> HomeIconPalette(Color(0xFFFF3D6E), Color(0xFFFACC15), if (lightMode) Color(0xFFBE123C) else Color(0xFFFFE1EA))
+    PhoebeIcon.Heart -> HomeIconPalette(Color(0xFFFB7185), Color(0xFFBE123C), if (lightMode) Color(0xFFBE123C) else Color(0xFFFFDCE5))
+    PhoebeIcon.Music -> HomeIconPalette(Color(0xFF2563EB), Color(0xFF06B6D4), if (lightMode) Color(0xFF1D4ED8) else Color.White)
+    PhoebeIcon.PlaylistPlay -> HomeIconPalette(Color(0xFF0F766E), Color(0xFF22C55E), if (lightMode) Color(0xFF115E59) else Color.White)
+    PhoebeIcon.Bell -> HomeIconPalette(Color(0xFFF97316), Color(0xFFFACC15), if (lightMode) Color(0xFFC2410C) else Color.White)
+    PhoebeIcon.Grid -> HomeIconPalette(Color(0xFF14B8A6), Color(0xFF7C3AED), if (lightMode) Color(0xFF0F766E) else Color.White)
+    else -> HomeIconPalette(PhoebePaletteDark.accentLight, Color(0xFF5EEAD4), if (lightMode) PhoebePaletteLight.accent else PhoebePaletteDark.accentLight)
 }
 
 private fun PlexRadioStation.homeRadioIcon(): PhoebeIcon {
