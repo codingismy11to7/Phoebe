@@ -43,3 +43,14 @@
 -keep class com.phoebe.app.ui.HomeUiStateKt {
     *;
 }
+
+# navigation3 NavDisplay + SceneInfo/NavigationEventInfo hierarchy break ProGuard stack maps (VerifyError on macOS release).
+-keep class androidx.navigation3.** {
+    *;
+}
+-keep class androidx.navigationevent.** {
+    *;
+}
+-keep class org.jetbrains.androidx.navigationevent.** {
+    *;
+}
