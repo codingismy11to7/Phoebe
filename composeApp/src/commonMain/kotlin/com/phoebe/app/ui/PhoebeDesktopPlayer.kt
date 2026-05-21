@@ -369,7 +369,6 @@ internal fun DesktopPlayer(
                                     CollectionsScreen(
                                         entry = targetScreen.entry,
                                         catalog = catalog,
-                                        gridColumns = libraryUi.gridColumns,
                                         searchQuery = searchQuery,
                                         modifier = Modifier.weight(1f).fillMaxWidth(),
                                         onBack = onPopDetail,
@@ -382,7 +381,6 @@ internal fun DesktopPlayer(
                                         entry = targetScreen.entry,
                                         value = targetScreen.value,
                                         catalog = catalog,
-                                        gridColumns = libraryUi.gridColumns,
                                         searchQuery = searchQuery,
                                         modifier = Modifier.weight(1f).fillMaxWidth(),
                                         onBack = onPopDetail,

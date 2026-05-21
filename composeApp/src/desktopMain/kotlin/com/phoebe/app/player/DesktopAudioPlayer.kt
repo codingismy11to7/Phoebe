@@ -173,6 +173,9 @@ internal class DesktopAudioPlayer(
                 val playbackUri = file?.toURI()?.toString() ?: uri
                 fullyBufferedPlayback = file != null
                 if (!playJavaFxWithRetries(playbackUri, generation)) {
+                    if (file != null && trySampledFallbackAfterJavaFxFailure(file, generation)) {
+                        return@execute
+                    }
                     diagnostics.playbackError(PlaybackEnginePath.JavaFxMediaPlayer, "JavaFX playback failed to start")
                     markPlaybackFailed(generation = generation)
                     return@execute
@@ -462,6 +465,37 @@ internal class DesktopAudioPlayer(
 
     private fun preferSampledPlayback(file: File): Boolean {
         return sampledPlaybackExtensionFromSuffix(file.extension) != null
+    }
+
+    private fun preferSampledFallbackAfterJavaFxFailure(file: File): Boolean {
+        return when (file.extension.lowercase()) {
+            "mp3", "mpeg" -> true
+            else -> false
+        }
+    }
+
+    private fun trySampledFallbackAfterJavaFxFailure(file: File, generation: Int): Boolean {
+        if (!preferSampledFallbackAfterJavaFxFailure(file)) return false
+        if (!isPlayRequestCurrent(generation)) return true
+        disposeJavaFxBlocking()
+        val clip = openAndStartSampledClip(file) ?: run {
+            disposeSampled()
+            return false
+        }
+        if (!isPlayRequestCurrent(generation)) {
+            runCatching {
+                clip.stop()
+                clip.close()
+            }
+            return true
+        }
+        sampledClip = clip
+        diagnostics.engineSelected(PlaybackEnginePath.SampledClip)
+        startSampledProgressProbe(clip, generation)
+        applyVolumesFromState()
+        updateBufferedPosition(trackDurationOrClipDuration(generation, clip), generation)
+        markPlaybackReady(generation = generation)
+        return true
     }
 
     private fun sampledPlaybackExtensionFromUri(uri: String): String? {

@@ -30,6 +30,7 @@ import com.phoebe.app.domain.TrackMetadataUpdate
 import com.phoebe.app.domain.canAddToLocalPlaylist
 import com.phoebe.app.domain.canAddToPlexPlaylist
 import com.phoebe.app.domain.canTogglePlexLike
+import com.phoebe.app.domain.hasPlayableSource
 import com.phoebe.app.domain.isLocalPlaylist
 import com.phoebe.app.domain.isRemoteProviderPlaylist
 import com.phoebe.app.domain.isEmbyFamily
@@ -1214,6 +1215,10 @@ class AppState(
                     mutableMessage.value = error.message ?: "Couldn't start Music Assistant playback."
                 }
             }
+            return
+        }
+        if (track != null && !track.hasPlayableSource()) {
+            surfaceTransientNotice("Couldn't find a playable stream for ${track.title}. Try refreshing the library.")
             return
         }
         mutableMusicAssistantRemotePlayback.value = null

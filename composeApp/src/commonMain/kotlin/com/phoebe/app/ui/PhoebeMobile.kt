@@ -200,6 +200,9 @@ private val MobileToolbarChromeHeight = 56.dp
 private val MobileBottomNavChromeHeight = 68.dp
 private val MobileMiniPlayerChromeHeight = 66.dp
 private val MobileChromeScrollGap = 12.dp
+private val MobilePlayerMetadataReserveWithAlbum = 104.dp
+private val MobilePlayerMetadataReserveWithoutAlbum = 84.dp
+private val MobilePlayerRemoteTargetReserve = 18.dp
 
 @Composable
 internal fun MobileCompactMainFeature(
@@ -1383,9 +1386,16 @@ internal fun MobilePlayer(
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(0.dp)),
                         ) {
+                            val baseMetadataReserve = if (track.album.isNotBlank()) {
+                                MobilePlayerMetadataReserveWithAlbum
+                            } else {
+                                MobilePlayerMetadataReserveWithoutAlbum
+                            }
+                            val metadataReserve = baseMetadataReserve +
+                                if (remotePlaybackTarget != null) MobilePlayerRemoteTargetReserve else 0.dp
                             val artworkSize = minOf(
                                 maxWidth,
-                                (maxHeight - 64.dp).coerceAtLeast(260.dp),
+                                (maxHeight - metadataReserve).coerceAtLeast(180.dp),
                             )
                             Column(
                                 Modifier

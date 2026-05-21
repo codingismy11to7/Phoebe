@@ -1797,6 +1797,10 @@ internal fun PlaylistDetailPanel(
     val visibleTracks = remember(sortedTracks, searchQuery) {
         filterTracksByQuery(sortedTracks, searchQuery)
     }
+    val playVisibleTrack = { visibleIndex: Int ->
+        val (queueTracks, queueIndex) = playbackQueueForVisibleTrack(sortedTracks, visibleTracks, visibleIndex)
+        onPlayTracks(queueTracks, queueIndex)
+    }
     val ratingActions = LocalRatingActions.current
     val favoriteActions = LocalFavoriteActions.current
     val nowPlaying = LocalNowPlaying.current
@@ -1906,8 +1910,8 @@ internal fun PlaylistDetailPanel(
                     track = track,
                     selected = false,
                     columns = libraryUi.columns,
-                    onSelect = { onPlayTracks(visibleTracks, index) },
-                    onPlay = { onPlayTracks(visibleTracks, index) },
+                    onSelect = { playVisibleTrack(index) },
+                    onPlay = { playVisibleTrack(index) },
                     onAddToUpNext = { onAddToUpNext(track) },
                     onDownload = { onDownload(track) },
                     modifier = Modifier.animateItem(),
@@ -1921,7 +1925,7 @@ internal fun PlaylistDetailPanel(
                     isNowPlaying = track.id == nowPlaying.trackId,
                     nowPlayingIsPlaying = nowPlaying.isPlaying,
                     nowPlayingIsBuffering = nowPlaying.isBuffering,
-                    onPlay = { onPlayTracks(visibleTracks, index) },
+                    onPlay = { playVisibleTrack(index) },
                     onAddToUpNext = { onAddToUpNext(track) },
                     onDownload = { onDownload(track) },
                 )

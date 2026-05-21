@@ -167,22 +167,12 @@ class PlexPlayHistorySyncer(
             )
             if (stats.isEmpty()) break
             seen += stats.size
-            val tracksToPublish = LinkedHashMap<String, Track>()
-            for (stat in stats) {
-                val existing = tracksById["plex:${stat.ratingKey}"]
-                if (existing == null) {
-                    tracksToPublish.getOrPut("plex:${stat.ratingKey}") { stat.toPlayHistoryTrack() }
-                }
-            }
             imported += playHistoryRepository.importPlexPlayCountFallbackBatch(
                 stats = stats,
                 serverId = server.id,
                 tracksById = tracksById,
                 importedAtMs = importedAtMs,
             )
-            if (tracksToPublish.isNotEmpty()) {
-                catalogRepository.publishPlexTracks(tracksToPublish.values.toList())
-            }
             if (stats.size < PlaybackStatsPageSize) break
             start += PlaybackStatsPageSize
         }

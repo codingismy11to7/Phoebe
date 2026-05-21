@@ -976,7 +976,6 @@ private fun PhoebeRootStateHolder(
                     is AppScreen.Collections -> CollectionsScreen(
                         entry = scr.entry,
                         catalog = catalog,
-                        gridColumns = libraryUi.gridColumns,
                         modifier = Modifier.fillMaxSize(),
                         supportedCollectionEntries = supportedCollectionEntries,
                         onBack = { navigator.pop() },
@@ -986,7 +985,6 @@ private fun PhoebeRootStateHolder(
                         entry = scr.entry,
                         value = scr.value,
                         catalog = catalog,
-                        gridColumns = libraryUi.gridColumns,
                         modifier = Modifier.fillMaxSize(),
                         supportedCollectionEntries = supportedCollectionEntries,
                         onBack = { navigator.pop() },

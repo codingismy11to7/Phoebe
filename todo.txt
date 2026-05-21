@@ -1,18 +1,3 @@
-during sync if resize to mobile, seems to crash?
-
-jellyfin / navidrome / emby
-- finalize support
-- additional features
-
-music assistant 
--streaming?
-
-eq
-
-web target 
-- continue to iterate on perf
-- publish
-
 ios
 -car play - Apple CarPlay entitlement — request com.apple.developer.carplay-audio in the Apple Developer portal and enable it on your App ID. Without it, signing will fail even though the code is in place.
 

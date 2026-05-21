@@ -925,17 +925,26 @@ internal fun LibrarySectionOptionsMenu(
                             }
                         },
                         onClick = {
-                            onSortBy?.invoke(key)
+                            onSortBy(key)
                             expanded = false
                         },
                     )
                 }
             }
             if (hasOrder) {
-                DropdownMenuItem(
-                    text = { Text(if (ascending == true) "Order: A–Z (tap for Z–A)" else "Order: Z–A / Desc (tap for A–Z)") },
+                OrderMenuItem(
+                    label = "Ascending",
+                    selected = ascending == true,
                     onClick = {
-                        onAscending?.invoke(!(ascending ?: true))
+                        onAscending(true)
+                        expanded = false
+                    },
+                )
+                OrderMenuItem(
+                    label = "Descending",
+                    selected = ascending == false,
+                    onClick = {
+                        onAscending(false)
                         expanded = false
                     },
                 )
@@ -953,7 +962,7 @@ internal fun LibrarySectionOptionsMenu(
                         }
                     },
                     onClick = {
-                        onViewMode?.invoke(LibraryViewMode.Grid)
+                        onViewMode(LibraryViewMode.Grid)
                         expanded = false
                     },
                 )
@@ -969,12 +978,12 @@ internal fun LibrarySectionOptionsMenu(
                         }
                     },
                     onClick = {
-                        onViewMode?.invoke(LibraryViewMode.List)
+                        onViewMode(LibraryViewMode.List)
                         expanded = false
                     },
                 )
             }
-            if (hasColumns && columns != null && onColumns != null) {
+            if (hasColumns) {
                 DropdownMenuItem(
                     text = { Text("Columns", color = PhoebeUi.mutedText, fontWeight = FontWeight.SemiBold) },
                     onClick = {},
@@ -1040,10 +1049,19 @@ internal fun LibraryFilterOptionsMenu(
                     },
                 )
             }
-            DropdownMenuItem(
-                text = { Text(if (prefs.ascending) "Order: A–Z (tap for Z–A)" else "Order: Z–A / Desc (tap for A–Z)") },
+            OrderMenuItem(
+                label = "Ascending",
+                selected = prefs.ascending,
                 onClick = {
-                    onAscending(!prefs.ascending)
+                    onAscending(true)
+                    expanded = false
+                },
+            )
+            OrderMenuItem(
+                label = "Descending",
+                selected = !prefs.ascending,
+                onClick = {
+                    onAscending(false)
                     expanded = false
                 },
             )
@@ -1128,6 +1146,27 @@ internal fun LibraryFilterOptionsMenu(
             }
         }
     }
+}
+
+@Composable
+private fun OrderMenuItem(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    DropdownMenuItem(
+        text = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (selected) {
+                    PhoebeIconView(PhoebeIcon.Check, tint = PhoebeUi.accentLight, modifier = Modifier.size(14.dp))
+                } else {
+                    Spacer(Modifier.size(14.dp))
+                }
+                Text("Order: $label")
+            }
+        },
+        onClick = onClick,
+    )
 }
 
 internal fun libraryGridCells(columns: Int): GridCells =

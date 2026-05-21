@@ -1063,6 +1063,21 @@ class PlexClient(
         }
     }
 
+    suspend fun movePlaylistItemToTop(
+        server: PlexServer,
+        token: String,
+        playlistRatingKey: String,
+        playlistItemId: Long,
+    ) {
+        val response = withReachableBase(server) { base ->
+            httpClient.put("$base/playlists/$playlistRatingKey/items/$playlistItemId/move") {
+                plexServerAuth(token)
+                header(HttpHeaders.Accept, "application/json")
+            }
+        }
+        parsePlaylistResponse(response, "movePlaylistItemToTop", "playlist/$playlistRatingKey/item/$playlistItemId")
+    }
+
     suspend fun rateItem(
         server: PlexServer,
         token: String,
