@@ -22,6 +22,7 @@ import com.phoebe.app.domain.DownloadState
 import com.phoebe.app.domain.JellyfinLibraryPageKind
 import com.phoebe.app.domain.JellyfinSyncMode
 import com.phoebe.app.domain.MusicLibrary
+import com.phoebe.app.domain.MediaProviderType
 import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.LIKED_SONGS_PLAYLIST_BARE_ID
@@ -67,6 +68,7 @@ import com.phoebe.app.sources.SourceBuildContext
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.get
+import io.ktor.client.request.header
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -1284,16 +1286,23 @@ class CatalogRepository(
                                 message = "Loading $remoteLabel metadata…",
                                 blocking = !previous.isNotEmpty(),
                             )
-                            val albums = loadJellyfinFullAlbums(
-                                remoteClient = remoteClient,
-                                server = server,
-                                library = library,
-                                token = token,
-                                userId = userId,
-                                remoteLabel = remoteLabel,
-                            )
+                            val albumsDeferred = async {
+                                loadJellyfinFullAlbums(
+                                    remoteClient = remoteClient,
+                                    server = server,
+                                    library = library,
+                                    token = token,
+                                    userId = userId,
+                                    remoteLabel = remoteLabel,
+                                )
+                            }
+                            val artistsDeferred = async {
+                                remoteClient.artists(server, library, token, userId)
+                            }
+                            val albums = albumsDeferred.await()
+                            val artists = artistsDeferred.await()
                             val enrichedArtists = enrichArtistAlbumCountsOnly(
-                                enrichArtistArtwork(jellyfinArtistsFromAlbums(albums), albums),
+                                enrichArtistArtwork(artists, albums),
                                 albums,
                             )
                             publishJellyfinProgress(
@@ -2429,7 +2438,14 @@ class CatalogRepository(
         } ?: snapshot.albums.firstOrNull {
             it.title.equals(track.album, ignoreCase = true)
         }
-        return album?.id
+        if (album != null) return album.id
+        val prefix = track.id.substringBefore(':').takeIf { it.isNotBlank() && ':' in track.id }
+            ?: snapshot.remoteCatalogIdPrefix()
+            ?: return null
+        if (track.album.isNotBlank()) {
+            return "$prefix:album:${track.album.lowercase()}"
+        }
+        return "$prefix:play-history"
     }
 
     /**
@@ -2705,47 +2721,69 @@ class CatalogRepository(
             val library = session.selectedLibrary ?: return
             val remoteClient = if (session.providerType.catalogPrefix == "emby") embyClient else jellyfinClient
             val providerPrefix = session.providerType.catalogPrefix
-            
-            val artistId = mutableCatalog.value.artists.find { it.title.equals(artistTitle, ignoreCase = true) }?.id?.removePrefix("$providerPrefix:")
-                ?: return
-            
-            withCatalogRefreshing {
+
+            val artist = mutableCatalog.value.artists.find { it.title.equals(artistTitle, ignoreCase = true) } ?: return
+            val bareArtistId = artist.id.removePrefix("$providerPrefix:")
+            val albums = if (bareArtistId.startsWith("album-artist-")) {
+                catalogAlbumsForArtist(mutableCatalog.value, artistTitle)
+            } else {
                 runCatching {
-                    val albums = remoteClient.albumsForArtist(server, library, token, userId, artistId)
+                    remoteClient.albumsForArtist(server, library, token, userId, bareArtistId)
                         .map { it.withProviderPrefix(providerPrefix) }
-                    
-                    val existingAlbums = mutableCatalog.value.albums
-                    val newAlbums = albums.filter { a -> existingAlbums.none { it.id == a.id } }
-                    
-                    if (newAlbums.isNotEmpty()) {
-                        catalogMergeMutex.withLock {
-                            val cur = mutableCatalog.value
-                            publish(cur.copy(albums = cur.albums + newAlbums), persist = false)
-                        }
+                }.getOrElse { error ->
+                    PhoebeLog.d("CatalogRepository") {
+                        "albumsForArtist failed for '$bareArtistId': ${error.message}"
                     }
-                    
-                    coroutineScope {
-                        albums.map { album ->
-                            async {
-                                runCatching {
-                                    val snap = mutableCatalog.value
-                                    val existing = snap.tracksByParent[album.id]
-                                    if (!existing.isNullOrEmpty()) return@runCatching
-                                    
-                                    val tracks = remoteClient.albumTracks(server, album.copy(id = album.id.removePrefix("$providerPrefix:")), token, userId)
-                                        .map { it.withProviderPrefix(providerPrefix) }
-                                    
-                                    catalogMergeMutex.withLock {
-                                        val cur = mutableCatalog.value
-                                        publish(cur.copy(tracksByParent = cur.tracksByParent + (album.id to tracks)), persist = false)
-                                    }
+                    emptyList()
+                }.ifEmpty {
+                    catalogAlbumsForArtist(mutableCatalog.value, artistTitle)
+                }
+            }
+            val albumsToFetch = albums.filter { album ->
+                mutableCatalog.value.tracksByParent[album.id].isNullOrEmpty()
+            }
+            if (albumsToFetch.isEmpty()) return
+
+            val existingAlbums = mutableCatalog.value.albums
+            val newAlbums = albums.filter { a -> existingAlbums.none { it.id == a.id } }
+            if (newAlbums.isNotEmpty()) {
+                catalogMergeMutex.withLock {
+                    val cur = mutableCatalog.value
+                    publish(cur.copy(albums = cur.albums + newAlbums), persist = false)
+                }
+            }
+
+            coroutineScope {
+                albumsToFetch.map { album ->
+                    async {
+                        pushTracksLoading(album.id)
+                        try {
+                            runCatching {
+                                val tracks = remoteClient.albumTracks(
+                                    server,
+                                    album.copy(id = album.id.removePrefix("$providerPrefix:")),
+                                    token,
+                                    userId,
+                                ).map { it.withProviderPrefix(providerPrefix) }
+                                catalogMergeMutex.withLock {
+                                    val cur = mutableCatalog.value
+                                    publish(
+                                        cur.copy(tracksByParent = cur.tracksByParent + (album.id to tracks)),
+                                        persist = false,
+                                    )
+                                }
+                            }.onFailure { error ->
+                                PhoebeLog.d("CatalogRepository") {
+                                    "album track fetch failed for '${album.title}': ${error.message}"
                                 }
                             }
-                        }.awaitAll()
+                        } finally {
+                            popTracksLoading(album.id)
+                        }
                     }
-                }
-                publish(mutableCatalog.value, persist = true)
+                }.awaitAll()
             }
+            publish(mutableCatalog.value, persist = true)
             return
         }
 
@@ -3033,6 +3071,18 @@ class CatalogRepository(
         publish(mutableCatalog.value, persist = true)
     }
 
+    suspend fun publishProviderTracks(prefix: String, tracks: List<Track>) {
+        if (tracks.isEmpty()) return
+        publishIndexedProviderTracks(prefix, tracks)
+        publish(mutableCatalog.value, persist = true)
+    }
+
+    suspend fun publishPlexTracks(tracks: List<Track>) {
+        if (tracks.isEmpty()) return
+        publishIndexedPlexTracks(tracks)
+        publish(mutableCatalog.value, persist = true)
+    }
+
     suspend fun warmPlexHistoryTracks(session: PlexSession?, maxEntries: Int = 200): Int {
         val server = session?.selectedServer ?: return 0
         val library = session.selectedLibrary ?: return 0
@@ -3109,18 +3159,22 @@ class CatalogRepository(
         val remaining = ids.filterTo(LinkedHashSet()) { it.isNotBlank() }
         snapshot.tracksByParent.values.forEach { parentTracks ->
             for (track in parentTracks) {
-                if (track.id in remaining) {
-                    resolved[track.id] = track
-                    remaining.remove(track.id)
-                    if (remaining.isEmpty()) return resolved
+                for (id in remaining.toList()) {
+                    if (track.id in providerTrackLookupIds(id)) {
+                        resolved[id] = track
+                        remaining.remove(id)
+                    }
                 }
+                if (remaining.isEmpty()) return resolved
             }
         }
         if (remaining.isEmpty()) return resolved
         val fromDb = withContext(Dispatchers.Default) {
             buildMap(remaining.size) {
                 for (id in remaining) {
-                    database.catalogQueries.selectTrackById(id).awaitAsOneOrNull()?.let { row ->
+                    providerTrackLookupIds(id).firstNotNullOfOrNull { lookupId ->
+                        database.catalogQueries.selectTrackById(lookupId).awaitAsOneOrNull()
+                    }?.let { row ->
                         put(
                             id,
                             Track(
@@ -3151,7 +3205,13 @@ class CatalogRepository(
             }
         }
         if (fromDb.isNotEmpty()) {
-            publishIndexedPlexTracks(fromDb.values.toList())
+            val plexTracks = fromDb.values.filter { it.id.startsWith("plex:") }
+            val providerTracks = fromDb.values.filterNot { it.id.startsWith("plex:") }
+            if (plexTracks.isNotEmpty()) publishIndexedPlexTracks(plexTracks)
+            providerTracks.groupBy { it.id.substringBefore(':') }
+                .filterKeys { it.isNotBlank() }
+                .forEach { (prefix, tracks) -> publishIndexedProviderTracks(prefix, tracks) }
+            publish(mutableCatalog.value, persist = true)
             resolved.putAll(fromDb)
             fromDb.keys.forEach(remaining::remove)
         }
@@ -3228,6 +3288,35 @@ class CatalogRepository(
             if (fetched.isNotEmpty()) {
                 publishIndexedPlexTracks(fetched)
                 publish(mutableCatalog.value, persist = true)
+            }
+            return fetched.size
+        }
+        if (server != null && token != null && session.isEmbyFamily()) {
+            val prefix = session.providerType.catalogPrefix
+            val remoteClient = if (session.providerType.catalogPrefix == "emby") embyClient else jellyfinClient
+            val itemIds = missing.mapNotNull { entry ->
+                entry.trackId.removePrefix("$prefix:").takeIf { it.isNotBlank() && it != entry.trackId }
+            }.distinct()
+            if (itemIds.isEmpty()) return 0
+            val fetched = coroutineScope {
+                itemIds
+                    .chunked(catalogTrackIndexParallelism().coerceAtLeast(1))
+                    .flatMap { chunk ->
+                        chunk.map { itemId ->
+                            async {
+                                runCatching { remoteClient.trackDetails(server, token, itemId, session.userId) }
+                                    .onFailure { e ->
+                                        PhoebeLog.d("CatalogRepository") {
+                                            "play-history track warm failed for '$prefix:$itemId': ${e.message}"
+                                        }
+                                    }
+                                    .getOrNull()
+                            }
+                        }.awaitAll().filterNotNull()
+                    }
+            }
+            if (fetched.isNotEmpty()) {
+                publishProviderTracks(prefix, fetched)
             }
             return fetched.size
         }
@@ -4793,7 +4882,9 @@ class CatalogRepository(
     private suspend fun downloadArtworkForTrack(track: Track): String? {
         val thumbUrl = track.thumbUrl?.takeIf { it.isNotBlank() && it.isRemoteArtworkUrl() } ?: return null
         return runCatching {
-            val bytes = httpClient.get(thumbUrl).body<ByteArray>()
+            val bytes = httpClient.get(thumbUrl) {
+                applyEmbyFamilyArtworkAuth(thumbUrl)
+            }.body<ByteArray>()
             storage.writeBytes(cachedArtworkPathForUrl(thumbUrl), bytes)
         }.onFailure { error ->
             if (error is CancellationException) throw error
@@ -4833,7 +4924,9 @@ class CatalogRepository(
     ): String? {
         val remoteThumbUrl = thumbUrl?.takeIf { it.isNotBlank() && it.isRemoteArtworkUrl() } ?: return null
         return runCatching {
-            val bytes = httpClient.get(remoteThumbUrl).body<ByteArray>()
+            val bytes = httpClient.get(remoteThumbUrl) {
+                applyEmbyFamilyArtworkAuth(remoteThumbUrl)
+            }.body<ByteArray>()
             storage.writeBytes(cachedArtworkPathForUrl(remoteThumbUrl), bytes)
         }.onFailure { error ->
             if (error is CancellationException) throw error
@@ -5201,13 +5294,24 @@ class CatalogRepository(
         val knownTrackIds = snapshot.tracksByParent.values.flatten().map { it.id }.toSet() + syncedTrackIdsDuringRefresh
         val knownParentIds = snapshot.tracksByParent.keys.toSet()
 
-        val existingArtistIds = database.catalogQueries.selectArtists().awaitAsList().map { it.id }
+        val existingArtists = database.catalogQueries.selectArtists().awaitAsList()
+        val existingArtistIds = existingArtists.map { it.id }
+        val existingArtistsById = existingArtists.associateBy { it.id }
         val existingAlbumIds = database.catalogQueries.selectAlbums().awaitAsList().map { it.id }
         val existingPlaylistIds = database.catalogQueries.selectPlaylists().awaitAsList().map { it.id }
         val existingTrackIds = database.catalogQueries.selectAllTrackIds().awaitAsList()
 
         database.transaction {
             existingArtistIds.filter { it !in knownArtistIds }.forEach { database.catalogQueries.deleteArtistById(it) }
+        // Drop legacy synthetic artists when a real artist with the same title was synced.
+        val knownTitles = snapshot.artists.map { it.title.trim().lowercase() }.toSet()
+        existingArtistIds
+            .filter { id -> id !in knownArtistIds && id.substringAfter(':').startsWith("album-artist-") }
+            .filter { id ->
+                val title = existingArtistsById[id]?.title?.trim()?.lowercase()
+                title != null && title in knownTitles
+            }
+            .forEach { database.catalogQueries.deleteArtistById(it) }
             existingAlbumIds.filter { it !in knownAlbumIds }.forEach { database.catalogQueries.deleteAlbumById(it) }
             existingPlaylistIds.filter { it !in knownPlaylistIds }.forEach { database.catalogQueries.deletePlaylistById(it) }
             if (!partialPaged) {
@@ -5657,6 +5761,23 @@ class CatalogRepository(
 
     private fun providerItemId(id: String, prefix: String): String? =
         id.removePrefix("$prefix:").takeIf { id.startsWith("$prefix:") && it.isNotBlank() }
+
+    private fun providerTrackLookupIds(id: String): Set<String> {
+        if (id.isBlank()) return emptySet()
+        for (provider in MediaProviderType.entries) {
+            val prefix = "${provider.catalogPrefix}:"
+            if (id.startsWith(prefix)) {
+                val bare = id.removePrefix(prefix)
+                return setOf(id, bare)
+            }
+        }
+        return buildSet {
+            add(id)
+            for (provider in MediaProviderType.entries) {
+                add("${provider.catalogPrefix}:$id")
+            }
+        }
+    }
 
     private fun jellyfinItemId(id: String): String? =
         id.removePrefix("jellyfin:").takeIf { id.startsWith("jellyfin:") && it.isNotBlank() }

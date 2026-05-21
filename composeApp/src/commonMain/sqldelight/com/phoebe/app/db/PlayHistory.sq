@@ -75,6 +75,18 @@ FROM PlayHistoryRow
 WHERE source = ?
 AND plex_server_id = ?;
 
+selectMaxImportedRemoteStatsLastPlayedAt:
+SELECT MAX(last_played_at_ms) AS lastPlayed
+FROM PlayCountAggregateRow
+WHERE source = ?
+AND server_id = ?;
+
+selectMaxPlexStatsLastPlayedAt:
+SELECT MAX(last_played_at_ms) AS lastPlayed
+FROM PlayCountAggregateRow
+WHERE source = 'plex-stats'
+AND server_id = ?;
+
 selectImportedPlexHistoryKey:
 SELECT plex_history_key
 FROM PlayHistoryRow
@@ -104,18 +116,39 @@ AND source = 'local'
 AND plex_history_key IS NULL;
 
 selectLastPlayedByArtist:
-SELECT artist, MAX(played_at_ms) AS lastPlayed
-FROM PlayHistoryRow
+SELECT artist, MAX(lastPlayed) AS lastPlayed
+FROM (
+    SELECT artist, played_at_ms AS lastPlayed
+    FROM PlayHistoryRow
+    UNION ALL
+    SELECT artist, last_played_at_ms AS lastPlayed
+    FROM PlayCountAggregateRow
+    WHERE last_played_at_ms > 0
+)
 GROUP BY artist;
 
 selectLastPlayedByAlbum:
-SELECT album, MAX(played_at_ms) AS lastPlayed
-FROM PlayHistoryRow
+SELECT album, MAX(lastPlayed) AS lastPlayed
+FROM (
+    SELECT album, played_at_ms AS lastPlayed
+    FROM PlayHistoryRow
+    UNION ALL
+    SELECT album, last_played_at_ms AS lastPlayed
+    FROM PlayCountAggregateRow
+    WHERE last_played_at_ms > 0
+)
 GROUP BY album;
 
 selectLastPlayedByTrack:
-SELECT track_id, MAX(played_at_ms) AS lastPlayed
-FROM PlayHistoryRow
+SELECT track_id, MAX(lastPlayed) AS lastPlayed
+FROM (
+    SELECT track_id, played_at_ms AS lastPlayed
+    FROM PlayHistoryRow
+    UNION ALL
+    SELECT track_id, last_played_at_ms AS lastPlayed
+    FROM PlayCountAggregateRow
+    WHERE last_played_at_ms > 0
+)
 GROUP BY track_id;
 
 selectPlayCountsByTrack:
@@ -186,18 +219,26 @@ ORDER BY play_counts.playCount DESC, lastPlayedMs DESC, play_counts.track_id
 LIMIT ?;
 
 selectTopRecentlyPlayedByTrack:
+WITH last_played AS (
+    SELECT track_id, played_at_ms AS lastPlayedMs, artist, album
+    FROM PlayHistoryRow
+    UNION ALL
+    SELECT track_id, last_played_at_ms AS lastPlayedMs, artist, album
+    FROM PlayCountAggregateRow
+    WHERE last_played_at_ms > 0
+)
 SELECT
     track_id,
-    MAX(played_at_ms) AS lastPlayedMs,
+    MAX(lastPlayedMs) AS lastPlayedMs,
     COALESCE(
-        (SELECT artist FROM PlayHistoryRow p2 WHERE p2.track_id = p1.track_id ORDER BY played_at_ms DESC LIMIT 1),
+        (SELECT artist FROM last_played lp2 WHERE lp2.track_id = lp1.track_id ORDER BY lastPlayedMs DESC LIMIT 1),
         ''
     ) AS artist,
     COALESCE(
-        (SELECT album FROM PlayHistoryRow p2 WHERE p2.track_id = p1.track_id ORDER BY played_at_ms DESC LIMIT 1),
+        (SELECT album FROM last_played lp2 WHERE lp2.track_id = lp1.track_id ORDER BY lastPlayedMs DESC LIMIT 1),
         ''
     ) AS album
-FROM PlayHistoryRow p1
+FROM last_played lp1
 GROUP BY track_id
 ORDER BY lastPlayedMs DESC, track_id
 LIMIT ?;

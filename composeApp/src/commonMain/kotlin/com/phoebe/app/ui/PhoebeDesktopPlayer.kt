@@ -538,6 +538,7 @@ internal fun DesktopPlayer(
                                         onGridColumns = onGridColumns,
                                         onExportFavoritePlaylists = onExportFavoritePlaylists,
                                         onImportFavoritePlaylists = onImportFavoritePlaylists,
+                                        session = session,
                                         modifier = Modifier.fillMaxSize(),
                                         initialCategory = settingsInitialCategory,
                                     )

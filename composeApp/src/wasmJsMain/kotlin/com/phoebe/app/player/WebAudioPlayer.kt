@@ -57,9 +57,6 @@ private class WebAudioPlayer : SimpleAudioPlayer() {
             scheduleRetry(generation, reload = false)
         }
         audio.oncanplay = {
-            syncFromAudio(generation, isBuffering = false)
-        }
-        audio.onprogress = {
             syncFromAudio(generation, isBuffering = audio.paused && playWhenReady)
         }
         audio.ontimeupdate = {

@@ -1,8 +1,10 @@
 package com.phoebe.app
 
+import com.phoebe.app.data.artistImageUrl
 import com.phoebe.app.data.EmbyClient
 import com.phoebe.app.data.JellyfinClient
 import com.phoebe.app.data.JellyfinPlaybackEvent
+import com.phoebe.app.data.itemImageUrl
 import com.phoebe.app.domain.MusicLibrary
 import com.phoebe.app.testing.testHttpClient
 import io.ktor.client.engine.mock.MockEngine
@@ -120,8 +122,8 @@ class EmbyClientTest {
         val engine = MockEngine { request ->
             starts += request.url.parameters["startIndex"]
             limits += request.url.parameters["limit"]
-            when (request.url.encodedPath) {
-                "/emby/Items" -> respondJson(
+            when {
+                request.url.encodedPath.endsWith("/Items") -> respondJson(
                     """
                     {
                       "Items": [
@@ -166,7 +168,7 @@ class EmbyClientTest {
                     }
                     """.trimIndent(),
                 )
-                "/emby/Items" -> respondJson(
+                "/emby/Items", "/emby/Users/user-1/Items" -> respondJson(
                     """
                     {
                       "Items": [
@@ -196,10 +198,157 @@ class EmbyClientTest {
         val track = client.tracks(server, library, "token", "user-1").single()
 
         assertTrue(artist.favorite)
-        assertEquals("https://emby.example/emby/Items/artist-1/Images/Primary?tag=artist-tag&api_key=token", artist.thumbUrl)
+        assertEquals("https://emby.example/emby/Artists/North%20Lake/Images/Primary?tag=artist-tag&api_key=token", artist.thumbUrl)
         assertEquals("https://emby.example/emby/Items/album-1/Images/Primary?tag=album-tag&api_key=token", track.thumbUrl)
         assertTrue(seenFields.filterNotNull().any { it.contains("PrimaryImageTag") })
         assertTrue(seenFields.filterNotNull().any { it.contains("AlbumPrimaryImageTag") })
+    }
+
+    @Test
+    fun embyPlaybackStatsUseUserScopedItemsPath() = runTest {
+        val paths = mutableListOf<String>()
+        val queryKeys = mutableListOf<String>()
+        val engine = MockEngine { request ->
+            paths += request.url.encodedPath
+            queryKeys += request.url.parameters.names()
+            respondJson(
+                """
+                {
+                  "Items": [
+                    {
+                      "Id": "track-1",
+                      "Type": "Audio",
+                      "Name": "Clean Up Song",
+                      "Album": "Album",
+                      "AlbumArtist": "Tessa Violet",
+                      "UserData": {
+                        "PlayCount": 3,
+                        "LastPlayedDate": "2026-05-17T20:30:00.0000000Z"
+                      },
+                      "RunTimeTicks": 2450000000
+                    }
+                  ],
+                  "TotalRecordCount": 1
+                }
+                """.trimIndent(),
+            )
+        }
+        val client = EmbyClient(testHttpClient(engine))
+        val server = com.phoebe.app.domain.PlexServer("emby:test", "Emby", "https://emby.example/emby", owned = true)
+
+        val stats = client.playbackStatsPage(
+            server = server,
+            library = MusicLibrary("music", "Music"),
+            token = "token",
+            userId = "user-1",
+            start = 0,
+            size = 100,
+        )
+
+        assertEquals(1, stats.size)
+        assertEquals("track-1", stats.single().itemId)
+        assertEquals(listOf("/emby/Users/user-1/Items"), paths)
+        assertTrue("EnableUserData" in queryKeys)
+        assertTrue("IsPlayed" in queryKeys)
+        assertTrue("IncludeItemTypes" in queryKeys)
+    }
+
+    @Test
+    fun embyPlaybackLatestReturnsBareJsonArray() = runTest {
+        val engine = MockEngine { request ->
+            respondJson(
+                """
+                [
+                  {
+                    "Id": "track-1",
+                    "Type": "Audio",
+                    "Name": "A Night at the Opera",
+                    "UserData": {
+                      "PlayCount": 1,
+                      "LastPlayedDate": "2026-05-17T20:30:00.0000000Z"
+                    },
+                    "RunTimeTicks": 2450000000
+                  }
+                ]
+                """.trimIndent(),
+            )
+        }
+        val client = EmbyClient(testHttpClient(engine))
+        val server = com.phoebe.app.domain.PlexServer("emby:test", "Emby", "https://emby.example/emby", owned = true)
+
+        val stats = client.playbackLatestPlayedPage(
+            server = server,
+            library = MusicLibrary("music", "Music"),
+            token = "token",
+            userId = "user-1",
+            size = 10,
+        )
+
+        assertEquals(1, stats.size)
+        assertEquals("track-1", stats.single().itemId)
+    }
+
+    @Test
+    fun embyArtistImageUrlUsesArtistsByNamePath() {
+        assertEquals(
+            "https://emby.example/emby/Artists/Tessa%20Violet/Images/Primary?tag=artist-tag&api_key=token",
+            artistImageUrl(
+                server = com.phoebe.app.domain.PlexServer("emby:test", "Emby", "https://emby.example/emby", owned = true),
+                artistName = "Tessa Violet",
+                token = "token",
+                tag = "artist-tag",
+            ),
+        )
+    }
+
+    @Test
+    fun embyArtworkUrlGeneratedForAllItemsWithId() {
+        assertEquals(
+            "https://emby.example/emby/Items/album-2/Images/Primary?api_key=token",
+            itemImageUrl(
+                server = com.phoebe.app.domain.PlexServer("emby:test", "Emby", "https://emby.example/emby", owned = true),
+                itemId = "album-2",
+                token = "token",
+                tag = null,
+                hasPrimaryImage = true,
+            ),
+        )
+    }
+
+    @Test
+    fun embyArtworkUrlWorksWithoutImageTagWhenPrimaryImageExists() = runTest {
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/emby/Items", "/emby/Users/user-1/Items" -> respondJson(
+                    """
+                    {
+                      "Items": [
+                        {
+                          "Id": "album-2",
+                          "Type": "MusicAlbum",
+                          "Name": "Halo",
+                          "AlbumArtist": "Tessa Violet",
+                          "HasPrimaryImage": true,
+                          "RunTimeTicks": 2450000000
+                        }
+                      ],
+                      "TotalRecordCount": 1
+                    }
+                    """.trimIndent(),
+                )
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val client = EmbyClient(testHttpClient(engine))
+        val server = com.phoebe.app.domain.PlexServer("emby:test", "Emby", "https://emby.example/emby", owned = true)
+        val library = MusicLibrary("music", "Music")
+
+        val album = client.albumPage(server, library, "token", "user-1", pageIndex = 0).items.single()
+
+        assertEquals(
+            "https://emby.example/emby/Items/album-2/Images/Primary?api_key=token",
+            album.thumbUrl,
+        )
     }
 }
 

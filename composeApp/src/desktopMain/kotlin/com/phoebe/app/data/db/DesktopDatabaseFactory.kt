@@ -30,12 +30,12 @@ actual suspend fun createSqlDriver(schema: SqlSchema<QueryResult.AsyncValue<Unit
         deleteDatabaseFiles(dbFile)
         val rebuilt = openDriver(dbFile, properties, schema)
         revFile.writeText(LocalDbRevision.toString())
-        rebuilt.execute(null, "PRAGMA busy_timeout=30000", 0)
+        rebuilt.execPragma("PRAGMA busy_timeout=30000")
         return rebuilt
     }
 
     revFile.writeText(LocalDbRevision.toString())
-    driver.execute(null, "PRAGMA busy_timeout=30000", 0)
+    driver.execPragma("PRAGMA busy_timeout=30000")
     return driver
 }
 

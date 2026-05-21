@@ -2,6 +2,7 @@ package com.phoebe.app
 
 import com.phoebe.app.data.catalogArtistForAlbum
 import com.phoebe.app.data.enrichArtistAlbumCountsOnly
+import com.phoebe.app.data.dedupeArtistsByTitle
 import com.phoebe.app.data.enrichArtistArtwork
 import com.phoebe.app.data.enrichJellyfinCatalogArtwork
 import com.phoebe.app.domain.Album
@@ -49,6 +50,17 @@ class ArtistCountsTest {
         assertEquals("http://jellyfin.example/album.jpg", enriched.tracksByParent["jellyfin:album-1"]?.single()?.thumbUrl)
         assertEquals("Artist One", enriched.tracksByParent["jellyfin:album-1"]?.single()?.artist)
         assertEquals("http://jellyfin.example/album.jpg", enriched.artists.single().thumbUrl)
+    }
+
+    @Test
+    fun dedupeArtistsByTitlePrefersRealIdsOverSyntheticAlbumArtistIds() {
+        val artists = listOf(
+            Artist(id = "emby:album-artist-emby:album-1", title = "!!!", thumbUrl = "https://example/a.jpg", albumCount = 7),
+            Artist(id = "emby:artist-real", title = "!!!", thumbUrl = "https://example/b.jpg", albumCount = 7),
+        )
+        val deduped = dedupeArtistsByTitle(artists)
+        assertEquals(1, deduped.size)
+        assertEquals("emby:artist-real", deduped.single().id)
     }
 
     @Test

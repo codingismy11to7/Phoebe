@@ -139,11 +139,13 @@ class AppDependencies(
                 plexPlayHistorySyncer = PlexPlayHistorySyncer(
                     plexClient = plexClient,
                     playHistoryRepository = playHistoryRepository,
+                    catalogRepository = catalogRepository,
                 ),
                 jellyfinPlayHistorySyncer = JellyfinPlayHistorySyncer(
                     jellyfinClient = jellyfinClient,
                     embyClient = embyClient,
                     playHistoryRepository = playHistoryRepository,
+                    catalogRepository = catalogRepository,
                 ),
                 navidromePlayHistorySyncer = NavidromePlayHistorySyncer(
                     subsonicClient = subsonicClient,

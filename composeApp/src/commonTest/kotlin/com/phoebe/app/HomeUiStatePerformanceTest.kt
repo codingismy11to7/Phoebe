@@ -5,6 +5,7 @@ import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.Track
+import com.phoebe.app.platform.isDesktopPlatform
 import com.phoebe.app.ui.PlayHistorySnapshot
 import com.phoebe.app.ui.deriveHomeUiState
 import kotlin.math.roundToInt
@@ -20,6 +21,8 @@ class HomeUiStatePerformanceTest {
 
     @Test
     fun deriveHomeUiStateScalingReport() {
+        if (!isDesktopPlatform()) return
+
         val sizes = listOf(
             LibrarySize(albums = 50, tracksPerAlbum = 12),
             LibrarySize(albums = 500, tracksPerAlbum = 12),

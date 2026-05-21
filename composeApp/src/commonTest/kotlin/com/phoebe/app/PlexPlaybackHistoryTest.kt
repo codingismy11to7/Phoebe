@@ -118,4 +118,94 @@ class PlexPlaybackHistoryTest {
         assertEquals(1700000000000L, page.entries.single().viewedAtMs)
         assertEquals("1", page.entries.single().librarySectionId)
     }
+
+    @Test
+    fun trackPlaybackStatReadsNestedUserStateViewCount() = kotlinx.coroutines.test.runTest {
+        val engine = MockEngine {
+            respond(
+                content = """
+                    {
+                      "MediaContainer": {
+                        "Metadata": [
+                          {
+                            "ratingKey": 12345,
+                            "type": "track",
+                            "title": "Only You",
+                            "parentTitle": "80s Pop",
+                            "grandparentTitle": "Various Artists",
+                            "UserState": {
+                              "viewCount": 24,
+                              "lastViewedAt": 1700000000
+                            }
+                          }
+                        ]
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, "application/json"),
+            )
+        }
+        val client = PlexClient(testHttpClient(engine))
+        val stat = client.trackPlaybackStat(
+            server = PlexServer("server", "Plex", "https://plex.example:32400", owned = true),
+            ratingKey = "12345",
+            token = "token",
+        )
+
+        assertEquals("12345", stat?.ratingKey)
+        assertEquals(24L, stat?.viewCount)
+        assertEquals(1700000000000L, stat?.lastViewedAtMs)
+    }
+
+    @Test
+    fun trackPlaybackStatsPageReadsNestedUserStateViewCount() = kotlinx.coroutines.test.runTest {
+        val engine = MockEngine {
+            respond(
+                content = """
+                    {
+                      "MediaContainer": {
+                        "size": 2,
+                        "Metadata": [
+                          {
+                            "ratingKey": "t1",
+                            "type": "track",
+                            "title": "Only You",
+                            "parentTitle": "80s Pop",
+                            "grandparentTitle": "Various Artists",
+                            "UserState": {
+                              "viewCount": 24,
+                              "lastViewedAt": 1700000000
+                            }
+                          },
+                          {
+                            "ratingKey": "t2",
+                            "type": "track",
+                            "title": "Swept Away",
+                            "parentTitle": "Album",
+                            "grandparentTitle": "Artist",
+                            "viewCount": 1,
+                            "lastViewedAt": 1700000100
+                          }
+                        ]
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, "application/json"),
+            )
+        }
+        val client = PlexClient(testHttpClient(engine))
+        val stats = client.trackPlaybackStatsPage(
+            server = PlexServer("server", "Plex", "https://plex.example:32400", owned = true),
+            token = "token",
+            library = MusicLibrary("1", "Music"),
+            start = 0,
+            size = 100,
+        )
+
+        assertEquals(2, stats.size)
+        assertEquals(24L, stats.first { it.ratingKey == "t1" }.viewCount)
+        assertEquals(1L, stats.first { it.ratingKey == "t2" }.viewCount)
+    }
 }

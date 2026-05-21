@@ -804,6 +804,8 @@ data class PlayerState(
 /** True when the track is played from on-device storage (local folder or download), not stream-only. */
 fun Track.isLocalMediaPlayback(): Boolean = !localUri.isNullOrBlank()
 
+fun Track.isFromLocalFolder(folderId: String): Boolean = id.startsWith("local_${folderId}:")
+
 /** True when this row came from the Plex music library slice of the merged catalog. */
 fun Track.isPlexLibraryTrack(): Boolean = id.startsWith("plex:")
 

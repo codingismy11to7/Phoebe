@@ -17,9 +17,10 @@ actual suspend fun createSqlDriver(schema: SqlSchema<QueryResult.AsyncValue<Unit
         schema = schema.synchronous(),
         name = localDatabaseFileName(),
     )
-    driver.execute(null, "PRAGMA journal_mode=WAL", 0)
-    driver.execute(null, "PRAGMA synchronous=NORMAL", 0)
-    driver.execute(null, "PRAGMA temp_store=MEMORY", 0)
+    driver.execPragma("PRAGMA journal_mode=WAL")
+    driver.execPragma("PRAGMA synchronous=NORMAL")
+    driver.execPragma("PRAGMA temp_store=MEMORY")
+    driver.execPragma("PRAGMA busy_timeout=30000")
     return driver
 }
 
@@ -40,8 +41,10 @@ private fun wipeIfRevisionChanged() {
             .firstOrNull() as? String
         if (docs != null) {
             // NativeSqliteDriver writes to `${documents}/databases/${name}.db` by default.
-            val path = "$docs/databases/$dbFileName.db"
-            NSFileManager.defaultManager.removeItemAtPath(path, error = null)
+            val base = "$docs/databases/$dbFileName.db"
+            NSFileManager.defaultManager.removeItemAtPath(base, error = null)
+            NSFileManager.defaultManager.removeItemAtPath("$base-wal", error = null)
+            NSFileManager.defaultManager.removeItemAtPath("$base-shm", error = null)
         }
     }
     defaults.setInteger(LocalDbRevision, forKey = revisionKey)

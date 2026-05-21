@@ -114,6 +114,16 @@ abstract class SimpleAudioPlayer : AudioPlayer {
         mutableState.value = state.copy(queue = state.queue.subList(0, keep).toList())
     }
 
+    override fun stopPlayback() {
+        playGeneration++
+        playWhenReady = false
+        crossfadeRequestKey = null
+        stopProgressTicker()
+        stopCurrentPlaybackImmediately()
+        val volume = mutableState.value.volume
+        mutableState.value = PlayerState(volume = volume)
+    }
+
     override fun addToUpNext(track: Track) {
         val state = mutableState.value
         val deduped = state.queue.filterNot { it.id == track.id }

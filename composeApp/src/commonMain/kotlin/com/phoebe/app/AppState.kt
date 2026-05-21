@@ -33,6 +33,7 @@ import com.phoebe.app.domain.canTogglePlexLike
 import com.phoebe.app.domain.isLocalPlaylist
 import com.phoebe.app.domain.isRemoteProviderPlaylist
 import com.phoebe.app.domain.isEmbyFamily
+import com.phoebe.app.domain.isFromLocalFolder
 import com.phoebe.app.domain.isMusicAssistant
 import com.phoebe.app.domain.isNavidrome
 import com.phoebe.app.domain.isPlex
@@ -245,6 +246,8 @@ class AppState(
     private var recentAlbumWarmSignature: String? = null
     private var playedAlbumWarmSignature: String? = null
     private var mostPlayedWarmSignature: String? = null
+    private val prefetchedArtistIds = mutableSetOf<String>()
+    private val prefetchedAlbumIds = mutableSetOf<String>()
     private var catalogRefreshJob: Job? = null
     private var playHistorySyncJob: Job? = null
     private val activeDownloadJobs = mutableSetOf<Job>()
@@ -721,7 +724,11 @@ class AppState(
                 ensureLikedSongsPlaylistIfPossible()
             }
             warmPlaylistTracksInBackground()
-            syncRemotePlayHistoryInBackground()
+            if (session.value.isPlex() || session.value.isEmbyFamily() || session.value.isNavidrome()) {
+                syncRemotePlayHistory(showMessage = false)
+            } else {
+                syncRemotePlayHistoryInBackground()
+            }
             cacheDownloadedArtworkInBackground()
             if (catalogMessage != null) mutableMessage.value = catalogMessage
         } catch (error: CancellationException) {
@@ -795,6 +802,8 @@ class AppState(
 
     fun refreshPlexPlayHistory() = startRemotePlayHistorySync(showMessage = true)
 
+    fun refreshPlayHistory() = startRemotePlayHistorySync(showMessage = true)
+
     private fun syncRemotePlayHistoryInBackground() = startRemotePlayHistorySync(showMessage = false)
 
     private fun startRemotePlayHistorySync(showMessage: Boolean) {
@@ -830,6 +839,14 @@ class AppState(
                     PhoebeLog.d("AppState") { "Plex history track warm failed: ${error.message}" }
                 }
                 dependencies.plexPlayHistorySyncer.sync(currentSession, catalog.value)
+                val refreshTrackIds = buildList {
+                    addAll(dependencies.playHistoryRepository.queryTopMostPlayed(30).map { it.trackId })
+                    addAll(dependencies.playHistoryRepository.queryTopRecentlyPlayed(30).map { it.trackId })
+                }.distinct()
+                dependencies.plexPlayHistorySyncer.refreshViewCountsForTrackIds(
+                    currentSession,
+                    refreshTrackIds,
+                )
             } else if (currentSession.isNavidrome()) {
                 dependencies.navidromePlayHistorySyncer.sync(currentSession, catalog.value)
             } else {
@@ -922,6 +939,7 @@ class AppState(
 
     fun prefetchHomeArtistStats(artist: Artist) {
         if (!session.value.canUsePlexBackgroundFetches()) return
+        if (!prefetchedArtistIds.add(artist.id)) return
         scope.launch {
             runCatching {
                 dependencies.catalogRepository.ensureTracksForArtistAlbums(session.value, artist.title)
@@ -931,6 +949,7 @@ class AppState(
 
     fun prefetchHomeAlbumStats(album: Album) {
         if (!session.value.canUsePlexBackgroundFetches()) return
+        if (!prefetchedAlbumIds.add(album.id)) return
         scope.launch {
             runCatching {
                 dependencies.catalogRepository.tracksForAlbum(session.value, album)
@@ -981,9 +1000,24 @@ class AppState(
 
     fun warmTracksForMostPlayed(maxTracks: Int = 20) {
         if (!session.value.canUsePlexBackgroundFetches()) return
-        val entries = topMostPlayed.value.take(maxTracks)
+        val entries = buildList {
+            addAll(topMostPlayed.value.take(maxTracks))
+            topRecentlyPlayed.value.take(maxTracks).forEach { recent ->
+                if (none { it.trackId == recent.trackId }) {
+                    add(
+                        com.phoebe.app.domain.MostPlayedEntry(
+                            trackId = recent.trackId,
+                            playCount = playCountsByTrack.value[recent.trackId] ?: 0L,
+                            lastPlayedMs = recent.lastPlayedMs,
+                            artist = recent.artist,
+                            album = recent.album,
+                        ),
+                    )
+                }
+            }
+        }
         if (entries.isEmpty()) return
-        val signature = entries.joinToString("|") { "${it.trackId}:${it.playCount}" }
+        val signature = entries.joinToString("|") { "${it.trackId}:${it.playCount}:${it.lastPlayedMs}" }
         if (signature == mostPlayedWarmSignature) return
         mostPlayedWarmSignature = signature
         scope.launch {
@@ -1288,6 +1322,12 @@ class AppState(
         } else {
             dependencies.audioPlayer.clearQueue()
         }
+    }
+
+    private fun stopPlayback() {
+        mutableMusicAssistantRemotePlayback.value = null
+        dependencies.castController.disconnect()
+        dependencies.audioPlayer.stopPlayback()
     }
     fun addToUpNext(track: Track) = dependencies.audioPlayer.addToUpNext(track)
     fun appendToQueue(tracks: List<Track>) = dependencies.audioPlayer.appendToQueue(tracks)
@@ -1685,6 +1725,14 @@ class AppState(
     private fun hasEnabledLocalFolders(): Boolean =
         mediaSources.value.localFolders.any { it.enabled }
 
+    private fun shouldStopPlaybackForRemovedLocalFolder(folderId: String): Boolean {
+        val playback = player.value
+        if (playback.queue.any { it.isFromLocalFolder(folderId) }) return true
+        val enabledAfterRemoval = mediaSources.value.localFolders.any { it.enabled && it.id != folderId }
+        if (enabledAfterRemoval || session.value?.token?.isNotBlank() == true) return false
+        return playback.currentTrack != null || playback.upNext.isNotEmpty()
+    }
+
     fun updateTrackMetadata(update: TrackMetadataUpdate) = scope.launch {
         val result = dependencies.catalogRepository.updateTrackMetadata(session.value, update)
         val provider = session.value.providerLabel()
@@ -1822,7 +1870,11 @@ class AppState(
     }
 
     fun removeLocalFolder(id: String) = scope.launch {
+        val shouldStopPlayback = shouldStopPlaybackForRemovedLocalFolder(id)
         dependencies.mediaSourcesRepository.removeLocalFolder(id)
+        if (shouldStopPlayback) {
+            stopPlayback()
+        }
         refreshCatalogSuspended(catalogMessage = null)
         mutableMessage.value = "Removed local folder."
         if (defaultBrowseRequest() == AppNavigationRequest.SignIn) {
@@ -1844,9 +1896,9 @@ class AppState(
         mostPlayedWarmSignature = null
         recentAlbumWarmSignature = null
         playedAlbumWarmSignature = null
-        mutableMusicAssistantRemotePlayback.value = null
-        dependencies.castController.disconnect()
-        dependencies.audioPlayer.clearQueue()
+        prefetchedArtistIds.clear()
+        prefetchedAlbumIds.clear()
+        stopPlayback()
         mutablePin.value = null
         mutableLibraries.value = emptyList()
         mutableLibrariesLoading.value = false
@@ -1878,7 +1930,7 @@ class AppState(
 
 private fun PlexSession?.canUsePlexBackgroundFetches(): Boolean {
     val server = this?.selectedServer ?: return false
-    if (isNavidrome()) return server.uri.isNotBlank()
+    if (isNavidrome() || isEmbyFamily()) return server.uri.isNotBlank()
     return server.connectionUris.isNotEmpty() ||
         server.advertisedConnectionUris.isNotEmpty() ||
         server.localConnectionUris.isNotEmpty()

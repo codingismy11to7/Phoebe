@@ -246,7 +246,7 @@ internal fun SignInWelcomeScreen(
                 selected = false
             )
             DesktopProviderChip(
-                text = "Jellyfin (alpha / not fully supported)",
+                text = "Jellyfin",
                 painter = painterResource(Res.drawable.jellyfin),
                 painterTint = Color(0xFF00A4DC),
                 onClick = {
@@ -260,7 +260,8 @@ internal fun SignInWelcomeScreen(
             )
             listOf(MediaProviderType.Emby, MediaProviderType.Navidrome, MediaProviderType.MusicAssistant).forEach { provider ->
                 DesktopProviderChip(
-                    text = provider.providerButtonLabel() + " (alpha / not fully supported)",
+                    text = provider.providerButtonLabel() +
+                        if (provider == MediaProviderType.MusicAssistant) " (alpha / not fully supported)" else "",
                     painter = when (provider) {
                         MediaProviderType.Emby -> painterResource(Res.drawable.emby)
                         MediaProviderType.Navidrome -> painterResource(Res.drawable.navidrome)
@@ -433,7 +434,7 @@ private fun MediaProviderType.providerButtonLabel(): String = when (this) {
 
 private const val DefaultNavidromeServerUrl = "http://192.168.86.43:30043/"
 private const val DefaultJellyfinServerUrl = "http://192.168.86.43:30013/"
-private const val DefaultEmbyServerUrl = ""
+private const val DefaultEmbyServerUrl = "http://192.168.86.43:36983/"
 private const val JellyfinServerUrlPlaceholder = "http://hostname:8096"
 
 @Composable
@@ -619,7 +620,7 @@ internal fun MobileSignInWelcomeScreen(
                     ProviderChoiceRow(
                         painter = painterResource(Res.drawable.jellyfin),
                         painterTint = Color(0xFF00A4DC),
-                        title = "Sign in with Jellyfin (alpha / not fully supported)",
+                        title = "Sign in with Jellyfin",
                         subtitle = if (jellyfinExpanded) "Enter your server details below" else "Connect to a Jellyfin music server",
                         lightMode = lightMode,
                         expanded = jellyfinExpanded,
@@ -685,7 +686,8 @@ internal fun MobileSignInWelcomeScreen(
                                 MediaProviderType.MusicAssistant -> Color(0xFF03A9F4)
                                 else -> null
                             },
-                            title = "Sign in with ${provider.providerButtonLabel()} (alpha / not fully supported)",
+                            title = "Sign in with ${provider.providerButtonLabel()}" +
+                                if (provider == MediaProviderType.MusicAssistant) " (alpha / not fully supported)" else "",
                             subtitle = when {
                                 providerExpanded -> "Enter your server details below"
                                 provider == MediaProviderType.Emby -> "Connect to an Emby music server"

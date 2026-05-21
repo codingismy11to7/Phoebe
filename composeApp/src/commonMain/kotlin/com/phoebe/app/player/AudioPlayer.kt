@@ -10,6 +10,8 @@ interface AudioPlayer {
     fun play(queue: List<Track>, startIndex: Int = 0)
     fun togglePlayPause()
     fun clearQueue()
+    /** Stop playback and discard the entire queue, including the current track. */
+    fun stopPlayback()
     fun addToUpNext(track: Track)
     fun appendToQueue(tracks: List<Track>)
     fun moveUpNext(fromIndex: Int, toIndex: Int)
