@@ -2,6 +2,8 @@ package com.phoebe.app
 
 import com.phoebe.app.data.SubsonicClient
 import com.phoebe.app.data.md5Hex
+import com.phoebe.app.domain.LIKED_SONGS_PLAYLIST_BARE_ID
+import com.phoebe.app.domain.LIKED_SONGS_PLAYLIST_TITLE
 import com.phoebe.app.domain.MusicLibrary
 import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.testing.testHttpClient
@@ -48,6 +50,47 @@ class SubsonicClientTest {
         assertEquals("ada", session.userName)
         assertEquals("https://navidrome.example", session.selectedServer!!.uri)
         assertEquals(listOf("/rest/ping.view"), seen)
+    }
+
+    @Test
+    fun resolvesOpenSubsonicGenreArrayOnAlbum() = runTest {
+        val server = PlexServer("navidrome:test", "Navidrome", "https://navidrome.example", owned = true)
+        val library = MusicLibrary("all", "All Music")
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/rest/getArtists.view" -> respondJson(
+                    """{ "subsonic-response": { "status": "ok", "artists": { "index": [] } } }""",
+                )
+                "/rest/getAlbumList2.view" -> respondJson(
+                    """
+                    { "subsonic-response": { "status": "ok", "albumList2": { "album": [
+                      { "id": "al1", "name": "Radio House", "artist": "North Lake", "genres": [
+                        { "name": "Electronic" }, { "name": "Synthpop" }
+                      ] }
+                    ] } } }
+                    """.trimIndent(),
+                )
+                "/rest/getAlbum.view" -> respondJson(
+                    """
+                    { "subsonic-response": { "status": "ok", "album": {
+                      "id": "al1", "name": "Radio House", "artist": "North Lake", "song": []
+                    } } }
+                    """.trimIndent(),
+                )
+                "/rest/getPlaylists.view" -> respondJson(
+                    """{ "subsonic-response": { "status": "ok", "playlists": {} } }""",
+                )
+                "/rest/getStarred2.view" -> respondJson(
+                    """{ "subsonic-response": { "status": "ok", "starred2": {} } }""",
+                )
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val client = SubsonicClient(testHttpClient(engine))
+
+        val album = client.buildCatalog(server, library, "ada", "secret").albums.single()
+
+        assertEquals("Electronic, Synthpop", album.genre)
     }
 
     @Test
@@ -103,6 +146,8 @@ class SubsonicClientTest {
         val artist = catalog.artists.single()
         val album = catalog.albums.single()
         assertEquals("North Lake", artist.title)
+        assertEquals("Electronic", artist.genre)
+        assertEquals("Electronic", album.genre)
         assertEquals("Radio House", album.title)
         assertTrue(artist.favorite)
         assertTrue(album.favorite)
@@ -112,7 +157,7 @@ class SubsonicClientTest {
         assertEquals(album.thumbUrl, artist.thumbUrl)
         assertTrue(catalog.playlists.any { it.title == "Late" })
         assertEquals("Liked Songs", catalog.playlists.first().title)
-        assertEquals("Night Signals", catalog.tracksByParent["liked-songs"]!!.single().title)
+        assertEquals("Night Signals", catalog.tracksByParent[LIKED_SONGS_PLAYLIST_BARE_ID]!!.single().title)
         val track = catalog.tracksByParent["al1"]!!.single()
         assertEquals("Night Signals", track.title)
         assertTrue(track.streamUrl.contains("/rest/stream.view"))
@@ -137,6 +182,34 @@ class SubsonicClientTest {
         assertEquals("ar1", seen[0].second["artistId"])
         assertEquals("al1", seen[1].second["albumId"])
         assertEquals("tr1", seen[2].second["id"])
+    }
+
+    @Test
+    fun likedSongsPlaylistTracksUseStarredEndpoint() = runTest {
+        val server = PlexServer("navidrome:test", "Navidrome", "https://navidrome.example", owned = true)
+        val seen = mutableListOf<String>()
+        val engine = MockEngine { request ->
+            seen += request.url.encodedPath
+            when (request.url.encodedPath) {
+                "/rest/getStarred2.view" -> respondJson(
+                    """
+                    { "subsonic-response": { "status": "ok", "starred2": {
+                      "song": [{ "id": "tr1", "title": "Night Signals", "album": "Radio House", "artist": "North Lake", "duration": 245 }]
+                    } } }
+                    """.trimIndent(),
+                )
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val client = SubsonicClient(testHttpClient(engine))
+        val tracks = client.playlistTracks(
+            server,
+            com.phoebe.app.domain.Playlist(id = LIKED_SONGS_PLAYLIST_BARE_ID, title = LIKED_SONGS_PLAYLIST_TITLE, trackCount = 0),
+            "ada",
+            "secret",
+        )
+        assertEquals(listOf("/rest/getStarred2.view"), seen)
+        assertEquals("Night Signals", tracks.single().title)
     }
 
     @Test
@@ -169,6 +242,9 @@ class SubsonicClientTest {
                 )
                 "/rest/getPlaylists.view" -> respondJson(
                     """{ "subsonic-response": { "status": "ok", "playlists": { "playlist": [] } } }""",
+                )
+                "/rest/getStarred2.view" -> respondJson(
+                    """{ "subsonic-response": { "status": "ok", "starred2": {} } }""",
                 )
                 else -> respond("", HttpStatusCode.NotFound)
             }

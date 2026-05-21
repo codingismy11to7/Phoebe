@@ -148,6 +148,7 @@ import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.DownloadItem
 import com.phoebe.app.domain.DownloadState
 import com.phoebe.app.domain.LocalFolderMediaSourceConfig
+import com.phoebe.app.domain.MediaProviderType
 import com.phoebe.app.domain.MediaSourcesState
 import com.phoebe.app.domain.MostPlayedEntry
 import com.phoebe.app.domain.MusicLibrary
@@ -157,6 +158,7 @@ import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
+import com.phoebe.app.domain.catalogPrefix
 import com.phoebe.app.domain.isLocalMediaPlayback
 import com.phoebe.app.domain.isRemoteLibraryTrack
 import com.phoebe.app.domain.supportsPlexPlaylists
@@ -344,9 +346,19 @@ internal val LocalTrackNavigationActions = compositionLocalOf { TrackNavigationA
 
 private fun equivalentTrackIds(id: String): Set<String> {
     if (id.isBlank()) return emptySet()
-    if (id.startsWith("plex:")) return setOf(id, id.removePrefix("plex:"))
-    if (id.startsWith("jellyfin:")) return setOf(id, id.removePrefix("jellyfin:"))
-    return if (':' in id) setOf(id) else setOf(id, "plex:$id")
+    for (provider in MediaProviderType.entries) {
+        val prefix = "${provider.catalogPrefix}:"
+        if (id.startsWith(prefix)) {
+            val bare = id.removePrefix(prefix)
+            return setOf(id, bare)
+        }
+    }
+    return buildSet {
+        add(id)
+        for (provider in MediaProviderType.entries) {
+            add("${provider.catalogPrefix}:$id")
+        }
+    }
 }
 
 internal fun buildTrackRatingIndex(catalog: CatalogSnapshot): Map<String, Float?> {

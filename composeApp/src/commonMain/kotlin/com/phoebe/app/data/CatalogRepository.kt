@@ -24,7 +24,9 @@ import com.phoebe.app.domain.JellyfinSyncMode
 import com.phoebe.app.domain.MusicLibrary
 import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.PlexSession
+import com.phoebe.app.domain.LIKED_SONGS_PLAYLIST_BARE_ID
 import com.phoebe.app.domain.LIKED_SONGS_PLAYLIST_TITLE
+import com.phoebe.app.domain.likedSongsPlaylistId
 import com.phoebe.app.domain.LOCAL_PLAYLIST_ID_PREFIX
 import com.phoebe.app.domain.PENDING_LIKED_SONGS_PLAYLIST_ID
 import com.phoebe.app.domain.PlexRadioStation
@@ -43,6 +45,7 @@ import com.phoebe.app.domain.isLikedSongsPlaylist
 import com.phoebe.app.domain.isEmbyFamily
 import com.phoebe.app.domain.isJellyfin
 import com.phoebe.app.domain.isJellyfinLibraryTrack
+import com.phoebe.app.domain.isNavidrome
 import com.phoebe.app.domain.isPlex
 import com.phoebe.app.domain.isPlexLibraryTrack
 import com.phoebe.app.domain.isRemoteLibraryTrack
@@ -125,6 +128,7 @@ class CatalogRepository(
     private val plexClient: PlexClient,
     private val jellyfinClient: JellyfinClient = JellyfinClient(HttpClient()),
     private val embyClient: EmbyClient = EmbyClient(HttpClient()),
+    private val subsonicClient: SubsonicClient = SubsonicClient(HttpClient()),
     private val providerRegistry: MusicProviderRegistry = MusicProviderRegistry(emptyList()),
     private val database: PhoebeDatabase,
     private val storage: PlatformStorage,
@@ -376,6 +380,10 @@ class CatalogRepository(
         }
         if (session.isEmbyFamily()) {
             refreshJellyfinAggregated(session)
+            return
+        }
+        if (session?.isNavidrome() == true) {
+            refreshNavidromeAggregated(session)
             return
         }
         if (session != null && !session.isPlex()) {
@@ -820,6 +828,256 @@ class CatalogRepository(
                 message = error.message ?: "${session.providerType.name} sync failed.",
             )
             throw error
+        }
+        PhoebeLog.d("CatalogRepository") {
+            "refreshAggregated complete → ${snapshot.albums.size} albums, " +
+                "${snapshot.tracksByParent.values.sumOf { it.size }} tracks"
+        }
+    }
+
+    private suspend fun refreshNavidromeAggregated(session: PlexSession) {
+        val remotePrefix = session.providerType.catalogPrefix
+        val remoteLabel = "Subsonic"
+        PhoebeLog.d("CatalogRepository") {
+            "refreshAggregated start → $remotePrefix=${session.selectedServer?.name ?: "none"}, " +
+                "localFolders=${mediaSourcesRepository.state.value.localFolders.count { it.enabled }}"
+        }
+        var foregroundRefreshing = false
+        val snapshot = try {
+            refreshMutex.withLock {
+                val previous = mutableCatalog.value
+                pushCatalogRefreshing()
+                foregroundRefreshing = true
+                publishCatalogSyncState(
+                    CatalogSyncState(
+                        phase = CatalogSyncPhase.LoadingLibrary,
+                        message = if (previous.isNotEmpty()) "Refreshing library…" else "Loading Subsonic metadata…",
+                        blocking = !previous.isNotEmpty(),
+                    ),
+                    force = true,
+                )
+                try {
+                    val ctx = SourceBuildContext(
+                        session = session,
+                        plexClient = plexClient,
+                        httpClient = httpClient,
+                        localFolders = mediaSourcesRepository.state.value.localFolders,
+                        localFileMetadataCache = localFileMetadataCache,
+                    )
+                    val server = session.selectedServer ?: return@withLock previous
+                    val username = session.userName
+                    val password = session.token
+                    val library = session.selectedLibrary ?: NavidromeAllMusicLibrary
+                    val localDeferred = startDeferredLocalCatalog(ctx)
+                    coroutineScope {
+                        var merged = CatalogSnapshot().copy(downloads = previous.downloads)
+                        var incrementalPersist = false
+                        var libraryShellPublished = false
+
+                        suspend fun publishNavidromeProgress(
+                            raw: CatalogSnapshot,
+                            message: String,
+                            persistProgress: Boolean = false,
+                            publishShell: Boolean = false,
+                        ) {
+                            val currentMerged = mutableCatalog.value
+                            val newMerged = CatalogMerge.merge(
+                                CatalogSnapshot(),
+                                CatalogMerge.withPrefix(remotePrefix, raw),
+                                CatalogSnapshot(),
+                            )
+                            merged = newMerged.copy(
+                                downloads = previous.downloads,
+                                artists = newMerged.artists.ifEmpty { currentMerged.artists },
+                                albums = newMerged.albums.ifEmpty { currentMerged.albums },
+                                playlists = mergeDistinctPlaylists(currentMerged.playlists, newMerged.playlists),
+                                tracksByParent = mergeTrackParents(
+                                    currentMerged.tracksByParent,
+                                    newMerged.tracksByParent,
+                                ),
+                            )
+                            mutableCatalog.value = merged
+                            publishCatalogSyncState(
+                                CatalogSyncState(
+                                    phase = if (!publishShell && merged.tracksByParent.isEmpty()) {
+                                        CatalogSyncPhase.LoadingLibrary
+                                    } else {
+                                        CatalogSyncPhase.LoadingSongs
+                                    },
+                                    message = message,
+                                    loadedAlbums = merged.albums.size,
+                                    loadedTracks = merged.tracksByParent.values.sumOf { it.size },
+                                    blocking = false,
+                                ),
+                                force = publishShell,
+                            )
+                            if (persistProgress) {
+                                incrementalPersist = true
+                                enqueueCatalogDbWrite { persistCatalogShell(merged) }
+                            }
+                            if (publishShell && !libraryShellPublished) {
+                                libraryShellPublished = true
+                                popCatalogRefreshing()
+                                foregroundRefreshing = false
+                            }
+                            yield()
+                        }
+
+                        if (session.jellyfinSyncMode == JellyfinSyncMode.Quick) {
+                            publishCatalogSyncState(
+                                CatalogSyncState(
+                                    phase = CatalogSyncPhase.LoadingLibrary,
+                                    message = "Loading Subsonic metadata…",
+                                    blocking = !previous.isNotEmpty(),
+                                ),
+                                force = true,
+                            )
+                            val shell = subsonicClient.quickCatalogShell(server, username, password)
+                            publishNavidromeProgress(
+                                raw = shell,
+                                message = "Indexing Subsonic songs…",
+                                persistProgress = true,
+                                publishShell = true,
+                            )
+
+                            val albumsToIndex = shell.albums.take(SubsonicQuickSyncAlbumTrackBatch)
+                            if (albumsToIndex.isNotEmpty()) {
+                                val albumsById = shell.albums.associateBy { it.id }
+                                var indexedAlbumPages = 0
+                                val totalAlbumPages = albumsToIndex.size
+                                val progressJob = launch {
+                                    while (isActive) {
+                                        updateNavidromeAlbumIndexProgress(indexedAlbumPages, totalAlbumPages)
+                                        delay(SyncProgressUpdateIntervalMs)
+                                    }
+                                }
+                                val tracksByAlbum = subsonicClient.albumTracksParallel(
+                                    server = server,
+                                    albums = albumsToIndex,
+                                    username = username,
+                                    password = password,
+                                    albumsById = albumsById,
+                                    parallelism = catalogTrackIndexParallelism().coerceAtLeast(1),
+                                ) { loaded, _ ->
+                                    indexedAlbumPages = loaded
+                                }
+                                progressJob.cancel()
+                                updateNavidromeAlbumIndexProgress(indexedAlbumPages, totalAlbumPages)
+                                val likedTracks = shell.tracksByParent[LIKED_SONGS_PLAYLIST_BARE_ID].orEmpty()
+                                val tracksWithLiked = if (likedTracks.isEmpty()) {
+                                    tracksByAlbum
+                                } else {
+                                    tracksByAlbum + (LIKED_SONGS_PLAYLIST_BARE_ID to likedTracks)
+                                }
+                                publishNavidromeProgress(
+                                    raw = shell.copy(
+                                        tracksByParent = tracksWithLiked,
+                                    ),
+                                    message = "Indexing Subsonic songs…",
+                                )
+                            }
+                        } else {
+                            var indexedAlbumPages = 0
+                            var totalAlbumPages = 0
+                            val progressJob = launch {
+                                while (isActive) {
+                                    if (totalAlbumPages > 0) {
+                                        updateNavidromeAlbumIndexProgress(indexedAlbumPages, totalAlbumPages)
+                                    } else {
+                                        publishCatalogSyncState(
+                                            mutableCatalogSyncState.value.copy(
+                                                phase = CatalogSyncPhase.LoadingLibrary,
+                                                message = "Loading Subsonic metadata…",
+                                                blocking = !libraryShellPublished && !previous.isNotEmpty(),
+                                            ),
+                                        )
+                                    }
+                                    delay(SyncProgressUpdateIntervalMs)
+                                }
+                            }
+                            val remoteRaw = subsonicClient.buildCatalog(
+                                server = server,
+                                library = library,
+                                username = username,
+                                password = password,
+                            ) { _, loadedAlbums, totalAlbums ->
+                                indexedAlbumPages = loadedAlbums
+                                totalAlbumPages = totalAlbums
+                            }
+                            progressJob.cancel()
+                            if (totalAlbumPages > 0) {
+                                updateNavidromeAlbumIndexProgress(indexedAlbumPages, totalAlbumPages)
+                            }
+                            publishNavidromeProgress(
+                                raw = remoteRaw,
+                                message = "Indexing Subsonic songs…",
+                                persistProgress = true,
+                                publishShell = true,
+                            )
+                        }
+
+                        if (incrementalPersist) {
+                            enqueueCatalogDbWrite { persistCatalogShell(merged) }
+                        }
+                        persistAsync(merged)
+                        val partialPaged = merged.remotePageInfo.hasUnloadedRemotePages()
+                        if (incrementalPersist || partialPaged) {
+                            persistenceScope.launch {
+                                runCatching {
+                                    awaitCatalogDbWrites()
+                                    runCatalogDbWrite {
+                                        reconcileCatalogPersistence(merged, partialPaged = partialPaged)
+                                    }
+                                }.onFailure { error ->
+                                    PhoebeLog.d("CatalogRepository") {
+                                        "background catalog reconcile failed: ${error.message}"
+                                    }
+                                }
+                            }
+                        }
+                        scheduleDeferredLocalCatalogMerge(localDeferred)
+                        publishCatalogSyncState(
+                            CatalogSyncState(
+                                phase = CatalogSyncPhase.Complete,
+                                message = "Library ready.",
+                                loadedAlbums = merged.albums.size,
+                                loadedTracks = merged.tracksByParent.values.sumOf { it.size },
+                                progress = 1f,
+                            ),
+                            force = true,
+                        )
+                        merged
+                    }
+                } catch (error: Throwable) {
+                    if (error is CancellationException) {
+                        if (foregroundRefreshing) {
+                            popCatalogRefreshing()
+                            foregroundRefreshing = false
+                        }
+                        mutableCatalogSyncState.value = CatalogSyncState()
+                        throw error
+                    }
+                    mutableCatalogSyncState.value = CatalogSyncState(
+                        phase = CatalogSyncPhase.Failed,
+                        message = error.message ?: "$remoteLabel sync failed.",
+                    )
+                    if (foregroundRefreshing) {
+                        popCatalogRefreshing()
+                        foregroundRefreshing = false
+                    }
+                    throw error
+                }
+            }
+        } catch (error: Throwable) {
+            if (error is CancellationException) throw error
+            mutableCatalogSyncState.value = CatalogSyncState(
+                phase = CatalogSyncPhase.Failed,
+                message = error.message ?: "$remoteLabel sync failed.",
+            )
+            throw error
+        } finally {
+            catalogRefreshingDepth = 0
+            mutableCatalogRefreshing.value = false
         }
         PhoebeLog.d("CatalogRepository") {
             "refreshAggregated complete → ${snapshot.albums.size} albums, " +
@@ -2105,6 +2363,22 @@ class CatalogRepository(
         )
     }
 
+    private fun updateNavidromeAlbumIndexProgress(loadedAlbumPages: Int, totalAlbumPages: Int) {
+        if (totalAlbumPages <= 0) return
+        val progress = (loadedAlbumPages.toFloat() / totalAlbumPages).coerceIn(0f, 1f)
+        publishCatalogSyncState(
+            mutableCatalogSyncState.value.copy(
+                phase = CatalogSyncPhase.LoadingSongs,
+                message = "Indexing Subsonic songs…",
+                detail = "$loadedAlbumPages / $totalAlbumPages albums",
+                loadedAlbums = mutableCatalog.value.albums.size,
+                loadedTracks = mutableCatalog.value.tracksByParent.values.sumOf { it.size },
+                progress = progress,
+                blocking = false,
+            ),
+        )
+    }
+
     private fun publishCatalogSyncState(state: CatalogSyncState, force: Boolean = false) {
         if (force) {
             if (!state.isActive) catalogSyncUiThrottle.reset()
@@ -2514,7 +2788,21 @@ class CatalogRepository(
         publish(mutableCatalog.value, persist = true)
     }
 
+    suspend fun warmTracksForPersonalMix(session: PlexSession?, minTracks: Int): Int {
+        if (minTracks <= 0) return 0
+        val startCount = mutableCatalog.value.playableTrackCount()
+        if (startCount >= minTracks) return 0
+        if (session?.isNavidrome() != true) return 0
+        warmNavidromeAlbumTracksForPool(session, minTracks - startCount)
+        return mutableCatalog.value.playableTrackCount() - startCount
+    }
+
     suspend fun warmRecentAlbumTracks(session: PlexSession?, cutoffMs: Long, maxAlbums: Int = 10) {
+        val navidromeSession = session?.takeIf { it.isNavidrome() }
+        if (navidromeSession != null) {
+            warmNavidromeRecentAlbumTracks(navidromeSession, cutoffMs, maxAlbums)
+            return
+        }
         val server = session?.selectedServer ?: return
         val token = session.serverAuthToken() ?: return
         val albumsToFetch = mutableCatalog.value.albums
@@ -2623,6 +2911,125 @@ class CatalogRepository(
                     yield()
                 }
         }
+        publish(mutableCatalog.value, persist = true)
+    }
+
+    private suspend fun warmNavidromeAlbumTracksByTitle(
+        session: PlexSession,
+        albumTitles: List<String>,
+        maxAlbums: Int = 10,
+    ) {
+        val titleOrder = albumTitles
+            .mapIndexedNotNull { index, title ->
+                title.trim().lowercase().takeIf { it.isNotBlank() }?.let { it to index }
+            }
+            .toMap()
+        if (titleOrder.isEmpty()) return
+        val albumsToFetch = mutableCatalog.value.albums
+            .asSequence()
+            .filter { it.title.trim().lowercase() in titleOrder }
+            .filter { mutableCatalog.value.tracksByParent[it.id].isNullOrEmpty() }
+            .sortedBy { titleOrder[it.title.trim().lowercase()] ?: Int.MAX_VALUE }
+            .take(maxAlbums)
+            .toList()
+        publishNavidromeAlbumTracks(session, albumsToFetch)
+    }
+
+    private suspend fun warmNavidromeRecentAlbumTracks(
+        session: PlexSession,
+        cutoffMs: Long,
+        maxAlbums: Int,
+    ) {
+        val albumsToFetch = mutableCatalog.value.albums
+            .asSequence()
+            .filter { (it.dateAddedMs ?: Long.MIN_VALUE) >= cutoffMs }
+            .filter { mutableCatalog.value.tracksByParent[it.id].isNullOrEmpty() }
+            .sortedByDescending { it.dateAddedMs ?: 0L }
+            .take(maxAlbums)
+            .toList()
+        if (albumsToFetch.isEmpty()) return
+        PhoebeLog.v("CatalogRepository") { "warmNavidromeRecentAlbumTracks → ${albumsToFetch.size} albums" }
+        publishNavidromeAlbumTracks(session, albumsToFetch)
+    }
+
+    private suspend fun warmNavidromeAlbumTracksForPool(session: PlexSession, minAdditionalTracks: Int) {
+        if (minAdditionalTracks <= 0) return
+        if (session.selectedServer == null || session.token.isBlank()) return
+        val targetCount = mutableCatalog.value.playableTrackCount() + minAdditionalTracks
+        val albumsWithoutTracks = mutableCatalog.value.albums
+            .asSequence()
+            .filter { mutableCatalog.value.tracksByParent[it.id].isNullOrEmpty() }
+            .shuffled()
+            .take(PersonalMixWarmMaxAlbums)
+            .toList()
+        if (albumsWithoutTracks.isEmpty()) return
+        PhoebeLog.d("CatalogRepository") {
+            "warmNavidromeAlbumTracksForPool → need $minAdditionalTracks more tracks"
+        }
+        for (batch in albumsWithoutTracks.chunked(PersonalMixWarmBatchAlbums.coerceAtLeast(1))) {
+            if (mutableCatalog.value.playableTrackCount() >= targetCount) break
+            publishNavidromeAlbumTracks(session, batch)
+        }
+    }
+
+    private suspend fun publishNavidromeAlbumTracks(session: PlexSession, albums: List<Album>) {
+        if (albums.isEmpty()) return
+        val server = session.selectedServer ?: return
+        val username = session.userName
+        val password = session.token.takeIf { it.isNotBlank() } ?: return
+        val prefix = session.providerType.catalogPrefix
+        val remoteAlbums = albums.map { album -> album.copy(id = album.id.removePrefix("$prefix:")) }
+        val tracksByAlbum = subsonicClient.albumTracksParallel(
+            server = server,
+            albums = remoteAlbums,
+            username = username,
+            password = password,
+            albumsById = remoteAlbums.associateBy { it.id },
+            parallelism = catalogTrackIndexParallelism().coerceAtLeast(1),
+        )
+        if (tracksByAlbum.isEmpty()) return
+        val prefixedTracksByAlbum = CatalogMerge.withPrefix(
+            prefix,
+            CatalogSnapshot(tracksByParent = tracksByAlbum),
+        ).tracksByParent
+        catalogMergeMutex.withLock {
+            val cur = mutableCatalog.value
+            publish(
+                cur.copy(tracksByParent = mergeTrackParents(cur.tracksByParent, prefixedTracksByAlbum)),
+                persist = true,
+            )
+        }
+    }
+
+    private fun CatalogSnapshot.playableTrackCount(): Int =
+        tracksByParent.values
+            .asSequence()
+            .flatten()
+            .distinctBy { it.id }
+            .count { it.streamUrl.isNotBlank() || !it.localUri.isNullOrBlank() }
+
+    private suspend fun publishIndexedProviderTracks(prefix: String, rawTracks: List<Track>) {
+        val tracksByAlbum = rawTracks
+            .map { it.withProviderPrefix(prefix) }
+            .groupBy { track -> resolveIndexedTrackParentId(track, mutableCatalog.value) }
+            .filterKeys { it != null }
+            .mapKeys { it.key!! }
+        if (tracksByAlbum.isEmpty()) return
+        catalogMergeMutex.withLock {
+            val cur = mutableCatalog.value
+            var nextParents = cur.tracksByParent
+            tracksByAlbum.forEach { (parentId, tracks) ->
+                val existing = nextParents[parentId].orEmpty()
+                val incoming = preserveTrackDateAdded(existing, tracks)
+                nextParents = nextParents + (parentId to (existing + incoming).distinctBy { it.id })
+            }
+            mutableCatalog.value = cur.copy(tracksByParent = nextParents)
+        }
+    }
+
+    suspend fun publishNavidromeTracks(tracks: List<Track>) {
+        if (tracks.isEmpty()) return
+        publishIndexedProviderTracks("navidrome", tracks)
         publish(mutableCatalog.value, persist = true)
     }
 
@@ -2765,6 +3172,37 @@ class CatalogRepository(
 
         val server = session?.selectedServer
         val token = session?.serverAuthToken()
+        if (server != null && session.isNavidrome()) {
+            val username = session.userName
+            val password = session.token
+            val fetched = coroutineScope {
+                missing.map { entry ->
+                    async {
+                        runCatching { subsonicClient.getSong(server, username, password, entry.trackId) }
+                            .onFailure { e ->
+                                PhoebeLog.d("CatalogRepository") {
+                                    "most-played track warm failed for '${entry.trackId}': ${e.message}"
+                                }
+                            }
+                            .getOrNull()
+                    }
+                }.awaitAll().filterNotNull()
+            }
+            if (fetched.isNotEmpty()) {
+                publishIndexedProviderTracks("navidrome", fetched)
+                publish(mutableCatalog.value, persist = true)
+            }
+            val alreadyResolvedAfterFetch = resolveTracksByIds(missing.map { it.trackId })
+            val stillMissing = missing.filter { it.trackId !in alreadyResolvedAfterFetch }
+            val albumTitles = stillMissing
+                .map { it.album.trim() }
+                .filter { it.isNotBlank() }
+                .distinctBy { it.lowercase() }
+            if (albumTitles.isNotEmpty()) {
+                warmNavidromeAlbumTracksByTitle(session, albumTitles, maxAlbums = albumTitles.size.coerceAtMost(maxTracks))
+            }
+            return fetched.size
+        }
         if (server != null && token != null && session.isPlex()) {
             val ratingKeys = missing.mapNotNull { entry ->
                 plexRatingKey(entry.trackId)?.takeIf { it.isNotBlank() }
@@ -3218,8 +3656,30 @@ class CatalogRepository(
         if (playlist.isLocalPlaylist()) {
             return mutableCatalog.value.tracksByParent[playlist.id].orEmpty()
         }
-        if (playlist.id == PENDING_LIKED_SONGS_PLAYLIST_ID) {
-            return mutableCatalog.value.tracksByParent[playlist.id].orEmpty()
+        if (playlist.id == PENDING_LIKED_SONGS_PLAYLIST_ID || playlist.isLikedSongsPlaylist()) {
+            val cached = mutableCatalog.value.tracksByParent[playlist.id].orEmpty()
+            if (cached.isNotEmpty()) return cached
+            readTracksForParentFromDatabase(playlist.id)?.let { fromDb ->
+                if (fromDb.isNotEmpty()) {
+                    publish(
+                        mutableCatalog.value.copy(
+                            tracksByParent = mutableCatalog.value.tracksByParent + (playlist.id to fromDb),
+                        ),
+                        persist = false,
+                    )
+                    return fromDb
+                }
+            }
+            if (session?.isNavidrome() == true) {
+                pushTracksLoading(playlist.id)
+                return try {
+                    refetchPlaylistTracksFromPlex(session, playlist, showRefreshing = false)
+                    mutableCatalog.value.tracksByParent[playlist.id].orEmpty()
+                } finally {
+                    popTracksLoading(playlist.id)
+                }
+            }
+            return emptyList()
         }
         val snapshot = mutableCatalog.value
         val playlistMeta = snapshot.playlists.find { it.id == playlist.id } ?: playlist
@@ -3279,10 +3739,19 @@ class CatalogRepository(
         return createPlaylist(session, LIKED_SONGS_PLAYLIST_TITLE)
     }
 
-    suspend fun ensureLocalLikedSongsPlaylist(): Playlist {
+    suspend fun ensureLocalLikedSongsPlaylist(session: PlexSession? = null): Playlist {
+        val providerPlaylistId = session?.providerType?.let { likedSongsPlaylistId(it) }
+        providerPlaylistId?.let { id ->
+            mutableCatalog.value.playlists.firstOrNull { it.id == id }?.let { return it }
+        }
+        val pending = mutableCatalog.value.playlists.firstOrNull { it.id == PENDING_LIKED_SONGS_PLAYLIST_ID }
+        if (pending != null && providerPlaylistId != null) {
+            migratePendingLikedSongs(providerPlaylistId)
+            return mutableCatalog.value.playlists.first { it.id == providerPlaylistId }
+        }
         mutableCatalog.value.playlists.firstOrNull { it.isLikedSongsPlaylist() }?.let { return it }
         val playlist = Playlist(
-            id = PENDING_LIKED_SONGS_PLAYLIST_ID,
+            id = providerPlaylistId ?: PENDING_LIKED_SONGS_PLAYLIST_ID,
             title = LIKED_SONGS_PLAYLIST_TITLE,
             trackCount = 0,
         )
@@ -3291,6 +3760,20 @@ class CatalogRepository(
             persist = true,
         )
         return playlist
+    }
+
+    private suspend fun migratePendingLikedSongs(targetPlaylistId: String) {
+        val snapshot = mutableCatalog.value
+        val pendingTracks = snapshot.tracksByParent[PENDING_LIKED_SONGS_PLAYLIST_ID].orEmpty()
+        if (pendingTracks.isEmpty()) return
+        val targetTracks = snapshot.tracksByParent[targetPlaylistId].orEmpty()
+        val mergedTracks = (targetTracks + pendingTracks).distinctBy { it.id }
+        val targetPlaylist = snapshot.playlists.firstOrNull { it.id == targetPlaylistId }
+            ?: Playlist(id = targetPlaylistId, title = LIKED_SONGS_PLAYLIST_TITLE, trackCount = mergedTracks.size)
+        publishLikedSongs(
+            targetPlaylist.copy(trackCount = mergedTracks.size),
+            mergedTracks,
+        )
     }
 
     fun isTrackLiked(trackId: String): Boolean {
@@ -3303,9 +3786,9 @@ class CatalogRepository(
         return toggleLikedTrackRemote(session, track)
     }
 
-    suspend fun toggleLikedTrackLocally(track: Track): Boolean {
+    suspend fun toggleLikedTrackLocally(session: PlexSession?, track: Track): Boolean {
         if (!track.canTogglePlexLike()) return false
-        val playlist = ensureLocalLikedSongsPlaylist()
+        val playlist = ensureLocalLikedSongsPlaylist(session)
         val snapshot = mutableCatalog.value
         val existing = snapshot.tracksByParent[playlist.id].orEmpty()
         val isLiked = existing.any { it.hasSamePlexIdentity(track.id) }
@@ -3445,11 +3928,12 @@ class CatalogRepository(
             snapshot.copy(playlists = nextPlaylists, tracksByParent = nextTracks),
             persist = true,
         )
+        persistPlaylistTracksAsync(mutableCatalog.value, playlist.id)
     }
 
     suspend fun toggleLikedTrackRemote(session: PlexSession?, track: Track): Boolean {
         if (session != null && !session.isPlex()) {
-            val liked = toggleLikedTrackLocally(track)
+            val liked = toggleLikedTrackLocally(session, track)
             syncLikedTrackChange(session, track, liked)
             return liked
         }
@@ -5227,6 +5711,8 @@ class CatalogRepository(
         const val CollectionFacetFirstPageSize = 80
         const val CollectionFacetTrackLimit = 500
         const val MaxCollectionFacetTrackPages = 4
+        const val PersonalMixWarmBatchAlbums = 12
+        const val PersonalMixWarmMaxAlbums = 48
     }
 }
 

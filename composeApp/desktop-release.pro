@@ -39,6 +39,26 @@
     *;
 }
 
+# Navigation routes are persisted via rememberSerializable + kotlinx.serialization.
+# Without these rules, release builds crash when opening routes such as Recently Added.
+-keepattributes *Annotation*, InnerClasses
+-dontnote kotlinx.serialization.**
+
+-if @kotlinx.serialization.Serializable class **
+-keepclassmembers class <1> {
+    static <1>$Companion Companion;
+}
+
+-if @kotlinx.serialization.Serializable class ** {
+    static **$* *;
+}
+-keepclassmembers class <2>$<3> {
+    kotlinx.serialization.KSerializer serializer(...);
+}
+
+-keep @kotlinx.serialization.Serializable class com.phoebe.app.** { *; }
+-keep,includedescriptorclasses class com.phoebe.app.**$$serializer { *; }
+
 # Kotlin default-arg stubs + large home derivation break ProGuard stack maps (VerifyError on macOS release).
 -keep class com.phoebe.app.ui.HomeUiStateKt {
     *;

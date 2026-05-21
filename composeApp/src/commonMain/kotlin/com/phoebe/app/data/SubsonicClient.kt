@@ -3,7 +3,9 @@ package com.phoebe.app.data
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.CatalogSnapshot
+import com.phoebe.app.domain.LIKED_SONGS_PLAYLIST_BARE_ID
 import com.phoebe.app.domain.LIKED_SONGS_PLAYLIST_TITLE
+import com.phoebe.app.domain.isLikedSongsPlaylist
 import com.phoebe.app.domain.MusicLibrary
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.PlexServer
@@ -14,10 +16,23 @@ import io.ktor.client.call.body
 import io.ktor.client.request.get
 import io.ktor.client.request.parameter
 import io.ktor.http.encodeURLParameter
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 internal val NavidromeAllMusicLibrary = MusicLibrary("all", "All Music")
+
+internal const val SubsonicQuickSyncAlbumTrackBatch = 40
+
+internal const val SubsonicPlayHistoryAlbumListSize = 50
+
+internal data class SubsonicSongPlayStat(
+    val track: Track,
+    val playCount: Long,
+    val lastPlayedMs: Long?,
+)
 
 class SubsonicClient(
     private val httpClient: HttpClient,
@@ -45,21 +60,29 @@ class SubsonicClient(
         return listOf(NavidromeAllMusicLibrary)
     }
 
-    suspend fun buildCatalog(server: PlexServer, library: MusicLibrary, username: String, password: String): CatalogSnapshot {
+    suspend fun buildCatalog(
+        server: PlexServer,
+        library: MusicLibrary,
+        username: String,
+        password: String,
+        onProgress: suspend (message: String, loadedAlbums: Int, totalAlbums: Int) -> Unit = { _, _, _ -> },
+    ): CatalogSnapshot {
+        onProgress("Loading Subsonic artists…", 0, 0)
         val artistsFromEndpoint = artists(server, library, username, password)
+        onProgress("Loading Subsonic albums…", 0, 0)
         val albums = albums(server, library, username, password)
+        onProgress("Loading starred items…", 0, albums.size)
         val starred = starred(server, username, password)
         val albumsById = albums.associateBy { it.id }
-        val tracksByAlbum = albums.associate { album ->
-            album.id to albumTracks(server, album, username, password).map { track ->
-                val knownAlbum = albumsById[album.id]
-                if (knownAlbum == null) track else track.copy(
-                    album = knownAlbum.title,
-                    artist = track.artist.takeUnless { it == "Unknown artist" } ?: knownAlbum.artist,
-                    thumbUrl = track.thumbUrl ?: knownAlbum.thumbUrl,
-                    parentAlbumId = album.id,
-                )
-            }
+        onProgress("Indexing Subsonic songs…", 0, albums.size)
+        val tracksByAlbum = albumTracksParallel(
+            server = server,
+            albums = albums,
+            username = username,
+            password = password,
+            albumsById = albumsById,
+        ) { loaded, total ->
+            onProgress("Indexing Subsonic songs…", loaded, total)
         }
         val albumsWithArtwork = enrichAlbumsFromTracks(albums, tracksByAlbum)
             .map { album -> if (album.id.removePrefix("navidrome:") in starred.albumIds) album.copy(favorite = true) else album }
@@ -80,41 +103,160 @@ class SubsonicClient(
     }
 
     suspend fun quickCatalog(server: PlexServer, username: String, password: String): CatalogSnapshot {
-        val artistsFromEndpoint = artists(server, NavidromeAllMusicLibrary, username, password)
-        val albumPage = albumPage(server, username, password, pageIndex = 0)
-        val starred = starred(server, username, password)
-        val tracksByAlbum = albumPage.items.associate { album ->
-            album.id to albumTracks(server, album, username, password).map { track ->
-                track.copy(
-                    album = track.album.takeUnless { it == "Unknown album" } ?: album.title,
-                    artist = track.artist.takeUnless { it == "Unknown artist" } ?: album.artist,
-                    thumbUrl = track.thumbUrl ?: album.thumbUrl,
+        val shell = quickCatalogShell(server, username, password)
+        val albumsToIndex = shell.albums.take(SubsonicQuickSyncAlbumTrackBatch)
+        if (albumsToIndex.isEmpty()) return shell
+        val albumsById = shell.albums.associateBy { it.id }
+        val tracksByAlbum = albumTracksParallel(
+            server = server,
+            albums = albumsToIndex,
+            username = username,
+            password = password,
+            albumsById = albumsById,
+        )
+        val albumsWithArtwork = enrichAlbumsFromTracks(shell.albums, tracksByAlbum)
+        val likedTracks = shell.tracksByParent[LIKED_SONGS_PLAYLIST_BARE_ID].orEmpty()
+        return shell.copy(
+            albums = albumsWithArtwork,
+            tracksByParent = tracksByAlbum.withLikedSongs(likedTracks),
+        )
+    }
+
+    suspend fun quickCatalogShell(server: PlexServer, username: String, password: String): CatalogSnapshot =
+        coroutineScope {
+            val artistsDeferred = async { artists(server, NavidromeAllMusicLibrary, username, password) }
+            val albumPageDeferred = async { albumPage(server, username, password, pageIndex = 0) }
+            val starredDeferred = async { starred(server, username, password) }
+            val playlistsDeferred = async { playlists(server, username, password) }
+
+            val artistsFromEndpoint = artistsDeferred.await()
+            val albumPage = albumPageDeferred.await()
+            val starred = starredDeferred.await()
+            val playlists = runCatching { playlistsDeferred.await() }.getOrDefault(emptyList())
+            val albumsWithArtwork = albumPage.items
+                .map { album -> if (album.id.removePrefix("navidrome:") in starred.albumIds) album.copy(favorite = true) else album }
+            val artists = mergeArtistsFromAlbums(
+                artistsFromEndpoint.map { artist ->
+                    if (artist.id.removePrefix("navidrome:") in starred.artistIds) artist.copy(favorite = true) else artist
+                },
+                albumsWithArtwork,
+            )
+            val likedTracks = starred.tracks
+            CatalogSnapshot(
+                artists = artists,
+                albums = albumsWithArtwork,
+                playlists = playlists.withLikedSongs(likedTracks),
+                tracksByParent = emptyMap<String, List<Track>>().withLikedSongs(likedTracks),
+                remotePageInfo = com.phoebe.app.domain.CatalogPageInfo(
+                    pageSize = albumPage.pageSize,
+                    artistTotal = artists.size,
+                    loadedArtistPages = setOf(0),
+                    albumTotal = albumPage.total,
+                    loadedAlbumPages = if (albumPage.items.isNotEmpty()) setOf(0) else emptySet(),
+                ),
+            )
+        }
+
+    suspend fun albumTracksParallel(
+        server: PlexServer,
+        albums: List<Album>,
+        username: String,
+        password: String,
+        albumsById: Map<String, Album> = albums.associateBy { it.id },
+        parallelism: Int = 8,
+        onProgress: suspend (loaded: Int, total: Int) -> Unit = { _, _ -> },
+    ): Map<String, List<Track>> {
+        if (albums.isEmpty()) return emptyMap()
+        val result = LinkedHashMap<String, List<Track>>(albums.size)
+        var loaded = 0
+        coroutineScope {
+            albums.chunked(parallelism.coerceAtLeast(1)).forEach { chunk ->
+                chunk.map { album ->
+                    async {
+                        album.id to albumTracks(server, album, username, password).map { track ->
+                            val knownAlbum = albumsById[album.id]
+                            if (knownAlbum == null) {
+                                track.copy(parentAlbumId = album.id)
+                            } else {
+                                track.copy(
+                                    album = knownAlbum.title,
+                                    artist = track.artist.takeUnless { it == "Unknown artist" } ?: knownAlbum.artist,
+                                    thumbUrl = track.thumbUrl ?: knownAlbum.thumbUrl,
+                                    parentAlbumId = album.id,
+                                )
+                            }
+                        }
+                    }
+                }.awaitAll().forEach { (albumId, tracks) ->
+                    result[albumId] = tracks
+                }
+                loaded += chunk.size
+                onProgress(loaded, albums.size)
+            }
+        }
+        return result
+    }
+
+    suspend fun getSong(server: PlexServer, username: String, password: String, songId: String): Track? {
+        val id = songId.removePrefix("navidrome:")
+        val response = request<SubsonicSongRoot>(server.uri, username, password, "getSong") {
+            parameter("id", id)
+        }
+        return response.response.song?.toTrack(server.uri, username, password)
+    }
+
+    suspend fun albumListByType(
+        server: PlexServer,
+        username: String,
+        password: String,
+        type: String,
+        size: Int = SubsonicPlayHistoryAlbumListSize,
+    ): List<Album> {
+        val response = request<SubsonicAlbumListRoot>(server.uri, username, password, "getAlbumList2") {
+            parameter("type", type)
+            parameter("size", size.coerceIn(1, SubsonicPageSize))
+            parameter("offset", 0)
+        }
+        return response.response.albumList2?.album.orEmpty().map { it.toAlbum(server.uri, username, password) }
+    }
+
+    internal suspend fun playHistoryStats(
+        server: PlexServer,
+        username: String,
+        password: String,
+        maxAlbumsPerList: Int = SubsonicPlayHistoryAlbumListSize,
+    ): List<SubsonicSongPlayStat> {
+        val albums = (
+            albumListByType(server, username, password, "frequent", maxAlbumsPerList) +
+                albumListByType(server, username, password, "recent", maxAlbumsPerList)
+            ).distinctBy { it.id }
+        if (albums.isEmpty()) return emptyList()
+        val statsBySongId = LinkedHashMap<String, SubsonicSongPlayStat>()
+        for (album in albums) {
+            val id = album.id.removePrefix("navidrome:")
+            val response = request<SubsonicAlbumRoot>(server.uri, username, password, "getAlbum") {
+                parameter("id", id)
+            }
+            val songs = response.response.album?.song.orEmpty()
+            for (song in songs) {
+                val playCount = song.playCount?.toLong()?.coerceAtLeast(0L) ?: 0L
+                val lastPlayedMs = song.played?.parseSubsonicTimestampMillis()
+                if (playCount <= 0L && lastPlayedMs == null) continue
+                val track = song.toTrack(server.uri, username, password).copy(
+                    album = song.album ?: album.title,
+                    artist = song.artist ?: album.artist,
+                    thumbUrl = song.coverArt?.let { coverArtUrl(server.uri, username, password, it) } ?: album.thumbUrl,
                     parentAlbumId = album.id,
+                )
+                val existing = statsBySongId[song.id]
+                statsBySongId[song.id] = SubsonicSongPlayStat(
+                    track = track,
+                    playCount = maxOf(existing?.playCount ?: 0L, playCount),
+                    lastPlayedMs = listOfNotNull(existing?.lastPlayedMs, lastPlayedMs).maxOrNull(),
                 )
             }
         }
-        val albumsWithArtwork = enrichAlbumsFromTracks(albumPage.items, tracksByAlbum)
-            .map { album -> if (album.id.removePrefix("navidrome:") in starred.albumIds) album.copy(favorite = true) else album }
-        val artists = mergeArtistsFromAlbums(
-            artistsFromEndpoint.map { artist ->
-                if (artist.id.removePrefix("navidrome:") in starred.artistIds) artist.copy(favorite = true) else artist
-            },
-            albumsWithArtwork,
-        )
-        val likedTracks = starred.tracks
-        return CatalogSnapshot(
-            artists = artists,
-            albums = albumsWithArtwork,
-            playlists = playlists(server, username, password).withLikedSongs(likedTracks),
-            tracksByParent = tracksByAlbum.withLikedSongs(likedTracks),
-            remotePageInfo = com.phoebe.app.domain.CatalogPageInfo(
-                pageSize = albumPage.pageSize,
-                artistTotal = artists.size,
-                loadedArtistPages = setOf(0),
-                albumTotal = albumPage.total,
-                loadedAlbumPages = if (albumPage.items.isNotEmpty()) setOf(0) else emptySet(),
-            ),
-        )
+        return statsBySongId.values.toList()
     }
 
     suspend fun artists(server: PlexServer, library: MusicLibrary, username: String, password: String): List<Artist> {
@@ -177,8 +319,14 @@ class SubsonicClient(
         return response.response.album?.song.orEmpty().map { it.toTrack(server.uri, username, password) }
     }
 
+    suspend fun likedSongTracks(server: PlexServer, username: String, password: String): List<Track> =
+        starred(server, username, password).tracks
+
     suspend fun playlistTracks(server: PlexServer, playlist: Playlist, username: String, password: String): List<Track> {
         val id = playlist.id.removePrefix("navidrome:")
+        if (id == LIKED_SONGS_PLAYLIST_BARE_ID) {
+            return likedSongTracks(server, username, password)
+        }
         val response = request<SubsonicPlaylistRoot>(server.uri, username, password, "getPlaylist") {
             parameter("id", id)
         }
@@ -339,6 +487,9 @@ private data class SubsonicAlbumListRoot(@SerialName("subsonic-response") val re
 private data class SubsonicAlbumRoot(@SerialName("subsonic-response") val response: SubsonicResponse = SubsonicResponse())
 
 @Serializable
+private data class SubsonicSongRoot(@SerialName("subsonic-response") val response: SubsonicResponse = SubsonicResponse())
+
+@Serializable
 private data class SubsonicPlaylistsRoot(@SerialName("subsonic-response") val response: SubsonicResponse = SubsonicResponse())
 
 @Serializable
@@ -357,6 +508,7 @@ private data class SubsonicResponse(
     val artists: SubsonicArtists? = null,
     val albumList2: SubsonicAlbumList? = null,
     val album: SubsonicAlbumDto? = null,
+    val song: SubsonicSongDto? = null,
     val playlists: SubsonicPlaylists? = null,
     val playlist: SubsonicPlaylistDto? = null,
     val similarSongs2: SubsonicSongs? = null,
@@ -392,6 +544,9 @@ private data class SubsonicAlbumList(
 )
 
 @Serializable
+private data class SubsonicNamedTag(val name: String? = null)
+
+@Serializable
 private data class SubsonicAlbumDto(
     val id: String,
     val name: String,
@@ -403,7 +558,10 @@ private data class SubsonicAlbumDto(
     val created: String? = null,
     val year: Int? = null,
     val genre: String? = null,
+    val genres: List<SubsonicNamedTag>? = null,
     val starred: String? = null,
+    val playCount: Int? = null,
+    val played: String? = null,
     val song: List<SubsonicSongDto> = emptyList(),
 )
 
@@ -436,12 +594,15 @@ private data class SubsonicSongDto(
     val created: String? = null,
     val year: Int? = null,
     val genre: String? = null,
+    val genres: List<SubsonicNamedTag>? = null,
     val bitRate: Int? = null,
     val suffix: String? = null,
     val contentType: String? = null,
     val path: String? = null,
     val starred: String? = null,
     val userRating: Int? = null,
+    val playCount: Int? = null,
+    val played: String? = null,
 )
 
 @Serializable
@@ -465,16 +626,19 @@ private fun mergeArtistsFromAlbums(artists: List<Artist>, albums: List<Album>): 
             if (key.isBlank() || key == "unknown artist") return@forEach
             val current = existing[key]
             val title = current?.title ?: artistAlbums.first().artist
+            val genre = current?.genre ?: dominantCollectionTagLabel(artistAlbums.mapNotNull { it.genre })
             existing[key] = current?.copy(
                 albumCount = maxOf(current.albumCount, artistAlbums.size),
                 thumbUrl = current.thumbUrl ?: artistAlbums.firstNotNullOfOrNull { it.thumbUrl },
                 favorite = current.favorite || artistAlbums.any { it.favorite },
+                genre = genre,
             ) ?: Artist(
                 id = "artist:${key.hashCode().toUInt().toString(16)}",
                 title = title,
                 albumCount = artistAlbums.size,
                 thumbUrl = artistAlbums.firstNotNullOfOrNull { it.thumbUrl },
                 favorite = artistAlbums.any { it.favorite },
+                genre = genre,
             )
         }
     return existing.values.sortedBy { it.title.lowercase() }
@@ -482,6 +646,14 @@ private fun mergeArtistsFromAlbums(artists: List<Artist>, albums: List<Album>): 
 
 private fun String.normalizedArtistKey(): String =
     trim().lowercase()
+
+private fun resolvedSubsonicGenre(single: String?, multi: List<SubsonicNamedTag>?): String? {
+    val fromMulti = multi?.mapNotNull { it.name?.trim() }?.filter { it.isNotBlank() }.orEmpty()
+    return when {
+        fromMulti.isNotEmpty() -> fromMulti.joinToString(", ")
+        else -> single?.trim()?.takeIf { it.isNotBlank() }
+    }
+}
 
 private fun enrichAlbumsFromTracks(albums: List<Album>, tracksByAlbum: Map<String, List<Track>>): List<Album> =
     albums.map { album ->
@@ -493,18 +665,19 @@ private fun enrichAlbumsFromTracks(albums: List<Album>, tracksByAlbum: Map<Strin
     }
 
 private fun List<Playlist>.withLikedSongs(tracks: List<Track>): List<Playlist> {
-    if (tracks.isEmpty()) return this
     val liked = Playlist(
-        id = "liked-songs",
+        id = LIKED_SONGS_PLAYLIST_BARE_ID,
         title = LIKED_SONGS_PLAYLIST_TITLE,
         trackCount = tracks.size,
         thumbUrl = tracks.firstNotNullOfOrNull { it.thumbUrl },
     )
-    return listOf(liked) + filterNot { it.title == LIKED_SONGS_PLAYLIST_TITLE }
+    return listOf(liked) + filterNot { it.isLikedSongsPlaylist() }
 }
 
-private fun Map<String, List<Track>>.withLikedSongs(tracks: List<Track>): Map<String, List<Track>> =
-    if (tracks.isEmpty()) this else this + ("liked-songs" to tracks)
+private fun Map<String, List<Track>>.withLikedSongs(tracks: List<Track>): Map<String, List<Track>> {
+    val next = this - LIKED_SONGS_PLAYLIST_BARE_ID
+    return if (tracks.isEmpty()) next else next + (LIKED_SONGS_PLAYLIST_BARE_ID to tracks)
+}
 
 private fun SubsonicAlbumDto.toAlbum(baseUrl: String, username: String, password: String): Album =
     Album(
@@ -512,7 +685,7 @@ private fun SubsonicAlbumDto.toAlbum(baseUrl: String, username: String, password
         title = name,
         artist = artist ?: "Unknown artist",
         year = year,
-        genre = genre,
+        genre = resolvedSubsonicGenre(genre, genres),
         dateAddedMs = created?.parseSubsonicTimestampMillis(),
         thumbUrl = coverArt?.let { subsonicBinaryUrl(baseUrl, username, password, "getCoverArt", it) },
         favorite = starred != null,
@@ -529,7 +702,7 @@ private fun SubsonicSongDto.toTrack(baseUrl: String, username: String, password:
         downloadUrl = subsonicBinaryUrl(baseUrl, username, password, "download", id),
         thumbUrl = coverArt?.let { subsonicBinaryUrl(baseUrl, username, password, "getCoverArt", it) },
         year = year,
-        genre = genre,
+        genre = resolvedSubsonicGenre(genre, genres),
         filepath = path,
         audioCodec = suffix?.uppercase() ?: contentType?.substringAfter('/')?.uppercase(),
         bitrateKbps = bitRate,

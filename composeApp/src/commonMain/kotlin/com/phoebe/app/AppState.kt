@@ -34,6 +34,7 @@ import com.phoebe.app.domain.isLocalPlaylist
 import com.phoebe.app.domain.isRemoteProviderPlaylist
 import com.phoebe.app.domain.isEmbyFamily
 import com.phoebe.app.domain.isMusicAssistant
+import com.phoebe.app.domain.isNavidrome
 import com.phoebe.app.domain.isPlex
 import com.phoebe.app.domain.serverAuthToken
 import com.phoebe.app.domain.supportsCollectionEntry
@@ -47,6 +48,7 @@ import com.phoebe.app.data.FavoriteSyncResult
 import com.phoebe.app.data.FavoritePlaylistsExport
 import com.phoebe.app.data.JellyfinQuickConnectResult
 import com.phoebe.app.data.JellyfinPlayHistorySyncResult
+import com.phoebe.app.data.NavidromePlayHistorySyncResult
 import com.phoebe.app.data.PlexPlayHistorySyncResult
 import com.phoebe.app.data.PlexClient
 import com.phoebe.app.data.defaultPlexRadioStations
@@ -763,7 +765,7 @@ class AppState(
     private suspend fun ensureLikedSongsPlaylistIfPossible(): Playlist? {
         if (!session.value.supportsRemotePlaylists()) return null
         return runCatching {
-            dependencies.catalogRepository.ensureLocalLikedSongsPlaylist()
+            dependencies.catalogRepository.ensureLocalLikedSongsPlaylist(session.value)
         }.onFailure { error ->
             PhoebeLog.d("AppState") { "Liked Songs setup failed: ${error.message}" }
         }.getOrNull()
@@ -797,7 +799,7 @@ class AppState(
 
     private fun startRemotePlayHistorySync(showMessage: Boolean) {
         val currentSession = session.value
-        if (!currentSession.isPlex() && !currentSession.isEmbyFamily()) {
+        if (!currentSession.isPlex() && !currentSession.isEmbyFamily() && !currentSession.isNavidrome()) {
             if (showMessage) mutableMessage.value = "${currentSession.providerLabel()} play history sync is handled from playback progress."
             return
         }
@@ -828,6 +830,8 @@ class AppState(
                     PhoebeLog.d("AppState") { "Plex history track warm failed: ${error.message}" }
                 }
                 dependencies.plexPlayHistorySyncer.sync(currentSession, catalog.value)
+            } else if (currentSession.isNavidrome()) {
+                dependencies.navidromePlayHistorySyncer.sync(currentSession, catalog.value)
             } else {
                 dependencies.jellyfinPlayHistorySyncer.sync(currentSession, catalog.value)
             }
@@ -845,6 +849,11 @@ class AppState(
                         val provider = session.value.providerLabel()
                         if (result.imported > 0) "Synced ${result.imported} $provider plays."
                         else "$provider play history is up to date."
+                    }
+                    NavidromePlayHistorySyncResult.Skipped -> "Subsonic play history is not available yet."
+                    is NavidromePlayHistorySyncResult.Synced -> {
+                        if (result.imported > 0) "Synced ${result.imported} Subsonic plays."
+                        else "Subsonic play history is up to date."
                     }
                     else -> "Play history is up to date."
                 }
@@ -979,6 +988,15 @@ class AppState(
         mostPlayedWarmSignature = signature
         scope.launch {
             dependencies.catalogRepository.warmTracksForMostPlayed(session.value, entries, maxTracks)
+        }
+    }
+
+    suspend fun ensurePersonalMixTracks(limit: Int) {
+        if (!session.value.canUsePlexBackgroundFetches()) return
+        runCatching {
+            dependencies.catalogRepository.warmTracksForPersonalMix(session.value, limit)
+        }.onFailure { error ->
+            PhoebeLog.d("AppState") { "personal mix track warm failed: ${error.message}" }
         }
     }
 
@@ -1590,7 +1608,7 @@ class AppState(
             return@launch
         }
         val liked = runCatching {
-            dependencies.catalogRepository.toggleLikedTrackLocally(track)
+            dependencies.catalogRepository.toggleLikedTrackLocally(session.value, track)
         }.getOrElse { error ->
             PhoebeLog.d("AppState") { "toggleLikedTrack failed for '${track.title}': ${error.message}" }
             mutableMessage.value = error.message ?: "Couldn't update Liked Songs."
@@ -1602,15 +1620,23 @@ class AppState(
 
     private fun syncLikedSongsInBackground(track: Track? = null, liked: Boolean? = null) {
         scope.launch {
-            runCatching {
+            val synced = runCatching {
                 if (track != null && liked != null) {
                     dependencies.catalogRepository.syncLikedTrackChange(session.value, track, liked)
                 } else {
                     dependencies.catalogRepository.syncLikedSongsPlaylist(session.value)
                 }
-            }.onFailure { error ->
-                PhoebeLog.d("AppState") { "Liked Songs Plex sync failed: ${error.message}" }
-                mutableMessage.value = "Liked Songs updated locally. Plex sync will retry later."
+            }.getOrElse { error ->
+                PhoebeLog.d("AppState") { "Liked Songs sync failed: ${error.message}" }
+                false
+            }
+            if (track != null && liked != null && synced != true) {
+                val provider = session.value.providerLabel()
+                mutableMessage.value = if (session.value.isNavidrome()) {
+                    "Liked locally. Subsonic favorites sync failed — check your connection and try again."
+                } else {
+                    "Liked Songs updated locally. $provider sync will retry later."
+                }
             }
         }
     }
@@ -1815,6 +1841,9 @@ class AppState(
     fun signOut() {
         cancelCatalogRefresh()
         cancelRemotePlayHistorySync()
+        mostPlayedWarmSignature = null
+        recentAlbumWarmSignature = null
+        playedAlbumWarmSignature = null
         mutableMusicAssistantRemotePlayback.value = null
         dependencies.castController.disconnect()
         dependencies.audioPlayer.clearQueue()
@@ -1849,6 +1878,7 @@ class AppState(
 
 private fun PlexSession?.canUsePlexBackgroundFetches(): Boolean {
     val server = this?.selectedServer ?: return false
+    if (isNavidrome()) return server.uri.isNotBlank()
     return server.connectionUris.isNotEmpty() ||
         server.advertisedConnectionUris.isNotEmpty() ||
         server.localConnectionUris.isNotEmpty()
