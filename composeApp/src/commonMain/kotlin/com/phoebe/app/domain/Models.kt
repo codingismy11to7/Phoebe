@@ -827,7 +827,14 @@ fun Track.belongsToProvider(providerType: MediaProviderType): Boolean =
 
 const val LOCAL_PLAYLIST_ID_PREFIX = "local:playlist:"
 const val LIKED_SONGS_PLAYLIST_TITLE = "Liked Songs"
+const val LIKED_SONGS_PLAYLIST_BARE_ID = "liked-songs"
 const val PENDING_LIKED_SONGS_PLAYLIST_ID = "plex:liked-songs-pending"
+
+/** Synthetic Liked Songs row for Subsonic/Navidrome (backed by starred songs, not a server playlist). */
+const val NavidromeLikedSongsPlaylistId = "navidrome:$LIKED_SONGS_PLAYLIST_BARE_ID"
+
+fun likedSongsPlaylistId(providerType: MediaProviderType): String =
+    "${providerType.catalogPrefix}:$LIKED_SONGS_PLAYLIST_BARE_ID"
 
 /** User-created playlist stored only in Phoebe (not synced to Plex). */
 fun Playlist.isLocalPlaylist(): Boolean = id.startsWith(LOCAL_PLAYLIST_ID_PREFIX)

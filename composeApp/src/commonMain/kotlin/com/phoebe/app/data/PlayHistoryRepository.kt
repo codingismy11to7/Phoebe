@@ -261,6 +261,36 @@ class PlayHistoryRepository(
         importedAtMs = importedAtMs,
     )
 
+    suspend fun importRemotePlay(
+        track: Track,
+        source: String,
+        serverId: String,
+        historyKey: String,
+        playedAtMs: Long,
+        importedAtMs: Long,
+    ): Boolean {
+        if (track.id.isBlank() || historyKey.isBlank()) return false
+        val cleanArtist = track.artist.ifBlank { "Unknown Artist" }
+        val cleanAlbum = track.album.ifBlank { "Unknown Album" }
+        return withContext(Dispatchers.Default) {
+            val alreadyImported = database.playHistoryQueries
+                .selectImportedPlexHistoryKey(historyKey)
+                .awaitAsOneOrNull() != null
+            if (alreadyImported) return@withContext false
+            database.playHistoryQueries.insertImportedRemotePlay(
+                track_id = track.id,
+                artist = cleanArtist,
+                album = cleanAlbum,
+                played_at_ms = playedAtMs,
+                source = source,
+                plex_server_id = serverId,
+                plex_history_key = historyKey,
+                plex_imported_at_ms = importedAtMs,
+            )
+            true
+        }
+    }
+
     private suspend fun upsertRemotePlayCountAggregate(
         track: Track,
         source: String,

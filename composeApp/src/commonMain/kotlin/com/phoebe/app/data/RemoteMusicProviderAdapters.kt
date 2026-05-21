@@ -188,20 +188,7 @@ class NavidromeProviderAdapter(
     override suspend fun albumPageCatalog(session: PlexSession, pageIndex: Int): Pair<CatalogSnapshot, ProviderItemPage<Album>>? {
         val server = session.selectedServer ?: return null
         val page = client.albumPage(server, session.userName, session.token, pageIndex)
-        val tracksByAlbum = page.items.associate { album ->
-            album.id to client.albumTracks(server, album, session.userName, session.token).map { track ->
-                track.copy(
-                    album = track.album.takeUnless { it == "Unknown album" } ?: album.title,
-                    artist = track.artist.takeUnless { it == "Unknown artist" } ?: album.artist,
-                    thumbUrl = track.thumbUrl ?: album.thumbUrl,
-                    parentAlbumId = album.id,
-                )
-            }
-        }
-        return CatalogSnapshot(
-            albums = page.items,
-            tracksByParent = tracksByAlbum,
-        ) to page
+        return CatalogSnapshot(albums = page.items) to page
     }
 
     override suspend fun albumTracks(session: PlexSession, album: Album): List<Track> =

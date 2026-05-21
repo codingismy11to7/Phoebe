@@ -345,7 +345,7 @@ internal fun Sidebar(
                                 onSignOut()
                             },
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                        ) { Text("Sign out of $providerName", fontSize = 11.sp) }
+                        ) { Text("Sign out", fontSize = 11.sp) }
                     }
                     SectionLabel("Media sources", PhoebeUi.primaryText)
                     Text(remoteSourceLabel, color = PhoebeUi.mutedText, fontSize = 11.sp, lineHeight = 15.sp)

@@ -11,6 +11,7 @@ import com.phoebe.app.data.MediaSourcesRepository
 import com.phoebe.app.data.MusicAssistantClient
 import com.phoebe.app.data.MusicAssistantProviderAdapter
 import com.phoebe.app.data.MusicProviderRegistry
+import com.phoebe.app.data.NavidromePlayHistorySyncer
 import com.phoebe.app.data.NavidromeProviderAdapter
 import com.phoebe.app.data.PlayHistoryRepository
 import com.phoebe.app.data.PlexClient
@@ -49,6 +50,7 @@ class AppDependencies(
     val providerRegistry: MusicProviderRegistry,
     val plexPlayHistorySyncer: PlexPlayHistorySyncer,
     val jellyfinPlayHistorySyncer: JellyfinPlayHistorySyncer,
+    val navidromePlayHistorySyncer: NavidromePlayHistorySyncer,
     val plexPlaybackReporter: PlexPlaybackReporter,
     val audioPlayer: AudioPlayer,
     val castController: CastController,
@@ -60,7 +62,7 @@ class AppDependencies(
     suspend fun deleteDatabaseDataForSignOut() {
         catalogRepository.awaitDatabaseIdle()
         databaseWriteGate.withWrite {
-            database.clearAllAppData(clearPlayHistory = false)
+            database.clearAllAppData(clearPlayHistory = true)
         }
         listOf("session.json", "catalog.json", "media_sources.json", "library_ui_prefs.json").forEach {
             platformStorage.delete(it)
@@ -110,22 +112,24 @@ class AppDependencies(
             sessionRepository.restore(refreshConnections = false)
             mediaSourcesRepository.restore()
             searchHistoryRepository.restore()
+            val catalogRepository = CatalogRepository(
+                plexClient = plexClient,
+                jellyfinClient = jellyfinClient,
+                embyClient = embyClient,
+                subsonicClient = subsonicClient,
+                providerRegistry = providerRegistry,
+                database = database,
+                storage = storage,
+                httpClient = httpClient,
+                mediaSourcesRepository = mediaSourcesRepository,
+                databaseWriteGate = databaseWriteGate,
+            )
             return AppDependencies(
                 database = database,
                 databaseWriteGate = databaseWriteGate,
                 sessionRepository = sessionRepository,
                 mediaSourcesRepository = mediaSourcesRepository,
-                catalogRepository = CatalogRepository(
-                    plexClient = plexClient,
-                    jellyfinClient = jellyfinClient,
-                    embyClient = embyClient,
-                    providerRegistry = providerRegistry,
-                    database = database,
-                    storage = storage,
-                    httpClient = httpClient,
-                    mediaSourcesRepository = mediaSourcesRepository,
-                    databaseWriteGate = databaseWriteGate,
-                ),
+                catalogRepository = catalogRepository,
                 libraryUiRepository = libraryUiRepository,
                 lyricsRepository = LyricsRepository(database, httpClient),
                 playHistoryRepository = playHistoryRepository,
@@ -140,6 +144,11 @@ class AppDependencies(
                     jellyfinClient = jellyfinClient,
                     embyClient = embyClient,
                     playHistoryRepository = playHistoryRepository,
+                ),
+                navidromePlayHistorySyncer = NavidromePlayHistorySyncer(
+                    subsonicClient = subsonicClient,
+                    playHistoryRepository = playHistoryRepository,
+                    catalogRepository = catalogRepository,
                 ),
                 plexPlaybackReporter = PlexPlaybackReporter(
                     plexClient = plexClient,

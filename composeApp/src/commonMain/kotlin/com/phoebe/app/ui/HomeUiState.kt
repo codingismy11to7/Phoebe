@@ -131,6 +131,7 @@ internal fun CatalogSnapshot.homeMetadataKey(): Long {
     playlists.forEach { playlist ->
         hash = hash * 31 + playlist.id.hashCode()
         hash = hash * 31 + playlist.favorite.hashCode()
+        hash = hash * 31 + playlist.trackCount
     }
     return hash
 }

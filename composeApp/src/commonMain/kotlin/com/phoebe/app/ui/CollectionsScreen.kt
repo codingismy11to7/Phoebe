@@ -45,6 +45,7 @@ import com.phoebe.app.domain.CollectionEntry
 import com.phoebe.app.domain.CollectionFacet
 import com.phoebe.app.domain.CollectionTarget
 import com.phoebe.app.domain.LibrarySortBy
+import com.phoebe.app.data.splitCollectionTagLabels
 import com.phoebe.app.domain.LibraryUiPreferences
 import com.phoebe.app.platform.PhoebeLog
 
@@ -679,10 +680,10 @@ private fun CatalogSnapshot.artistItems(
     albumThumbByArtist: Map<String, String?>,
 ): List<CollectionItem> {
     val assigned = assignedTags(entry)
-    val fallbackByArtistTitle = tagByArtistTitle(entry.facet)
+    val fallbackByArtistTitle = tagsByArtistTitle(entry.facet)
     return artists.flatMap { artist ->
         val labels = assigned[artist.id].orEmpty().ifEmpty {
-            listOfNotNull(fallbackByArtistTitle[artist.title.trim().lowercase()])
+            fallbackByArtistTitle[artist.title.trim().lowercase()].orEmpty()
         }.mapNotNull { it.cleanCollectionLabel() }.distinct()
         labels.map { label ->
             CollectionItem(
@@ -698,10 +699,10 @@ private fun CatalogSnapshot.artistItems(
 
 private fun CatalogSnapshot.albumItems(entry: CollectionEntry): List<CollectionItem> {
     val assigned = assignedTags(entry)
-    val fallbackByAlbumId = tagByAlbumId(entry.facet)
+    val fallbackByAlbumId = tagsByAlbumId(entry.facet)
     return albums.flatMap { album ->
         val labels = assigned[album.id].orEmpty().ifEmpty {
-            listOfNotNull(fallbackByAlbumId[album.id])
+            fallbackByAlbumId[album.id].orEmpty()
         }.mapNotNull { it.cleanCollectionLabel() }.distinct()
         labels.map { label ->
             CollectionItem(
@@ -730,51 +731,44 @@ private fun String.toCanonicalCatalogId(): String =
         else -> "plex:$this"
     }
 
-private fun CatalogSnapshot.tagByArtistTitle(facet: CollectionFacet): Map<String, String> {
-    val dominantByTitle = dominantTrackTagByArtistTitle(facet)
-    val directByTitle = artists.mapNotNull { artist ->
-        val key = artist.title.trim().lowercase().takeIf { it.isNotBlank() } ?: return@mapNotNull null
-        val tag = artist.collectionTag(facet) ?: return@mapNotNull null
-        key to tag
-    }.toMap()
-    return dominantByTitle + directByTitle
-}
-
-private fun CatalogSnapshot.tagByAlbumId(facet: CollectionFacet): Map<String, String> {
-    val dominantById = dominantTrackTagByAlbumId(facet)
-    val directById = albums.mapNotNull { album ->
-        val tag = album.collectionTag(facet) ?: return@mapNotNull null
-        album.id to tag
-    }.toMap()
-    return dominantById + directById
-}
-
-private fun CatalogSnapshot.dominantTrackTagByArtistTitle(facet: CollectionFacet): Map<String, String> {
-    val tallies = LinkedHashMap<String, LinkedHashMap<String, Int>>()
+private fun CatalogSnapshot.tagsByArtistTitle(facet: CollectionFacet): Map<String, List<String>> {
+    val tagsByKey = LinkedHashMap<String, LinkedHashSet<String>>()
+    fun add(key: String, raw: String?) {
+        if (key.isBlank()) return
+        val bucket = tagsByKey.getOrPut(key) { LinkedHashSet() }
+        splitCollectionTagLabels(raw).forEach { label ->
+            label.cleanCollectionLabel()?.let(bucket::add)
+        }
+    }
+    artists.forEach { artist ->
+        add(artist.title.trim().lowercase(), artist.collectionTag(facet))
+    }
     tracksByParent.values.asSequence()
         .flatten()
         .distinctBy { it.id }
         .forEach { track ->
-            val artistKey = track.artist.trim().lowercase().takeIf { it.isNotBlank() } ?: return@forEach
-            val genre = track.collectionTag(facet) ?: return@forEach
-            val artistTally = tallies.getOrPut(artistKey) { LinkedHashMap() }
-            artistTally[genre] = (artistTally[genre] ?: 0) + 1
+            add(track.artist.trim().lowercase(), track.collectionTag(facet))
         }
-    return tallies.mapValues { (_, genres) -> genres.maxBy { it.value }.key }
+    return tagsByKey.mapValues { (_, labels) -> labels.toList() }
 }
 
-private fun CatalogSnapshot.dominantTrackTagByAlbumId(facet: CollectionFacet): Map<String, String> =
-    tracksByParent.mapNotNull { (albumId, tracks) ->
-        val tally = LinkedHashMap<String, Int>()
+private fun CatalogSnapshot.tagsByAlbumId(facet: CollectionFacet): Map<String, List<String>> {
+    val tagsById = LinkedHashMap<String, LinkedHashSet<String>>()
+    fun add(albumId: String, raw: String?) {
+        if (albumId.isBlank()) return
+        val bucket = tagsById.getOrPut(albumId) { LinkedHashSet() }
+        splitCollectionTagLabels(raw).forEach { label ->
+            label.cleanCollectionLabel()?.let(bucket::add)
+        }
+    }
+    albums.forEach { album -> add(album.id, album.collectionTag(facet)) }
+    tracksByParent.forEach { (albumId, tracks) ->
         tracks.asSequence()
             .distinctBy { it.id }
-            .mapNotNull { it.collectionTag(facet) }
-            .forEach { genre ->
-                tally[genre] = (tally[genre] ?: 0) + 1
-            }
-        val genre = tally.maxByOrNull { it.value }?.key ?: return@mapNotNull null
-        albumId to genre
-    }.toMap()
+            .forEach { track -> add(albumId, track.collectionTag(facet)) }
+    }
+    return tagsById.mapValues { (_, labels) -> labels.toList() }
+}
 
 private fun Artist.collectionTag(facet: CollectionFacet): String? =
     when (facet) {

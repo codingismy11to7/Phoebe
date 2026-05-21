@@ -541,21 +541,26 @@ private fun PhoebeRootStateHolder(
     val personalMixPreferences = rememberUpdatedState(libraryUi.personalMix)
     val personalMixPlayHistory = rememberUpdatedState(playHistory)
     var recentPersonalMixKeys by remember { mutableStateOf(emptySet<String>()) }
-    val playPersonalMix = remember(state) {
+    val personalMixScope = rememberCoroutineScope()
+    val playPersonalMix = remember(state, personalMixScope) {
         {
-            val tracks = personalMix(
-                catalog = personalMixCatalog.value,
-                state = personalMixHomeUiState.value,
-                preferences = personalMixPreferences.value,
-                playHistory = personalMixPlayHistory.value,
-                recentMixTrackKeys = recentPersonalMixKeys,
-            )
-            if (tracks.isNotEmpty()) {
+            personalMixScope.launch {
+                val preferences = personalMixPreferences.value.normalized()
+                state.ensurePersonalMixTracks(preferences.limit)
+                val tracks = personalMix(
+                    catalog = personalMixCatalog.value,
+                    state = personalMixHomeUiState.value,
+                    preferences = preferences,
+                    playHistory = personalMixPlayHistory.value,
+                    recentMixTrackKeys = recentPersonalMixKeys,
+                )
+                if (tracks.isEmpty()) return@launch
                 recentPersonalMixKeys = (recentPersonalMixKeys + tracks.map { it.personalMixIdentityKey() })
                     .let { keys -> if (keys.size > 100) keys.drop(keys.size - 100).toSet() else keys.toSet() }
                 playTracks(tracks, 0)
                 navigator.openPlayer()
             }
+            Unit
         }
     }
     LaunchedEffect(screen, browseSection, catalog.albums, catalog.tracksByParent.keys, session?.selectedServer, nowMs, trackHeavySectionsEnabled) {
@@ -628,7 +633,6 @@ private fun PhoebeRootStateHolder(
     val openCollectionValue: (CollectionEntry, String) -> Unit = { entry, value ->
         if (session.supportsCollectionEntry(entry)) {
             selectedPlaylistId = null
-            navigator.openBrowse(BrowseSection.Home)
             navigator.open(PhoebeRoute.CollectionItems(entry, value))
         }
     }
@@ -655,6 +659,7 @@ private fun PhoebeRootStateHolder(
         val providerType = session?.providerType
         val list = catalog.playlists.filter { playlist ->
             playlist.isLocalPlaylist() ||
+                playlist.isLikedSongsPlaylist() ||
                 (plexReady && providerType != null && playlist.isRemoteProviderPlaylist() && playlist.belongsToProvider(providerType))
         }
         PlaylistActions(
