@@ -144,6 +144,7 @@ import com.phoebe.app.domain.MediaSourcesState
 import com.phoebe.app.domain.MusicLibrary
 import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.PlexSession
+import com.phoebe.app.domain.RecentSearchItem
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
@@ -245,6 +246,18 @@ internal fun SearchDesktopView(
     LaunchedEffect(searchQuery) {
         resultScope = SearchResultScope.Overview
     }
+    val openArtist: (Artist) -> Unit = { artist ->
+        searchHistory.recordArtist(artist)
+        onArtist(artist)
+    }
+    val openAlbum: (Album) -> Unit = { album ->
+        searchHistory.recordAlbum(album)
+        onAlbum(album)
+    }
+    val playTracks: (List<Track>, Int) -> Unit = { tracks, index ->
+        tracks.getOrNull(index)?.let(searchHistory.recordTrack)
+        onPlayTracks(tracks, index)
+    }
     BoxWithConstraints(modifier) {
         val compactPane = maxWidth < 900.dp
         val contentPadding = if (compactPane) {
@@ -286,19 +299,19 @@ internal fun SearchDesktopView(
                     catalog = catalog,
                     compact = compactPane,
                     onBack = { resultScope = SearchResultScope.Overview },
-                    onArtist = onArtist,
-                    onAlbum = onAlbum,
-                    onPlayTracks = onPlayTracks,
+                    onArtist = openArtist,
+                    onAlbum = openAlbum,
+                    onPlayTracks = playTracks,
                     onAddToUpNext = onAddToUpNext,
                     onDownload = onDownload,
                 )
-            } else {
+            } else if (hasQuery) {
                 SearchTopResultSection(
                     results = results,
                     catalog = catalog,
-                    onAlbum = onAlbum,
-                    onArtist = onArtist,
-                    onPlayTracks = onPlayTracks,
+                    onAlbum = openAlbum,
+                    onArtist = openArtist,
+                    onPlayTracks = playTracks,
                     compact = compactPane,
                 )
             }
@@ -312,7 +325,7 @@ internal fun SearchDesktopView(
                     } else {
                         null
                     },
-                    onPlayTracks = onPlayTracks,
+                    onPlayTracks = playTracks,
                     onAddToUpNext = onAddToUpNext,
                     onDownload = onDownload,
                 )
@@ -320,7 +333,7 @@ internal fun SearchDesktopView(
                     SearchAlbumsSection(
                         albums = results.albums.take(6),
                         catalog = catalog,
-                        onAlbum = onAlbum,
+                        onAlbum = openAlbum,
                         compact = true,
                         onSeeAll = if (results.albums.size > 6) {
                             { resultScope = SearchResultScope.Albums }
@@ -331,7 +344,7 @@ internal fun SearchDesktopView(
                     SearchArtistsSection(
                         artists = results.artists.take(4),
                         catalog = catalog,
-                        onArtist = onArtist,
+                        onArtist = openArtist,
                         compact = true,
                         onSeeAll = if (results.artists.size > 4) {
                             { resultScope = SearchResultScope.Artists }
@@ -344,7 +357,7 @@ internal fun SearchDesktopView(
                         SearchAlbumsSection(
                             albums = results.albums.take(5),
                             catalog = catalog,
-                            onAlbum = onAlbum,
+                            onAlbum = openAlbum,
                             modifier = Modifier.weight(1.15f),
                             compact = false,
                             onSeeAll = if (results.albums.size > 5) {
@@ -356,7 +369,7 @@ internal fun SearchDesktopView(
                         SearchArtistsSection(
                             artists = results.artists.take(3),
                             catalog = catalog,
-                            onArtist = onArtist,
+                            onArtist = openArtist,
                             modifier = Modifier.weight(0.85f),
                             compact = false,
                             onSeeAll = if (results.artists.size > 3) {
@@ -368,16 +381,17 @@ internal fun SearchDesktopView(
                     }
                 }
             }
-            SearchRecentPanel(
-                searches = searchHistory.recentSearches,
-                onSearch = { search ->
-                    searchHistory.commitSearch(search)
-                    onSearchQuery(search)
-                },
-                onRemoveSearch = searchHistory.removeSearch,
-                onClearSearches = searchHistory.clearSearches,
-                modifier = Modifier.fillMaxWidth(),
-            )
+            if (!hasQuery && searchHistory.recentItems.isNotEmpty()) {
+                SearchRecentPanel(
+                    items = searchHistory.recentItems,
+                    onArtist = openArtist,
+                    onAlbum = openAlbum,
+                    onTrack = { track, tracks, index -> playTracks(tracks, index) },
+                    onRemoveItem = searchHistory.removeItem,
+                    onClearItems = searchHistory.clearItems,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
     }
 }
@@ -396,10 +410,23 @@ internal fun SearchMobileView(
     onDownload: (Track) -> Unit,
 ) {
     val results = rememberSearchUiResults(catalog, searchQuery)
+    val searchHistory = LocalSearchHistory.current
     val hasQuery = searchQuery.isNotBlank()
     var resultScope by remember { mutableStateOf(SearchResultScope.Overview) }
     LaunchedEffect(searchQuery) {
         resultScope = SearchResultScope.Overview
+    }
+    val openArtist: (Artist) -> Unit = { artist ->
+        searchHistory.recordArtist(artist)
+        onArtist(artist)
+    }
+    val openAlbum: (Album) -> Unit = { album ->
+        searchHistory.recordAlbum(album)
+        onAlbum(album)
+    }
+    val playTracks: (List<Track>, Int) -> Unit = { tracks, index ->
+        tracks.getOrNull(index)?.let(searchHistory.recordTrack)
+        onPlayTracks(tracks, index)
     }
     LazyColumn(
         modifier = modifier.padding(horizontal = 16.dp),
@@ -420,21 +447,21 @@ internal fun SearchMobileView(
                     catalog = catalog,
                     compact = true,
                     onBack = { resultScope = SearchResultScope.Overview },
-                    onArtist = onArtist,
-                    onAlbum = onAlbum,
-                    onPlayTracks = onPlayTracks,
+                    onArtist = openArtist,
+                    onAlbum = openAlbum,
+                    onPlayTracks = playTracks,
                     onAddToUpNext = onAddToUpNext,
                     onDownload = onDownload,
                 )
             }
-        } else {
+        } else if (hasQuery) {
             item(contentType = "top-result") {
                 SearchTopResultSection(
                     results = results,
                     catalog = catalog,
-                    onAlbum = onAlbum,
-                    onArtist = onArtist,
-                    onPlayTracks = onPlayTracks,
+                    onAlbum = openAlbum,
+                    onArtist = openArtist,
+                    onPlayTracks = playTracks,
                     compact = true,
                 )
             }
@@ -450,7 +477,7 @@ internal fun SearchMobileView(
                     } else {
                         null
                     },
-                    onPlayTracks = onPlayTracks,
+                    onPlayTracks = playTracks,
                     onAddToUpNext = onAddToUpNext,
                     onDownload = onDownload,
                 )
@@ -459,7 +486,7 @@ internal fun SearchMobileView(
                 SearchAlbumsSection(
                     albums = results.albums.take(6),
                     catalog = catalog,
-                    onAlbum = onAlbum,
+                    onAlbum = openAlbum,
                     compact = true,
                     onSeeAll = if (results.albums.size > 6) {
                         { resultScope = SearchResultScope.Albums }
@@ -472,13 +499,26 @@ internal fun SearchMobileView(
                 SearchArtistsSection(
                     artists = results.artists.take(4),
                     catalog = catalog,
-                    onArtist = onArtist,
+                    onArtist = openArtist,
                     compact = true,
                     onSeeAll = if (results.artists.size > 4) {
                         { resultScope = SearchResultScope.Artists }
                     } else {
                         null
                     },
+                )
+            }
+        }
+        if (!hasQuery && searchHistory.recentItems.isNotEmpty()) {
+            item(contentType = "recent") {
+                SearchRecentPanel(
+                    items = searchHistory.recentItems,
+                    onArtist = openArtist,
+                    onAlbum = openAlbum,
+                    onTrack = { track, tracks, index -> playTracks(tracks, index) },
+                    onRemoveItem = searchHistory.removeItem,
+                    onClearItems = searchHistory.clearItems,
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
         }
@@ -963,59 +1003,107 @@ internal fun SearchArtistRow(artist: Artist, catalog: CatalogSnapshot, onArtist:
 
 @Composable
 internal fun SearchRecentPanel(
-    searches: List<String>,
-    onSearch: (String) -> Unit,
-    onRemoveSearch: (String) -> Unit,
-    onClearSearches: () -> Unit,
+    items: List<RecentSearchItem>,
+    onArtist: (Artist) -> Unit,
+    onAlbum: (Album) -> Unit,
+    onTrack: (Track, List<Track>, Int) -> Unit,
+    onRemoveItem: (RecentSearchItem) -> Unit,
+    onClearItems: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val entityItems = items.filterNot { it is RecentSearchItem.Query }
+    if (entityItems.isEmpty()) return
+
     Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(14.dp))
-            .background(Color.Black.copy(alpha = 0.12f))
-            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(14.dp))
-            .padding(18.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        SectionLabel("Recent Searches", PhoebeUi.primaryText)
-        if (searches.isEmpty()) {
-            Text("Searches will appear here.", color = PhoebeUi.mutedText, fontSize = 12.sp, lineHeight = 17.sp)
-        } else {
-            searches.forEach { search ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable { onSearch(search) }
-                        .padding(vertical = 3.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(9.dp),
-                ) {
-                    PhoebeIconView(PhoebeIcon.Search, tint = PhoebeUi.mutedText, modifier = Modifier.size(14.dp))
-                    Text(search, color = PhoebeUi.secondaryText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                    Box(
-                        Modifier
-                            .size(28.dp)
-                            .clip(CircleShape)
-                            .clickable { onRemoveSearch(search) },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        PhoebeIconView(PhoebeIcon.Close, tint = PhoebeUi.mutedText.copy(alpha = 0.68f), modifier = Modifier.size(13.dp))
-                    }
-                }
-            }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            SectionLabel("Recent", PhoebeUi.primaryText)
             Text(
-                "Clear Recent",
+                "Clear",
                 color = PhoebeUi.mutedText,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = 0.04.em,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
                 modifier = Modifier
                     .clip(RoundedCornerShape(6.dp))
-                    .clickable(onClick = onClearSearches)
-                    .padding(vertical = 4.dp),
+                    .clickable(onClick = onClearItems)
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
             )
         }
+        entityItems.forEach { item ->
+            when (item) {
+                is RecentSearchItem.Query -> Unit
+                is RecentSearchItem.ArtistHit -> RecentSearchEntityRow(
+                    title = item.artist.title,
+                    subtitle = "Artist",
+                    thumbUrl = item.artist.thumbUrl,
+                    seed = item.artist.title,
+                    onClick = { onArtist(item.artist) },
+                    onRemove = { onRemoveItem(item) },
+                )
+                is RecentSearchItem.AlbumHit -> RecentSearchEntityRow(
+                    title = item.album.title,
+                    subtitle = "${item.album.artist} • Album",
+                    thumbUrl = item.album.thumbUrl,
+                    seed = item.album.title,
+                    onClick = { onAlbum(item.album) },
+                    onRemove = { onRemoveItem(item) },
+                )
+                is RecentSearchItem.TrackHit -> RecentSearchEntityRow(
+                    title = item.track.title,
+                    subtitle = "${item.track.artist} • ${item.track.album}",
+                    thumbUrl = item.track.thumbUrl,
+                    seed = item.track.album,
+                    onClick = { onTrack(item.track, listOf(item.track), 0) },
+                    onRemove = { onRemoveItem(item) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecentSearchEntityRow(
+    title: String,
+    subtitle: String,
+    thumbUrl: String?,
+    seed: String,
+    onClick: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(6.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 1.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        ArtworkImage(seed, thumbUrl, Modifier.size(28.dp), radius = 6.dp, elevated = false)
+        Column(Modifier.weight(1f)) {
+            Text(title, color = PhoebeUi.primaryText, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(subtitle, color = PhoebeUi.mutedText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        RecentSearchRemoveButton(onRemove)
+    }
+}
+
+@Composable
+private fun RecentSearchRemoveButton(onRemove: () -> Unit) {
+    Box(
+        Modifier
+            .size(24.dp)
+            .clip(CircleShape)
+            .clickable(onClick = onRemove),
+        contentAlignment = Alignment.Center,
+    ) {
+        PhoebeIconView(PhoebeIcon.Close, tint = PhoebeUi.mutedText.copy(alpha = 0.68f), modifier = Modifier.size(11.dp))
     }
 }
 

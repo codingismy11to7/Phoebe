@@ -1,12 +1,11 @@
-full instrumentation tests - verify playback
+during sync if resize to mobile, seems to crash?
 
 jellyfin / navidrome / emby
--finalize support
+- finalize support
+- additional features
 
 music assistant 
 -streaming?
-
-predictive back / swipe to dismiss
 
 eq
 
@@ -16,7 +15,5 @@ web target
 
 ios
 -car play - Apple CarPlay entitlement — request com.apple.developer.carplay-audio in the Apple Developer portal and enable it on your App ID. Without it, signing will fail even though the code is in place.
-
-settings page
 
 tv

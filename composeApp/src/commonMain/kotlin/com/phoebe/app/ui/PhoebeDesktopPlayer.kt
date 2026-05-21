@@ -16,6 +16,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -29,12 +30,15 @@ import androidx.compose.ui.unit.dp
 import com.phoebe.app.domain.AppScreen
 import com.phoebe.app.domain.JellyfinSyncMode
 import com.phoebe.app.domain.MediaProviderType
+import com.phoebe.app.domain.PlayerState
 import com.phoebe.app.domain.isEmbyFamily
 import com.phoebe.app.domain.isNavidrome
+import kotlinx.coroutines.flow.StateFlow
 
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 internal fun DesktopPlayer(
+    playerFlow: StateFlow<PlayerState>? = null,
     shellState: DesktopShellState,
     playbackState: PlaybackUiState,
     playbackActions: PlaybackActions,
@@ -57,7 +61,7 @@ internal fun DesktopPlayer(
     val compact = shellState.compact
     val busy = shellState.busy
     val shellPlayback = playbackState.shellPlayback
-    val player = playbackState.player
+    val player = rememberDesktopPlayerState(playerFlow, playbackState.player)
     val track = playbackState.track
     val upNext = playbackState.upNext
     val lyricsTrack = playbackState.lyricsTrack
@@ -163,6 +167,7 @@ internal fun DesktopPlayer(
     val onRetryServers = authSetupActions.onRetryServers
     val onHomeSections = settingsActions.onHomeSections
     val onPersonalMix = settingsActions.onPersonalMix
+    val onGridColumns = settingsActions.onGridColumns
     val onExportFavoritePlaylists = settingsActions.onExportFavoritePlaylists
     val onImportFavoritePlaylists = settingsActions.onImportFavoritePlaylists
     val onCrossfadeSeconds = settingsActions.onCrossfadeSeconds
@@ -319,6 +324,7 @@ internal fun DesktopPlayer(
                                         onAddToUpNext = onAddToUpNext,
                                         onDownload = onDownload,
                                         onDownloadAlbum = onDownloadAlbum,
+                                        onArtist = onArtist,
                                         onLibraryColumns = onLibraryColumns,
                                     )
                                 }
@@ -363,6 +369,7 @@ internal fun DesktopPlayer(
                                     CollectionsScreen(
                                         entry = targetScreen.entry,
                                         catalog = catalog,
+                                        gridColumns = libraryUi.gridColumns,
                                         searchQuery = searchQuery,
                                         modifier = Modifier.weight(1f).fillMaxWidth(),
                                         onBack = onPopDetail,
@@ -375,6 +382,7 @@ internal fun DesktopPlayer(
                                         entry = targetScreen.entry,
                                         value = targetScreen.value,
                                         catalog = catalog,
+                                        gridColumns = libraryUi.gridColumns,
                                         searchQuery = searchQuery,
                                         modifier = Modifier.weight(1f).fillMaxWidth(),
                                         onBack = onPopDetail,
@@ -527,6 +535,7 @@ internal fun DesktopPlayer(
                                         onNotifyWhenDownloadFinishes = onNotifyWhenDownloadFinishes,
                                         onHomeSections = onHomeSections,
                                         onPersonalMix = onPersonalMix,
+                                        onGridColumns = onGridColumns,
                                         onExportFavoritePlaylists = onExportFavoritePlaylists,
                                         onImportFavoritePlaylists = onImportFavoritePlaylists,
                                         modifier = Modifier.fillMaxSize(),
@@ -667,4 +676,14 @@ private fun previewRoutesFor(screen: AppScreen, section: BrowseSection): List<Ph
         AppScreen.Player -> PhoebeRoute.Player
     }
     return if (route == root) listOf(root) else listOf(root, route)
+}
+
+@Composable
+private fun rememberDesktopPlayerState(
+    playerFlow: StateFlow<PlayerState>?,
+    fallback: PlayerState,
+): PlayerState {
+    if (playerFlow == null) return fallback
+    val player by playerFlow.collectAsState()
+    return player
 }

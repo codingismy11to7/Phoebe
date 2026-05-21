@@ -1,6 +1,8 @@
 package com.phoebe.app.domain
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 
 @Serializable
 enum class MediaProviderType {
@@ -333,12 +335,23 @@ data class LibraryColumnVisibility(
 
 @Serializable
 data class LibraryUiPreferences(
-    val sortBy: LibrarySortBy = LibrarySortBy.Name,
+    val sortBy: LibrarySortBy = LibrarySortBy.Year,
     val ascending: Boolean = true,
     val columns: LibraryColumnVisibility = LibraryColumnVisibility(),
     val homeSections: List<HomeSection> = HomeSection.defaultOrder,
     val personalMix: PersonalMixPreferences = PersonalMixPreferences(),
-)
+    /** Number of columns in library/collection grid views (2–5). */
+    val gridColumns: Int = DefaultGridColumns,
+) {
+    fun normalized(): LibraryUiPreferences =
+        copy(gridColumns = gridColumns.coerceIn(MinGridColumns, MaxGridColumns))
+
+    companion object {
+        const val DefaultGridColumns = 3
+        const val MinGridColumns = 2
+        const val MaxGridColumns = 5
+    }
+}
 
 @Serializable
 data class AppSettings(
@@ -621,6 +634,39 @@ val AppScreen.telemetryName: String
         is AppScreen.PlaylistDetail -> "playlist_detail"
         AppScreen.Player -> "player"
     }
+
+@Serializable
+sealed class RecentSearchItem {
+    abstract val key: String
+
+    @Serializable
+    @SerialName("query")
+    data class Query(val text: String) : RecentSearchItem() {
+        @Transient
+        override val key: String = "query:${text.trim().lowercase()}"
+    }
+
+    @Serializable
+    @SerialName("artist")
+    data class ArtistHit(val artist: Artist) : RecentSearchItem() {
+        @Transient
+        override val key: String = "artist:${artist.id}"
+    }
+
+    @Serializable
+    @SerialName("album")
+    data class AlbumHit(val album: Album) : RecentSearchItem() {
+        @Transient
+        override val key: String = "album:${album.id}"
+    }
+
+    @Serializable
+    @SerialName("track")
+    data class TrackHit(val track: Track) : RecentSearchItem() {
+        @Transient
+        override val key: String = "track:${track.id}"
+    }
+}
 
 data class LyricsLine(
     val startMs: Long?,

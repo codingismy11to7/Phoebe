@@ -290,12 +290,21 @@ abstract class SimpleAudioPlayer : AudioPlayer {
             .let { buffered ->
                 if (effectiveDurationMs > 0L) buffered.coerceAtMost(effectiveDurationMs) else buffered
             }
+        val effectiveBuffering = isBuffering && playWhenReady
+        if (current.positionMs == positionMs &&
+            current.bufferedPositionMs == effectiveBufferedPositionMs &&
+            current.durationMs == effectiveDurationMs &&
+            current.isPlaying == effectivePlaying &&
+            current.isBuffering == effectiveBuffering
+        ) {
+            return
+        }
         mutableState.value = current.copy(
             positionMs = positionMs,
             bufferedPositionMs = effectiveBufferedPositionMs,
             durationMs = effectiveDurationMs,
             isPlaying = effectivePlaying,
-            isBuffering = isBuffering && playWhenReady,
+            isBuffering = effectiveBuffering,
         )
         if (effectivePlaying && useProgressTicker) {
             startProgressTicker()

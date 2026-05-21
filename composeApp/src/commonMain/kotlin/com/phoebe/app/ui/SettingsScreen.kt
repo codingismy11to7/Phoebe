@@ -91,6 +91,7 @@ internal fun SettingsDesktopView(
     onNotifyWhenDownloadFinishes: (Boolean) -> Unit,
     onHomeSections: (List<HomeSection>) -> Unit,
     onPersonalMix: (PersonalMixPreferences) -> Unit,
+    onGridColumns: (Int) -> Unit,
     onExportFavoritePlaylists: () -> Unit,
     onImportFavoritePlaylists: () -> Unit,
     homeScreenLayoutMode: HomeScreenLayoutMode = HomeScreenLayoutMode.Default,
@@ -150,6 +151,7 @@ internal fun SettingsDesktopView(
                     )
                     SettingsCategory.Account -> AccountPlaceholderCard()
                     SettingsCategory.Library -> {
+                        GridSettingsCard(libraryUi.gridColumns, onGridColumns)
                         HomeSettingsCard(libraryUi.homeSections, onHomeSections)
                         FavoritePlaylistSettingsCard(onExportFavoritePlaylists, onImportFavoritePlaylists)
                     }
@@ -190,6 +192,7 @@ internal fun SettingsMobileView(
     onNotifyWhenDownloadFinishes: (Boolean) -> Unit,
     onHomeSections: (List<HomeSection>) -> Unit,
     onPersonalMix: (PersonalMixPreferences) -> Unit,
+    onGridColumns: (Int) -> Unit,
     onExportFavoritePlaylists: () -> Unit,
     onImportFavoritePlaylists: () -> Unit,
     homeScreenLayoutMode: HomeScreenLayoutMode = HomeScreenLayoutMode.Default,
@@ -212,7 +215,8 @@ internal fun SettingsMobileView(
             homeScreenLayoutMode,
             onHomeScreenLayoutModeChange,
         )
-        SectionLabel("HOME", PhoebeUi.accentLight)
+        SectionLabel("LIBRARY", PhoebeUi.accentLight)
+        GridSettingsCard(libraryUi.gridColumns, onGridColumns, compact = true)
         HomeSettingsCard(libraryUi.homeSections, onHomeSections, compact = true)
         FavoritePlaylistSettingsCard(onExportFavoritePlaylists, onImportFavoritePlaylists, compact = true)
         SectionLabel("AUDIO PLAYBACK", PhoebeUi.accentLight)
@@ -719,6 +723,48 @@ private fun MixValueSlider(
                 inactiveTrackColor = PhoebeUi.progressTrack,
             ),
         )
+    }
+}
+
+@Composable
+private fun GridSettingsCard(
+    gridColumns: Int,
+    onGridColumns: (Int) -> Unit,
+    compact: Boolean = false,
+) {
+    SettingsCard {
+        Text("Grid size", color = PhoebeUi.primaryText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Text(
+            "Number of columns when browsing artists, albums, and songs",
+            color = PhoebeUi.mutedText,
+            fontSize = 12.sp,
+            modifier = Modifier.padding(bottom = 14.dp),
+        )
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            (LibraryUiPreferences.MinGridColumns..LibraryUiPreferences.MaxGridColumns).forEach { count ->
+                val selected = count == gridColumns
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .height(if (compact) 42.dp else 46.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { onGridColumns(count) }
+                        .background(if (selected) PhoebeUi.accent.copy(alpha = 0.22f) else PhoebeUi.subtleFill)
+                        .border(BorderStroke(1.dp, if (selected) PhoebeUi.accentLight else PhoebeUi.border), RoundedCornerShape(10.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        count.toString(),
+                        color = if (selected) PhoebeUi.primaryText else PhoebeUi.secondaryText,
+                        fontSize = 14.sp,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                    )
+                }
+            }
+        }
     }
 }
 

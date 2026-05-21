@@ -40,7 +40,10 @@ actual fun createAudioPlayer(): AudioPlayer = DesktopAudioPlayer()
 internal class DesktopAudioPlayer(
     private val diagnostics: PlaybackDiagnostics = PlaybackDiagnostics.None,
 ) : SimpleAudioPlayer() {
+    override val useProgressTicker: Boolean = false
+
     private var player: MediaPlayer? = null
+    private var lastPlaybackUiSyncAtMs = 0L
     private var fadingOutPlayer: MediaPlayer? = null
     private var desktopCrossfadeGeneration = -1
     private var sampledClip: Clip? = null
@@ -890,6 +893,19 @@ internal class DesktopAudioPlayer(
         val durationMs = mediaPlayer.media.duration.toMillis().toLong().coerceAtLeast(0L)
         val platformBufferedMs = mediaPlayer.bufferProgressTime.toMillis().toLong().coerceAtLeast(positionMs)
         val bufferedMs = if (fullyBufferedPlayback && durationMs > 0L) durationMs else platformBufferedMs
+        val playing = mediaPlayer.status == MediaPlayer.Status.PLAYING
+        val current = state.value
+        val nowMs = System.currentTimeMillis()
+        val playbackFlagsChanged = playing != current.isPlaying || isBuffering != current.isBuffering
+        val bufferedAdvanced = bufferedMs > current.bufferedPositionMs + 500L
+        if (!playbackFlagsChanged &&
+            !bufferedAdvanced &&
+            nowMs - lastPlaybackUiSyncAtMs < PlaybackUiSyncIntervalMs &&
+            kotlin.math.abs(positionMs - current.positionMs) < PlaybackUiSyncIntervalMs
+        ) {
+            return
+        }
+        lastPlaybackUiSyncAtMs = nowMs
         diagnostics.playbackProgress(PlaybackEnginePath.JavaFxMediaPlayer, positionMs, durationMs)
         if (mediaPlayer.status == MediaPlayer.Status.PLAYING) {
             diagnostics.platformPlaying(PlaybackEnginePath.JavaFxMediaPlayer, positionMs, durationMs)
@@ -897,7 +913,7 @@ internal class DesktopAudioPlayer(
         applyPlatformPlayback(
             positionMs = positionMs,
             durationMs = durationMs,
-            isPlaying = mediaPlayer.status == MediaPlayer.Status.PLAYING,
+            isPlaying = playing,
             isBuffering = isBuffering,
             bufferedPositionMs = bufferedMs,
             generation = generation,
@@ -967,6 +983,7 @@ internal class DesktopAudioPlayer(
         const val MaxStreamRetryCount = 2
         const val StreamRetryBaseDelayMs = 1_000L
         const val JavaFxStartupTimeoutSeconds = 15L
+        const val PlaybackUiSyncIntervalMs = 250L
     }
 }
 

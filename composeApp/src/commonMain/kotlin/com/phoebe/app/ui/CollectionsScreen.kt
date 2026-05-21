@@ -45,12 +45,14 @@ import com.phoebe.app.domain.CollectionEntry
 import com.phoebe.app.domain.CollectionFacet
 import com.phoebe.app.domain.CollectionTarget
 import com.phoebe.app.domain.LibrarySortBy
+import com.phoebe.app.domain.LibraryUiPreferences
 import com.phoebe.app.platform.PhoebeLog
 
 @Composable
 internal fun CollectionsScreen(
     entry: CollectionEntry,
     catalog: CatalogSnapshot,
+    gridColumns: Int = LibraryUiPreferences.DefaultGridColumns,
     modifier: Modifier = Modifier,
     searchQuery: String = "",
     supportedCollectionEntries: Set<CollectionEntry> = allCollectionEntries().toSet(),
@@ -100,7 +102,8 @@ internal fun CollectionsScreen(
             },
             onBack = onBack,
         )
-        DetailSectionToolbar(
+        DetailSectionHeader(
+            title = entry.facet.plural,
             sortBy = sortBy,
             sortKeys = listOf(LibrarySortBy.Name, LibrarySortBy.DateAdded),
             sortLabel = { key -> if (key == LibrarySortBy.DateAdded) "Item count" else "${entry.facet.singular} name" },
@@ -118,6 +121,7 @@ internal fun CollectionsScreen(
                 searchQuery = searchQuery,
                 compact = maxWidth < 700.dp,
                 viewMode = viewMode,
+                gridColumns = gridColumns,
                 state = gridState,
                 onCollectionValue = onCollectionValue,
                 modifier = Modifier.fillMaxSize(),
@@ -131,6 +135,7 @@ internal fun CollectionItemsScreen(
     entry: CollectionEntry,
     value: String,
     catalog: CatalogSnapshot,
+    gridColumns: Int = LibraryUiPreferences.DefaultGridColumns,
     modifier: Modifier = Modifier,
     searchQuery: String = "",
     supportedCollectionEntries: Set<CollectionEntry> = allCollectionEntries().toSet(),
@@ -151,7 +156,9 @@ internal fun CollectionItemsScreen(
         }
     }
     val loading = items.isEmpty() && collectionValue?.itemsLoaded != true
-    var sortBy by rememberSaveable(entry.target.name, entry.facet.name, value) { mutableStateOf(LibrarySortBy.Name) }
+    var sortBy by rememberSaveable(entry.target.name, entry.facet.name, value) {
+        mutableStateOf(if (entry.target == CollectionTarget.Albums) LibrarySortBy.Year else LibrarySortBy.Name)
+    }
     var ascending by rememberSaveable(entry.target.name, entry.facet.name, value) { mutableStateOf(true) }
     var viewMode by rememberSaveable(entry.target.name, entry.facet.name, value) { mutableStateOf(LibraryViewMode.Grid) }
     val visibleItems = remember(items, entry, sortBy, ascending, searchQuery) {
@@ -184,7 +191,8 @@ internal fun CollectionItemsScreen(
             },
             onBack = onBack,
         )
-        DetailSectionToolbar(
+        DetailSectionHeader(
+            title = entry.target.itemPlural,
             sortBy = sortBy,
             sortKeys = collectionItemSortKeys(entry.target),
             sortLabel = { key -> collectionItemSortLabel(entry.target, key) },
@@ -202,6 +210,7 @@ internal fun CollectionItemsScreen(
                 loading = loading,
                 searchQuery = searchQuery,
                 viewMode = viewMode,
+                gridColumns = gridColumns,
                 state = gridState,
                 onArtist = onArtist,
                 onAlbum = onAlbum,
@@ -253,6 +262,7 @@ private fun CollectionValuesGrid(
     searchQuery: String,
     compact: Boolean,
     viewMode: LibraryViewMode,
+    gridColumns: Int,
     state: LazyGridState,
     onCollectionValue: (CollectionEntry, String) -> Unit,
     modifier: Modifier = Modifier,
@@ -272,7 +282,7 @@ private fun CollectionValuesGrid(
         return
     }
     LazyVerticalGrid(
-        columns = if (viewMode == LibraryViewMode.List) GridCells.Fixed(1) else GridCells.Adaptive(if (compact) 148.dp else 184.dp),
+        columns = if (viewMode == LibraryViewMode.List) GridCells.Fixed(1) else libraryGridCells(gridColumns),
         state = state,
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -319,6 +329,7 @@ private fun CollectionItemsGrid(
     loading: Boolean,
     searchQuery: String,
     viewMode: LibraryViewMode,
+    gridColumns: Int,
     state: LazyGridState,
     onArtist: (Artist) -> Unit,
     onAlbum: (Album) -> Unit,
@@ -339,7 +350,7 @@ private fun CollectionItemsGrid(
         return
     }
     LazyVerticalGrid(
-        columns = if (viewMode == LibraryViewMode.List) GridCells.Fixed(1) else GridCells.Adaptive(if (compact) 132.dp else 158.dp),
+        columns = if (viewMode == LibraryViewMode.List) GridCells.Fixed(1) else libraryGridCells(gridColumns),
         state = state,
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -611,7 +622,7 @@ private fun sortCollectionBuckets(
 private fun collectionItemSortKeys(target: CollectionTarget): List<LibrarySortBy> =
     when (target) {
         CollectionTarget.Artists -> listOf(LibrarySortBy.Name, LibrarySortBy.DateAdded)
-        CollectionTarget.Albums -> listOf(LibrarySortBy.Name, LibrarySortBy.Artist, LibrarySortBy.Year, LibrarySortBy.DateAdded)
+        CollectionTarget.Albums -> listOf(LibrarySortBy.Year, LibrarySortBy.Name, LibrarySortBy.Artist, LibrarySortBy.DateAdded)
     }
 
 private fun collectionItemSortLabel(target: CollectionTarget, sortBy: LibrarySortBy): String =

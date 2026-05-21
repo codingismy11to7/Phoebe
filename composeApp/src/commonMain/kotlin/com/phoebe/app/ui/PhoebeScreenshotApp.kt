@@ -158,6 +158,7 @@ import com.phoebe.app.domain.PlexRadioStation
 import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.PlayerState
+import com.phoebe.app.domain.RecentSearchItem
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.ShellPlaybackState
 import com.phoebe.app.domain.RepeatMode
@@ -241,10 +242,15 @@ internal fun PhoebeScreenshotApp(
             ),
             LocalMetadataEditorActions provides MetadataEditorActions(),
             LocalSearchHistory provides SearchHistoryState(
-                recentSearches = listOf("moon", "quartet", "field recordings"),
-                commitSearch = {},
-                removeSearch = {},
-                clearSearches = {},
+                recentItems = listOf(
+                    RecentSearchItem.ArtistHit(Artist(id = "plex:a1", title = "The National")),
+                    RecentSearchItem.AlbumHit(Album(id = "plex:al1", title = "Boxer", artist = "The National")),
+                ),
+                recordArtist = {},
+                recordAlbum = {},
+                recordTrack = {},
+                removeItem = {},
+                clearItems = {},
             ),
             LocalDragDrop provides DragDropController(),
             LocalSharedElementTransitionsEnabled provides false,
@@ -443,6 +449,7 @@ internal fun PhoebeDesktopScreenshotScenario(
         settingsActions = SettingsActions(
             onHomeSections = {},
             onPersonalMix = {},
+            onGridColumns = {},
             onExportFavoritePlaylists = {},
             onImportFavoritePlaylists = {},
             onCrossfadeSeconds = {},
@@ -560,6 +567,7 @@ internal fun PhoebeMobileScreenshotScenario(
                 onAddToUpNext = {},
                 onDownload = {},
                 onDownloadAlbum = {},
+                onArtist = {},
                 onLibraryColumns = {},
             )
             PhoebeScreenshotScenario.Song -> SongDetailPanel(
@@ -711,6 +719,7 @@ internal fun PhoebeMobileScreenshotScenario(
                 onLibraryColumns = {},
                 onHomeSections = {},
                 onPersonalMix = {},
+                onGridColumns = {},
                 onExportFavoritePlaylists = {},
                 onImportFavoritePlaylists = {},
                 appSettings = AppSettings.Default,
@@ -792,6 +801,7 @@ private fun MobileHomeAccordionScreenshot(
         onLibraryColumns = {},
         onHomeSections = {},
         onPersonalMix = {},
+        onGridColumns = {},
         onExportFavoritePlaylists = {},
         onImportFavoritePlaylists = {},
         appSettings = AppSettings.Default,

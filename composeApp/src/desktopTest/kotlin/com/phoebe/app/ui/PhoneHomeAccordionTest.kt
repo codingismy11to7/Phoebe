@@ -244,6 +244,7 @@ class PhoneHomeAccordionTest {
                     onNotifyWhenDownloadFinishes = {},
                     onHomeSections = {},
                     onPersonalMix = {},
+                    onGridColumns = {},
                     onExportFavoritePlaylists = {},
                     onImportFavoritePlaylists = {},
                     homeScreenLayoutMode = selected,

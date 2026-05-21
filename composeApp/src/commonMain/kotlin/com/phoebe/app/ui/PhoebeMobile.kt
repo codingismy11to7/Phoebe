@@ -453,6 +453,7 @@ internal fun MobileBrowseShell(
     onLibraryColumns: (LibraryColumnVisibility) -> Unit,
     onHomeSections: (List<HomeSection>) -> Unit,
     onPersonalMix: (PersonalMixPreferences) -> Unit,
+    onGridColumns: (Int) -> Unit,
     onExportFavoritePlaylists: () -> Unit,
     onImportFavoritePlaylists: () -> Unit,
     appSettings: AppSettings,
@@ -555,6 +556,7 @@ internal fun MobileBrowseShell(
                     onNotifyWhenDownloadFinishes = onNotifyWhenDownloadFinishes,
                     onHomeSections = onHomeSections,
                     onPersonalMix = onPersonalMix,
+                    onGridColumns = onGridColumns,
                     onExportFavoritePlaylists = onExportFavoritePlaylists,
                     onImportFavoritePlaylists = onImportFavoritePlaylists,
                     modifier = Modifier.fillMaxSize().padding(top = chromePadding.top, bottom = chromePadding.bottom),
@@ -1242,11 +1244,13 @@ internal fun MobilePlayer(
                     radius = 380f,
                 ),
             )
-            .background(Brush.verticalGradient(listOf(PhoebeUi.shellTop, PhoebeUi.canvasBackground)))
-            .navigationBarsPadding(),
+            .background(Brush.verticalGradient(listOf(PhoebeUi.shellTop, PhoebeUi.canvasBackground))),
     ) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
-            val collapsedSheetHeightPx = with(density) { 84.dp.toPx() }
+            val collapsedSheetHeightPx = with(density) {
+                val navBarBottom = WindowInsets.navigationBars.getBottom(this).toDp()
+                (88.dp + navBarBottom).toPx()
+            }
             val expandedSheetHeightPx = with(density) {
                 val controlsPx = 130.dp.toPx()
                 val headerPx = 56.dp.toPx()
@@ -1580,7 +1584,7 @@ internal fun MobileQueueSheet(
                     onDragStopped = { velocity -> onSheetDragEndUpdated.value(velocity) },
                 )
                 .padding(horizontal = 18.dp)
-                .padding(top = 8.dp, bottom = 12.dp),
+                .padding(top = 8.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Box(
@@ -1594,7 +1598,7 @@ internal fun MobileQueueSheet(
                         .width(handleWidth.dp)
                         .height(4.dp)
                         .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.14f + sheetProgress * 0.12f)),
+                        .background(PhoebeUi.primaryText.copy(alpha = 0.14f + sheetProgress * 0.12f)),
                 )
             }
             Row(
@@ -1680,5 +1684,6 @@ internal fun MobileQueueSheet(
                 )
             }
         }
+        Spacer(Modifier.navigationBarsPadding())
     }
 }

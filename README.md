@@ -240,32 +240,14 @@ Android logs go to Logcat (`Log.d`). Other platforms print `[tag] message` to st
 
 Instrumented areas include catalog sync, Plex session and API calls, local folder indexing, playback, lyrics, and app startup.
 
-## Mockups
+## UI
 
-Design direction and UI explorations from the `mockups/` folder (may differ slightly from the current app build).
-
-**Library — light**
-
-![Library in light mode](mockups/light.png)
-
-**Search**
-
-![Search UI mockup](mockups/search.png)
-
-**Metadata**
-
-![Track metadata editor mockup](mockups/metadata.png)
-
-**Settings**
-
-![Settings mockup](mockups/settings.png)
-
-**Album and artist**
-
-![Album view mockup](mockups/album.png)
-
-![Artist view mockup](mockups/artist.png)
-
-**Now playing**
-
-![Song / now playing mockup](mockups/song.png)
+| Platform | Screen | Screenshot |
+|----------|--------|------------|
+| Desktop | Home — mixes, collections, favorites, and recents | ![Desktop home](mockups/screenshots/desktop1.png) |
+| Desktop | Library — artists grid with sidebar and Up Next queue | ![Desktop library artists](mockups/screenshots/desktop2.png) |
+| Mobile | Home — discovery sections and bottom navigation | ![Mobile home](mockups/screenshots/mobile1.png) |
+| Mobile | Search — top result, songs, and albums for a query | ![Mobile search](mockups/screenshots/mobile2.png) |
+| Mobile | Library — artists grid with sort and view controls | ![Mobile library artists](mockups/screenshots/mobile3.png) |
+| Mobile | Now playing — artwork, waveform progress, and queue | ![Mobile now playing](mockups/screenshots/mobile4.png) |
+| Mobile | Lyrics — synced lines with LRCLIB attribution | ![Mobile lyrics](mockups/screenshots/mobile5.png) |

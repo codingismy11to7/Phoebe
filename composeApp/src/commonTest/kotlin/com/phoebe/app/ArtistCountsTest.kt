@@ -1,5 +1,6 @@
 package com.phoebe.app
 
+import com.phoebe.app.data.catalogArtistForAlbum
 import com.phoebe.app.data.enrichArtistAlbumCountsOnly
 import com.phoebe.app.data.enrichArtistArtwork
 import com.phoebe.app.data.enrichJellyfinCatalogArtwork
@@ -108,5 +109,21 @@ class ArtistCountsTest {
         val artists = listOf(Artist(id = "a1", title = "Artist One", thumbUrl = "https://example/existing.jpg"))
         val albums = listOf(Album(id = "al1", title = "Album", artist = "Artist One", thumbUrl = "https://example/album.jpg"))
         assertEquals("https://example/existing.jpg", enrichArtistArtwork(artists, albums).single().thumbUrl)
+    }
+
+    @Test
+    fun catalogArtistForAlbumMatchesExactAndFeatStrings() {
+        val artist = Artist(id = "a1", title = "Artist One")
+        val catalog = CatalogSnapshot(
+            artists = listOf(artist),
+            albums = listOf(
+                Album(id = "al1", title = "Album", artist = "Artist One"),
+                Album(id = "al2", title = "Collab", artist = "Artist One feat. Guest"),
+            ),
+        )
+
+        assertEquals(artist, catalogArtistForAlbum(catalog, catalog.albums[0]))
+        assertEquals(artist, catalogArtistForAlbum(catalog, catalog.albums[1]))
+        assertNull(catalogArtistForAlbum(catalog, Album(id = "al3", title = "Other", artist = "")))
     }
 }

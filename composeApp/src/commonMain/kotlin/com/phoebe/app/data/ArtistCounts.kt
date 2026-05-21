@@ -130,6 +130,13 @@ fun catalogTracksForArtist(catalog: CatalogSnapshot, artistTitle: String): List<
         .sortedWith(compareBy({ it.album.lowercase() }, { it.title.lowercase() }))
         .toList()
 
+fun catalogArtistForAlbum(catalog: CatalogSnapshot, album: Album): Artist? {
+    val title = album.artist.trim()
+    if (title.isBlank()) return null
+    return catalog.artists.firstOrNull { it.title.equals(title, ignoreCase = true) }
+        ?: catalog.artists.firstOrNull { albumMatchesArtist(album, it.title) }
+}
+
 private fun albumMatchesArtist(album: Album, artistTitle: String): Boolean {
     val t = artistTitle.trim()
     if (t.isEmpty()) return false

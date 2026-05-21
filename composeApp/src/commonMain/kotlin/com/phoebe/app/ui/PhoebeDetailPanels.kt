@@ -134,6 +134,7 @@ import androidx.compose.ui.zIndex
 import kotlin.math.roundToInt
 import com.phoebe.app.AppState
 import com.phoebe.app.data.catalogAlbumsForArtist
+import com.phoebe.app.data.catalogArtistForAlbum
 import com.phoebe.app.data.catalogArtistGenre
 import com.phoebe.app.data.catalogTracksForArtist
 import com.phoebe.app.domain.Album
@@ -707,11 +708,16 @@ private fun DetailMetaRow(
 private fun PlayRadioActionButton(
     starting: Boolean,
     modifier: Modifier = Modifier,
+    label: String = "Play Radio",
     onClick: () -> Unit,
 ) {
     LibraryToolbarButton(
         icon = PhoebeIcon.Play,
-        label = if (starting) "Starting Radio..." else "Play Radio",
+        label = when {
+            starting && label == "Radio" -> "Starting..."
+            starting -> "Starting Radio..."
+            else -> label
+        },
         modifier = modifier,
         enabled = !starting,
         iconTint = if (starting) PhoebeUi.mutedText else PhoebeUi.accentLight,
@@ -830,6 +836,7 @@ private fun ArtistStatsPanel(
         if (artistRadioAvailability == ArtistRadioAvailability.Available) {
             PlayRadioActionButton(
                 starting = artistRadioStarting,
+                label = "Radio",
                 modifier = Modifier.fillMaxWidth(),
                 onClick = onPlayArtistRadio,
             )
@@ -911,7 +918,7 @@ internal fun ArtistDetailPanel(
     val albumWord = if (albums.size == 1) "album" else "albums"
     val songWord = if (tracks.size == 1) "song" else "songs"
 
-    var albumSortBy by remember(artist.id) { mutableStateOf(LibrarySortBy.Name) }
+    var albumSortBy by remember(artist.id) { mutableStateOf(LibrarySortBy.Year) }
     var albumAscending by remember(artist.id) { mutableStateOf(true) }
     var albumViewMode by remember(artist.id) { mutableStateOf(LibraryViewMode.List) }
 
@@ -946,11 +953,7 @@ internal fun ArtistDetailPanel(
         val edgePadding = if (maxWidth < 640.dp) 20.dp else 36.dp
         val topPadding = if (maxWidth < 640.dp) 16.dp else 36.dp
         val bottomContentPadding = if (useTable) 24.dp else 144.dp
-        val albumGridColumns = remember(maxWidth) {
-            val minCardWidth = 160.dp
-            val gap = 14.dp
-            ((maxWidth + gap) / (minCardWidth + gap)).toInt().coerceAtLeast(1)
-        }
+        val albumGridColumns = libraryUi.gridColumns
         val albumGridRows = remember(visibleAlbums, albumGridColumns) {
             visibleAlbums.chunked(albumGridColumns)
         }
@@ -1020,10 +1023,11 @@ internal fun ArtistDetailPanel(
                         if (artistRadioAvailability == ArtistRadioAvailability.Available) {
                             PlayRadioActionButton(
                                 starting = artistRadioStarting,
+                                label = "Radio",
                                 onClick = { onPlayArtistRadio(artist) },
                             )
                         }
-                        DownloadActionButton("Download Artist", tracks) { onDownloadArtist(artist) }
+                        DownloadActionButton("Download", tracks) { onDownloadArtist(artist) }
                     }
                 }
                 Spacer(Modifier.height(6.dp))
@@ -1044,40 +1048,39 @@ internal fun ArtistDetailPanel(
                     )
                 }
                 Spacer(Modifier.height(10.dp))
-                SectionLabel("Albums", PhoebeUi.primaryText)
-            }
-        }
-        item(contentType = "artist-album-toolbar") {
-            DetailSectionToolbar(
-                sortBy = albumSortBy,
-                sortKeys = listOf(LibrarySortBy.Name, LibrarySortBy.Year),
-                sortLabel = { key ->
-                    when (key) {
-                        LibrarySortBy.Year -> "Release date"
-                        else -> "Album name"
-                    }
-                },
-                onSortBy = { albumSortBy = it },
-                ascending = albumAscending,
-                onAscending = { albumAscending = it },
-                viewMode = albumViewMode,
-                onViewMode = { albumViewMode = it },
-                actions = {
-                    if (useTable) {
-                        PlayAllActionButton(
-                            tracks = visibleTracks,
-                            onClick = { onPlayTracks(visibleTracks, 0) },
-                        )
-                        if (artistRadioAvailability == ArtistRadioAvailability.Available) {
-                            PlayRadioActionButton(
-                                starting = artistRadioStarting,
-                                onClick = { onPlayArtistRadio(artist) },
-                            )
+                DetailSectionHeader(
+                    title = "Albums",
+                    sortBy = albumSortBy,
+                    sortKeys = listOf(LibrarySortBy.Name, LibrarySortBy.Year, LibrarySortBy.DateAdded),
+                    sortLabel = { key ->
+                        when (key) {
+                            LibrarySortBy.Year -> "Release date"
+                            LibrarySortBy.DateAdded -> "Date added"
+                            else -> "Album name"
                         }
-                        DownloadActionButton("Download Artist", tracks) { onDownloadArtist(artist) }
-                    }
-                },
-            )
+                    },
+                    onSortBy = { albumSortBy = it },
+                    ascending = albumAscending,
+                    onAscending = { albumAscending = it },
+                    viewMode = albumViewMode,
+                    onViewMode = { albumViewMode = it },
+                    actions = {
+                        if (useTable) {
+                            PlayAllActionButton(
+                                tracks = visibleTracks,
+                                onClick = { onPlayTracks(visibleTracks, 0) },
+                            )
+                            if (artistRadioAvailability == ArtistRadioAvailability.Available) {
+                                PlayRadioActionButton(
+                                    starting = artistRadioStarting,
+                                    onClick = { onPlayArtistRadio(artist) },
+                                )
+                            }
+                            DownloadActionButton("Download Artist", tracks) { onDownloadArtist(artist) }
+                        }
+                    },
+                )
+            }
         }
         if (albumViewMode == LibraryViewMode.Grid) {
             items(
@@ -1143,28 +1146,29 @@ internal fun ArtistDetailPanel(
                 )
             }
         }
-        item(contentType = "artist-songs-label") {
+        item(contentType = "artist-songs-header") {
             Spacer(Modifier.height(8.dp))
-            SectionLabel("Songs", PhoebeUi.primaryText)
+            DetailSectionHeader(
+                title = "Songs",
+                sortBy = songSortBy,
+                sortKeys = listOf(LibrarySortBy.Name, LibrarySortBy.Album, LibrarySortBy.Year, LibrarySortBy.DateAdded),
+                sortLabel = { key ->
+                    when (key) {
+                        LibrarySortBy.Album -> "Album name"
+                        LibrarySortBy.Year -> "Release date"
+                        LibrarySortBy.DateAdded -> "Date added"
+                        else -> "Song name"
+                    }
+                },
+                onSortBy = { songSortBy = it },
+                ascending = songAscending,
+                onAscending = { songAscending = it },
+                columns = libraryUi.columns,
+                onColumns = onLibraryColumns,
+            )
         }
         item(contentType = "artist-song-toolbar") {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                DetailSectionToolbar(
-                    sortBy = songSortBy,
-                    sortKeys = listOf(LibrarySortBy.Name, LibrarySortBy.Album, LibrarySortBy.Year),
-                    sortLabel = { key ->
-                        when (key) {
-                            LibrarySortBy.Album -> "Album name"
-                            LibrarySortBy.Year -> "Release date"
-                            else -> "Song name"
-                        }
-                    },
-                    onSortBy = { songSortBy = it },
-                    ascending = songAscending,
-                    onAscending = { songAscending = it },
-                    columns = libraryUi.columns,
-                    onColumns = onLibraryColumns,
-                )
                 val tracksLoadingIds = LocalTracksLoading.current
                 val artistAlbumsLoading = catalogAlbumsForArtist(catalog, artist.title).any { it.id in tracksLoadingIds }
                 if (artistAlbumsLoading && searchQuery.isBlank()) {
@@ -1441,12 +1445,10 @@ private fun SimilarArtistRow(
 }
 
 @Composable
-internal fun ArtistAlbumGrid(albums: List<Album>, onAlbum: (Album) -> Unit, modifier: Modifier = Modifier) {
+internal fun ArtistAlbumGrid(albums: List<Album>, gridColumns: Int, onAlbum: (Album) -> Unit, modifier: Modifier = Modifier) {
     BoxWithConstraints(modifier.fillMaxWidth()) {
-        val minCardWidth = 160.dp
         val gap = 14.dp
-        val available = maxWidth
-        val columns = ((available + gap) / (minCardWidth + gap)).toInt().coerceAtLeast(1)
+        val columns = gridColumns.coerceIn(LibraryUiPreferences.MinGridColumns, LibraryUiPreferences.MaxGridColumns)
         Column(verticalArrangement = Arrangement.spacedBy(gap)) {
             albums.chunked(columns).forEach { row ->
                 Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
@@ -1507,17 +1509,20 @@ internal fun AlbumDetailPanel(
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
     onDownloadAlbum: (Album) -> Unit,
+    onArtist: (Artist) -> Unit,
     onLibraryColumns: (LibraryColumnVisibility) -> Unit,
 ) {
     val tracks = remember(catalog.tracksByParent, album.id) {
         catalog.tracksByParent[album.id].orEmpty()
     }
+    val artist = remember(catalog.artists, album.id, album.artist) {
+        catalogArtistForAlbum(catalog, album)
+    }
 
     var sortBy by remember(album.id) { mutableStateOf(LibrarySortBy.AlbumOrder) }
-    var ascending by remember(album.id) { mutableStateOf(true) }
 
-    val sortedTracks = remember(tracks, sortBy, ascending) {
-        sortTracksForLibrary(tracks, sortBy, ascending)
+    val sortedTracks = remember(tracks, sortBy) {
+        sortTracksForLibrary(tracks, sortBy, ascending = true)
     }
     val visibleTracks = remember(sortedTracks, searchQuery) {
         filterTracksByQuery(sortedTracks, searchQuery)
@@ -1551,7 +1556,7 @@ internal fun AlbumDetailPanel(
                             Modifier.size(160.dp).sharedArtworkTransition("album:${album.id}"),
                             elevated = true,
                         )
-                        AlbumDetailHeaderText(album, tracks, onDownloadAlbum, showDownload = false)
+                        AlbumDetailHeaderText(album, tracks, artist, onDownloadAlbum, onArtist, showDownload = false)
                     }
                 } else {
                     Column(
@@ -1564,27 +1569,24 @@ internal fun AlbumDetailPanel(
                             Modifier.size(168.dp).sharedArtworkTransition("album:${album.id}"),
                             elevated = false,
                         )
-                        AlbumDetailHeaderText(album, tracks, onDownloadAlbum, compact = true)
+                        AlbumDetailHeaderText(album, tracks, artist, onDownloadAlbum, onArtist, compact = true)
                     }
                 }
-                SectionLabel("Tracks", PhoebeUi.primaryText)
-            }
-        }
-        item(contentType = "album-track-toolbar") {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                DetailSectionToolbar(
+                DetailSectionHeader(
+                    title = "Tracks",
                     sortBy = sortBy,
-                    sortKeys = listOf(LibrarySortBy.AlbumOrder, LibrarySortBy.Name, LibrarySortBy.Year),
+                    sortKeys = listOf(LibrarySortBy.AlbumOrder, LibrarySortBy.Name, LibrarySortBy.Year, LibrarySortBy.DateAdded),
                     sortLabel = { key ->
                         when (key) {
                             LibrarySortBy.AlbumOrder -> "Album order"
                             LibrarySortBy.Year -> "Release date"
+                            LibrarySortBy.DateAdded -> "Date added"
                             else -> "Song name"
                         }
                     },
                     onSortBy = { sortBy = it },
-                    ascending = ascending,
-                    onAscending = { ascending = it },
+                    ascending = null,
+                    onAscending = null,
                     columns = libraryUi.columns,
                     onColumns = onLibraryColumns,
                     actions = {
@@ -1595,6 +1597,10 @@ internal fun AlbumDetailPanel(
                         }
                     },
                 )
+            }
+        }
+        item(contentType = "album-track-toolbar") {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (album.id in LocalTracksLoading.current && searchQuery.isBlank()) {
                     CatalogLoadingStrip()
                 }
@@ -1651,7 +1657,9 @@ internal fun AlbumDetailPanel(
 private fun AlbumDetailHeaderText(
     album: Album,
     tracks: List<Track>,
+    artist: Artist?,
     onDownloadAlbum: (Album) -> Unit,
+    onArtist: (Artist) -> Unit,
     compact: Boolean = false,
     showDownload: Boolean = true,
 ) {
@@ -1675,7 +1683,11 @@ private fun AlbumDetailHeaderText(
             color = PhoebeUi.secondaryText,
             fontSize = 14.sp,
             letterSpacing = 0.05.em,
-            modifier = Modifier.sharedBoundsTransition("album:${album.id}:subtitle"),
+            modifier = Modifier
+                .sharedBoundsTransition("album:${album.id}:subtitle")
+                .clickable(enabled = artist != null) {
+                    artist?.let(onArtist)
+                },
         )
         album.year?.let { y ->
             Text("$y", color = PhoebeUi.mutedText, fontSize = 13.sp)
@@ -1843,33 +1855,32 @@ internal fun PlaylistDetailPanel(
                     }
                 }
                 Spacer(Modifier.height(6.dp))
-                SectionLabel("Tracks", PhoebeUi.primaryText)
+                DetailSectionHeader(
+                    title = "Tracks",
+                    sortBy = sortBy,
+                    sortKeys = listOf(LibrarySortBy.PlaylistOrder, LibrarySortBy.Name, LibrarySortBy.Album, LibrarySortBy.Year, LibrarySortBy.DateAdded),
+                    sortLabel = { key ->
+                        when (key) {
+                            LibrarySortBy.PlaylistOrder -> "Playlist order"
+                            LibrarySortBy.Album -> "Album name"
+                            LibrarySortBy.Year -> "Release date"
+                            LibrarySortBy.DateAdded -> "Date added"
+                            else -> "Song name"
+                        }
+                    },
+                    onSortBy = { sortBy = it },
+                    ascending = ascending,
+                    onAscending = { ascending = it },
+                    columns = libraryUi.columns,
+                    onColumns = onLibraryColumns,
+                    actions = {
+                        if (useTable) {
+                            DownloadActionButton("Download Playlist", tracks) { onDownloadPlaylist(playlist) }
+                            PlaylistExportMenu(playlist = playlist)
+                        }
+                    },
+                )
             }
-        }
-        item(contentType = "playlist-track-toolbar") {
-            DetailSectionToolbar(
-                sortBy = sortBy,
-                sortKeys = listOf(LibrarySortBy.PlaylistOrder, LibrarySortBy.Name, LibrarySortBy.Album, LibrarySortBy.Year),
-                sortLabel = { key ->
-                    when (key) {
-                        LibrarySortBy.PlaylistOrder -> "Playlist order"
-                        LibrarySortBy.Album -> "Album name"
-                        LibrarySortBy.Year -> "Release date"
-                        else -> "Song name"
-                    }
-                },
-                onSortBy = { sortBy = it },
-                ascending = ascending,
-                onAscending = { ascending = it },
-                columns = libraryUi.columns,
-                onColumns = onLibraryColumns,
-                actions = {
-                    if (useTable) {
-                        DownloadActionButton("Download Playlist", tracks) { onDownloadPlaylist(playlist) }
-                        PlaylistExportMenu(playlist = playlist)
-                    }
-                },
-            )
         }
         if (visibleTracks.isEmpty()) {
             item(contentType = "playlist-empty") {
