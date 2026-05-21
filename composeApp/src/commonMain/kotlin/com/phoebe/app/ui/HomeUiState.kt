@@ -8,8 +8,10 @@ import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.PersonalMixPreferences
+import com.phoebe.app.domain.catalogPrefix
 import com.phoebe.app.data.PlayHistoryTopListCapacity
 import com.phoebe.app.domain.MostPlayedEntry
+import com.phoebe.app.domain.MediaProviderType
 import com.phoebe.app.domain.PlayHistoryKind
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.RecentlyPlayedEntry
@@ -259,8 +261,8 @@ internal fun lookupTracksByIds(
     trackIndex?.let { index ->
         for (id in trackIds) {
             if (id in remaining) {
-                index[id]?.let {
-                    resolved[id] = it
+                playHistoryLookupIds(id).firstNotNullOfOrNull { lookupId -> index[lookupId] }?.let { track ->
+                    resolved[id] = track
                     remaining.remove(id)
                 }
             }
@@ -269,14 +271,33 @@ internal fun lookupTracksByIds(
     if (remaining.isEmpty()) return resolved
     for (parentTracks in catalog.tracksByParent.values) {
         for (track in parentTracks) {
-            if (track.id in remaining) {
-                resolved[track.id] = track
-                remaining.remove(track.id)
-                if (remaining.isEmpty()) return resolved
+            for (id in remaining.toList()) {
+                if (track.id in playHistoryLookupIds(id)) {
+                    resolved[id] = track
+                    remaining.remove(id)
+                    if (remaining.isEmpty()) return resolved
+                }
             }
         }
     }
     return resolved
+}
+
+private fun playHistoryLookupIds(id: String): Set<String> {
+    if (id.isBlank()) return emptySet()
+    for (provider in MediaProviderType.entries) {
+        val prefix = "${provider.catalogPrefix}:"
+        if (id.startsWith(prefix)) {
+            val bare = id.removePrefix(prefix)
+            return setOf(id, bare)
+        }
+    }
+    return buildSet {
+        add(id)
+        for (provider in MediaProviderType.entries) {
+            add("${provider.catalogPrefix}:$id")
+        }
+    }
 }
 
 internal fun deriveHomeUiState(
@@ -665,8 +686,29 @@ private fun <T> collectResolvedPlayedRows(
     val candidates = ranked.take(limit)
     val resolved = lookupTracksByIds(catalog, candidates.map(trackId).toSet(), resolvedTracksById, trackIndex)
     return candidates.mapNotNull { entry ->
-        resolved[trackId(entry)]?.let { track -> buildRow(entry, track) }
+        val id = trackId(entry)
+        val track = resolved[id] ?: placeholderTrackForPlayHistoryEntry(entry, id) ?: return@mapNotNull null
+        buildRow(entry, track)
     }
+}
+
+private fun <T> placeholderTrackForPlayHistoryEntry(entry: T, trackId: String): Track? {
+    val (artist, album) = when (entry) {
+        is RecentlyPlayedEntry -> entry.artist to entry.album
+        is MostPlayedEntry -> entry.artist to entry.album
+        else -> return null
+    }
+    if (artist.isBlank() && album.isBlank()) return null
+    val title = album.ifBlank { artist }.ifBlank { return null }
+    return Track(
+        id = trackId,
+        title = title,
+        artist = artist.ifBlank { "Unknown Artist" },
+        album = album.ifBlank { "Unknown Album" },
+        durationMs = 0L,
+        streamUrl = "",
+        downloadUrl = "",
+    )
 }
 
 private fun heavyRotationTracks(

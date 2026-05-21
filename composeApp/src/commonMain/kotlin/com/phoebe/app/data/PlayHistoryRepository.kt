@@ -153,6 +153,21 @@ class PlayHistoryRepository(
                 }
         }
 
+    suspend fun queryTopRecentlyPlayed(limit: Int): List<RecentlyPlayedEntry> =
+        withContext(Dispatchers.Default) {
+            database.playHistoryQueries
+                .selectTopRecentlyPlayedByTrack(limit.coerceAtLeast(0).toLong())
+                .awaitAsList()
+                .map { row ->
+                    RecentlyPlayedEntry(
+                        trackId = row.track_id,
+                        lastPlayedMs = row.lastPlayedMs ?: 0L,
+                        artist = row.artist,
+                        album = row.album,
+                    )
+                }
+        }
+
     /**
      * Persist a fresh play event for [track]. The eagerly-subscribed [StateFlow]s
      * react automatically when SQLDelight notifies that the table changed.
@@ -179,6 +194,16 @@ class PlayHistoryRepository(
     suspend fun maxImportedRemotePlayedAt(source: String, serverId: String): Long? =
         withContext(Dispatchers.Default) {
             database.playHistoryQueries.selectMaxImportedRemotePlayedAt(source, serverId).awaitAsOneOrNull()?.lastPlayed
+        }
+
+    suspend fun maxImportedRemoteStatsLastPlayedAt(source: String, serverId: String): Long? =
+        withContext(Dispatchers.Default) {
+            database.playHistoryQueries.selectMaxImportedRemoteStatsLastPlayedAt(source, serverId).awaitAsOneOrNull()?.lastPlayed
+        }
+
+    suspend fun maxPlexStatsLastPlayedAt(serverId: String): Long? =
+        withContext(Dispatchers.Default) {
+            database.playHistoryQueries.selectMaxPlexStatsLastPlayedAt(serverId).awaitAsOneOrNull()?.lastPlayed
         }
 
     suspend fun importPlexPlay(
@@ -245,6 +270,30 @@ class PlayHistoryRepository(
         importedAtMs = importedAtMs,
     )
 
+    suspend fun importPlexPlayCountFallbackBatch(
+        stats: List<PlexTrackPlaybackStat>,
+        serverId: String,
+        tracksById: Map<String, Track> = emptyMap(),
+        importedAtMs: Long,
+    ): Int {
+        if (stats.isEmpty() || serverId.isBlank()) return 0
+        return withContext(Dispatchers.Default) {
+            var imported = 0
+            for (stat in stats) {
+                val track = stat.toPlayHistoryTrack(tracksById["plex:${stat.ratingKey}"])
+                imported += upsertRemotePlayCountAggregateInTransaction(
+                    track = track,
+                    source = "plex-stats",
+                    serverId = serverId,
+                    lastPlayedAtMs = stat.lastViewedAtMs ?: 0L,
+                    playCount = stat.viewCount,
+                    importedAtMs = importedAtMs,
+                )
+            }
+            imported
+        }
+    }
+
     suspend fun importRemotePlayCountFallback(
         track: Track,
         source: String,
@@ -298,28 +347,44 @@ class PlayHistoryRepository(
         lastPlayedAtMs: Long,
         playCount: Long,
         importedAtMs: Long,
+    ): Int = withContext(Dispatchers.Default) {
+        upsertRemotePlayCountAggregateInTransaction(
+            track = track,
+            source = source,
+            serverId = serverId,
+            lastPlayedAtMs = lastPlayedAtMs,
+            playCount = playCount,
+            importedAtMs = importedAtMs,
+        )
+    }
+
+    private suspend fun upsertRemotePlayCountAggregateInTransaction(
+        track: Track,
+        source: String,
+        serverId: String,
+        lastPlayedAtMs: Long,
+        playCount: Long,
+        importedAtMs: Long,
     ): Int {
         if (track.id.isBlank() || source.isBlank() || serverId.isBlank() || playCount <= 0L) return 0
         val cleanArtist = track.artist.ifBlank { "Unknown Artist" }
         val cleanAlbum = track.album.ifBlank { "Unknown Album" }
         val cappedCount = playCount.coerceIn(1L, 500L)
-        withContext(Dispatchers.Default) {
-            val existing = database.playHistoryQueries
-                .selectPlayCountAggregateByTrack(track.id)
-                .awaitAsOneOrNull()
-            val mergedCount = maxOf(existing?.play_count ?: 0L, cappedCount)
-            val mergedLastPlayed = maxOf(existing?.last_played_at_ms ?: 0L, lastPlayedAtMs.coerceAtLeast(0L))
-            database.playHistoryQueries.insertPlayCountAggregate(
-                track_id = track.id,
-                artist = cleanArtist,
-                album = cleanAlbum,
-                play_count = mergedCount,
-                last_played_at_ms = mergedLastPlayed,
-                source = source,
-                server_id = serverId,
-                imported_at_ms = importedAtMs,
-            )
-        }
+        val existing = database.playHistoryQueries
+            .selectPlayCountAggregateByTrack(track.id)
+            .awaitAsOneOrNull()
+        val mergedCount = maxOf(existing?.play_count ?: 0L, cappedCount)
+        val mergedLastPlayed = maxOf(existing?.last_played_at_ms ?: 0L, lastPlayedAtMs.coerceAtLeast(0L))
+        database.playHistoryQueries.insertPlayCountAggregate(
+            track_id = track.id,
+            artist = cleanArtist,
+            album = cleanAlbum,
+            play_count = mergedCount,
+            last_played_at_ms = mergedLastPlayed,
+            source = source,
+            server_id = serverId,
+            imported_at_ms = importedAtMs,
+        )
         return 1
     }
 

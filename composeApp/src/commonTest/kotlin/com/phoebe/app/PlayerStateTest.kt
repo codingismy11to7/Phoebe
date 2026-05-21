@@ -400,6 +400,40 @@ class PlayerStateTest {
         assertEquals(0, player.crossfadeStarts)
         assertEquals(tracks[1], player.state.value.currentTrack)
     }
+
+    @Test
+    fun clearQueueKeepsCurrentTrackButRemovesUpNext() {
+        val player = TestPlayer()
+        val tracks = listOf(
+            Track("t1", "One", "Artist", "Album", 60_000, "http://a", ""),
+            Track("t2", "Two", "Artist", "Album", 90_000, "http://b", ""),
+            Track("t3", "Three", "Artist", "Album", 120_000, "http://c", ""),
+        )
+
+        player.play(tracks, 0)
+        player.clearQueue()
+
+        assertEquals(tracks[0], player.state.value.currentTrack)
+        assertTrue(player.state.value.upNext.isEmpty())
+    }
+
+    @Test
+    fun stopPlaybackClearsCurrentTrackAndUpNext() {
+        val player = TestPlayer()
+        val tracks = listOf(
+            Track("t1", "One", "Artist", "Album", 60_000, "http://a", ""),
+            Track("t2", "Two", "Artist", "Album", 90_000, "http://b", ""),
+        )
+
+        player.play(tracks, 0)
+        player.setVolume(0.5f)
+        player.stopPlayback()
+
+        assertEquals(null, player.state.value.currentTrack)
+        assertTrue(player.state.value.queue.isEmpty())
+        assertFalse(player.state.value.isPlaying)
+        assertEquals(0.5f, player.state.value.volume)
+    }
 }
 
 private class TestPlayer : SimpleAudioPlayer() {

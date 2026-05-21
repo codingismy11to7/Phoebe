@@ -294,6 +294,16 @@ class PlexClient(
     suspend fun trackDetails(server: PlexServer, ratingKey: String, token: String): Track? =
         metadataDetails(server, ratingKey, token).firstOrNull()?.toTrack(server, token)
 
+    suspend fun trackPlaybackStat(server: PlexServer, ratingKey: String, token: String): PlexTrackPlaybackStat? {
+        val body = runCatching {
+            plexGetRaw(server, token, "/library/metadata/$ratingKey?includeUserState=1")
+        }.getOrElse { error ->
+            PhoebeLog.d("PlexClient") { "track playback stat fetch failed for '$ratingKey': ${error.message}" }
+            return null
+        }
+        return parseTrackPlaybackStatsFromBody(body).firstOrNull()
+    }
+
     suspend fun musicStations(server: PlexServer, library: MusicLibrary, token: String): List<PlexRadioStation> {
         val path = "/hubs/sections/${library.key}"
         val body = plexGetRaw(server, token, path)
@@ -707,7 +717,46 @@ class PlexClient(
         start: Int,
         size: Int,
     ): List<PlexTrackPlaybackStat> {
-        val response: PlexMediaContainerResponse = withReachableBase(server) { base ->
+        val strategies = listOf(
+            TrackStatsQuery(includeUserState = true, sort = "lastViewedAt:desc", playedOnly = true),
+            TrackStatsQuery(includeUserState = true, sort = "lastViewedAt:desc", playedOnly = false),
+            TrackStatsQuery(includeUserState = true, sort = null, playedOnly = false),
+        )
+        for (strategy in strategies) {
+            val stats = runCatching {
+                fetchTrackPlaybackStatsPage(
+                    server = server,
+                    library = library,
+                    token = token,
+                    start = start,
+                    size = size,
+                    query = strategy,
+                )
+            }.onFailure { error ->
+                PhoebeLog.d("PlexClient") {
+                    "track playback stats query failed (start=$start sort=${strategy.sort} playedOnly=${strategy.playedOnly}): ${error.message}"
+                }
+            }.getOrNull().orEmpty()
+            if (stats.isNotEmpty()) return stats
+        }
+        return emptyList()
+    }
+
+    private data class TrackStatsQuery(
+        val includeUserState: Boolean,
+        val sort: String?,
+        val playedOnly: Boolean,
+    )
+
+    private suspend fun fetchTrackPlaybackStatsPage(
+        server: PlexServer,
+        library: MusicLibrary,
+        token: String,
+        start: Int,
+        size: Int,
+        query: TrackStatsQuery,
+    ): List<PlexTrackPlaybackStat> {
+        val body = withReachableBase(server) { base ->
             val response = httpClient.get("$base/library/sections/${library.key}/all") {
                 plexServerAuth(token)
                 header(HttpHeaders.Accept, "application/json")
@@ -716,28 +765,27 @@ class PlexClient(
                 parameter("X-Plex-Container-Start", start)
                 parameter("X-Plex-Container-Size", size)
                 parameter("type", PlexTrackType)
-                parameter("sort", "lastViewedAt:desc")
+                if (query.includeUserState) {
+                    parameter("includeUserState", "1")
+                }
+                query.sort?.let { parameter("sort", it) }
+                if (query.playedOnly) {
+                    parameter("track.viewCount", "1")
+                }
             }
             if (!response.status.isSuccess()) {
-                val body = response.bodyAsText()
-                error("Plex track playback stats failed (${response.status.value}) via $base: ${body.take(200)}")
+                val errorBody = response.bodyAsText()
+                error("Plex track playback stats failed (${response.status.value}) via $base: ${errorBody.take(200)}")
             }
-            val body = runCatching { response.bodyAsText() }.getOrElse { error ->
+            val responseBody = runCatching { response.bodyAsText() }.getOrElse { error ->
                 throw IllegalStateException("Plex track playback stats body could not be read via $base: ${error.message}", error)
             }
-            if (body.isBlank()) {
+            if (responseBody.isBlank()) {
                 error("Plex track playback stats returned an empty response via $base")
             }
-            runCatching {
-                PlexJson.decodeFromString(PlexMediaContainerResponse.serializer(), body)
-            }.getOrElse { error ->
-                PhoebeLog.d("PlexClient") {
-                    "track playback stats decode failed via $base: ${error.message}; body=${body.take(400)}"
-                }
-                throw IllegalStateException("Plex track playback stats response was unreadable via $base: ${error.message}", error)
-            }
+            responseBody
         }
-        return response.mediaContainer.metadata.mapNotNull { it.toTrackPlaybackStat() }
+        return parseTrackPlaybackStatsFromBody(body)
     }
 
     suspend fun tracksForYearRange(
@@ -1486,7 +1534,11 @@ class PlexClient(
         }
 
     private suspend fun metadataDetails(server: PlexServer, ratingKey: String, token: String): List<PlexMetadataDto> {
-        val response = plexGet<PlexMediaContainerResponse>(server, token, "/library/metadata/$ratingKey")
+        val response = plexGet<PlexMediaContainerResponse>(
+            server,
+            token,
+            "/library/metadata/$ratingKey?includeUserState=1",
+        )
         return response.mediaContainer.metadata
     }
 
@@ -1616,13 +1668,23 @@ class PlexClient(
 
     private fun PlexMetadataDto.toTrackPlaybackStat(): PlexTrackPlaybackStat? {
         if (ratingKey.isBlank()) return null
-        val count = viewCount?.takeIf { it > 0L } ?: return null
+        val count = resolvedViewCount() ?: return null
         return PlexTrackPlaybackStat(
             ratingKey = ratingKey,
             viewCount = count,
-            lastViewedAtMs = (lastViewedAt ?: viewedAt)?.times(1000L),
+            lastViewedAtMs = resolvedLastViewedAtMs(),
+            title = title.ifBlank { "Unknown Song" },
+            artist = grandparentTitle ?: parentTitle ?: "Unknown Artist",
+            album = parentTitle ?: "Unknown Album",
         )
     }
+
+    private fun PlexMetadataDto.resolvedViewCount(): Long? =
+        viewCount?.takeIf { it > 0L }
+            ?: userState?.viewCount?.takeIf { it > 0L }
+
+    private fun PlexMetadataDto.resolvedLastViewedAtMs(): Long? =
+        (lastViewedAt ?: viewedAt ?: userState?.lastViewedAt ?: userState?.viewedAt)?.times(1000L)
 
     private fun PlexMediaContainerResponse.toTrackPage(
         server: PlexServer,
@@ -1657,6 +1719,66 @@ class PlexClient(
 
     /** Base URL that succeeded for API calls, used for media/thumbnail URLs. */
     fun mediaBaseUrl(server: PlexServer): String = apiBaseCache[server.id] ?: server.uri
+
+    private fun parseTrackPlaybackStatsFromBody(body: String): List<PlexTrackPlaybackStat> {
+        val root = runCatching { PlexJson.parseToJsonElement(body) }.getOrNull() ?: return emptyList()
+        val mediaContainer = root.jsonObjectOrNull()?.get("MediaContainer")?.jsonObjectOrNull() ?: root.jsonObjectOrNull()
+        val metadata = mediaContainer?.get("Metadata") ?: return emptyList()
+        val objects = when (metadata) {
+            is JsonArray -> metadata.mapNotNull { it.jsonObjectOrNull() }
+            is JsonObject -> listOf(metadata)
+            else -> emptyList()
+        }
+        return objects.mapNotNull { it.toRawTrackPlaybackStat() }
+    }
+
+    private fun JsonObject.toRawTrackPlaybackStat(): PlexTrackPlaybackStat? {
+        val ratingKey = stringValue("ratingKey") ?: longValue("ratingKey")?.toString() ?: return null
+        val viewCount = resolveRawViewCount() ?: return null
+        return PlexTrackPlaybackStat(
+            ratingKey = ratingKey,
+            viewCount = viewCount,
+            lastViewedAtMs = resolveRawLastViewedAt(),
+            title = stringValue("title") ?: "Unknown Song",
+            artist = stringValue("grandparentTitle") ?: stringValue("parentTitle") ?: "Unknown Artist",
+            album = stringValue("parentTitle") ?: "Unknown Album",
+        )
+    }
+
+    private fun JsonObject.resolveRawViewCount(): Long? {
+        longValue("viewCount")?.takeIf { it > 0L }?.let { return it }
+        resolveNestedUserStateViewCount(this["UserState"] ?: this["userState"])?.let { return it }
+        val meta = this["Meta"]?.jsonObjectOrNull() ?: return null
+        return resolveNestedUserStateViewCount(meta["UserState"] ?: meta["userState"])
+    }
+
+    private fun JsonObject.resolveRawLastViewedAt(): Long? {
+        (longValue("lastViewedAt") ?: longValue("viewedAt"))?.let { return it * 1000L }
+        resolveNestedUserStateLastViewedAt(this["UserState"] ?: this["userState"])?.let { return it }
+        val meta = this["Meta"]?.jsonObjectOrNull() ?: return null
+        return resolveNestedUserStateLastViewedAt(meta["UserState"] ?: meta["userState"])
+    }
+
+    private fun resolveNestedUserStateViewCount(userState: JsonElement?): Long? = when (userState) {
+        is JsonObject -> userState.longValue("viewCount")?.takeIf { it > 0L }
+        is JsonArray -> userState.firstNotNullOfOrNull { (it as? JsonObject)?.longValue("viewCount")?.takeIf { count -> count > 0L } }
+        else -> null
+    }
+
+    private fun resolveNestedUserStateLastViewedAt(userState: JsonElement?): Long? {
+        val stateObject = when (userState) {
+            is JsonObject -> userState
+            is JsonArray -> userState.firstNotNullOfOrNull { it as? JsonObject }
+            else -> null
+        } ?: return null
+        return (stateObject.longValue("lastViewedAt") ?: stateObject.longValue("viewedAt"))?.times(1000L)
+    }
+
+    private fun JsonObject.longValue(key: String): Long? {
+        val primitive = this[key] as? JsonPrimitive ?: return null
+        return primitive.contentOrNull?.toLongOrNull()
+            ?: primitive.contentOrNull?.toDoubleOrNull()?.toLong()
+    }
 
     companion object {
         const val LibraryIdentifier = "com.plexapp.plugins.library"

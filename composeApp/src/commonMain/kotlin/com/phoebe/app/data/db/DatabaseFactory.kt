@@ -16,6 +16,19 @@ expect suspend fun createSqlDriver(schema: SqlSchema<QueryResult.AsyncValue<Unit
 suspend fun createPhoebeDatabase(): PhoebeDatabase =
     PhoebeDatabase(createSqlDriver(PhoebeDatabase.Schema))
 
+/** PRAGMA statements may return a result row; native drivers reject them via [SqlDriver.execute]. */
+internal fun SqlDriver.execPragma(sql: String) {
+    executeQuery(
+        identifier = null,
+        sql = sql,
+        mapper = { cursor ->
+            while (cursor.next().value) { }
+            QueryResult.Unit
+        },
+        parameters = 0,
+    )
+}
+
 /** Opens [PhoebeDatabase] with an existing driver (in-memory JDBC, Android test context, etc.). */
 fun phoebeDatabaseFromDriver(driver: SqlDriver): PhoebeDatabase = PhoebeDatabase(driver)
 

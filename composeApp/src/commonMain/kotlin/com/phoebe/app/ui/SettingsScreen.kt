@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Slider
@@ -39,6 +40,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
@@ -55,6 +57,8 @@ import com.phoebe.app.domain.AppSettings
 import com.phoebe.app.domain.HomeSection
 import com.phoebe.app.domain.LibraryUiPreferences
 import com.phoebe.app.domain.PersonalMixPreferences
+import com.phoebe.app.domain.PlexSession
+import com.phoebe.app.domain.providerLabel
 import com.phoebe.app.platform.rememberPickDownloadDirectory
 import kotlin.math.roundToInt
 
@@ -96,6 +100,7 @@ internal fun SettingsDesktopView(
     onImportFavoritePlaylists: () -> Unit,
     homeScreenLayoutMode: HomeScreenLayoutMode = HomeScreenLayoutMode.Default,
     onHomeScreenLayoutModeChange: (HomeScreenLayoutMode) -> Unit = {},
+    session: PlexSession? = null,
     modifier: Modifier = Modifier,
     initialCategory: SettingsCategory = SettingsCategory.AudioPlayback,
 ) {
@@ -149,7 +154,7 @@ internal fun SettingsDesktopView(
                         onCrossfadeSeconds = onCrossfadeSeconds,
                         onScanLibraryOnLaunch = onScanLibraryOnLaunch,
                     )
-                    SettingsCategory.Account -> AccountPlaceholderCard()
+                    SettingsCategory.Account -> AccountSettingsCard(session = session)
                     SettingsCategory.Library -> {
                         GridSettingsCard(libraryUi.gridColumns, onGridColumns)
                         HomeSettingsCard(libraryUi.homeSections, onHomeSections)
@@ -197,6 +202,7 @@ internal fun SettingsMobileView(
     onImportFavoritePlaylists: () -> Unit,
     homeScreenLayoutMode: HomeScreenLayoutMode = HomeScreenLayoutMode.Default,
     onHomeScreenLayoutModeChange: (HomeScreenLayoutMode) -> Unit = {},
+    session: PlexSession? = null,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -206,6 +212,8 @@ internal fun SettingsMobileView(
             .padding(horizontal = 20.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
+        SectionLabel("ACCOUNT", PhoebeUi.accentLight)
+        AccountSettingsCard(session = session, compact = true)
         SectionLabel("APPEARANCE", PhoebeUi.accentLight)
         AppearanceSettingsCard(
             isLightMode,
@@ -969,11 +977,105 @@ private fun SettingsSwitchRow(
 }
 
 @Composable
-private fun AccountPlaceholderCard() {
+private fun AccountSettingsCard(
+    session: PlexSession?,
+    compact: Boolean = false,
+) {
+    val signedIn = session?.token?.isNotBlank() == true
+    val providerName = session.providerLabel()
     SettingsCard {
         Text("Account", color = PhoebeUi.primaryText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(12.dp))
-        Text("Profile and subscription controls will live here.", color = PhoebeUi.secondaryText, fontSize = 13.sp)
+        Text(
+            if (signedIn) "Your signed-in media provider" else "Connect a media provider to browse your library",
+            color = PhoebeUi.mutedText,
+            fontSize = 12.sp,
+            modifier = Modifier.padding(bottom = if (compact) 10.dp else 14.dp),
+        )
+        if (!signedIn) {
+            Text("Not signed in", color = PhoebeUi.secondaryText, fontSize = 13.sp)
+        } else {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = if (compact) 10.dp else 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Box(
+                    Modifier
+                        .size(if (compact) 40.dp else 48.dp)
+                        .clip(CircleShape)
+                        .background(Brush.linearGradient(listOf(Color(0xFF3876C8), Color(0xFFB87C5C)))),
+                )
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        session.userName,
+                        color = PhoebeUi.primaryText,
+                        fontSize = if (compact) 15.sp else 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        "$providerName signed in",
+                        color = PhoebeUi.secondaryText,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(PhoebeUi.subtleFill)
+                    .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(10.dp))
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+            ) {
+                AccountDetailRow(label = "Provider", value = providerName)
+                AccountDetailRow(label = "Account", value = session.userName)
+                session.selectedServer?.name?.takeIf { it.isNotBlank() }?.let { serverName ->
+                    AccountDetailRow(label = "Server", value = serverName)
+                }
+                session.selectedServer?.uri?.takeIf { it.isNotBlank() }?.let { serverUri ->
+                    AccountDetailRow(label = "Server URL", value = serverUri)
+                }
+                session.selectedLibrary?.title?.takeIf { it.isNotBlank() }?.let { libraryTitle ->
+                    AccountDetailRow(label = "Library", value = libraryTitle)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AccountDetailRow(
+    label: String,
+    value: String,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Text(
+            label,
+            color = PhoebeUi.mutedText,
+            fontSize = 12.sp,
+            modifier = Modifier.width(88.dp),
+        )
+        Text(
+            value,
+            color = PhoebeUi.primaryText,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.weight(1f),
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 

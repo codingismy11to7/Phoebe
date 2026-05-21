@@ -559,6 +559,7 @@ internal fun MobileBrowseShell(
                     onGridColumns = onGridColumns,
                     onExportFavoritePlaylists = onExportFavoritePlaylists,
                     onImportFavoritePlaylists = onImportFavoritePlaylists,
+                    session = session,
                     modifier = Modifier.fillMaxSize().padding(top = chromePadding.top, bottom = chromePadding.bottom),
                 )
                 section == BrowseSection.Home && selectedPlaylistId == null -> {

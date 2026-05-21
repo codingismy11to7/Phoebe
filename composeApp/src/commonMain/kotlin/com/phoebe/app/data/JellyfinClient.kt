@@ -13,6 +13,7 @@ import io.ktor.client.call.body
 import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.header
+import io.ktor.client.request.header
 import io.ktor.client.request.parameter
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -63,6 +64,7 @@ open class JellyfinClient(
                 id = "$prefix:${base.hashCode().toUInt().toString(16)}",
                 name = base.removePrefix("https://").removePrefix("http://"),
                 uri = base,
+                connectionUris = listOf(base),
                 owned = true,
             ),
         )
@@ -73,9 +75,9 @@ open class JellyfinClient(
         val response: JellyfinItemsResponse = httpClient.get("${server.uri}$path") {
             jellyfinAuth(token)
             if (family != EmbyFamily.Emby) {
-                parameter("userId", userId)
+                q("userId", userId)
             }
-            parameter("includeExternalContent", false)
+            q("includeExternalContent", false)
         }.jellyfinBody("library lookup")
         return response.Items
             .filter { it.CollectionType.equals("music", ignoreCase = true) || it.Type == "CollectionFolder" }
@@ -84,21 +86,21 @@ open class JellyfinClient(
 
     suspend fun artists(server: PlexServer, library: MusicLibrary, token: String, userId: String): List<Artist> {
         val scoped = pagedItems(server, token, "/Artists/AlbumArtists", "albumArtists scoped:${library.key}") {
-            parameter("userId", userId)
-            parameter("parentId", library.key)
-            parameter("recursive", true)
-            parameter("fields", JellyfinFields)
-            parameter("enableUserData", true)
-            parameter("sortBy", "SortName")
-        }.Items.map { it.toArtist(server, token) }
+            q("userId", userId)
+            q("parentId", library.key)
+            q("recursive", true)
+            q("fields", JellyfinFields)
+            q("enableUserData", true)
+            q("sortBy", "SortName")
+        }.Items.map { it.toArtist(server, token, family) }
         if (scoped.isNotEmpty()) return scoped
         return pagedItems(server, token, "/Artists/AlbumArtists", "albumArtists unscoped") {
-            parameter("userId", userId)
-            parameter("recursive", true)
-            parameter("fields", JellyfinFields)
-            parameter("enableUserData", true)
-            parameter("sortBy", "SortName")
-        }.Items.map { it.toArtist(server, token) }
+            q("userId", userId)
+            q("recursive", true)
+            q("fields", JellyfinFields)
+            q("enableUserData", true)
+            q("sortBy", "SortName")
+        }.Items.map { it.toArtist(server, token, family) }
     }
 
     suspend fun artistPage(server: PlexServer, library: MusicLibrary, token: String, userId: String, pageIndex: Int): JellyfinItemPage<Artist> {
@@ -110,12 +112,12 @@ open class JellyfinClient(
             startIndex = pageIndex * pageSize,
             maxPages = 1,
         ) {
-            parameter("userId", userId)
-            parameter("parentId", library.key)
-            parameter("recursive", true)
-            parameter("fields", JellyfinFields)
-            parameter("enableUserData", true)
-            parameter("sortBy", "SortName")
+            q("userId", userId)
+            q("parentId", library.key)
+            q("recursive", true)
+            q("fields", JellyfinFields)
+            q("enableUserData", true)
+            q("sortBy", "SortName")
         }
         val page = if ((scoped.TotalRecordCount ?: scoped.Items.size) > 0 || pageIndex > 0) {
             scoped
@@ -128,14 +130,14 @@ open class JellyfinClient(
                 startIndex = pageIndex * pageSize,
                 maxPages = 1,
             ) {
-                parameter("userId", userId)
-                parameter("recursive", true)
-                parameter("fields", JellyfinFields)
-                parameter("enableUserData", true)
-                parameter("sortBy", "SortName")
+                q("userId", userId)
+                q("recursive", true)
+                q("fields", JellyfinFields)
+                q("enableUserData", true)
+                q("sortBy", "SortName")
             }
         }
-        return JellyfinItemPage(page.Items.map { it.toArtist(server, token) }, page.TotalRecordCount ?: page.Items.size, pageIndex, pageSize)
+        return JellyfinItemPage(page.Items.map { it.toArtist(server, token, family) }, page.TotalRecordCount ?: page.Items.size, pageIndex, pageSize)
     }
 
     suspend fun albums(
@@ -152,12 +154,12 @@ open class JellyfinClient(
             onPage(page, total)
         }
         val scoped = albumsForQuery(server, token, userId, fastSync, ::consumePage) {
-            parameter("parentId", library.key)
-            parameter("recursive", true)
+            q("parentId", library.key)
+            q("recursive", true)
         }
         if (scoped.isNotEmpty()) return scoped
         return albumsForQuery(server, token, userId, fastSync, ::consumePage) {
-            parameter("recursive", true)
+            q("recursive", true)
         }
     }
 
@@ -171,16 +173,17 @@ open class JellyfinClient(
     ): List<Album> = pagedItemsParallel(
         server = server,
         token = token,
+        userId = userId,
         path = "/Items",
         label = "albums",
-        fetchImages = !fastSync,
+        fetchImages = true,
         onPage = { items, total -> onPage(items.map { it.toAlbum(server, token) }, total) },
     ) {
-        parameter("userId", userId)
-        parameter("includeItemTypes", "MusicAlbum")
-        parameter("fields", if (fastSync) JellyfinFastAlbumFields else JellyfinFields)
-        parameter("enableUserData", true)
-        parameter("sortBy", "AlbumArtist,SortName")
+        q("userId", userId)
+        q("includeItemTypes", "MusicAlbum")
+        q("fields", if (fastSync) JellyfinFastAlbumFields else JellyfinFields)
+        q("enableUserData", true)
+        q("sortBy", "AlbumArtist,SortName")
         block()
     }.Items.map { it.toAlbum(server, token) }
 
@@ -193,34 +196,36 @@ open class JellyfinClient(
     ): List<Album> = pagedItems(
         server = server,
         token = token,
+        userId = userId,
         path = "/Items",
         label = "albums for artist $artistId",
     ) {
-        parameter("userId", userId)
-        parameter("parentId", library.key)
-        parameter("recursive", true)
-        parameter("includeItemTypes", "MusicAlbum")
-        parameter("fields", JellyfinFields)
-        parameter("enableUserData", true)
-        parameter("ArtistIds", artistId)
+        q("userId", userId)
+        q("parentId", library.key)
+        q("recursive", true)
+        q("includeItemTypes", "MusicAlbum")
+        q("fields", JellyfinFields)
+        q("enableUserData", true)
+        q("ArtistIds", artistId)
     }.Items.map { it.toAlbum(server, token) }
 
     suspend fun albumPage(server: PlexServer, library: MusicLibrary, token: String, userId: String, pageIndex: Int): JellyfinItemPage<Album> {
         val scoped = pagedItems(
             server = server,
             token = token,
+            userId = userId,
             path = "/Items",
             label = "albums scoped:${library.key} page:$pageIndex",
             startIndex = pageIndex * pageSize,
             maxPages = 1,
         ) {
-            parameter("userId", userId)
-            parameter("parentId", library.key)
-            parameter("recursive", true)
-            parameter("includeItemTypes", "MusicAlbum")
-            parameter("fields", JellyfinFields)
-            parameter("enableUserData", true)
-            parameter("sortBy", "AlbumArtist,SortName")
+            q("userId", userId)
+            q("parentId", library.key)
+            q("recursive", true)
+            q("includeItemTypes", "MusicAlbum")
+            q("fields", JellyfinFields)
+            q("enableUserData", true)
+            q("sortBy", "AlbumArtist,SortName")
         }
         val page = if ((scoped.TotalRecordCount ?: scoped.Items.size) > 0 || pageIndex > 0) {
             scoped
@@ -228,17 +233,18 @@ open class JellyfinClient(
             pagedItems(
                 server = server,
                 token = token,
+                userId = userId,
                 path = "/Items",
                 label = "albums unscoped page:$pageIndex",
                 startIndex = pageIndex * pageSize,
                 maxPages = 1,
             ) {
-                parameter("userId", userId)
-                parameter("recursive", true)
-                parameter("includeItemTypes", "MusicAlbum")
-                parameter("fields", JellyfinFields)
-                parameter("enableUserData", true)
-                parameter("sortBy", "AlbumArtist,SortName")
+                q("userId", userId)
+                q("recursive", true)
+                q("includeItemTypes", "MusicAlbum")
+                q("fields", JellyfinFields)
+                q("enableUserData", true)
+                q("sortBy", "AlbumArtist,SortName")
             }
         }
         return JellyfinItemPage(page.Items.map { it.toAlbum(server, token) }, page.TotalRecordCount ?: page.Items.size, pageIndex, pageSize)
@@ -258,16 +264,16 @@ open class JellyfinClient(
             onPage(page, total)
         }
         val scoped = tracksForQuery(server, token, userId, ::consumePage, includeMediaDetails) {
-            parameter("parentId", library.key)
-            parameter("recursive", true)
-            parameter("includeItemTypes", "Audio")
-            parameter("sortBy", "AlbumArtist,Album,ParentIndexNumber,IndexNumber,SortName")
+            q("parentId", library.key)
+            q("recursive", true)
+            q("includeItemTypes", "Audio")
+            q("sortBy", "AlbumArtist,Album,ParentIndexNumber,IndexNumber,SortName")
         }
         if (scoped.isNotEmpty()) return scoped
         return tracksForQuery(server, token, userId, ::consumePage, includeMediaDetails) {
-            parameter("recursive", true)
-            parameter("includeItemTypes", "Audio")
-            parameter("sortBy", "AlbumArtist,Album,ParentIndexNumber,IndexNumber,SortName")
+            q("recursive", true)
+            q("includeItemTypes", "Audio")
+            q("sortBy", "AlbumArtist,Album,ParentIndexNumber,IndexNumber,SortName")
         }
     }
 
@@ -275,18 +281,19 @@ open class JellyfinClient(
         val scoped = pagedItems(
             server = server,
             token = token,
+            userId = userId,
             path = "/Items",
             label = "tracks scoped:${library.key} page:$pageIndex",
             startIndex = pageIndex * pageSize,
             maxPages = 1,
         ) {
-            parameter("userId", userId)
-            parameter("parentId", library.key)
-            parameter("recursive", true)
-            parameter("includeItemTypes", "Audio")
-            parameter("fields", JellyfinFields)
-            parameter("enableUserData", true)
-            parameter("sortBy", "AlbumArtist,Album,ParentIndexNumber,IndexNumber,SortName")
+            q("userId", userId)
+            q("parentId", library.key)
+            q("recursive", true)
+            q("includeItemTypes", "Audio")
+            q("fields", JellyfinFields)
+            q("enableUserData", true)
+            q("sortBy", "AlbumArtist,Album,ParentIndexNumber,IndexNumber,SortName")
         }
         val page = if ((scoped.TotalRecordCount ?: scoped.Items.size) > 0 || pageIndex > 0) {
             scoped
@@ -294,17 +301,18 @@ open class JellyfinClient(
             pagedItems(
                 server = server,
                 token = token,
+                userId = userId,
                 path = "/Items",
                 label = "tracks unscoped page:$pageIndex",
                 startIndex = pageIndex * pageSize,
                 maxPages = 1,
             ) {
-                parameter("userId", userId)
-                parameter("recursive", true)
-                parameter("includeItemTypes", "Audio")
-                parameter("fields", JellyfinFields)
-                parameter("enableUserData", true)
-                parameter("sortBy", "AlbumArtist,Album,ParentIndexNumber,IndexNumber,SortName")
+                q("userId", userId)
+                q("recursive", true)
+                q("includeItemTypes", "Audio")
+                q("fields", JellyfinFields)
+                q("enableUserData", true)
+                q("sortBy", "AlbumArtist,Album,ParentIndexNumber,IndexNumber,SortName")
             }
         }
         return JellyfinItemPage(page.Items.mapNotNull { it.toTrack(server, token) }, page.TotalRecordCount ?: page.Items.size, pageIndex, pageSize)
@@ -317,52 +325,198 @@ open class JellyfinClient(
         userId: String,
         start: Int,
         size: Int,
-    ): List<JellyfinPlaybackStat> =
-        items(server, token) {
-            parameter("userId", userId)
-            parameter("parentId", library.key)
-            parameter("recursive", true)
-            parameter("includeItemTypes", "Audio")
-            parameter("fields", JellyfinHistoryFields)
-            parameter("enableUserData", true)
-            parameter("sortBy", "DatePlayed")
-            parameter("sortOrder", "Descending")
-            parameter("startIndex", start)
-            parameter("limit", size)
-        }.Items.mapNotNull { item ->
-            val lastPlayedAtMs = item.UserData?.LastPlayedDate.toEpochMillisOrNull() ?: return@mapNotNull null
-            val playCount = item.UserData?.PlayCount?.toLong()?.takeIf { it > 0L } ?: return@mapNotNull null
-            JellyfinPlaybackStat(
-                itemId = item.Id,
-                lastPlayedAtMs = lastPlayedAtMs,
-                playCount = playCount,
-            )
+    ): List<JellyfinPlaybackStat> {
+        val strategies = if (family == EmbyFamily.Emby) {
+            buildList {
+                add(PlaybackStatsQuery(scopedToLibrary = true, playedFilter = true, sortBy = "PlayCount"))
+                add(PlaybackStatsQuery(scopedToLibrary = true, playedFilter = true, sortBy = "DatePlayed"))
+                add(PlaybackStatsQuery(scopedToLibrary = true, playedFilter = false, sortBy = "PlayCount"))
+                if (start == 0) {
+                    add(PlaybackStatsQuery(scopedToLibrary = false, playedFilter = true, sortBy = "PlayCount"))
+                }
+            }
+        } else {
+            buildList {
+                add(PlaybackStatsQuery(scopedToLibrary = true, playedFilter = true))
+                add(PlaybackStatsQuery(scopedToLibrary = true, playedFilter = false))
+                add(PlaybackStatsQuery(scopedToLibrary = true, playedFilter = false, sortBy = "PlayCount"))
+                if (start == 0) {
+                    add(PlaybackStatsQuery(scopedToLibrary = false, playedFilter = true))
+                    add(PlaybackStatsQuery(scopedToLibrary = false, playedFilter = false))
+                    add(PlaybackStatsQuery(scopedToLibrary = false, playedFilter = false, sortBy = "PlayCount"))
+                }
+            }
         }
+        for (strategy in strategies) {
+            val stats = playbackStatsItems(
+                server = server,
+                token = token,
+                userId = userId,
+                library = library,
+                start = start,
+                size = size,
+                query = strategy,
+            )
+            if (stats.isNotEmpty()) return stats
+        }
+        return emptyList()
+    }
+
+    /**
+     * Emby: GET /Users/{UserId}/Items/Resume — resumable / in-progress items.
+     */
+    suspend fun playbackResumePage(
+        server: PlexServer,
+        library: MusicLibrary,
+        token: String,
+        userId: String,
+        start: Int,
+        size: Int,
+    ): List<JellyfinPlaybackStat> {
+        if (userId.isBlank()) return emptyList()
+        val path = "/Users/$userId/Items/Resume"
+        val response = httpClient.get("${server.uri}$path") {
+            jellyfinAuth(token)
+            q("enableImages", true)
+            q("imageTypeLimit", 1)
+            q("enableImageTypes", "Primary")
+            q("parentId", library.key)
+            q("recursive", true)
+            q("includeItemTypes", "Audio")
+            q("fields", historyFields())
+            q("enableUserData", true)
+            q("startIndex", start)
+            q("limit", size)
+        }.body<JellyfinItemsResponse>()
+        val stats = response.Items.mapNotNull { it.toPlaybackStat(server, token, requirePlayCount = false) }
+        PhoebeLog.d("JellyfinClient") {
+            "playbackResume parent=${library.key} raw=${response.Items.size} kept=${stats.size} total=${response.TotalRecordCount}"
+        }
+        return stats
+    }
+
+    /**
+     * Emby: GET /Users/{UserId}/Items/Latest?IsPlayed=true — recently played audio per library.
+     */
+    suspend fun playbackLatestPlayedPage(
+        server: PlexServer,
+        library: MusicLibrary,
+        token: String,
+        userId: String,
+        size: Int,
+    ): List<JellyfinPlaybackStat> {
+        if (family != EmbyFamily.Emby || userId.isBlank()) return emptyList()
+        val items: List<JellyfinItemDto> = httpClient.get("${server.uri}/Users/$userId/Items/Latest") {
+            jellyfinAuth(token)
+            q("parentId", library.key)
+            q("includeItemTypes", "Audio")
+            q("isPlayed", true)
+            q("enableUserData", true)
+            q("fields", historyFields())
+            q("limit", size)
+        }.body()
+        val stats = items.mapNotNull { it.toPlaybackStat(server, token, requirePlayCount = false) }
+        PhoebeLog.d("JellyfinClient") {
+            "playbackLatest parent=${library.key} raw=${items.size} kept=${stats.size}"
+        }
+        return stats
+    }
+
+    private data class PlaybackStatsQuery(
+        val scopedToLibrary: Boolean,
+        val playedFilter: Boolean,
+        val sortBy: String = "DatePlayed",
+    )
+
+    private suspend fun playbackStatsItems(
+        server: PlexServer,
+        token: String,
+        userId: String,
+        library: MusicLibrary,
+        start: Int,
+        size: Int,
+        query: PlaybackStatsQuery,
+    ): List<JellyfinPlaybackStat> {
+        val path = itemsApiPath(userId)
+        val response = items(server, token, path = path, userId = userId, fetchImages = true) {
+            if (resolvedItemsPath(path, userId) == "/Items") {
+                q("userId", userId)
+            }
+            if (query.scopedToLibrary) {
+                q("parentId", library.key)
+                q("recursive", true)
+            }
+            q("includeItemTypes", "Audio")
+            q("fields", historyFields())
+            q("enableUserData", true)
+            if (query.playedFilter) {
+                if (family == EmbyFamily.Emby) {
+                    q("isPlayed", true)
+                } else {
+                    q("filters", "IsPlayed")
+                }
+            }
+            q("sortBy", query.sortBy)
+            q("sortOrder", "Descending")
+            q("startIndex", start)
+            q("limit", size)
+        }
+        val stats = response.Items.mapNotNull { it.toPlaybackStat(server, token, requirePlayCount = true) }
+        PhoebeLog.d("JellyfinClient") {
+            "playbackStats scoped=${query.scopedToLibrary} played=${query.playedFilter} sort=${query.sortBy} " +
+                "parent=${if (query.scopedToLibrary) library.key else "all"} " +
+                "raw=${response.Items.size} kept=${stats.size} total=${response.TotalRecordCount}"
+        }
+        return stats
+    }
+
+    private fun historyFields(): String =
+        if (family == EmbyFamily.Emby) EmbyHistoryFields else JellyfinHistoryFields
+
+    private fun itemsApiPath(userId: String): String =
+        if (family == EmbyFamily.Emby && userId.isNotBlank()) "/Users/$userId/Items" else "/Items"
+
+    suspend fun trackDetails(server: PlexServer, token: String, itemId: String, userId: String? = null): Track? =
+        runCatching {
+            val itemUrl = if (family == EmbyFamily.Emby && !userId.isNullOrBlank()) {
+                "${server.uri}/Users/$userId/Items/$itemId"
+            } else {
+                "${server.uri}/Items/$itemId"
+            }
+            val item: JellyfinItemDto = httpClient.get(itemUrl) {
+                jellyfinAuth(token)
+                q("fields", JellyfinFields)
+                if (family == EmbyFamily.Emby && !userId.isNullOrBlank()) {
+                    q("enableUserData", true)
+                }
+            }.body()
+            item.toTrack(server, token)
+        }.getOrNull()
 
     suspend fun albumTracks(server: PlexServer, album: Album, token: String, userId: String): List<Track> =
         tracksForQuery(server, token, userId) {
-            parameter("parentId", album.id)
-            parameter("recursive", true)
-            parameter("includeItemTypes", "Audio")
-            parameter("sortBy", "ParentIndexNumber,IndexNumber,SortName")
+            q("parentId", album.id)
+            q("recursive", true)
+            q("includeItemTypes", "Audio")
+            q("sortBy", "ParentIndexNumber,IndexNumber,SortName")
         }
 
     suspend fun playlists(server: PlexServer, library: MusicLibrary, token: String, userId: String): List<Playlist> {
-        val scoped = pagedItems(server, token, "/Items", "playlists scoped:${library.key}") {
-            parameter("userId", userId)
-            parameter("parentId", library.key)
-            parameter("recursive", true)
-            parameter("includeItemTypes", "Playlist")
-            parameter("fields", JellyfinFields)
-            parameter("enableUserData", true)
+        val scoped = pagedItems(server, token, "/Items", "playlists scoped:${library.key}", userId = userId) {
+            q("userId", userId)
+            q("parentId", library.key)
+            q("recursive", true)
+            q("includeItemTypes", "Playlist")
+            q("fields", JellyfinFields)
+            q("enableUserData", true)
         }.Items.map { it.toPlaylist(server, token) }
         val regular = scoped.ifEmpty {
-            pagedItems(server, token, "/Items", "playlists unscoped") {
-                parameter("userId", userId)
-                parameter("recursive", true)
-                parameter("includeItemTypes", "Playlist")
-                parameter("fields", JellyfinFields)
-                parameter("enableUserData", true)
+            pagedItems(server, token, "/Items", "playlists unscoped", userId = userId) {
+                q("userId", userId)
+                q("recursive", true)
+                q("includeItemTypes", "Playlist")
+                q("fields", JellyfinFields)
+                q("enableUserData", true)
             }.Items.map { it.toPlaylist(server, token) }
         }
         val likedCount = favoriteTrackCount(server, library, token, userId)
@@ -374,18 +528,18 @@ open class JellyfinClient(
             return favoriteTracks(server, MusicLibrary("", ""), token, userId)
         }
         return tracksForQuery(server, token, userId) {
-            parameter("parentId", playlist.id)
-            parameter("recursive", true)
-            parameter("includeItemTypes", "Audio")
+            q("parentId", playlist.id)
+            q("recursive", true)
+            q("includeItemTypes", "Audio")
         }
     }
 
     suspend fun instantMix(server: PlexServer, token: String, userId: String, itemId: String): List<Track> =
         httpClient.get("${server.uri}/Items/$itemId/InstantMix") {
             jellyfinAuth(token)
-            parameter("userId", userId)
-            parameter("fields", JellyfinFields)
-            parameter("enableUserData", true)
+            q("userId", userId)
+            q("fields", JellyfinFields)
+            q("enableUserData", true)
         }.body<JellyfinItemsResponse>().Items.mapNotNull { it.toTrack(server, token) }
 
     suspend fun initiateQuickConnect(serverUrl: String): JellyfinQuickConnectResult {
@@ -441,21 +595,21 @@ open class JellyfinClient(
 
     suspend fun favoriteTracks(server: PlexServer, library: MusicLibrary, token: String, userId: String): List<Track> =
         tracksForQuery(server, token, userId) {
-            library.key.takeIf { it.isNotBlank() }?.let { parameter("parentId", it) }
-            parameter("recursive", true)
-            parameter("includeItemTypes", "Audio")
-            parameter("isFavorite", true)
-            parameter("sortBy", "SortName")
+            library.key.takeIf { it.isNotBlank() }?.let { q("parentId", it) }
+            q("recursive", true)
+            q("includeItemTypes", "Audio")
+            q("isFavorite", true)
+            q("sortBy", "SortName")
         }
 
     private suspend fun favoriteTrackCount(server: PlexServer, library: MusicLibrary, token: String, userId: String): Int =
         items(server, token) {
-            library.key.takeIf { it.isNotBlank() }?.let { parameter("parentId", it) }
-            parameter("userId", userId)
-            parameter("recursive", true)
-            parameter("includeItemTypes", "Audio")
-            parameter("isFavorite", true)
-            parameter("limit", 0)
+            library.key.takeIf { it.isNotBlank() }?.let { q("parentId", it) }
+            q("userId", userId)
+            q("recursive", true)
+            q("includeItemTypes", "Audio")
+            q("isFavorite", true)
+            q("limit", 0)
         }.let { it.TotalRecordCount ?: it.Items.size }
 
     suspend fun createPlaylist(server: PlexServer, token: String, userId: String, title: String, itemIds: List<String>): Playlist {
@@ -472,8 +626,8 @@ open class JellyfinClient(
         if (itemIds.isEmpty()) return
         val response = httpClient.post("${server.uri}/Playlists/$playlistId/Items") {
             jellyfinAuth(token)
-            parameter("userId", userId)
-            parameter("ids", itemIds.joinToString(","))
+            q("userId", userId)
+            q("ids", itemIds.joinToString(","))
         }
         if (!response.status.isSuccess()) error("Jellyfin playlist add failed (${response.status.value}): ${response.bodyAsText().take(200)}")
     }
@@ -513,8 +667,8 @@ open class JellyfinClient(
         } else {
             httpClient.post("${server.uri}/UserItems/$itemId/Rating") {
                 jellyfinAuth(token)
-                parameter("likes", true)
-                parameter("rating", (rating * 2f).coerceIn(0f, 10f))
+                q("likes", true)
+                q("rating", (rating * 2f).coerceIn(0f, 10f))
             }
         }
         if (!response.status.isSuccess()) error("Jellyfin rating sync failed (${response.status.value}): ${response.bodyAsText().take(200)}")
@@ -531,8 +685,8 @@ open class JellyfinClient(
         } else {
             httpClient.post("${server.uri}$path") {
                 jellyfinAuth(token)
-                parameter("likes", true)
-                parameter("rating", (rating * 2f).coerceIn(0f, 10f))
+                q("likes", true)
+                q("rating", (rating * 2f).coerceIn(0f, 10f))
             }
         }
         if (!response.status.isSuccess()) error("Emby rating sync failed (${response.status.value}): ${response.bodyAsText().take(200)}")
@@ -580,6 +734,7 @@ open class JellyfinClient(
     ): List<Track> = pagedItemsParallel(
         server = server,
         token = token,
+        userId = userId,
         path = "/Items",
         label = "tracks",
         fetchImages = false,
@@ -587,9 +742,9 @@ open class JellyfinClient(
             onPage(items.mapNotNull { it.toTrack(server, token) }, total)
         },
     ) {
-        parameter("userId", userId)
-        parameter("fields", if (includeMediaDetails) JellyfinFields else JellyfinFastTrackFields)
-        parameter("enableUserData", true)
+        q("userId", userId)
+        q("fields", if (includeMediaDetails) JellyfinFields else JellyfinFastTrackFields)
+        q("enableUserData", true)
         block()
     }.Items.mapNotNull { it.toTrack(server, token) }
 
@@ -598,15 +753,16 @@ open class JellyfinClient(
         token: String,
         path: String,
         label: String,
+        userId: String? = null,
         parallelism: Int = catalogTrackIndexParallelism().coerceAtLeast(1),
         fetchImages: Boolean = true,
         onPage: suspend (List<JellyfinItemDto>, Int?) -> Unit = { _, _ -> },
         block: io.ktor.client.request.HttpRequestBuilder.() -> Unit,
     ): JellyfinItemsResponse = coroutineScope {
         val limit = pageSize
-        val firstPage = items(server, token, path, fetchImages = fetchImages) {
-            parameter("startIndex", 0)
-            parameter("limit", limit)
+        val firstPage = items(server, token, path = path, userId = userId, fetchImages = fetchImages) {
+            q("startIndex", 0)
+            q("limit", limit)
             block()
         }
         val total = firstPage.TotalRecordCount ?: firstPage.Items.size
@@ -634,9 +790,9 @@ open class JellyfinClient(
                 for (pageIndex in pageQueue) {
                     val start = pageIndex * limit
                     PhoebeLog.d("JellyfinClient") { "pagedItemsParallel $label request start=$start limit=$limit" }
-                    val page = items(server, token, path, fetchImages = fetchImages) {
-                        parameter("startIndex", start)
-                        parameter("limit", limit)
+                    val page = items(server, token, path = path, userId = userId, fetchImages = fetchImages) {
+                        q("startIndex", start)
+                        q("limit", limit)
                         block()
                     }
                     pagesByIndex[pageIndex] = page.Items
@@ -656,6 +812,7 @@ open class JellyfinClient(
         token: String,
         path: String,
         label: String,
+        userId: String? = null,
         startIndex: Int = 0,
         maxPages: Int? = null,
         fetchImages: Boolean = true,
@@ -669,9 +826,9 @@ open class JellyfinClient(
         while (true) {
             val limit = pageSize
             PhoebeLog.d("JellyfinClient") { "pagedItems $label request start=$start limit=$limit" }
-            val page = items(server, token, path, fetchImages = fetchImages) {
-                parameter("startIndex", start)
-                parameter("limit", limit)
+            val page = items(server, token, path = path, userId = userId, fetchImages = fetchImages) {
+                q("startIndex", start)
+                q("limit", limit)
                 block()
             }
             if (total == null) {
@@ -697,21 +854,56 @@ open class JellyfinClient(
         return JellyfinItemsResponse(Items = all, TotalRecordCount = total ?: all.size)
     }
 
+    private fun io.ktor.client.request.HttpRequestBuilder.q(name: String, value: Any?) {
+        parameter(embyQueryName(name), value)
+    }
+
+    private fun embyQueryName(name: String): String {
+        if (family != EmbyFamily.Emby) return name
+        return when (name) {
+            "userId" -> "UserId"
+            "parentId" -> "ParentId"
+            "startIndex" -> "StartIndex"
+            "limit" -> "Limit"
+            "recursive" -> "Recursive"
+            "fields" -> "Fields"
+            "enableUserData" -> "EnableUserData"
+            "enableImages" -> "EnableImages"
+            "imageTypeLimit" -> "ImageTypeLimit"
+            "enableImageTypes" -> "EnableImageTypes"
+            "includeItemTypes" -> "IncludeItemTypes"
+            "includeExternalContent" -> "IncludeExternalContent"
+            "sortBy" -> "SortBy"
+            "sortOrder" -> "SortOrder"
+            "artistIds" -> "ArtistIds"
+            "filters" -> "Filters"
+            "isPlayed" -> "IsPlayed"
+            "isFavorite" -> "IsFavorite"
+            "mediaTypes" -> "MediaTypes"
+            "secret" -> "secret"
+            else -> if (name.isNotEmpty() && name[0].isUpperCase()) name else name.replaceFirstChar { it.uppercaseChar() }
+        }
+    }
+
     private suspend fun items(
         server: PlexServer,
         token: String,
         path: String = "/Items",
+        userId: String? = null,
         fetchImages: Boolean = true,
         block: io.ktor.client.request.HttpRequestBuilder.() -> Unit,
-    ): JellyfinItemsResponse = httpClient.get("${server.uri}$path") {
+    ): JellyfinItemsResponse = httpClient.get("${server.uri}${resolvedItemsPath(path, userId)}") {
         jellyfinAuth(token)
         if (fetchImages) {
-            parameter("enableImages", true)
-            parameter("imageTypeLimit", 1)
-            parameter("enableImageTypes", "Primary")
+            q("enableImages", true)
+            q("imageTypeLimit", 1)
+            q("enableImageTypes", "Primary")
         }
         block()
     }.body()
+
+    private fun resolvedItemsPath(path: String, userId: String?): String =
+        if (path == "/Items") itemsApiPath(userId.orEmpty()) else path
 
     private fun io.ktor.client.request.HttpRequestBuilder.jellyfinHeaders() {
         header(HttpHeaders.Accept, "application/json")
@@ -726,7 +918,7 @@ open class JellyfinClient(
     private suspend fun quickConnectState(base: String, secret: String): JellyfinQuickConnectResult =
         httpClient.get("$base/QuickConnect/Connect") {
             jellyfinHeaders()
-            parameter("secret", secret)
+            q("secret", secret)
         }.jellyfinBody("Quick Connect approval check")
 
     private suspend inline fun <reified T> HttpResponse.jellyfinBody(action: String): T {
@@ -759,7 +951,10 @@ open class JellyfinClient(
         private const val JellyfinFastAlbumFields =
             "Genres,UserData,DateCreated,ProductionYear,AlbumArtist,AlbumArtists,ParentId,PrimaryImageTag,AlbumPrimaryImageTag,ParentThumbItemId,ParentThumbImageTag"
         private const val JellyfinHistoryFields =
-            "UserData,DateCreated,ProductionYear,AlbumArtist,AlbumArtists,ParentId,Album,AlbumId,PrimaryImageTag,AlbumPrimaryImageTag"
+            "Genres,Path,UserData,DateCreated,ProductionYear,AlbumArtist,AlbumArtists,Artists,ParentId,Album,AlbumId,PrimaryImageTag,AlbumPrimaryImageTag"
+        // Emby ItemFields enum — UserData/AlbumArtists/etc. are invalid; use EnableUserData instead.
+        private const val EmbyHistoryFields =
+            "Genres,Path,DateCreated,ProductionYear,Album,AlbumId,ParentId,UserDataPlayCount,UserDataLastPlayedDate"
     }
 }
 
@@ -783,6 +978,7 @@ data class JellyfinPlaybackStat(
     val itemId: String,
     val lastPlayedAtMs: Long,
     val playCount: Long,
+    val track: Track? = null,
 )
 
 @Serializable
@@ -840,6 +1036,7 @@ private data class JellyfinItemDto(
     val ImageTags: JellyfinImageTags? = null,
     val PrimaryImageTag: String? = null,
     val AlbumPrimaryImageTag: String? = null,
+    val HasPrimaryImage: Boolean? = null,
     val ParentThumbItemId: String? = null,
     val ParentThumbImageTag: String? = null,
     val ChildCount: Int? = null,
@@ -861,6 +1058,7 @@ private data class JellyfinUserData(
     val IsFavorite: Boolean? = null,
     val PlayCount: Int? = null,
     val LastPlayedDate: String? = null,
+    val Played: Boolean? = null,
 )
 
 @Serializable
@@ -881,11 +1079,18 @@ private data class JellyfinPlaybackProgressInfo(
     val IsPaused: Boolean,
 )
 
-private fun JellyfinItemDto.toArtist(server: PlexServer, token: String): Artist =
-    Artist(
+private fun JellyfinItemDto.toArtist(server: PlexServer, token: String, family: EmbyFamily): Artist {
+    val title = Name ?: "Unknown artist"
+    val tag = ImageTags?.Primary ?: PrimaryImageTag
+    val thumbUrl = when (family) {
+        EmbyFamily.Emby -> artistImageUrl(server, title, token, tag, HasPrimaryImage == true)
+            ?: primaryImageUrl(server, token)
+        EmbyFamily.Jellyfin -> primaryImageUrl(server, token)
+    }
+    return Artist(
         id = Id,
-        title = Name ?: "Unknown artist",
-        thumbUrl = itemImageUrl(server, Id, token, ImageTags?.Primary ?: PrimaryImageTag),
+        title = title,
+        thumbUrl = thumbUrl,
         albumCount = AlbumCount ?: 0,
         songCount = ChildCount ?: 0,
         dateAddedMs = DateCreated.toEpochMillisOrNull(),
@@ -893,6 +1098,28 @@ private fun JellyfinItemDto.toArtist(server: PlexServer, token: String): Artist 
         rating = UserData?.Rating.toStarRating(),
         favorite = UserData?.IsFavorite == true,
     )
+}
+
+private fun JellyfinItemDto.toPlaybackStat(
+    server: PlexServer,
+    token: String,
+    requirePlayCount: Boolean,
+): JellyfinPlaybackStat? {
+    val markedPlayed = UserData?.Played == true
+    val playCount = UserData?.PlayCount?.toLong()?.takeIf { it > 0L }
+        ?: if (markedPlayed) 1L
+        else if (requirePlayCount) return null
+        else 1L
+    val lastPlayedAtMs = UserData?.LastPlayedDate.toEpochMillisOrNull()?.takeIf { it > 0L }
+        ?: if (markedPlayed || requirePlayCount) 1L
+        else return null
+    return JellyfinPlaybackStat(
+        itemId = Id,
+        lastPlayedAtMs = lastPlayedAtMs,
+        playCount = playCount,
+        track = toTrack(server, token),
+    )
+}
 
 private fun JellyfinItemDto.toAlbum(server: PlexServer, token: String): Album =
     Album(
@@ -900,7 +1127,7 @@ private fun JellyfinItemDto.toAlbum(server: PlexServer, token: String): Album =
         title = Name ?: "Unknown album",
         artist = AlbumArtist ?: AlbumArtists?.firstOrNull()?.Name ?: artistNameFromPath(Path) ?: "Unknown artist",
         year = ProductionYear,
-        thumbUrl = itemImageUrl(server, Id, token, ImageTags?.Primary ?: PrimaryImageTag),
+        thumbUrl = primaryImageUrl(server, token),
         dateAddedMs = DateCreated.toEpochMillisOrNull(),
         genre = Genres?.firstOrNull(),
         rating = UserData?.Rating.toStarRating(),
@@ -918,7 +1145,7 @@ private fun JellyfinItemDto.toTrack(server: PlexServer, token: String): Track? {
         durationMs = durationMs,
         streamUrl = "${server.uri}/Audio/$Id/stream?static=true&api_key=$token",
         downloadUrl = "${server.uri}/Items/$Id/Download?api_key=$token",
-        thumbUrl = itemImageUrl(server, Id, token, ImageTags?.Primary ?: PrimaryImageTag) ?: albumImageUrl(server, token),
+        thumbUrl = itemArtworkUrl(server, token) ?: albumImageUrl(server, token),
         year = ProductionYear,
         genre = Genres?.firstOrNull(),
         filepath = Path,
@@ -936,17 +1163,94 @@ private fun JellyfinItemDto.toPlaylist(server: PlexServer, token: String): Playl
         title = Name ?: "Playlist",
         trackCount = ChildCount ?: 0,
         key = Id,
-        thumbUrl = itemImageUrl(server, Id, token, ImageTags?.Primary ?: PrimaryImageTag),
+        thumbUrl = primaryImageUrl(server, token),
         rating = UserData?.Rating.toStarRating(),
         favorite = UserData?.IsFavorite == true,
     )
 
-private fun JellyfinItemDto.albumImageUrl(server: PlexServer, token: String): String? =
-    itemImageUrl(server, AlbumId, token, AlbumPrimaryImageTag)
-        ?: itemImageUrl(server, ParentThumbItemId, token, ParentThumbImageTag)
+private fun JellyfinItemDto.primaryImageUrl(server: PlexServer, token: String, itemId: String = Id): String? =
+    itemImageUrl(
+        server = server,
+        itemId = itemId,
+        token = token,
+        tag = ImageTags?.Primary ?: PrimaryImageTag,
+        hasPrimaryImage = HasPrimaryImage == true,
+    )
 
-private fun itemImageUrl(server: PlexServer, itemId: String?, token: String, tag: String?): String? =
-    if (itemId.isNullOrBlank() || tag.isNullOrBlank()) null else "${server.uri}/Items/$itemId/Images/Primary?tag=$tag&api_key=$token"
+private fun JellyfinItemDto.itemArtworkUrl(server: PlexServer, token: String): String? {
+    val tag = ImageTags?.Primary ?: PrimaryImageTag
+    if (tag.isNullOrBlank() && HasPrimaryImage != true) return null
+    return primaryImageUrl(server, token)
+}
+
+private fun JellyfinItemDto.albumImageUrl(server: PlexServer, token: String): String? =
+    itemImageUrl(server, AlbumId, token, AlbumPrimaryImageTag, hasPrimaryImage = AlbumId != null)
+        ?: itemImageUrl(server, ParentThumbItemId, token, ParentThumbImageTag, hasPrimaryImage = ParentThumbItemId != null)
+
+internal fun itemImageUrl(
+    server: PlexServer,
+    itemId: String?,
+    token: String,
+    tag: String?,
+    hasPrimaryImage: Boolean = false,
+): String? {
+    if (itemId.isNullOrBlank()) return null
+    val resolvedTag = tag?.takeIf { it.isNotBlank() }
+    val base = "${server.uri}/Items/$itemId/Images/Primary"
+    val auth = "api_key=$token"
+    return when {
+        resolvedTag != null -> "$base?tag=$resolvedTag&$auth"
+        hasPrimaryImage -> "$base?$auth"
+        else -> null
+    }
+}
+
+/** Emby items-by-name artists: GET /Artists/{Name}/Images/Primary */
+internal fun artistImageUrl(
+    server: PlexServer,
+    artistName: String,
+    token: String,
+    tag: String?,
+    hasPrimaryImage: Boolean = false,
+): String? {
+    val trimmed = artistName.trim()
+    if (trimmed.isBlank()) return null
+    val resolvedTag = tag?.takeIf { it.isNotBlank() }
+    if (resolvedTag == null && !hasPrimaryImage) return null
+    val encodedName = embyArtistPathName(trimmed)
+    val base = "${server.uri}/Artists/$encodedName/Images/Primary"
+    val auth = "api_key=$token"
+    return if (resolvedTag != null) "$base?tag=$resolvedTag&$auth" else "$base?$auth"
+}
+
+internal fun embyArtistPathName(name: String): String =
+    name.replace("?", "-").replace("&", "-").replace("/", "-").replace(" ", "%20")
+
+internal const val EmbyFamilyClientAuthorization =
+    """MediaBrowser Client="Phoebe", Device="Phoebe", DeviceId="phoebe", Version="1.0.0""""
+
+internal fun embyFamilyApiKeyFromUrl(url: String): String? =
+    url.substringAfter('?', "")
+        .split('&')
+        .firstOrNull { param -> param.startsWith("api_key=") }
+        ?.substringAfter("api_key=")
+        ?.takeIf { it.isNotBlank() }
+
+internal fun String.isEmbyFamilyArtworkUrl(): Boolean =
+    (startsWith("http://") || startsWith("https://")) &&
+        embyFamilyApiKeyFromUrl(this) != null &&
+        (
+            (contains("/Items/", ignoreCase = true) && contains("/Images/", ignoreCase = true)) ||
+                (contains("/Artists/", ignoreCase = true) && contains("/Images/", ignoreCase = true))
+            )
+
+internal fun io.ktor.client.request.HttpRequestBuilder.applyEmbyFamilyArtworkAuth(url: String) {
+    if (!url.isEmbyFamilyArtworkUrl()) return
+    embyFamilyApiKeyFromUrl(url)?.let { token ->
+        header("X-Emby-Authorization", EmbyFamilyClientAuthorization)
+        header("X-Emby-Token", token)
+    }
+}
 
 private fun artistNameFromPath(path: String?): String? {
     val segments = path

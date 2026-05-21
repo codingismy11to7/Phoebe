@@ -209,7 +209,7 @@ class JellyfinClientTest {
         val fields = seenFields.first().orEmpty()
         assertFalse(fields.contains("Path"))
         assertFalse(fields.contains("MediaSources"))
-        assertTrue(seenEnableImages.none { it == "true" })
+        assertTrue(seenEnableImages.all { it == "true" })
     }
 
     @Test

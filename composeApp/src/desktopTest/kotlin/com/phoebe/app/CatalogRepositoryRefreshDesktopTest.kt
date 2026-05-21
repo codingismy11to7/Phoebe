@@ -855,6 +855,7 @@ class CatalogRepositoryRefreshDesktopTest {
         val releaseTracks = CompletableDeferred<Unit>()
         val engine = MockEngine { request ->
             when (request.url.encodedPath) {
+                "/Artists/AlbumArtists" -> respondJson(jellyfinArtistPageJson())
                 "/Items" -> when {
                     request.url.parameters["includeItemTypes"] == "MusicAlbum" -> respondJson(jellyfinAlbumCatalogJson())
                     request.url.parameters["includeItemTypes"] == "Audio" -> {

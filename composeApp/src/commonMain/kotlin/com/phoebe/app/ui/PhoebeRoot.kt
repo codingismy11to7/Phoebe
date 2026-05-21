@@ -570,10 +570,19 @@ private fun PhoebeRootStateHolder(
             state.warmRecentAlbumTracks(cutoffMs = nowMs - RecentlyAddedWindowMs, maxAlbums = 10)
         }
     }
-    LaunchedEffect(screen, browseSection, topMostPlayed, session?.selectedServer, trackHeavySectionsEnabled) {
+    LaunchedEffect(screen, browseSection, topMostPlayed, topRecentlyPlayed, session?.selectedServer, trackHeavySectionsEnabled) {
         if (!trackHeavySectionsEnabled) return@LaunchedEffect
-        if (screen == AppScreen.Home && browseSection == BrowseSection.Home && topMostPlayed.isNotEmpty()) {
+        if (screen == AppScreen.Home && browseSection == BrowseSection.Home &&
+            (topMostPlayed.isNotEmpty() || topRecentlyPlayed.isNotEmpty())
+        ) {
             state.warmTracksForMostPlayed()
+        }
+    }
+    LaunchedEffect(screen, topMostPlayed, topRecentlyPlayed, session?.selectedServer) {
+        if (screen is AppScreen.PlayHistory &&
+            (topMostPlayed.isNotEmpty() || topRecentlyPlayed.isNotEmpty())
+        ) {
+            state.warmTracksForMostPlayed(maxTracks = 50)
         }
     }
     LaunchedEffect(session?.selectedServer?.id, session?.selectedLibrary?.key) {

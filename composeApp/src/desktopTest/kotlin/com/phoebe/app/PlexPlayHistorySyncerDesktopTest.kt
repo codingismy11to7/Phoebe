@@ -1,15 +1,20 @@
 package com.phoebe.app
 
 import app.cash.sqldelight.db.SqlDriver
+import com.phoebe.app.data.CatalogRepository
+import com.phoebe.app.data.MediaSourcesRepository
+import com.phoebe.app.data.MusicProviderRegistry
 import com.phoebe.app.data.PlayHistoryRepository
 import com.phoebe.app.data.PlexClient
 import com.phoebe.app.data.PlexPlayHistorySyncResult
 import com.phoebe.app.data.PlexPlayHistorySyncer
+import com.phoebe.app.db.PhoebeDatabase
 import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.MusicLibrary
 import com.phoebe.app.domain.Track
+import com.phoebe.app.platform.PlatformStorage
 import com.phoebe.app.testing.newInMemoryPhoebeDatabase
 import com.phoebe.app.testing.testHttpClient
 import io.ktor.client.engine.mock.MockEngine
@@ -27,6 +32,7 @@ import org.junit.After
 import org.junit.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertTrue
 
 class PlexPlayHistorySyncerDesktopTest {
     private var driver: SqlDriver? = null
@@ -44,44 +50,53 @@ class PlexPlayHistorySyncerDesktopTest {
     fun syncImportsMatchingPlexTracksAndUsesIncrementalLookback() = runBlocking {
         val starts = mutableListOf<String?>()
         val viewedAtFilters = mutableListOf<String?>()
-        var requestCount = 0
+        var historyRequestCount = 0
         val engine = MockEngine { request ->
-            requestCount += 1
-            starts += request.url.parameters["X-Plex-Container-Start"]
-            viewedAtFilters += request.url.parameters["viewedAt"]
-            respond(
-                content = when {
-                    requestCount == 1 -> historyJson(
-                        offset = 0,
-                        size = 2,
-                        totalSize = 3,
-                        metadata = """
-                            ${historyTrack("t1", "history-1", 1700000000)},
-                            ${historyTrack("missing", "history-missing", 1700000100)}
-                        """.trimIndent(),
+            when {
+                request.url.encodedPath.endsWith("/history/all") -> {
+                    historyRequestCount += 1
+                    starts += request.url.parameters["X-Plex-Container-Start"]
+                    viewedAtFilters += request.url.parameters["viewedAt"]
+                    respond(
+                        content = when (historyRequestCount) {
+                            1 -> historyJson(
+                                offset = 0,
+                                size = 2,
+                                totalSize = 3,
+                                metadata = """
+                                    ${historyTrack("t1", "history-1", 1700000000)},
+                                    ${historyTrack("missing", "history-missing", 1700000100)}
+                                """.trimIndent(),
+                            )
+                            2 -> historyJson(
+                                offset = 2,
+                                size = 1,
+                                totalSize = 3,
+                                metadata = historyAlbum("t3", "history-album", 1700000200),
+                            )
+                            else -> historyJson(
+                                offset = 0,
+                                size = 1,
+                                totalSize = 1,
+                                metadata = historyTrack("t1", "history-1", 1700000000),
+                            )
+                        },
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
                     )
-                    requestCount == 2 -> historyJson(
-                        offset = 2,
-                        size = 1,
-                        totalSize = 3,
-                        metadata = historyAlbum("t3", "history-album", 1700000200),
-                    )
-                    else -> historyJson(
-                        offset = 0,
-                        size = 1,
-                        totalSize = 1,
-                        metadata = historyTrack("t1", "history-1", 1700000000),
-                    )
-                },
-                status = HttpStatusCode.OK,
-                headers = headersOf(HttpHeaders.ContentType, "application/json"),
-            )
+                }
+                else -> respond(
+                    content = statsJson(metadata = ""),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+            }
         }
         val (db, d) = newInMemoryPhoebeDatabase()
         driver = d
         val repo = PlayHistoryRepository(db)
         repository = repo
-        val syncer = PlexPlayHistorySyncer(PlexClient(testHttpClient(engine)), repo)
+        val syncer = newSyncer(engine, db, repo)
         val session = PlexSession(
             token = "token",
             selectedServer = PlexServer("server", "Plex", "https://plex.example:32400", owned = true),
@@ -111,35 +126,132 @@ class PlexPlayHistorySyncerDesktopTest {
     }
 
     @Test
-    fun syncStopsAfterMaximumHistoryPages() = runBlocking {
-        var requestCount = 0
+    fun syncUsesPlexViewCountsForMostPlayedEvenWhenHistoryImportsFewEvents() = runBlocking {
+        val capturedStatsQuery = mutableListOf<String>()
         val engine = MockEngine { request ->
-            requestCount += 1
-            val start = request.url.parameters["X-Plex-Container-Start"]?.toIntOrNull() ?: 0
-            respond(
-                content = historyJson(
-                    offset = start,
-                    size = PlexPlayHistorySyncer.PageSize,
-                    totalSize = Int.MAX_VALUE,
-                    metadata = historyTrack(
-                        ratingKey = "missing",
-                        historyKey = "history-$start",
-                        viewedAt = 1700000000L - start,
+            when {
+                request.url.encodedPath.endsWith("/history/all") -> respond(
+                    content = historyJson(
+                        offset = 0,
+                        size = 1,
+                        totalSize = 1,
+                        metadata = historyTrack("t1", "history-1", 1700000000),
                     ),
-                ),
-                status = HttpStatusCode.OK,
-                headers = headersOf(HttpHeaders.ContentType, "application/json"),
-            )
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+                else -> {
+                    capturedStatsQuery += request.url.encodedQuery
+                    respond(
+                        content = statsJson(
+                            metadata = statsTrack(
+                                ratingKey = "t1",
+                                viewCount = 42,
+                                lastViewedAt = 1700000000,
+                            ),
+                        ),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+            }
         }
         val (db, d) = newInMemoryPhoebeDatabase()
         driver = d
         val repo = PlayHistoryRepository(db)
         repository = repo
         val result = assertIs<PlexPlayHistorySyncResult.Synced>(
-            PlexPlayHistorySyncer(PlexClient(testHttpClient(engine)), repo).sync(testSession(), testCatalog()),
+            newSyncer(engine, db, repo).sync(testSession(), testCatalog()),
         )
 
-        assertEquals(PlexPlayHistorySyncer.MaxPages, requestCount)
+        assertEquals(2, result.imported)
+        assertTrue(capturedStatsQuery.single().contains("includeUserState=1"))
+        assertTrue(capturedStatsQuery.single().contains("sort=lastViewedAt%3Adesc"))
+        val counts = repo.playCountsByTrack.first { it["plex:t1"] == 42L }
+        assertEquals(42L, counts["plex:t1"])
+        val top = repo.topMostPlayed.first { list -> list.any { it.trackId == "plex:t1" } }
+        assertEquals(42L, top.first { it.trackId == "plex:t1" }.playCount)
+    }
+
+    @Test
+    fun syncUsesPlexViewCountsWhenTrackIsNotInCatalogYet() = runBlocking {
+        val engine = MockEngine { request ->
+            when {
+                request.url.encodedPath.endsWith("/history/all") -> respond(
+                    content = historyJson(offset = 0, size = 0, totalSize = 0, metadata = ""),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+                else -> respond(
+                    content = statsJson(
+                        metadata = statsTrack(
+                            ratingKey = "t9",
+                            viewCount = 24,
+                            lastViewedAt = 1700000000,
+                        ),
+                    ),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+            }
+        }
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        val repo = PlayHistoryRepository(db)
+        repository = repo
+        val catalogRepository = newCatalogRepository(engine, db)
+        val syncer = PlexPlayHistorySyncer(PlexClient(testHttpClient(engine)), repo, catalogRepository)
+
+        val result = assertIs<PlexPlayHistorySyncResult.Synced>(
+            syncer.sync(testSession(), CatalogSnapshot()),
+        )
+
+        assertEquals(1, result.imported)
+        val counts = repo.playCountsByTrack.first { it["plex:t9"] == 24L }
+        assertEquals(24L, counts["plex:t9"])
+        val top = repo.topMostPlayed.first { list -> list.any { it.trackId == "plex:t9" } }
+        assertEquals(24L, top.first { it.trackId == "plex:t9" }.playCount)
+    }
+
+    @Test
+    fun syncStopsAfterMaximumHistoryPages() = runBlocking {
+        var historyRequestCount = 0
+        val engine = MockEngine { request ->
+            when {
+                request.url.encodedPath.endsWith("/history/all") -> {
+                    historyRequestCount += 1
+                    val start = request.url.parameters["X-Plex-Container-Start"]?.toIntOrNull() ?: 0
+                    respond(
+                        content = historyJson(
+                            offset = start,
+                            size = PlexPlayHistorySyncer.PageSize,
+                            totalSize = Int.MAX_VALUE,
+                            metadata = historyTrack(
+                                ratingKey = "missing",
+                                historyKey = "history-$start",
+                                viewedAt = 1700000000L - start,
+                            ),
+                        ),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+                else -> respond(
+                    content = statsJson(metadata = ""),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+            }
+        }
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        val repo = PlayHistoryRepository(db)
+        repository = repo
+        val result = assertIs<PlexPlayHistorySyncResult.Synced>(
+            newSyncer(engine, db, repo).sync(testSession(), testCatalog()),
+        )
+
+        assertEquals(PlexPlayHistorySyncer.MaxPages, historyRequestCount)
         assertEquals(PlexPlayHistorySyncer.MaxPages, result.seen)
         assertEquals(0, result.imported)
     }
@@ -156,12 +268,31 @@ class PlexPlayHistorySyncerDesktopTest {
         val repo = PlayHistoryRepository(db)
         repository = repo
         val job = launch {
-            PlexPlayHistorySyncer(PlexClient(testHttpClient(engine)), repo).sync(testSession(), testCatalog())
+            newSyncer(engine, db, repo).sync(testSession(), testCatalog())
         }
 
         requestStarted.await()
         job.cancel()
         withTimeout(1_000L) { job.join() }
+    }
+
+    private fun newSyncer(engine: MockEngine, db: PhoebeDatabase, repo: PlayHistoryRepository): PlexPlayHistorySyncer =
+        PlexPlayHistorySyncer(
+            plexClient = PlexClient(testHttpClient(engine)),
+            playHistoryRepository = repo,
+            catalogRepository = newCatalogRepository(engine, db),
+        )
+
+    private fun newCatalogRepository(engine: MockEngine, db: PhoebeDatabase): CatalogRepository {
+        val storage = PlatformStorage()
+        return CatalogRepository(
+            plexClient = PlexClient(testHttpClient(engine)),
+            providerRegistry = MusicProviderRegistry(emptyList()),
+            database = db,
+            storage = storage,
+            httpClient = testHttpClient(engine),
+            mediaSourcesRepository = MediaSourcesRepository(db, storage),
+        )
     }
 
     private fun testSession(): PlexSession = PlexSession(
@@ -189,6 +320,19 @@ class PlexPlayHistorySyncerDesktopTest {
         }
     """.trimIndent()
 
+    private fun statsJson(metadata: String): String = """
+        {
+          "MediaContainer": {
+            "offset": 0,
+            "size": 0,
+            "totalSize": 0,
+            "Metadata": [
+              $metadata
+            ]
+          }
+        }
+    """.trimIndent()
+
     private fun historyTrack(ratingKey: String, historyKey: String, viewedAt: Long): String = """
         {
           "ratingKey": "$ratingKey",
@@ -199,6 +343,18 @@ class PlexPlayHistorySyncerDesktopTest {
           "parentTitle": "Album",
           "grandparentTitle": "Artist",
           "viewedAt": $viewedAt
+        }
+    """.trimIndent()
+
+    private fun statsTrack(ratingKey: String, viewCount: Int, lastViewedAt: Long): String = """
+        {
+          "ratingKey": "$ratingKey",
+          "type": "track",
+          "title": "Night Signals",
+          "parentTitle": "Radio House",
+          "grandparentTitle": "North Lake",
+          "viewCount": $viewCount,
+          "lastViewedAt": $lastViewedAt
         }
     """.trimIndent()
 

@@ -101,7 +101,15 @@ data class PlexGenreTagDto(
 )
 
 @Serializable
+data class PlexUserStateDto(
+    val viewCount: Long? = null,
+    val lastViewedAt: Long? = null,
+    val viewedAt: Long? = null,
+)
+
+@Serializable
 data class PlexMetadataDto(
+    @Serializable(with = FlexibleRatingKeySerializer::class)
     val ratingKey: String = "",
     val historyKey: String? = null,
     @SerialName("playlistItemID") val playlistItemId: Long? = null,
@@ -112,6 +120,7 @@ data class PlexMetadataDto(
     val viewedAt: Long? = null,
     val lastViewedAt: Long? = null,
     val viewCount: Long? = null,
+    @SerialName("UserState") val userState: PlexUserStateDto? = null,
     @Serializable(with = FlexibleStringSerializer::class)
     val librarySectionID: String? = null,
     @SerialName("parentRatingKey") val parentRatingKey: String? = null,
@@ -176,6 +185,25 @@ private object FlexibleStringSerializer : KSerializer<String?> {
 
     override fun serialize(encoder: kotlinx.serialization.encoding.Encoder, value: String?) {
         if (value == null) encoder.encodeNull() else encoder.encodeString(value)
+    }
+}
+
+@OptIn(ExperimentalSerializationApi::class)
+private object FlexibleRatingKeySerializer : KSerializer<String> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("FlexibleRatingKey", PrimitiveKind.STRING)
+
+    override fun deserialize(decoder: Decoder): String {
+        val jsonDecoder = decoder as? JsonDecoder ?: return decoder.decodeString()
+        val element = jsonDecoder.decodeJsonElement()
+        return when (element) {
+            is JsonPrimitive -> element.content
+            else -> element.toString()
+        }
+    }
+
+    override fun serialize(encoder: kotlinx.serialization.encoding.Encoder, value: String) {
+        encoder.encodeString(value)
     }
 }
 

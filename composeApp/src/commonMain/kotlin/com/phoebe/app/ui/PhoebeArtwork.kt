@@ -144,6 +144,8 @@ import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
 import com.phoebe.app.data.cachedArtworkPathForUrl
+import com.phoebe.app.data.applyEmbyFamilyArtworkAuth
+import com.phoebe.app.data.isEmbyFamilyArtworkUrl
 import com.phoebe.app.domain.isLocalMediaPlayback
 import com.phoebe.app.domain.isRemoteLibraryTrack
 import com.phoebe.app.domain.supportsPlexPlaylists
@@ -361,10 +363,13 @@ internal object RemoteArtworkCache {
             val decoded = runCatching {
                 val fetchUrl = url.withRequestImageSize(key.maxDecodeDimension)
                 val bytes: ByteArray = if (remote) {
-                    runCatching { httpClient.get(fetchUrl).body<ByteArray>() }
-                        .getOrElse {
-                            storage.readBytes(cachedArtworkPathForUrl(url)) ?: return@runCatching null
-                        }
+                    runCatching {
+                        httpClient.get(fetchUrl) {
+                            applyEmbyFamilyArtworkAuth(url)
+                        }.body<ByteArray>()
+                    }.getOrElse {
+                        storage.readBytes(cachedArtworkPathForUrl(url)) ?: return@runCatching null
+                    }
                 } else {
                     storage.readUriBytes(url) ?: return@runCatching null
                 }
@@ -455,13 +460,17 @@ internal object RemoteArtworkCache {
         width.toLong() * height.toLong() * 4L
 }
 
-/** Ask Plex/Jellyfin-style servers for a smaller JPEG when the URL supports width/height query params. */
+/** Ask remote servers for a smaller JPEG when the URL supports sizing query params. */
 private fun String.withRequestImageSize(maxDecodeDimension: Int): String {
     if (!startsWith("http://") && !startsWith("https://")) return this
-    if (contains("width=", ignoreCase = true) || contains("height=", ignoreCase = true)) return this
     val pixels = maxDecodeDimension.coerceIn(64, 512)
     val separator = if (contains('?')) "&" else "?"
-    return "$this${separator}width=$pixels&height=$pixels"
+    return when {
+        contains("maxWidth=", ignoreCase = true) || contains("maxHeight=", ignoreCase = true) -> this
+        contains("width=", ignoreCase = true) || contains("height=", ignoreCase = true) -> this
+        isEmbyFamilyArtworkUrl() -> "$this${separator}maxWidth=$pixels&maxHeight=$pixels"
+        else -> "$this${separator}width=$pixels&height=$pixels"
+    }
 }
 
 @Composable

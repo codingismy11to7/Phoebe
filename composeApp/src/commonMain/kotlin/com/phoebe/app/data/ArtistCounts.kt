@@ -50,7 +50,7 @@ internal fun enrichJellyfinCatalogArtwork(snapshot: CatalogSnapshot): CatalogSna
         }
     }
     return snapshot.copy(
-        artists = enrichArtistArtwork(snapshot.artists, snapshot.albums),
+        artists = dedupeArtistsByTitle(enrichArtistArtwork(snapshot.artists, snapshot.albums)),
         tracksByParent = tracksByParent,
     )
 }
@@ -61,8 +61,9 @@ internal fun enrichArtistArtwork(artists: List<Artist>, albums: List<Album>): Li
         albums.asSequence()
             .filter { !it.thumbUrl.isNullOrBlank() }
             .forEach { album ->
-                if (album.artist !in this) {
-                    put(album.artist, album.thumbUrl!!)
+                val key = album.artist.trim().lowercase()
+                if (key !in this) {
+                    put(key, album.thumbUrl!!)
                 }
             }
     }
@@ -70,10 +71,22 @@ internal fun enrichArtistArtwork(artists: List<Artist>, albums: List<Album>): Li
         if (!artist.thumbUrl.isNullOrBlank()) {
             artist
         } else {
-            artist.copy(thumbUrl = thumbByAlbumArtist[artist.title])
+            val exact = thumbByAlbumArtist[artist.title.trim().lowercase()]
+            val fuzzy = albums.firstOrNull { albumMatchesArtist(it, artist.title) && !it.thumbUrl.isNullOrBlank() }?.thumbUrl
+            artist.copy(thumbUrl = exact ?: fuzzy)
         }
     }
 }
+
+/** Prefer real API artist ids over legacy synthetic `album-artist-*` entries. */
+internal fun dedupeArtistsByTitle(artists: List<Artist>): List<Artist> =
+    artists
+        .sortedWith(
+            compareBy<Artist> { it.id.substringAfter(':').startsWith("album-artist-") }
+                .thenBy { it.thumbUrl.isNullOrBlank() }
+                .thenByDescending { it.albumCount },
+        )
+        .distinctBy { it.title.trim().lowercase() }
 
 /**
  * Counts albums per artist title for artists that did not already have [Artist.albumCount] from the server.
@@ -137,7 +150,7 @@ fun catalogArtistForAlbum(catalog: CatalogSnapshot, album: Album): Artist? {
         ?: catalog.artists.firstOrNull { albumMatchesArtist(album, it.title) }
 }
 
-private fun albumMatchesArtist(album: Album, artistTitle: String): Boolean {
+internal fun albumMatchesArtist(album: Album, artistTitle: String): Boolean {
     val t = artistTitle.trim()
     if (t.isEmpty()) return false
     val a = album.artist.trim()

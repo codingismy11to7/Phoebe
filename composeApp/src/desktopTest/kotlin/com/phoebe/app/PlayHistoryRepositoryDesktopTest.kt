@@ -140,5 +140,10 @@ class PlayHistoryRepositoryDesktopTest {
         assertEquals(0, db.playHistoryQueries.selectLatestPlayEventsByTrack().awaitAsList().size)
         val top = repo.topMostPlayed.first { list -> list.any { it.trackId == "plex:t1" } }
         assertEquals(12L, top.first { it.trackId == "plex:t1" }.playCount)
+        val recent = repo.topRecentlyPlayed.first { list -> list.any { it.trackId == "plex:t1" } }
+        assertEquals("plex:t1", recent.first { it.trackId == "plex:t1" }.trackId)
+        assertEquals(9_000L, recent.first { it.trackId == "plex:t1" }.lastPlayedMs)
+        val lastPlayed = repo.lastPlayedByTrack.first { it["plex:t1"] == 9_000L }
+        assertEquals(9_000L, lastPlayed["plex:t1"])
     }
 }
