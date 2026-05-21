@@ -9,6 +9,8 @@ expect fun createPlatformHttpClient(): io.ktor.client.HttpClient
 
 expect fun isDesktopPlatform(): Boolean
 
+expect fun supportsPredictiveBack(): Boolean
+
 expect class PlatformStorage() {
     suspend fun readText(name: String): String?
     suspend fun writeText(name: String, value: String)

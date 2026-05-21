@@ -6,4 +6,6 @@ import androidx.compose.runtime.Composable
 expect fun PlatformBackHandler(
     enabled: Boolean,
     onBack: () -> Unit,
+    onBackProgress: ((Float) -> Unit)? = null,
+    onBackCancel: (() -> Unit)? = null,
 )

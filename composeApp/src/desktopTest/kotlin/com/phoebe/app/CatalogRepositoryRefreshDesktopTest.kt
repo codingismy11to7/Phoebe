@@ -691,6 +691,68 @@ class CatalogRepositoryRefreshDesktopTest {
     }
 
     @Test
+    fun tracksForPlaylistRefreshesIncompleteCacheBeforeReturning() = runTest {
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        db.transaction {
+            db.catalogQueries.upsertPlaylist("plex:p1", "Playlist One", 2, "/playlists/p1/items", null, 0, null, 0)
+            db.catalogQueries.upsertTrack(
+                id = "plex:t1",
+                title = "Cached Playlist Song",
+                artist = "Artist One",
+                album = "Album One",
+                durationMs = 1000,
+                streamUrl = "https://plex.example/t1?X-Plex-Token=token",
+                downloadUrl = "https://plex.example/t1?X-Plex-Token=token&download=1",
+                thumbUrl = null,
+                localArtworkUri = null,
+                localUri = null,
+                year = null,
+                genre = null,
+                mood = null,
+                style = null,
+                filepath = null,
+                audioCodec = null,
+                bitrateKbps = null,
+                dateAddedMs = null,
+                rating = null,
+                parentAlbumId = null,
+            )
+            db.catalogQueries.upsertTrackParent("plex:p1", "plex:t1", 0)
+        }
+        var playlistFetches = 0
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/playlists/p1/items" -> {
+                    playlistFetches++
+                    respondJson(playlistTracksJson())
+                }
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val http = testHttpClient(engine)
+        val media = MediaSourcesRepository(db, PlatformStorage())
+        val repo = CatalogRepository(
+            plexClient = PlexClient(http),
+            database = db,
+            storage = PlatformStorage(),
+            httpClient = http,
+            mediaSourcesRepository = media,
+        )
+
+        repo.restoreCachedCatalog()
+        val playlist = repo.catalog.value.playlists.single()
+
+        assertTrue(repo.catalog.value.tracksByParent[playlist.id].isNullOrEmpty())
+
+        val tracks = repo.tracksForPlaylist(testSession(), playlist)
+
+        assertEquals(listOf("plex:t1", "plex:t2"), tracks.map { it.id })
+        assertEquals(listOf("plex:t1", "plex:t2"), repo.catalog.value.tracksByParent[playlist.id].orEmpty().map { it.id })
+        assertEquals(1, playlistFetches)
+    }
+
+    @Test
     fun refreshRefetchesPlaylistWhenPlexReportsFewerTracksThanCache() = runTest {
         val (db, d) = newInMemoryPhoebeDatabase()
         driver = d

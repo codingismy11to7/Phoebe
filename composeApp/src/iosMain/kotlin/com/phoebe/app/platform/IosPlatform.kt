@@ -57,6 +57,8 @@ actual fun createPlatformHttpClient(): HttpClient = HttpClient(Darwin) {
 
 actual fun isDesktopPlatform(): Boolean = false
 
+actual fun supportsPredictiveBack(): Boolean = false
+
 actual suspend fun discoverJellyfinServers(): List<PlexServer> = emptyList()
 
 actual class PlatformStorage actual constructor() {

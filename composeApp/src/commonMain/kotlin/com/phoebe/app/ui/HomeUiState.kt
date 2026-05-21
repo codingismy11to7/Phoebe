@@ -473,11 +473,11 @@ private fun homeTrackIndex(
     )
 }
 
-private inline fun <T, S : Comparable<S>> topBy(
+private fun <T, S : Comparable<S>> topBy(
     items: Sequence<T>,
     limit: Int,
     descending: Boolean = false,
-    crossinline selector: (T) -> S,
+    selector: (T) -> S,
 ): List<T> {
     if (limit <= 0) return emptyList()
     val top = mutableListOf<Pair<T, S>>()
@@ -748,13 +748,119 @@ internal fun decadeMix(catalog: CatalogSnapshot, decade: Int): List<Track> =
         .filter { track -> track.year?.let { it >= decade && it <= decade + 9 } == true }
         .shuffled()
 
+internal enum class MixMaturity {
+    Sparse,
+    Growing,
+    Established,
+}
+
+internal fun mixMaturity(playHistory: PlayHistorySnapshot): MixMaturity {
+    val uniqueTracks = maxOf(playHistory.byTrack.size, playHistory.playCountByTrack.size)
+    val totalPlays = playHistory.playCountByTrack.values.sum()
+    return when {
+        uniqueTracks >= 100 -> MixMaturity.Established
+        uniqueTracks >= 25 || totalPlays >= 50 -> MixMaturity.Growing
+        else -> MixMaturity.Sparse
+    }
+}
+
+/** 0.0 = sparse warming-up profile, 1.0 = user-established profile. */
+internal fun mixMaturityBlend(playHistory: PlayHistorySnapshot): Double {
+    val uniqueTracks = maxOf(playHistory.byTrack.size, playHistory.playCountByTrack.size)
+    val totalPlays = playHistory.playCountByTrack.values.sum()
+    if (uniqueTracks >= 100) return 1.0
+    if (uniqueTracks < 25 && totalPlays < 50) return 0.0
+    return ((uniqueTracks - 25).coerceIn(0, 75) / 75.0).coerceIn(0.0, 1.0)
+}
+
+private data class EffectiveMixWeights(
+    val heavyRotation: Int,
+    val recent: Int,
+    val mostPlayed: Int,
+    val similar: Int,
+    val discovery: Int,
+    val favorites: Int = 0,
+    val recentlyAdded: Int = 0,
+    val wildcards: Int = 0,
+    val ratedUnplayed: Int = 0,
+) {
+    fun asList(): List<Int> = listOf(
+        heavyRotation,
+        recent,
+        mostPlayed,
+        similar,
+        discovery,
+        favorites,
+        recentlyAdded,
+        wildcards,
+        ratedUnplayed,
+    )
+}
+
+internal fun effectivePersonalMixPreferences(
+    base: PersonalMixPreferences,
+    playHistory: PlayHistorySnapshot,
+): PersonalMixPreferences {
+    val blend = mixMaturityBlend(playHistory)
+    if (blend >= 1.0) return base.normalized()
+    val normalized = base.normalized()
+    val sparse = EffectiveMixWeights(
+        heavyRotation = 15,
+        recent = 15,
+        mostPlayed = 15,
+        similar = 20,
+        discovery = 25,
+        favorites = 5,
+        recentlyAdded = 5,
+        wildcards = 5,
+        ratedUnplayed = 5,
+    )
+    val established = EffectiveMixWeights(
+        heavyRotation = normalized.heavyRotationWeight,
+        recent = normalized.recentWeight,
+        mostPlayed = normalized.mostPlayedWeight,
+        similar = normalized.similarWeight,
+        discovery = normalized.discoveryWeight,
+    )
+    fun lerp(sparseWeight: Int, establishedWeight: Int): Int =
+        (sparseWeight + (establishedWeight - sparseWeight) * blend).roundToInt().coerceAtLeast(0)
+    return normalized.copy(
+        heavyRotationWeight = lerp(sparse.heavyRotation, established.heavyRotation),
+        recentWeight = lerp(sparse.recent, established.recent),
+        mostPlayedWeight = lerp(sparse.mostPlayed, established.mostPlayed),
+        similarWeight = lerp(sparse.similar, established.similar),
+        discoveryWeight = lerp(sparse.discovery, established.discovery),
+    )
+}
+
+private fun sparseOnlyMixWeights(blend: Double): EffectiveMixWeights {
+    if (blend >= 1.0) return EffectiveMixWeights(0, 0, 0, 0, 0)
+    val sparseOnlyScale = (1.0 - blend).coerceIn(0.0, 1.0)
+    fun scaled(weight: Int): Int = (weight * sparseOnlyScale).roundToInt()
+    return EffectiveMixWeights(
+        heavyRotation = 0,
+        recent = 0,
+        mostPlayed = 0,
+        similar = 0,
+        discovery = 0,
+        favorites = scaled(5),
+        recentlyAdded = scaled(5),
+        wildcards = scaled(5),
+        ratedUnplayed = scaled(5),
+    )
+}
+
 internal fun personalMix(
     catalog: CatalogSnapshot,
     state: HomeUiState,
     preferences: PersonalMixPreferences = PersonalMixPreferences.Default,
     limit: Int = preferences.normalized().limit,
+    playHistory: PlayHistorySnapshot = PlayHistorySnapshot(),
+    recentMixTrackKeys: Set<String> = emptySet(),
 ): List<Track> {
-    val mixPrefs = preferences.normalized().copy(limit = limit)
+    val mixPrefs = effectivePersonalMixPreferences(preferences, playHistory).copy(limit = limit)
+    val maturityBlend = mixMaturityBlend(playHistory)
+    val sparseOnlyWeights = sparseOnlyMixWeights(maturityBlend)
     val tracks = allLoadedTracks(catalog)
     if (tracks.isEmpty()) return emptyList()
     val tracksByIdentity = tracks.associateBy { it.personalMixIdentityKey() }
@@ -764,56 +870,236 @@ internal fun personalMix(
     val seeds = (heavyRotation + recent + most).distinctBy { it.personalMixIdentityKey() }
     if (seeds.isEmpty()) return tracks.shuffled().take(mixPrefs.limit)
 
-    val seedArtists = seeds.map { it.artist.lowercase() }.toSet()
-    val seedGenres = seeds.mapNotNull { it.genre?.lowercase() }.toSet()
-    val seedDecades = seeds.mapNotNull { it.year?.let { year -> (year / 10) * 10 } }.toSet()
     val seedKeys = seeds.map { it.personalMixIdentityKey() }.toSet()
-    val similar = tracks.filter { track ->
-        track.personalMixIdentityKey() !in seedKeys &&
-            (track.artist.lowercase() in seedArtists ||
-                track.genre?.lowercase() in seedGenres ||
-                track.year?.let { (it / 10) * 10 }?.let { it in seedDecades } == true)
-    }
-    val playedKeys = (state.recentlyPlayedTracks + state.mostPlayedTracks)
+    val seedArtists = seeds.map { it.artist.lowercase() }.toSet()
+    val sparseSimilar = maturityBlend < 0.5
+    val similar = similarTracks(tracks, seeds, seedKeys, sparseSimilar)
+    val playedKeys = (state.recentlyPlayedTracks + state.mostPlayedTracks + state.heavyRotationTracks)
         .map { it.track.personalMixIdentityKey() }
         .toSet()
-    val discovery = tracks.filter { it.personalMixIdentityKey() !in playedKeys }
-        .sortedByDescending { it.dateAddedMs ?: 0L }
+    val unplayed = tracks.filter { it.personalMixIdentityKey() !in playedKeys }
+    val discovery = discoveryTracks(unplayed, maturityBlend)
+    val favorites = favoriteMixTracks(catalog, tracks).filter { it.personalMixIdentityKey() !in seedKeys }
+    val recentlyAdded = state.recentlyAddedTracks
+        .mapNotNull { tracksByIdentity[it.personalMixIdentityKey()] }
+        .filter { it.personalMixIdentityKey() !in seedKeys }
+    val wildcards = tracks.filter { it.personalMixIdentityKey() !in seedKeys }
+    val ratedUnplayed = unplayed.filter { track ->
+        track.rating != null && track.rating >= RatedUnplayedMinimumStars
+    }
 
     val target = mixPrefs.limit.coerceAtLeast(1)
-    val slices = mixSliceCounts(target, mixPrefs)
-    return buildList<Track> {
-        fun addSlice(candidates: List<Track>, maxCount: Int) {
-            var added = 0
-            candidates.shuffled().forEach { track ->
-                if (size < target && added < maxCount && none { existing -> existing.personalMixIdentityKey() == track.personalMixIdentityKey() }) {
-                    add(track)
-                    added++
-                }
+    val coreWeights = EffectiveMixWeights(
+        heavyRotation = mixPrefs.heavyRotationWeight,
+        recent = mixPrefs.recentWeight,
+        mostPlayed = mixPrefs.mostPlayedWeight,
+        similar = mixPrefs.similarWeight,
+        discovery = mixPrefs.discoveryWeight,
+    )
+    val allWeights = coreWeights.asList() + sparseOnlyWeights.asList().drop(5)
+    val slices = mixSliceCounts(target, allWeights)
+    val diversity = MixDiversityLimits.forTarget(target)
+    val decadeCapEnabled = tracks.mapNotNull { track -> track.year?.let { (it / 10) * 10 } }.distinct().size >= 2
+    return buildPersonalMixList(
+        target = target,
+        slices = slices,
+        sliceCandidates = listOf(
+            heavyRotation,
+            recent,
+            most,
+            similar,
+            discovery,
+            favorites,
+            recentlyAdded,
+            wildcards,
+            ratedUnplayed,
+        ),
+        filler = tracks,
+        diversity = diversity,
+        decadeCapEnabled = decadeCapEnabled,
+        recentMixTrackKeys = recentMixTrackKeys,
+    ).let { mix -> deprioritizeRecentMixTracks(mix, recentMixTrackKeys) }
+}
+
+private const val RatedUnplayedMinimumStars = 3f
+private const val MaxDecadeFraction = 0.4
+
+private data class MixDiversityLimits(
+    val maxPerArtist: Int,
+    val maxPerAlbum: Int,
+) {
+    companion object {
+        fun forTarget(target: Int): MixDiversityLimits =
+            MixDiversityLimits(
+                maxPerArtist = if (target <= 30) 1 else 2,
+                maxPerAlbum = 1,
+            )
+    }
+}
+
+private class MixDiversityState(
+    private val target: Int,
+    private val limits: MixDiversityLimits,
+    private val decadeCapEnabled: Boolean,
+) {
+    private val artistCounts = mutableMapOf<String, Int>()
+    private val albumCounts = mutableMapOf<String, Int>()
+    private val decadeCounts = mutableMapOf<Int, Int>()
+    private val identityKeys = mutableSetOf<String>()
+
+    fun canAdd(track: Track): Boolean {
+        val identityKey = track.personalMixIdentityKey()
+        if (identityKey in identityKeys) return false
+        val artist = track.artist.lowercase()
+        if ((artistCounts[artist] ?: 0) >= limits.maxPerArtist) return false
+        val album = track.album.lowercase()
+        if ((albumCounts[album] ?: 0) >= limits.maxPerAlbum) return false
+        if (decadeCapEnabled) {
+            val decade = track.year?.let { (it / 10) * 10 }
+            if (decade != null) {
+                val maxFromDecade = (target * MaxDecadeFraction).toInt().coerceAtLeast(1)
+                if ((decadeCounts[decade] ?: 0) >= maxFromDecade) return false
             }
         }
-        addSlice(heavyRotation, slices[0])
-        addSlice(recent, slices[1])
-        addSlice(most, slices[2])
-        addSlice(similar, slices[3])
-        addSlice(discovery, slices[4])
-        tracks.shuffled().forEach {
-            if (size < target && none { existing -> existing.personalMixIdentityKey() == it.personalMixIdentityKey() }) add(it)
+        return true
+    }
+
+    fun record(track: Track) {
+        identityKeys += track.personalMixIdentityKey()
+        val artist = track.artist.lowercase()
+        artistCounts[artist] = (artistCounts[artist] ?: 0) + 1
+        val album = track.album.lowercase()
+        albumCounts[album] = (albumCounts[album] ?: 0) + 1
+        track.year?.let { (it / 10) * 10 }?.let { decade ->
+            decadeCounts[decade] = (decadeCounts[decade] ?: 0) + 1
         }
     }
 }
 
-private fun mixSliceCounts(target: Int, preferences: PersonalMixPreferences): List<Int> {
-    val weights = listOf(
-        preferences.heavyRotationWeight,
-        preferences.recentWeight,
-        preferences.mostPlayedWeight,
-        preferences.similarWeight,
-        preferences.discoveryWeight,
-    ).map { it.coerceAtLeast(0) }
-    val totalWeight = weights.sum()
-    if (target <= 0 || totalWeight <= 0) return listOf(0, 0, 0, 0, target.coerceAtLeast(0))
-    val raw = weights.map { weight -> (target.toDouble() * weight.toDouble()) / totalWeight.toDouble() }
+private fun deprioritizeRecentMixTracks(mix: List<Track>, recentMixTrackKeys: Set<String>): List<Track> {
+    if (recentMixTrackKeys.isEmpty()) return mix
+    val (recent, fresh) = mix.partition { it.personalMixIdentityKey() in recentMixTrackKeys }
+    return fresh + recent
+}
+
+private fun buildPersonalMixList(
+    target: Int,
+    slices: List<Int>,
+    sliceCandidates: List<List<Track>>,
+    filler: List<Track>,
+    diversity: MixDiversityLimits,
+    decadeCapEnabled: Boolean,
+    recentMixTrackKeys: Set<String>,
+): List<Track> {
+    val diversityState = MixDiversityState(target, diversity, decadeCapEnabled)
+    val sliceAdded = IntArray(sliceCandidates.size)
+    return buildList {
+        fun tryAdd(track: Track): Boolean {
+            if (size >= target || !diversityState.canAdd(track)) return false
+            add(track)
+            diversityState.record(track)
+            return true
+        }
+        fun addFromCandidates(candidates: List<Track>, maxCount: Int, freshOnly: Boolean): Int {
+            if (maxCount <= 0) return 0
+            var added = 0
+            val pool = candidates.shuffled().filter { track ->
+                val isRecent = track.personalMixIdentityKey() in recentMixTrackKeys
+                if (freshOnly) !isRecent else isRecent
+            }
+            pool.forEach { track ->
+                if (added < maxCount && size < target && tryAdd(track)) added++
+            }
+            return added
+        }
+        sliceCandidates.forEachIndexed { index, candidates ->
+            val maxCount = slices.getOrElse(index) { 0 }
+            sliceAdded[index] = addFromCandidates(candidates, maxCount, freshOnly = true)
+        }
+        sliceCandidates.forEachIndexed { index, candidates ->
+            val maxCount = slices.getOrElse(index) { 0 }
+            val remaining = maxCount - sliceAdded[index]
+            if (remaining > 0) addFromCandidates(candidates, remaining, freshOnly = false)
+        }
+        addFromCandidates(filler, target - size, freshOnly = true)
+        addFromCandidates(filler, target - size, freshOnly = false)
+    }
+}
+
+private fun similarTracks(
+    tracks: List<Track>,
+    seeds: List<Track>,
+    seedKeys: Set<String>,
+    sparseMode: Boolean,
+): List<Track> {
+    val seedArtists = seeds.map { it.artist.lowercase() }.toSet()
+    val seedAlbums = seeds.map { it.album.lowercase() }.toSet()
+    return tracks
+        .asSequence()
+        .filter { it.personalMixIdentityKey() !in seedKeys }
+        .map { track -> track to similarTrackScore(track, seeds, seedAlbums) }
+        .filter { (track, score) ->
+            if (score <= 0) return@filter false
+            if (!sparseMode) return@filter true
+            val differentArtist = track.artist.lowercase() !in seedArtists
+            val genreMatch = track.genre != null &&
+                seeds.any { seed -> seed.genre.equals(track.genre, ignoreCase = true) }
+            val moodStyleMatch =
+                (track.mood != null && seeds.any { seed -> seed.mood.equals(track.mood, ignoreCase = true) }) ||
+                    (track.style != null && seeds.any { seed -> seed.style.equals(track.style, ignoreCase = true) })
+            differentArtist && (genreMatch || moodStyleMatch)
+        }
+        .sortedByDescending { it.second }
+        .map { it.first }
+        .toList()
+}
+
+private fun similarTrackScore(track: Track, seeds: List<Track>, seedAlbums: Set<String>): Int {
+    var score = 0
+    if (seeds.any { it.artist.equals(track.artist, ignoreCase = true) }) score += 3
+    if (track.genre != null && seeds.any { it.genre.equals(track.genre, ignoreCase = true) }) score += 2
+    if (track.mood != null && seeds.any { it.mood.equals(track.mood, ignoreCase = true) }) score += 2
+    if (track.style != null && seeds.any { it.style.equals(track.style, ignoreCase = true) }) score += 2
+    val trackDecade = track.year?.let { (it / 10) * 10 }
+    if (trackDecade != null && seeds.any { seed -> seed.year?.let { (it / 10) * 10 } == trackDecade }) score += 1
+    if (track.album.lowercase() in seedAlbums) score -= 2
+    return score
+}
+
+private fun discoveryTracks(unplayed: List<Track>, maturityBlend: Double): List<Track> {
+    val randomWeight = ((1.0 - maturityBlend) * 0.5).coerceIn(0.0, 0.5)
+    val byDateAdded = unplayed.sortedByDescending { it.dateAddedMs ?: 0L }
+    if (randomWeight <= 0.0) return byDateAdded
+    val randomPool = unplayed.shuffled()
+    if (byDateAdded.isEmpty()) return randomPool
+    if (randomPool.isEmpty()) return byDateAdded
+    return byDateAdded.flatMapIndexed { index, dated ->
+        val random = randomPool.getOrNull(index)
+        if (random != null && random.personalMixIdentityKey() != dated.personalMixIdentityKey()) {
+            listOf(dated, random)
+        } else {
+            listOf(dated)
+        }
+    }
+}
+
+private fun favoriteMixTracks(catalog: CatalogSnapshot, tracks: List<Track>): List<Track> {
+    if (catalog.artists.none { it.favorite } && catalog.albums.none { it.favorite }) return emptyList()
+    val favoriteArtistNames = catalog.artists.filter { it.favorite }.map { it.title.lowercase() }.toSet()
+    val favoriteAlbumTitles = catalog.albums.filter { it.favorite }.map { it.title.lowercase() }.toSet()
+    val favoriteAlbumIds = catalog.albums.filter { it.favorite }.map { it.id }.toSet()
+    return tracks.filter { track ->
+        track.artist.lowercase() in favoriteArtistNames ||
+            track.album.lowercase() in favoriteAlbumTitles ||
+            (track.parentAlbumId != null && track.parentAlbumId in favoriteAlbumIds)
+    }
+}
+
+private fun mixSliceCounts(target: Int, weights: List<Int>): List<Int> {
+    val normalizedWeights = weights.map { it.coerceAtLeast(0) }
+    val totalWeight = normalizedWeights.sum()
+    if (target <= 0 || totalWeight <= 0) return List(normalizedWeights.size) { 0 }
+    val raw = normalizedWeights.map { weight -> (target.toDouble() * weight.toDouble()) / totalWeight.toDouble() }
     val base = raw.map { it.toInt() }.toMutableList()
     var remaining = target - base.sum()
     raw.indices
@@ -826,6 +1112,8 @@ private fun mixSliceCounts(target: Int, preferences: PersonalMixPreferences): Li
         }
     return base
 }
+
+private fun Double.roundToInt(): Int = kotlin.math.round(this).toInt()
 
 internal fun Track.personalMixIdentityKey(): String {
     val metadataKey = listOf(title, artist, album)

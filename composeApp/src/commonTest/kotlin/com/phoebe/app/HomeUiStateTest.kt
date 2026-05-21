@@ -16,12 +16,22 @@ import com.phoebe.app.ui.decadeMix
 import com.phoebe.app.ui.defaultMixDecades
 import com.phoebe.app.ui.HomeCatalogIndexCache
 import com.phoebe.app.ui.deriveHomeUiState
+import com.phoebe.app.ui.effectivePersonalMixPreferences
+import com.phoebe.app.ui.mixMaturity
+import com.phoebe.app.ui.mixMaturityBlend
 import com.phoebe.app.ui.personalMix
+import com.phoebe.app.ui.personalMixIdentityKey
+import com.phoebe.app.ui.MixMaturity
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class HomeUiStateTest {
+    private fun establishedPlayHistory(): PlayHistorySnapshot {
+        val byTrack = (1..100).associate { "hist-$it" to it.toLong() }
+        val playCountByTrack = (1..100).associate { "hist-$it" to 2L }
+        return PlayHistorySnapshot(byTrack = byTrack, playCountByTrack = playCountByTrack)
+    }
     @Test
     fun derivesRecentAndMostPlayedHomeSections() {
         val tracks = (1..12).map { index ->
@@ -188,16 +198,16 @@ class HomeUiStateTest {
     @Test
     fun personalMixStartsWithHeavyRotationAndLimitsDiscovery() {
         val tracks = listOf(
-            Track("heavy1", "Heavy 1", "Comfort A", "Album", 1_000L, "stream", "", year = 2001, genre = "Rock"),
-            Track("heavy2", "Heavy 2", "Comfort B", "Album", 1_000L, "stream", "", year = 2002, genre = "Rock"),
-            Track("recent1", "Recent 1", "Comfort C", "Album", 1_000L, "stream", "", year = 2003, genre = "Rock"),
-            Track("recent2", "Recent 2", "Comfort D", "Album", 1_000L, "stream", "", year = 2004, genre = "Rock"),
-            Track("most1", "Most 1", "Comfort E", "Album", 1_000L, "stream", "", year = 2005, genre = "Rock"),
-            Track("most2", "Most 2", "Comfort F", "Album", 1_000L, "stream", "", year = 2006, genre = "Rock"),
-            Track("similar1", "Similar 1", "Comfort A", "Album", 1_000L, "stream", "", year = 2007, genre = "Rock"),
-            Track("similar2", "Similar 2", "Comfort B", "Album", 1_000L, "stream", "", year = 2008, genre = "Rock"),
-            Track("new1", "New 1", "Discovery", "Album", 1_000L, "stream", "", dateAddedMs = 10L),
-            Track("new2", "New 2", "Discovery", "Album", 1_000L, "stream", "", dateAddedMs = 9L),
+            Track("heavy1", "Heavy 1", "Comfort A", "Album 1", 1_000L, "stream", "", year = 2001, genre = "Rock"),
+            Track("heavy2", "Heavy 2", "Comfort B", "Album 2", 1_000L, "stream", "", year = 2002, genre = "Rock"),
+            Track("recent1", "Recent 1", "Comfort C", "Album 3", 1_000L, "stream", "", year = 2003, genre = "Rock"),
+            Track("recent2", "Recent 2", "Comfort D", "Album 4", 1_000L, "stream", "", year = 2004, genre = "Rock"),
+            Track("most1", "Most 1", "Comfort E", "Album 5", 1_000L, "stream", "", year = 2005, genre = "Rock"),
+            Track("most2", "Most 2", "Comfort F", "Album 6", 1_000L, "stream", "", year = 2006, genre = "Rock"),
+            Track("similar1", "Similar 1", "Comfort A", "Album 7", 1_000L, "stream", "", year = 2007, genre = "Rock"),
+            Track("similar2", "Similar 2", "Comfort B", "Album 8", 1_000L, "stream", "", year = 2008, genre = "Rock"),
+            Track("new1", "New 1", "Discovery", "Album 9", 1_000L, "stream", "", dateAddedMs = 10L),
+            Track("new2", "New 2", "Discovery", "Album 10", 1_000L, "stream", "", dateAddedMs = 9L),
         )
         val catalog = CatalogSnapshot(tracksByParent = mapOf("all" to tracks))
         val state = HomeUiState(
@@ -206,7 +216,12 @@ class HomeUiStateTest {
             mostPlayedTracks = tracks.slice(4..5).map { HomePlayedTrack(it, playCount = 10L) },
         )
 
-        val mix = personalMix(catalog, state, limit = 8).map { it.id }
+        val mix = personalMix(
+            catalog,
+            state,
+            limit = 8,
+            playHistory = establishedPlayHistory(),
+        ).map { it.id }
 
         assertEquals(setOf("heavy1", "heavy2"), mix.take(2).toSet())
         assertTrue(mix.count { it.startsWith("new") } <= 1)
@@ -217,7 +232,7 @@ class HomeUiStateTest {
         val original = Track("plex:101", "Same Song", "Artist", "Album", 1_000L, "stream", "")
         val unprefixed = original.copy(id = "101")
         val differentIdSameMetadata = original.copy(id = "local-copy")
-        val other = Track("other", "Other Song", "Artist", "Album", 1_000L, "stream", "")
+        val other = Track("other", "Other Song", "Artist", "Other Album", 1_000L, "stream", "")
         val catalog = CatalogSnapshot(
             tracksByParent = mapOf(
                 "album" to listOf(original, other),
@@ -230,7 +245,12 @@ class HomeUiStateTest {
             mostPlayedTracks = listOf(HomePlayedTrack(differentIdSameMetadata, playCount = 10L)),
         )
 
-        val mix = personalMix(catalog, state, limit = 10)
+        val mix = personalMix(
+            catalog = catalog,
+            state = state,
+            limit = 35,
+            playHistory = establishedPlayHistory(),
+        )
 
         assertEquals(listOf("Same Song", "Other Song").toSet(), mix.map { it.title }.toSet())
         assertEquals(mix.size, mix.map { it.title to it.artist to it.album to it.durationMs }.toSet().size)
@@ -239,7 +259,7 @@ class HomeUiStateTest {
     @Test
     fun personalMixUsesCustomWeights() {
         val heavy = (1..12).map {
-            Track("heavy$it", "Heavy $it", "Artist $it", "Album", 1_000L, "stream", "")
+            Track("heavy$it", "Heavy $it", "Artist $it", "Album $it", 1_000L, "stream", "")
         }
         val other = (1..8).map {
             Track("other$it", "Other $it", "Other", "Album", 1_000L, "stream", "", dateAddedMs = it.toLong())
@@ -260,6 +280,7 @@ class HomeUiStateTest {
                 similarWeight = 0,
                 discoveryWeight = 0,
             ),
+            playHistory = establishedPlayHistory(),
         )
 
         assertEquals(10, mix.size)
@@ -383,5 +404,180 @@ class HomeUiStateTest {
             trackIndexCache = cache,
         )
         assertEquals(listOf("t2", "t1"), pass2.recentlyAddedTracks.map { it.id })
+    }
+
+    @Test
+    fun mixMaturityDetectsSparseGrowingAndEstablishedHistory() {
+        assertEquals(MixMaturity.Sparse, mixMaturity(PlayHistorySnapshot()))
+        assertEquals(
+            MixMaturity.Sparse,
+            mixMaturity(
+                PlayHistorySnapshot(
+                    byTrack = (1..10).associate { "t$it" to it.toLong() },
+                    playCountByTrack = (1..10).associate { "t$it" to 1L },
+                ),
+            ),
+        )
+        assertEquals(
+            MixMaturity.Growing,
+            mixMaturity(
+                PlayHistorySnapshot(
+                    byTrack = (1..30).associate { "t$it" to it.toLong() },
+                    playCountByTrack = (1..30).associate { "t$it" to 2L },
+                ),
+            ),
+        )
+        assertEquals(MixMaturity.Established, mixMaturity(establishedPlayHistory()))
+    }
+
+    @Test
+    fun effectivePersonalMixPreferencesBoostsDiscoveryWhenHistoryIsSparse() {
+        val sparse = effectivePersonalMixPreferences(PersonalMixPreferences.Default, PlayHistorySnapshot())
+        val established = effectivePersonalMixPreferences(PersonalMixPreferences.Default, establishedPlayHistory())
+
+        assertTrue(sparse.discoveryWeight > established.discoveryWeight)
+        assertTrue(sparse.heavyRotationWeight < established.heavyRotationWeight)
+        assertEquals(PersonalMixPreferences.Default.normalized(), established)
+    }
+
+    @Test
+    fun mixMaturityBlendInterpolatesBetweenSparseAndEstablished() {
+        assertEquals(0.0, mixMaturityBlend(PlayHistorySnapshot()))
+        assertEquals(1.0, mixMaturityBlend(establishedPlayHistory()))
+        val growingBlend = mixMaturityBlend(
+            PlayHistorySnapshot(
+                byTrack = (1..62).associate { "t$it" to it.toLong() },
+                playCountByTrack = (1..62).associate { "t$it" to 2L },
+            ),
+        )
+        assertTrue(growingBlend > 0.0)
+        assertTrue(growingBlend < 1.0)
+    }
+
+    @Test
+    fun personalMixEnforcesArtistAndAlbumDiversityCaps() {
+        val tracks = (1..16).map { index ->
+            Track(
+                id = "track-$index",
+                title = "Song $index",
+                artist = "Artist ${(index - 1) / 4 + 1}",
+                album = "Album $index",
+                durationMs = 1_000L,
+                streamUrl = "stream",
+                downloadUrl = "",
+                year = 2000 + index,
+            )
+        }
+        val catalog = CatalogSnapshot(tracksByParent = mapOf("all" to tracks))
+        val state = HomeUiState(
+            heavyRotationTracks = tracks.take(4).map { HomePlayedTrack(it, playCount = 3L) },
+            recentlyPlayedTracks = tracks.slice(4..7).map { HomePlayedTrack(it, playCount = 1L) },
+            mostPlayedTracks = tracks.slice(8..11).map { HomePlayedTrack(it, playCount = 10L) },
+        )
+
+        val mix = personalMix(
+            catalog = catalog,
+            state = state,
+            limit = 35,
+            playHistory = establishedPlayHistory(),
+        )
+
+        assertEquals(8, mix.size)
+        assertEquals(4, mix.map { it.artist }.distinct().size)
+        assertTrue(mix.groupingBy { it.artist }.eachCount().values.all { it <= 2 })
+        assertEquals(mix.size, mix.map { it.album.lowercase() }.distinct().size)
+    }
+
+    @Test
+    fun sparsePersonalMixIncludesMoreUnplayedTracksThanEstablishedProfile() {
+        val played = (1..6).map { index ->
+            Track(
+                id = "played-$index",
+                title = "Played $index",
+                artist = "Artist $index",
+                album = "Album $index",
+                durationMs = 1_000L,
+                streamUrl = "stream",
+                downloadUrl = "",
+                genre = "Rock",
+                year = 2000 + index,
+            )
+        }
+        val unplayed = (1..12).map { index ->
+            Track(
+                id = "unplayed-$index",
+                title = "Unplayed $index",
+                artist = "Discovery $index",
+                album = "Discovery Album $index",
+                durationMs = 1_000L,
+                streamUrl = "stream",
+                downloadUrl = "",
+                dateAddedMs = index.toLong(),
+            )
+        }
+        val catalog = CatalogSnapshot(tracksByParent = mapOf("all" to played + unplayed))
+        val state = HomeUiState(
+            heavyRotationTracks = played.take(2).map { HomePlayedTrack(it, playCount = 3L) },
+            recentlyPlayedTracks = played.slice(2..3).map { HomePlayedTrack(it, playCount = 1L) },
+            mostPlayedTracks = played.drop(4).map { HomePlayedTrack(it, playCount = 10L) },
+        )
+
+        val sparseMix = personalMix(catalog, state, limit = 12, playHistory = PlayHistorySnapshot())
+        val establishedMix = personalMix(catalog, state, limit = 12, playHistory = establishedPlayHistory())
+
+        assertTrue(sparseMix.count { it.id.startsWith("unplayed") } >= establishedMix.count { it.id.startsWith("unplayed") })
+    }
+
+    @Test
+    fun personalMixDeprioritizesRecentlyQueuedTracks() {
+        val tracks = (1..6).map { index ->
+            Track(
+                id = "track-$index",
+                title = "Track $index",
+                artist = "Artist $index",
+                album = "Album $index",
+                durationMs = 1_000L,
+                streamUrl = "stream",
+                downloadUrl = "",
+            )
+        }
+        val catalog = CatalogSnapshot(tracksByParent = mapOf("all" to tracks))
+        val state = HomeUiState(
+            heavyRotationTracks = tracks.take(1).map { HomePlayedTrack(it, playCount = 3L) },
+            recentlyPlayedTracks = tracks.slice(1..2).map { HomePlayedTrack(it, playCount = 1L) },
+            mostPlayedTracks = tracks.drop(3).map { HomePlayedTrack(it, playCount = 10L) },
+        )
+        val recentKeys = tracks.take(3).map { it.personalMixIdentityKey() }.toSet()
+
+        val mix = personalMix(
+            catalog = catalog,
+            state = state,
+            limit = 6,
+            playHistory = establishedPlayHistory(),
+            recentMixTrackKeys = recentKeys,
+        )
+
+        assertTrue(mix.take(3).none { it.personalMixIdentityKey() in recentKeys })
+    }
+
+    @Test
+    fun sparsePersonalMixUsesFavoriteAndRatedUnplayedTracks() {
+        val played = Track("played", "Played", "Seed Artist", "Seed Album", 1_000L, "stream", "", genre = "Rock")
+        val favorite = Track("favorite", "Favorite", "Favorite Artist", "Favorite Album", 1_000L, "stream", "")
+        val rated = Track("rated", "Rated", "Rated Artist", "Rated Album", 1_000L, "stream", "", rating = 4f)
+        val other = Track("other", "Other", "Other Artist", "Other Album", 1_000L, "stream", "", dateAddedMs = 1L)
+        val catalog = CatalogSnapshot(
+            artists = listOf(Artist("fav-artist", "Favorite Artist", favorite = true)),
+            albums = listOf(Album("fav-album", "Favorite Album", "Favorite Artist", favorite = true)),
+            tracksByParent = mapOf("all" to listOf(played, favorite, rated, other)),
+        )
+        val state = HomeUiState(
+            heavyRotationTracks = listOf(HomePlayedTrack(played, playCount = 3L)),
+        )
+
+        val mix = personalMix(catalog, state, limit = 4, playHistory = PlayHistorySnapshot())
+
+        assertTrue(mix.map { it.id }.containsAll(listOf("favorite", "rated", "other")))
+        assertTrue(mix.size >= 3)
     }
 }

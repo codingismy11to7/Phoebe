@@ -6,5 +6,7 @@ import androidx.compose.runtime.Composable
 actual fun PlatformBackHandler(
     enabled: Boolean,
     onBack: () -> Unit,
+    onBackProgress: ((Float) -> Unit)?,
+    onBackCancel: (() -> Unit)?,
 ) {
 }

@@ -93,6 +93,8 @@ internal fun SettingsDesktopView(
     onPersonalMix: (PersonalMixPreferences) -> Unit,
     onExportFavoritePlaylists: () -> Unit,
     onImportFavoritePlaylists: () -> Unit,
+    homeScreenLayoutMode: HomeScreenLayoutMode = HomeScreenLayoutMode.Default,
+    onHomeScreenLayoutModeChange: (HomeScreenLayoutMode) -> Unit = {},
     modifier: Modifier = Modifier,
     initialCategory: SettingsCategory = SettingsCategory.AudioPlayback,
 ) {
@@ -133,7 +135,14 @@ internal fun SettingsDesktopView(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 when (category) {
-                    SettingsCategory.Appearance -> AppearanceSettingsCard(isLightMode, onLightModeChange, tintId, onTintChange)
+                    SettingsCategory.Appearance -> AppearanceSettingsCard(
+                        isLightMode,
+                        onLightModeChange,
+                        tintId,
+                        onTintChange,
+                        homeScreenLayoutMode,
+                        onHomeScreenLayoutModeChange,
+                    )
                     SettingsCategory.AudioPlayback -> AudioPlaybackSettingsCard(
                         settings = appSettings,
                         onCrossfadeSeconds = onCrossfadeSeconds,
@@ -183,6 +192,8 @@ internal fun SettingsMobileView(
     onPersonalMix: (PersonalMixPreferences) -> Unit,
     onExportFavoritePlaylists: () -> Unit,
     onImportFavoritePlaylists: () -> Unit,
+    homeScreenLayoutMode: HomeScreenLayoutMode = HomeScreenLayoutMode.Default,
+    onHomeScreenLayoutModeChange: (HomeScreenLayoutMode) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -193,7 +204,14 @@ internal fun SettingsMobileView(
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
         SectionLabel("APPEARANCE", PhoebeUi.accentLight)
-        AppearanceSettingsCard(isLightMode, onLightModeChange, tintId, onTintChange)
+        AppearanceSettingsCard(
+            isLightMode,
+            onLightModeChange,
+            tintId,
+            onTintChange,
+            homeScreenLayoutMode,
+            onHomeScreenLayoutModeChange,
+        )
         SectionLabel("HOME", PhoebeUi.accentLight)
         HomeSettingsCard(libraryUi.homeSections, onHomeSections, compact = true)
         FavoritePlaylistSettingsCard(onExportFavoritePlaylists, onImportFavoritePlaylists, compact = true)
@@ -263,6 +281,8 @@ private fun AppearanceSettingsCard(
     onLightModeChange: (Boolean) -> Unit,
     tintId: String,
     onTintChange: (String) -> Unit,
+    homeScreenLayoutMode: HomeScreenLayoutMode,
+    onHomeScreenLayoutModeChange: (HomeScreenLayoutMode) -> Unit,
 ) {
     SettingsCard {
         Text("Appearance", color = PhoebeUi.primaryText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
@@ -288,6 +308,13 @@ private fun AppearanceSettingsCard(
             )
         }
         Spacer(Modifier.height(18.dp))
+        Text("Mobile Home layout", color = PhoebeUi.primaryText, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.height(10.dp))
+        HomeLayoutModeControl(
+            selected = homeScreenLayoutMode,
+            onSelected = onHomeScreenLayoutModeChange,
+        )
+        Spacer(Modifier.height(18.dp))
         Text("Tint", color = PhoebeUi.primaryText, fontSize = 14.sp, fontWeight = FontWeight.Medium)
         Text("Choose the accent color for controls and active states", color = PhoebeUi.secondaryText, fontSize = 12.sp)
         Spacer(Modifier.height(10.dp))
@@ -302,6 +329,52 @@ private fun AppearanceSettingsCard(
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeLayoutModeControl(
+    selected: HomeScreenLayoutMode,
+    onSelected: (HomeScreenLayoutMode) -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(PhoebeUi.subtleFill)
+            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(10.dp))
+            .padding(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        HomeScreenLayoutMode.entries.forEach { mode ->
+            val isSelected = mode == selected
+            Row(
+                Modifier
+                    .weight(1f)
+                    .height(38.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { onSelected(mode) }
+                    .background(if (isSelected) PhoebeUi.accent.copy(alpha = 0.16f) else Color.Transparent)
+                    .border(
+                        BorderStroke(
+                            1.dp,
+                            if (isSelected) PhoebeUi.accent.copy(alpha = 0.32f) else Color.Transparent,
+                        ),
+                        RoundedCornerShape(8.dp),
+                    ),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                Text(
+                    mode.label,
+                    color = if (isSelected) PhoebeUi.accentLight else PhoebeUi.secondaryText,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
     }

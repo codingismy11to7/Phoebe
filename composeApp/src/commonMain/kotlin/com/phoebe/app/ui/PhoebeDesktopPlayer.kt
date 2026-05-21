@@ -513,6 +513,8 @@ internal fun DesktopPlayer(
                                         onLightModeChange = onUseLightAppearanceChange,
                                         tintId = appearanceTintId,
                                         onTintChange = onAppearanceTintChange,
+                                        homeScreenLayoutMode = settingsState.homeScreenLayoutMode,
+                                        onHomeScreenLayoutModeChange = settingsActions.onHomeScreenLayoutModeChange,
                                         downloadDirectory = downloadDirectory,
                                         downloadCount = downloadCount,
                                         appSettings = appSettings,
