@@ -6,6 +6,8 @@
 
 Phoebe is a Compose Multiplatform music player for Plex, Jellyfin, Emby, Subsonic-compatible servers (Navidrome, etc.), Music Assistant, local folders, Android, iOS, desktop (JVM), and the browser (Kotlin/Wasm).
 
+Try the web build at [phoebe.joetr.com](https://phoebe.joetr.com), or grab native installers and mobile binaries from [GitHub Releases](https://github.com/j-roskopf/Phoebe/releases).
+
 ## Music providers
 
 Phoebe can sign in to one remote music source at a time (plus optional local folders). Catalog IDs are prefixed (`plex:`, `jellyfin:`, `emby:`, `navidrome:`, `music-assistant:`) so items from different backends can be merged with local files in search and the library.
@@ -89,6 +91,7 @@ For UI architecture and navigation rules, see [Compose Architecture Guidelines](
 
 - **Playback** — Play, pause, seek, next/previous, shuffle, repeat, and an Up Next queue you can add to, reorder, and play from.
 - **Now playing** — Full-screen player with artwork, progress, transport controls, queue, and a now-playing badge on the active track row.
+- **Graphic equalizer** — 5-, 10-, 15-, and 31-band EQ with ±12 dB gain, a draggable response curve, per-band sliders, reset, enable/disable, and optional persistence across app restarts. EQ is wired into local playback on Android, desktop, iOS, and web; remote paths such as Chromecast keep using their own audio pipeline.
 - **Lyrics** — Synced and plain lyrics from embedded tags, sidecar files, and [LRCLIB](https://lrclib.net); cached in SQLDelight with auto-scroll during playback (desktop lyrics section and mobile detail flow).
 - **Playback sync** — Plex timeline reporting; Jellyfin/Emby session progress; Subsonic scrobble on stop (see [Music providers](#music-providers)).
 - **Search** — Search songs, artists, and albums across the merged catalog, with recent search history.
@@ -118,14 +121,18 @@ For UI architecture and navigation rules, see [Compose Architecture Guidelines](
 - **Multiplatform** — Android, iOS, desktop (JVM), and browser (Kotlin/Wasm) targets from a shared Compose UI and data layer.
 - **Offline-friendly persistence** — SQLDelight-backed catalog, session, media sources, library preferences, downloads state, play history, and lyrics cached across restarts.
 
-## Platform notes
+## Platforms
 
-| Platform | Local folders | Cast | Notes |
-|----------|---------------|------|--------|
-| **Desktop (JVM)** | Yes (folder picker) | — | DEB, MSI, DMG, and Flatpak builds via release CI; tuned JVM heap and Skiko GPU cache for lower idle memory. |
-| **Android** | Yes (SAF tree URI) | Chromecast | APK/AAB releases; Android Auto browse; instrumented playback tests on CI emulator. |
-| **iOS** | Yes (native folder picker) | Stub (Cast SDK not bundled) | CarPlay browse/play in code; CarPlay entitlement required to ship. |
-| **Web (Wasm)** | Stubbed (sandbox) | — | Plex streaming and SQLDelight worker DB; local folder picker/indexing not available in the browser. |
+| Platform | Get Phoebe | Local folders | Cast | Notes |
+|----------|------------|---------------|------|--------|
+| **Web (Wasm)** | [Open phoebe.joetr.com](https://phoebe.joetr.com) | Stubbed (sandbox) | — | Browser build deployed from release CI; Plex streaming, HTML audio playback, SQLDelight Web Worker DB, and WebAudio EQ when the stream permits CORS access. |
+| **Arch Linux** | [GitHub Releases](https://github.com/j-roskopf/Phoebe/releases) (`.flatpak`) | Yes (folder picker) | — | Use the Flatpak bundle on Arch and other non-Debian distributions. |
+| **Debian / Ubuntu** | [GitHub Releases](https://github.com/j-roskopf/Phoebe/releases) (`.deb`) | Yes (folder picker) | — | Native JVM desktop package with tuned heap and Skiko GPU cache settings. |
+| **Other Linux** | [GitHub Releases](https://github.com/j-roskopf/Phoebe/releases) (`.flatpak`) | Yes (folder picker) | — | Flatpak bundle is built alongside the DEB package. |
+| **Windows** | [GitHub Releases](https://github.com/j-roskopf/Phoebe/releases) (`.msi`) | Yes (folder picker) | — | Signed MSI release; window caption/border colors follow the app theme. |
+| **macOS** | [GitHub Releases](https://github.com/j-roskopf/Phoebe/releases) (`.dmg`) | Yes (folder picker) | — | Signed and notarized DMG; native bridge handles hardware media keys. |
+| **Android** | [GitHub Releases](https://github.com/j-roskopf/Phoebe/releases) (`.apk`, `.aab`) | Yes (SAF tree URI) | Chromecast | Android Auto browse, Media3 playback, Cast queue/transport, and instrumented playback tests on CI. |
+| **iOS** | [GitHub Releases](https://github.com/j-roskopf/Phoebe/releases) | Yes (native folder picker) | Stub (Cast SDK not bundled) | iOS app target with AVPlayer playback and CarPlay browse/play in code; release CI does not upload a signed IPA yet. |
 
 ## What works now
 
@@ -171,6 +178,7 @@ For UI architecture and navigation rules, see [Compose Architecture Guidelines](
 ### Audio and platform services
 
 - Shared `AudioPlayer` and `SystemVolumeController` with per-target implementations (Media3/ExoPlayer on Android, JavaFX on desktop, HTML audio on web).
+- Shared equalizer profile plumbing with persisted settings; Android, desktop, iOS, and web apply the EQ during local playback, with browser fallback notices when a stream blocks WebAudio access.
 - macOS `MediaKeysBridge` dylib; Android `PlaybackService` + Cast; iOS AVPlayer and CarPlay bridge.
 
 ### Data layer

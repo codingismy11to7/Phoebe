@@ -24,10 +24,12 @@ private class WebAudioPlayer : SimpleAudioPlayer() {
     private var sourcePreparedForWebEqualizer = false
     private var pendingSeekAfterLoadSeconds: Double? = null
     private var pendingPlayAfterLoad = false
+    private var audioUsesCors = true
+    private var corsFallbackAttempted = false
+    private var equalizerUnavailableForCurrentStream = false
+    private var equalizerUnavailableNoticeShown = false
 
-    private val audio = (document.createElement("audio") as HTMLAudioElement).apply {
-        preload = "auto"
-    }
+    private var audio = createAudioElement(useCors = true)
 
     override fun stopCurrentPlaybackImmediately() {
         retryJob?.cancel()
@@ -44,7 +46,17 @@ private class WebAudioPlayer : SimpleAudioPlayer() {
         currentUri = uri
         retryGeneration = generation
         retryCount = 0
+        corsFallbackAttempted = false
+        equalizerUnavailableForCurrentStream = false
+        equalizerUnavailableNoticeShown = false
         retryJob?.cancel()
+        if (!audioUsesCors) {
+            val previousAudio = audio
+            audio = createAudioElement(useCors = true)
+            audioUsesCors = true
+            sourcePreparedForWebEqualizer = false
+            disposeWebAudioElement(previousAudio)
+        }
         audio.volume = effectiveOutputVolume().toDouble().coerceIn(0.0, 1.0)
         prepareAudioElementForCurrentEqualizer()
         setWebAudioCurrentTime(audio, 0.0)
@@ -77,33 +89,27 @@ private class WebAudioPlayer : SimpleAudioPlayer() {
 
     override fun applyEqualizer(profile: EqualizerProfile) {
         val normalized = profile.normalized()
-        val uri = currentUri
-        val needsReload = uri != null &&
-            normalized.enabled &&
-            !sourcePreparedForWebEqualizer
-        if (needsReload) {
-            val positionSeconds = audio.currentTime
-            val wasPlaying = !audio.paused
-            pendingSeekAfterLoadSeconds = positionSeconds
-            pendingPlayAfterLoad = wasPlaying || playWhenReady
+        if (normalized.enabled && !sourcePreparedForWebEqualizer) {
             prepareAudioElementForCurrentEqualizer()
-            audio.src = uri
-            audio.load()
-            applyCurrentEqualizer()
-        } else {
-            applyCurrentEqualizer()
         }
+        applyCurrentEqualizer()
     }
 
     private fun prepareAudioElementForCurrentEqualizer() {
         val enabled = equalizerProfile.normalized().enabled
-        prepareWebEqualizerAudio(audio, enabled)
-        sourcePreparedForWebEqualizer = enabled
+        prepareWebEqualizerAudio(audio, enabled && audioUsesCors)
+        sourcePreparedForWebEqualizer = (enabled && audioUsesCors) || isWebEqualizerAttached(audio)
     }
 
     private fun applyCurrentEqualizer() {
         val normalized = equalizerProfile.normalized()
-        applyWebEqualizer(audio, webEqualizerPayload(normalized))
+        val effectiveProfile = if (GraphicEqualizerProcessor.isActive(normalized) && !sourcePreparedForWebEqualizer) {
+            surfaceEqualizerUnavailableNoticeIfNeeded()
+            normalized.copy(enabled = false)
+        } else {
+            normalized
+        }
+        applyWebEqualizer(audio, webEqualizerPayload(effectiveProfile))
     }
 
     private fun installAudioEventHandlers(generation: Int) {
@@ -136,7 +142,9 @@ private class WebAudioPlayer : SimpleAudioPlayer() {
         }
         audio.onerror = { _, _, _, _, _ ->
             clearPendingReloadRestore()
-            scheduleRetry(generation, reload = true)
+            if (!retryWithoutCors(generation)) {
+                scheduleRetry(generation, reload = true)
+            }
             null
         }
     }
@@ -165,6 +173,44 @@ private class WebAudioPlayer : SimpleAudioPlayer() {
     private fun clearPendingReloadRestore() {
         pendingSeekAfterLoadSeconds = null
         pendingPlayAfterLoad = false
+    }
+
+    private fun retryWithoutCors(generation: Int): Boolean {
+        val uri = currentUri ?: return false
+        if (!audioUsesCors || corsFallbackAttempted || !isPlayRequestCurrent(generation)) return false
+        corsFallbackAttempted = true
+        val previousAudio = audio
+        val positionSeconds = previousAudio.currentTime.takeIf { it.isFinite() && it > 0.0 } ?: 0.0
+        audio = createAudioElement(useCors = false)
+        audioUsesCors = false
+        sourcePreparedForWebEqualizer = false
+        equalizerUnavailableForCurrentStream = true
+        equalizerUnavailableNoticeShown = false
+        audio.volume = previousAudio.volume
+        installAudioEventHandlers(generation)
+        if (positionSeconds > 0.0) {
+            pendingSeekAfterLoadSeconds = positionSeconds
+            pendingPlayAfterLoad = playWhenReady
+        }
+        audio.src = uri
+        audio.load()
+        applyCurrentEqualizer()
+        disposeWebAudioElement(previousAudio)
+        if (playWhenReady) {
+            playWebAudio(audio)
+        }
+        return true
+    }
+
+    private fun surfaceEqualizerUnavailableNoticeIfNeeded(generation: Int = activePlayGeneration) {
+        if (!equalizerUnavailableForCurrentStream || equalizerUnavailableNoticeShown) return
+        if (!GraphicEqualizerProcessor.isActive(equalizerProfile)) return
+        equalizerUnavailableNoticeShown = true
+        val title = state.value.currentTrack?.title?.takeIf { it.isNotBlank() } ?: "this song"
+        surfacePlaybackNotice(
+            generation = generation,
+            message = "Equalizer isn't available for $title in the browser because its stream blocks WebAudio access. Playback continues without EQ.",
+        )
     }
 
     private fun syncFromAudio(generation: Int, isBuffering: Boolean) {
@@ -223,6 +269,9 @@ private class WebAudioPlayer : SimpleAudioPlayer() {
                 audio.src = uri
                 audio.load()
                 applyCurrentEqualizer()
+                if (playWhenReady) {
+                    playWebAudio(audio)
+                }
             }
             if (!reload) {
                 playWebAudio(audio)
@@ -248,6 +297,14 @@ private fun webEqualizerPayload(profile: EqualizerProfile): String {
     ) { gain -> gain.toString() }
     return """{"enabled":${normalized.enabled},"bandCount":${normalized.bandCount},"bands":$bands,"gains":$gains}"""
 }
+
+private fun createAudioElement(useCors: Boolean): HTMLAudioElement =
+    (document.createElement("audio") as HTMLAudioElement).apply {
+        preload = "auto"
+        if (useCors) {
+            crossOrigin = "anonymous"
+        }
+    }
 
 @OptIn(ExperimentalWasmJsInterop::class)
 @JsFun(
@@ -313,12 +370,44 @@ private external fun applyWebEqualizer(audio: HTMLAudioElement, payload: String)
         if (!audio) return;
         if (enabled) {
             audio.crossOrigin = "anonymous";
-        } else if (!globalThis.__phoebeEqualizer || globalThis.__phoebeEqualizer.audio !== audio) {
-            audio.removeAttribute("crossorigin");
         }
     }""",
 )
 private external fun prepareWebEqualizerAudio(audio: HTMLAudioElement, enabled: Boolean)
+
+@OptIn(ExperimentalWasmJsInterop::class)
+@JsFun(
+    """(audio) => {
+        const eq = globalThis.__phoebeEqualizer;
+        return !!eq && eq.audio === audio && !!eq.source;
+    }""",
+)
+private external fun isWebEqualizerAttached(audio: HTMLAudioElement): Boolean
+
+@OptIn(ExperimentalWasmJsInterop::class)
+@JsFun(
+    """(audio) => {
+        if (!audio) return;
+        try { audio.pause(); } catch (_) {}
+        audio.onloadedmetadata = null;
+        audio.onplaying = null;
+        audio.onwaiting = null;
+        audio.onstalled = null;
+        audio.oncanplay = null;
+        audio.ontimeupdate = null;
+        audio.onended = null;
+        audio.onerror = null;
+        const eq = globalThis.__phoebeEqualizer;
+        if (eq && eq.audio === audio) {
+            try { eq.source.disconnect(); } catch (_) {}
+            for (const node of eq.nodes || []) {
+                try { node.disconnect(); } catch (_) {}
+            }
+            globalThis.__phoebeEqualizer = { context: eq.context, audio: null, source: null, nodes: [] };
+        }
+    }""",
+)
+private external fun disposeWebAudioElement(audio: HTMLAudioElement)
 
 @OptIn(ExperimentalWasmJsInterop::class)
 @JsFun(
@@ -339,6 +428,19 @@ private external fun setWebAudioCurrentTime(audio: HTMLAudioElement, seconds: Do
 @JsFun(
     """(audio) => {
         try {
+            const Ctx = globalThis.AudioContext || globalThis.webkitAudioContext;
+            if (Ctx) {
+                let eq = globalThis.__phoebeEqualizer;
+                if (!eq || !eq.context) {
+                    eq = { context: new Ctx(), audio: null, source: null, nodes: [] };
+                    globalThis.__phoebeEqualizer = eq;
+                }
+                eq.context?.resume?.();
+            }
+            const activeEq = globalThis.__phoebeEqualizer;
+            if (activeEq && activeEq.audio === audio) {
+                activeEq.context?.resume?.();
+            }
             const playResult = audio.play();
             if (playResult && typeof playResult.catch === "function") {
                 playResult.catch((error) => {
