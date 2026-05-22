@@ -151,6 +151,7 @@ import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
+import com.phoebe.app.domain.displayPath
 import com.phoebe.app.domain.isLocalMediaPlayback
 import com.phoebe.app.domain.isLikedSongsPlaylist
 import com.phoebe.app.domain.isRemoteLibraryTrack
@@ -359,6 +360,7 @@ internal fun Sidebar(
                         ) {
                             Column(Modifier.weight(1f)) {
                                 Text(folder.label, color = PhoebeUi.secondaryText, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(folder.displayPath(), color = PhoebeUi.mutedText, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Text(if (folder.enabled) "Enabled" else "Disabled", color = PhoebeUi.mutedText, fontSize = 10.sp)
                             }
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {

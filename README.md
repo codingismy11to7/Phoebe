@@ -62,7 +62,7 @@ Bearer-token JSON API (`/api`). Library browse, search, playlists, playlist edit
 
 ### Local folders
 
-Desktop, Android, and iOS folder roots (web: stubbed). Indexed tracks merge with whichever remote provider is signed in. Phoebe-only playlists, exports (M3U8, text, CSV on desktop), and tag-based metadata. Can be used without any remote sign-in.
+Desktop, Android, iOS, and web folder roots. Web uses the browser file picker and can index/play picked files for the current page session. Indexed tracks merge with whichever remote provider is signed in. Phoebe-only playlists, exports (M3U8, text, CSV on desktop), and tag-based metadata. Can be used without any remote sign-in.
 
 ## Features
 
@@ -125,7 +125,7 @@ For UI architecture and navigation rules, see [Compose Architecture Guidelines](
 
 | Platform | Get Phoebe | Local folders | Cast | Notes |
 |----------|------------|---------------|------|--------|
-| **Web (Wasm)** | [Open phoebe.joetr.com](https://phoebe.joetr.com) | Stubbed (sandbox) | — | Browser build deployed from release CI; Plex streaming, HTML audio playback, SQLDelight Web Worker DB, and WebAudio EQ when the stream permits CORS access. |
+| **Web (Wasm)** | [Open phoebe.joetr.com](https://phoebe.joetr.com) | Yes (browser picker, current session) | — | Browser build deployed from release CI; Plex streaming, local picked-file playback, HTML audio playback, SQLDelight Web Worker DB, and WebAudio EQ when the source permits access. |
 | **Arch Linux** | [GitHub Releases](https://github.com/j-roskopf/Phoebe/releases) (`.flatpak`) | Yes (folder picker) | — | Use the Flatpak bundle on Arch and other non-Debian distributions. |
 | **Debian / Ubuntu** | [GitHub Releases](https://github.com/j-roskopf/Phoebe/releases) (`.deb`) | Yes (folder picker) | — | Native JVM desktop package with tuned heap and Skiko GPU cache settings. |
 | **Other Linux** | [GitHub Releases](https://github.com/j-roskopf/Phoebe/releases) (`.flatpak`) | Yes (folder picker) | — | Flatpak bundle is built alongside the DEB package. |
