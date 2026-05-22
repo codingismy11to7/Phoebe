@@ -15,10 +15,13 @@ import com.phoebe.app.platform.currentTimeMs
 import com.phoebe.app.sources.CatalogMerge
 import kotlin.random.Random
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Reports Plex library playback to the server's timeline API so Plex can mark tracks played
@@ -39,45 +42,81 @@ class PlexPlaybackReporter(
     private var failedPlayQueueRetryAtMs: Long = 0L
 
     fun start(scope: CoroutineScope) {
+        start(scope, includePeriodicTimeline = true)
+    }
+
+    internal fun start(scope: CoroutineScope, includePeriodicTimeline: Boolean) {
         scope.launch { watchPlaybackState() }
-        scope.launch { periodicTimelineWhilePlaying() }
+        if (includePeriodicTimeline) {
+            scope.launch { periodicTimelineWhilePlaying() }
+        }
     }
 
     private suspend fun watchPlaybackState() {
         var lastTrack: Track? = null
         var lastPositionMs: Long = 0L
         var lastIsPlaying: Boolean? = null
+        var lastSession: PlexSession? = null
+        var stoppedTrackId: String? = null
 
-        combine(audioPlayer.state, session) { player, sess -> player to sess }
-            .collect { (player, sess) ->
-                val track = player.currentTrack
-                if (track == null || !track.isRemoteLibraryTrack()) {
-                    if (lastTrack != null) {
-                        reportStopped(lastTrack!!, lastPositionMs, sess, continuing = false)
+        suspend fun reportLastStopped(sess: PlexSession?, continuing: Boolean) {
+            val track = lastTrack ?: return
+            if (stoppedTrackId == track.id) return
+            reportStopped(track, lastPositionMs, sess ?: lastSession, continuing)
+            stoppedTrackId = track.id
+        }
+
+        try {
+            combine(audioPlayer.state, session) { player, sess -> player to sess }
+                .collect { (player, sess) ->
+                    if (sess != null) lastSession = sess
+                    val track = player.currentTrack
+                    if (track == null || !track.isRemoteLibraryTrack()) {
+                        reportLastStopped(sess, continuing = false)
+                        clearPlayQueue()
+                        lastTrack = null
+                        lastPositionMs = 0L
+                        lastIsPlaying = null
+                        stoppedTrackId = null
+                        return@collect
                     }
-                    clearPlayQueue()
-                    lastTrack = null
-                    lastPositionMs = 0L
-                    lastIsPlaying = null
-                    return@collect
+
+                    val previousTrack = lastTrack
+                    if (previousTrack != null && previousTrack.id != track.id) {
+                        reportLastStopped(sess, continuing = true)
+                    }
+
+                    ensurePlayQueue(sess, player)
+
+                    val isPlaying = player.isPlaying
+                    val stoppedAtEnd = lastTrack?.id == track.id &&
+                        lastIsPlaying == true &&
+                        !isPlaying &&
+                        shouldReportStoppedAtRest(track, player)
+                    when {
+                        stoppedAtEnd -> {
+                            reportStopped(track, player.positionMs, sess ?: lastSession, continuing = false)
+                            stoppedTrackId = track.id
+                        }
+                        lastTrack?.id != track.id || lastIsPlaying != isPlaying -> {
+                            val state = if (isPlaying) PlexTimelineState.Playing else PlexTimelineState.Paused
+                            reportTimeline(sess, track, player, state)
+                            if (isPlaying) stoppedTrackId = null
+                        }
+                        isPlaying -> stoppedTrackId = null
+                    }
+
+                    lastTrack = track
+                    lastPositionMs = player.positionMs
+                    lastIsPlaying = isPlaying
                 }
-
-                if (lastTrack != null && lastTrack!!.id != track.id) {
-                    reportStopped(lastTrack!!, lastPositionMs, sess, continuing = true)
+        } finally {
+            withContext(NonCancellable) {
+                withTimeoutOrNull(ShutdownStopReportTimeoutMs) {
+                    reportLastStopped(lastSession, continuing = false)
                 }
-
-                ensurePlayQueue(sess, player)
-
-                val isPlaying = player.isPlaying
-                if (lastTrack?.id != track.id || lastIsPlaying != isPlaying) {
-                    val state = if (isPlaying) PlexTimelineState.Playing else PlexTimelineState.Paused
-                    reportTimeline(sess, track, player, state)
-                }
-
-                lastTrack = track
-                lastPositionMs = player.positionMs
-                lastIsPlaying = isPlaying
             }
+        }
     }
 
     private suspend fun periodicTimelineWhilePlaying() {
@@ -249,11 +288,24 @@ class PlexPlaybackReporter(
         const val TimelineIntervalMs = 10_000L
         const val PlayQueueFailureBackoffMs = 10L * 60L * 1000L
         const val MaxPlayQueueItems = 200
+        const val ShutdownStopReportTimeoutMs = 3_000L
+        const val StopNearEndGraceMs = 2_000L
+        const val StopPlayedFraction = 0.9
 
         fun plexRatingKey(trackId: String): String? =
             CatalogMerge.stripPlexId(trackId).takeIf { trackId.startsWith("plex:") }
 
         fun newPlaybackSessionId(): String =
             "phoebe-${currentTimeMs()}-${Random.nextInt(1_000_000)}"
+
+        fun shouldReportStoppedAtRest(track: Track, player: PlayerState): Boolean {
+            val durationMs = track.durationMs
+                .takeIf { it > 0L }
+                ?: player.durationMs.takeIf { it > 0L }
+                ?: return false
+            val nearEndThresholdMs = (durationMs - StopNearEndGraceMs)
+                .coerceAtLeast((durationMs * StopPlayedFraction).toLong())
+            return player.positionMs.coerceAtLeast(0L) >= nearEndThresholdMs
+        }
     }
 }

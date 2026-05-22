@@ -291,6 +291,7 @@ class AppState(
                 refreshServers()
             }
             dependencies.catalogRepository.restoreCachedCatalog()
+            syncRemotePlayHistoryInBackground()
             val hasRemoteLibrary = session.value?.selectedLibrary != null
             val hasLocalFolders = mediaSources.value.localFolders.any { it.enabled }
             if (appSettings.value.scanLibraryOnLaunch && (hasRemoteLibrary || hasLocalFolders)) {
@@ -309,7 +310,6 @@ class AppState(
             }
             cacheDownloadedArtworkInBackground()
             warmPlaylistTracksInBackground()
-            syncRemotePlayHistoryInBackground()
             ensureLikedSongsPlaylistIfPossible()
             if (session.value?.token?.isNotBlank() == true &&
                 session.value?.selectedServer != null &&
@@ -743,7 +743,6 @@ class AppState(
      * avoiding stale empty Plex refreshes overwriting a newer library load.
      */
     suspend fun refreshCatalogSuspended(catalogMessage: String? = "Library refreshed.", backgroundIfCached: Boolean = false) {
-        cancelRemotePlayHistorySync()
         val currentJob = currentCoroutineContext()[Job]
         catalogRefreshJob?.takeIf { it != currentJob }?.cancel()
         catalogRefreshJob = currentJob
@@ -754,7 +753,7 @@ class AppState(
             }
             warmPlaylistTracksInBackground()
             if (session.value.isPlex() || session.value.isEmbyFamily() || session.value.isNavidrome()) {
-                syncRemotePlayHistory(showMessage = false)
+                syncRemotePlayHistory(showMessage = false, recentOnly = backgroundIfCached)
             } else {
                 syncRemotePlayHistoryInBackground()
             }
@@ -838,12 +837,21 @@ class AppState(
     private fun startRemotePlayHistorySync(showMessage: Boolean) {
         val currentSession = session.value
         if (!currentSession.isPlex() && !currentSession.isEmbyFamily() && !currentSession.isNavidrome()) {
+            PhoebeLog.d("AppState") {
+                "play history sync skipped: provider=${currentSession?.providerType?.name ?: "none"}"
+            }
             if (showMessage) mutableMessage.value = "${currentSession.providerLabel()} play history sync is handled from playback progress."
             return
         }
+        if (showMessage) mutableMessage.value = "Syncing ${currentSession.providerLabel()} play history..."
+        PhoebeLog.d("AppState") {
+            "play history sync requested provider=${currentSession.providerLabel()} " +
+                "showMessage=$showMessage hasServer=${currentSession?.selectedServer != null} " +
+                "hasLibrary=${currentSession?.selectedLibrary != null}"
+        }
         playHistorySyncJob?.cancel()
         playHistorySyncJob = scope.launch {
-            syncRemotePlayHistory(showMessage = showMessage)
+            syncRemotePlayHistory(showMessage = showMessage, recentOnly = true)
         }
     }
 
@@ -858,30 +866,44 @@ class AppState(
         dependencies.catalogRepository.clearActiveSyncProgress()
     }
 
-    private suspend fun syncRemotePlayHistory(showMessage: Boolean): Any? {
+    private suspend fun syncRemotePlayHistory(showMessage: Boolean, recentOnly: Boolean): Any? {
         return runCatching {
             val currentSession = session.value
-            if (currentSession.isPlex()) {
-                runCatching {
-                    dependencies.catalogRepository.warmPlexHistoryTracks(currentSession)
-                }.onFailure { error ->
-                    PhoebeLog.d("AppState") { "Plex history track warm failed: ${error.message}" }
+            PhoebeLog.d("AppState") {
+                "play history sync started provider=${currentSession.providerLabel()} " +
+                    "recentOnly=$recentOnly catalogTracks=${catalog.value.tracksByParent.values.sumOf { it.size }}"
+            }
+            val result = if (currentSession.isPlex()) {
+                if (!recentOnly) {
+                    runCatching {
+                        dependencies.catalogRepository.warmPlexHistoryTracks(currentSession)
+                    }.onFailure { error ->
+                        PhoebeLog.d("AppState") { "Plex history track warm failed: ${error.message}" }
+                    }
                 }
-                dependencies.plexPlayHistorySyncer.sync(currentSession, catalog.value)
-                val refreshTrackIds = buildList {
-                    addAll(dependencies.playHistoryRepository.queryTopMostPlayed(30).map { it.trackId })
-                    addAll(dependencies.playHistoryRepository.queryTopRecentlyPlayed(30).map { it.trackId })
-                }.distinct()
-                dependencies.plexPlayHistorySyncer.refreshViewCountsForTrackIds(
-                    currentSession,
-                    refreshTrackIds,
-                )
+                val syncResult = if (recentOnly) {
+                    dependencies.plexPlayHistorySyncer.syncRecent(currentSession, catalog.value)
+                } else {
+                    dependencies.plexPlayHistorySyncer.sync(currentSession, catalog.value)
+                }
+                if (!recentOnly) {
+                    val refreshTrackIds = buildList {
+                        addAll(dependencies.playHistoryRepository.queryTopMostPlayed(30).map { it.trackId })
+                        addAll(dependencies.playHistoryRepository.queryTopRecentlyPlayed(30).map { it.trackId })
+                    }.distinct()
+                    dependencies.plexPlayHistorySyncer.refreshViewCountsForTrackIds(
+                        currentSession,
+                        refreshTrackIds,
+                    )
+                }
+                syncResult
             } else if (currentSession.isNavidrome()) {
                 dependencies.navidromePlayHistorySyncer.sync(currentSession, catalog.value)
             } else {
                 dependencies.jellyfinPlayHistorySyncer.sync(currentSession, catalog.value)
             }
             warmTracksForMostPlayed()
+            result
         }.onSuccess { result ->
             if (showMessage) {
                 mutableMessage.value = when (result) {

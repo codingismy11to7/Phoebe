@@ -162,6 +162,7 @@ internal data class AuthSetupActions(
     val onRemoveLocalFolder: (String) -> Unit,
     val onToggleLocalFolder: (String, Boolean) -> Unit,
     val onRefreshLibrary: () -> Unit,
+    val onRefreshPlayHistory: () -> Unit = {},
     val onJellyfinPage: (JellyfinLibraryPageKind, Int) -> Unit = { _, _ -> },
     val onSelectServer: (PlexServer) -> Unit,
     val onSelectLibrary: (MusicLibrary, JellyfinSyncMode?) -> Unit,

@@ -167,6 +167,7 @@ internal fun DesktopPlayer(
     val onRemoveLocalFolder = authSetupActions.onRemoveLocalFolder
     val onToggleLocalFolder = authSetupActions.onToggleLocalFolder
     val onRefreshLibrary = authSetupActions.onRefreshLibrary
+    val onRefreshPlayHistory = authSetupActions.onRefreshPlayHistory
     val onJellyfinPage = authSetupActions.onJellyfinPage
     val onSelectServer = authSetupActions.onSelectServer
     val onSelectLibrary = authSetupActions.onSelectLibrary
@@ -226,6 +227,7 @@ internal fun DesktopPlayer(
                         onRemoveLocalFolder = onRemoveLocalFolder,
                         onToggleLocalFolder = onToggleLocalFolder,
                         onRefreshLibrary = onRefreshLibrary,
+                        onRefreshPlayHistory = onRefreshPlayHistory,
                     )
                     Column(Modifier.weight(1f).fillMaxHeight()) {
                         Row(Modifier.weight(1f).fillMaxWidth()) {

@@ -451,6 +451,7 @@ internal fun MobileBrowseShell(
     onSignOut: () -> Unit,
     onAddLocalFolder: (String?) -> Unit,
     onRefreshLibrary: () -> Unit,
+    onRefreshPlayHistory: () -> Unit = {},
     onJellyfinPage: (JellyfinLibraryPageKind, Int) -> Unit = { _, _ -> },
     onLibrarySortBy: (LibrarySortBy) -> Unit,
     onLibraryAscending: (Boolean) -> Unit,
@@ -773,6 +774,13 @@ internal fun MobileBrowseShell(
                         text = { Text("Refresh library") },
                         onClick = {
                             onRefreshLibrary()
+                            menuExpanded = false
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Sync play history") },
+                        onClick = {
+                            onRefreshPlayHistory()
                             menuExpanded = false
                         },
                     )

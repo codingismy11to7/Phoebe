@@ -31,6 +31,7 @@ import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
@@ -128,6 +129,7 @@ class PlexPlayHistorySyncerDesktopTest {
     @Test
     fun syncUsesPlexViewCountsForMostPlayedEvenWhenHistoryImportsFewEvents() = runBlocking {
         val capturedStatsQuery = mutableListOf<String>()
+        val capturedPlayedOnlyFilters = mutableListOf<String?>()
         val engine = MockEngine { request ->
             when {
                 request.url.encodedPath.endsWith("/history/all") -> respond(
@@ -142,6 +144,7 @@ class PlexPlayHistorySyncerDesktopTest {
                 )
                 else -> {
                     capturedStatsQuery += request.url.encodedQuery
+                    capturedPlayedOnlyFilters += request.url.parameters["viewCount>="]
                     respond(
                         content = statsJson(
                             metadata = statsTrack(
@@ -167,9 +170,10 @@ class PlexPlayHistorySyncerDesktopTest {
         assertEquals(2, result.imported)
         assertTrue(capturedStatsQuery.single().contains("includeUserState=1"))
         assertTrue(capturedStatsQuery.single().contains("sort=lastViewedAt%3Adesc"))
+        assertEquals(listOf<String?>("1"), capturedPlayedOnlyFilters)
         val counts = repo.playCountsByTrack.first { it["plex:t1"] == 42L }
         assertEquals(42L, counts["plex:t1"])
-        val top = repo.topMostPlayed.first { list -> list.any { it.trackId == "plex:t1" } }
+        val top = repo.topMostPlayed.first { list -> list.any { it.trackId == "plex:t1" && it.playCount == 42L } }
         assertEquals(42L, top.first { it.trackId == "plex:t1" }.playCount)
     }
 
@@ -211,6 +215,91 @@ class PlexPlayHistorySyncerDesktopTest {
         assertEquals(24L, counts["plex:t9"])
         val top = repo.topMostPlayed.first { list -> list.any { it.trackId == "plex:t9" } }
         assertEquals(24L, top.first { it.trackId == "plex:t9" }.playCount)
+    }
+
+    @Test
+    fun syncRecentOnlyFetchesFirstStatsPage() = runBlocking {
+        val statsStarts = mutableListOf<String?>()
+        val statsSizes = mutableListOf<String?>()
+        val encodedQueries = mutableListOf<String>()
+        val contentDirectoryIds = mutableListOf<String?>()
+        val engine = MockEngine { request ->
+            when {
+                request.url.encodedPath.endsWith("/identity") -> respond(
+                    content = "{}",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+                request.url.encodedPath.endsWith("/history/all") -> error("recent sync should not call Plex history")
+                else -> {
+                    statsStarts += request.url.parameters["X-Plex-Container-Start"]
+                    statsSizes += request.url.parameters["X-Plex-Container-Size"]
+                    encodedQueries += request.url.encodedQuery
+                    contentDirectoryIds += request.url.parameters["contentDirectoryID"]
+                    respond(
+                        content = statsJson(
+                            metadata = statsTrack(
+                                ratingKey = "t1",
+                                viewCount = 3,
+                                lastViewedAt = 1700000000,
+                            ),
+                        ),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+            }
+        }
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        val repo = PlayHistoryRepository(db)
+        repository = repo
+
+        val result = assertIs<PlexPlayHistorySyncResult.Synced>(
+            newSyncer(engine, db, repo).syncRecent(testSession(), testCatalog()),
+        )
+
+        assertEquals(1, result.seen)
+        assertEquals(listOf<String?>("0"), statsStarts)
+        assertEquals(listOf<String?>("${PlexPlayHistorySyncer.RecentStatsPageSize}"), statsSizes)
+        assertTrue(encodedQueries.single().contains("viewCount%3E%3D=1"))
+        assertTrue(encodedQueries.single().contains("sort=lastViewedAt%3Adesc"))
+        assertEquals(listOf<String?>("1"), contentDirectoryIds)
+        assertFalse(encodedQueries.single().contains("includeUserState"))
+        val recent = repo.topRecentlyPlayed.first { list -> list.any { it.trackId == "plex:t1" } }
+        assertEquals(1700000000L * 1000L, recent.first { it.trackId == "plex:t1" }.lastPlayedMs)
+    }
+
+    @Test
+    fun syncRecentDoesNotCallHistoryWhenHistoryEndpointWouldHang() = runBlocking {
+        val engine = MockEngine { request ->
+            when {
+                request.url.encodedPath.endsWith("/history/all") -> awaitCancellation()
+                else -> respond(
+                    content = statsJson(
+                        metadata = statsTrack(
+                            ratingKey = "t1",
+                            viewCount = 5,
+                            lastViewedAt = 1700000300,
+                        ),
+                    ),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+            }
+        }
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        val repo = PlayHistoryRepository(db)
+        repository = repo
+
+        val result = withTimeout(2_000L) {
+            newSyncer(engine, db, repo).syncRecent(testSession(), testCatalog())
+        }
+
+        assertIs<PlexPlayHistorySyncResult.Synced>(result)
+        val recent = repo.topRecentlyPlayed.first { list -> list.any { it.trackId == "plex:t1" } }
+        assertEquals(1700000300L * 1000L, recent.first { it.trackId == "plex:t1" }.lastPlayedMs)
     }
 
     @Test
