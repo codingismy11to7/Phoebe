@@ -227,7 +227,7 @@ jobs:
           script: ./gradlew :composeApp:connectedDebugAndroidTest -Pphoebe.realAudioTests=true
 
   web-preview-deploy:
-    name: Deploy web preview
+    name: Deploy web preview to GitHub Pages
     needs:
       - web-screenshots
       - wasm-test
@@ -235,11 +235,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      WEB_DEPLOY_HOST: ${{ secrets.WEB_DEPLOY_HOST }}
-      WEB_DEPLOY_USER: ${{ secrets.WEB_DEPLOY_USER }}
-      WEB_DEPLOY_SSH_KEY: ${{ secrets.WEB_DEPLOY_SSH_KEY }}
-      WEB_DEPLOY_KNOWN_HOSTS: ${{ secrets.WEB_DEPLOY_KNOWN_HOSTS }}
-      WEB_PREVIEW_DEPLOY_PATH: ${{ secrets.WEB_PREVIEW_DEPLOY_PATH }}
+      PAGES_PREVIEW_DEPLOY_KEY: ${{ secrets.PAGES_PREVIEW_DEPLOY_KEY }}
+      PAGES_PREVIEW_REPOSITORY: ${{ vars.PAGES_PREVIEW_REPOSITORY }}
 
     steps:
       - name: Checkout
@@ -258,13 +255,10 @@ jobs:
         shell: bash
         run: |
           missing=()
-          [[ -n "${WEB_DEPLOY_HOST}" ]] || missing+=("WEB_DEPLOY_HOST")
-          [[ -n "${WEB_DEPLOY_USER}" ]] || missing+=("WEB_DEPLOY_USER")
-          [[ -n "${WEB_DEPLOY_SSH_KEY}" ]] || missing+=("WEB_DEPLOY_SSH_KEY")
-          [[ -n "${WEB_DEPLOY_KNOWN_HOSTS}" ]] || missing+=("WEB_DEPLOY_KNOWN_HOSTS")
-          [[ -n "${WEB_PREVIEW_DEPLOY_PATH}" ]] || missing+=("WEB_PREVIEW_DEPLOY_PATH")
+          [[ -n "${PAGES_PREVIEW_DEPLOY_KEY}" ]] || missing+=("PAGES_PREVIEW_DEPLOY_KEY")
+          [[ -n "${PAGES_PREVIEW_REPOSITORY}" ]] || missing+=("PAGES_PREVIEW_REPOSITORY")
           if (( ${#missing[@]} > 0 )); then
-            echo "::error::Missing required web preview deploy secrets: ${missing[*]}"
+            echo "::error::Missing required web preview deploy settings: ${missing[*]}"
             exit 1
           fi
 
@@ -275,14 +269,41 @@ jobs:
         shell: bash
         run: |
           mkdir -p "${HOME}/.ssh"
-          printf '%s\n' "${WEB_DEPLOY_SSH_KEY}" > "${HOME}/.ssh/deploy_key"
-          printf '%s\n' "${WEB_DEPLOY_KNOWN_HOSTS}" > "${HOME}/.ssh/known_hosts"
-          chmod 600 "${HOME}/.ssh/deploy_key"
+          printf '%s\n' "${PAGES_PREVIEW_DEPLOY_KEY}" > "${HOME}/.ssh/preview_pages_key"
+          ssh-keyscan github.com > "${HOME}/.ssh/known_hosts"
+          chmod 600 "${HOME}/.ssh/preview_pages_key"
 
-      - name: Deploy web preview bundle
+      - name: Deploy web preview bundle to preview Pages repository
         shell: bash
         run: |
-          rsync -az --delete \
-            -e "ssh -i ${HOME}/.ssh/deploy_key" \
+          export GIT_SSH_COMMAND="ssh -i ${HOME}/.ssh/preview_pages_key"
+          repository_url="git@github.com:${PAGES_PREVIEW_REPOSITORY}.git"
+          if git ls-remote --exit-code --heads "${repository_url}" gh-pages >/dev/null 2>&1; then
+            git clone --depth 1 --branch gh-pages "${repository_url}" preview-pages
+          else
+            git clone "${repository_url}" preview-pages
+            (
+              cd preview-pages
+              git checkout --orphan gh-pages
+              git rm -rf . >/dev/null 2>&1 || true
+            )
+          fi
+
+          rsync -a --delete --exclude .git \
             composeApp/build/dist/wasmJs/productionExecutable/ \
-            "${WEB_DEPLOY_USER}@${WEB_DEPLOY_HOST}:${WEB_PREVIEW_DEPLOY_PATH}/"
+            preview-pages/
+          touch preview-pages/.nojekyll
+          printf 'phoebe-test.joetr.com\n' > preview-pages/CNAME
+
+          (
+            cd preview-pages
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A
+            if git diff --cached --quiet; then
+              echo "No preview Pages changes to deploy."
+            else
+              git commit -m "Deploy Phoebe preview from ${GITHUB_SHA}"
+              git push origin gh-pages
+            fi
+          )
