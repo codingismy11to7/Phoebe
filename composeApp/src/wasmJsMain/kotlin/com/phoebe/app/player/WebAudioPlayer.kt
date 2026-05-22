@@ -1,6 +1,7 @@
 package com.phoebe.app.player
 
 import com.phoebe.app.domain.EqualizerProfile
+import com.phoebe.app.sources.resolveWebLocalAudioUri
 import kotlinx.browser.document
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -42,8 +43,9 @@ private class WebAudioPlayer : SimpleAudioPlayer() {
             markPlaybackFailed()
             return
         }
+        val playbackUri = resolveWebLocalAudioUri(uri)
         val generation = activePlayGeneration
-        currentUri = uri
+        currentUri = playbackUri
         retryGeneration = generation
         retryCount = 0
         corsFallbackAttempted = false
@@ -61,7 +63,7 @@ private class WebAudioPlayer : SimpleAudioPlayer() {
         prepareAudioElementForCurrentEqualizer()
         setWebAudioCurrentTime(audio, 0.0)
         installAudioEventHandlers(generation)
-        audio.src = uri
+        audio.src = playbackUri
         audio.load()
         applyCurrentEqualizer()
         if (playWhenReady) {
