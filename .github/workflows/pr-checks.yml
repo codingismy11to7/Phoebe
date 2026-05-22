@@ -236,7 +236,7 @@ jobs:
     timeout-minutes: 15
     env:
       PAGES_PREVIEW_DEPLOY_KEY: ${{ secrets.PAGES_PREVIEW_DEPLOY_KEY }}
-      PAGES_PREVIEW_REPOSITORY: ${{ vars.PAGES_PREVIEW_REPOSITORY }}
+      PAGES_PREVIEW_REPOSITORY: ${{ secrets.PAGES_PREVIEW_REPOSITORY }}
 
     steps:
       - name: Checkout

@@ -131,10 +131,10 @@ git push origin gh-pages
 
 Production GitHub Pages deploys do not need repository secrets. The release workflow uses `GITHUB_TOKEN` with `pages: write` and `id-token: write`.
 
-Preview deploys need one deploy key secret in this repository and one repository variable:
+Preview deploys need two repository secrets in this repository:
 
 - Repository secret `PAGES_PREVIEW_DEPLOY_KEY`: private SSH deploy key with write access to the preview repository.
-- Repository variable `PAGES_PREVIEW_REPOSITORY`: preview repository name in `owner/repo` form, for example `j-roskopf/phoebe-pages-preview`.
+- Repository secret `PAGES_PREVIEW_REPOSITORY`: preview repository name in `owner/repo` form, for example `j-roskopf/phoebe-pages-preview`.
 
 Create the preview deploy key locally:
 
