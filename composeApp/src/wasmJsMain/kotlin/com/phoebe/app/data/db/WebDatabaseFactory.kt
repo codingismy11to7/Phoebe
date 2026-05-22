@@ -24,9 +24,10 @@ actual suspend fun createSqlDriver(schema: SqlSchema<QueryResult.AsyncValue<Unit
 @JsFun(
     """
     (revision, debug) => {
-      let url = '/phoebe-sqljs.worker.js?revision=' + revision;
-      if (debug) url += '&debug=1';
-      return new Worker(url);
+      const url = new URL('phoebe-sqljs.worker.js', document.baseURI || location.href);
+      url.searchParams.set('revision', String(revision));
+      if (debug) url.searchParams.set('debug', '1');
+      return new Worker(url.toString());
     }
     """,
 )
