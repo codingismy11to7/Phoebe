@@ -141,6 +141,7 @@ import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryUiPreferences
 import com.phoebe.app.domain.CatalogSnapshot
+import com.phoebe.app.domain.EqualizerProfile
 import com.phoebe.app.domain.LocalFolderMediaSourceConfig
 import com.phoebe.app.domain.MediaSourcesState
 import com.phoebe.app.domain.MusicLibrary
@@ -181,6 +182,9 @@ internal fun DesktopTransport(
     volume: Float,
     castState: CastState = CastState(),
     remotePlaybackTarget: String? = null,
+    equalizerProfile: EqualizerProfile = EqualizerProfile.Default,
+    persistEqualizerSettings: Boolean = false,
+    equalizerRemoteUnavailable: Boolean = false,
     compact: Boolean,
     lyricsVisible: Boolean = false,
     upNextVisible: Boolean,
@@ -193,6 +197,11 @@ internal fun DesktopTransport(
     onVolume: (Float) -> Unit,
     onSeek: (Long) -> Unit,
     onLyrics: () -> Unit,
+    onEqualizerEnabled: (Boolean) -> Unit = {},
+    onEqualizerBandCount: (Int) -> Unit = {},
+    onEqualizerGain: (Int, Float) -> Unit = { _, _ -> },
+    onEqualizerReset: () -> Unit = {},
+    onPersistEqualizerSettings: (Boolean) -> Unit = {},
     onToggleUpNext: () -> Unit,
     onCast: () -> Unit,
 ) {
@@ -201,6 +210,20 @@ internal fun DesktopTransport(
     val trackNavigationActions = LocalTrackNavigationActions.current
     val canLike = track != null && likeActions.likesEnabled && track.canTogglePlexLike()
     val liked = track != null && likeActions.isLiked(track)
+    var equalizerOpen by remember { mutableStateOf(false) }
+    if (equalizerOpen) {
+        EqualizerDialog(
+            profile = equalizerProfile,
+            persistEnabled = persistEqualizerSettings,
+            remoteUnavailable = equalizerRemoteUnavailable,
+            onEnabledChange = onEqualizerEnabled,
+            onBandCountChange = onEqualizerBandCount,
+            onGainChange = onEqualizerGain,
+            onReset = onEqualizerReset,
+            onPersistChange = onPersistEqualizerSettings,
+            onDismiss = { equalizerOpen = false },
+        )
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -307,6 +330,12 @@ internal fun DesktopTransport(
             Box(Modifier.height(40.dp), contentAlignment = Alignment.Center) {
                 VolumeSlider(volume, onVolume, Modifier.width(if (compact) 84.dp else 112.dp))
             }
+            TransportIcon(
+                PhoebeIcon.Equalizer,
+                "Equalizer",
+                { equalizerOpen = true },
+                active = equalizerProfile.enabled,
+            )
             TransportIcon(
                 PhoebeIcon.Lyrics,
                 if (lyricsVisible) "Hide Lyrics" else "Show Lyrics",

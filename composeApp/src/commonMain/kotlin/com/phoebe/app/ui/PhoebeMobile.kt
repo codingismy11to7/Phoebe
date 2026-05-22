@@ -159,6 +159,7 @@ import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryUiPreferences
 import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.CollectionEntry
+import com.phoebe.app.domain.EqualizerProfile
 import com.phoebe.app.domain.LocalFolderMediaSourceConfig
 import com.phoebe.app.domain.MediaSourcesState
 import com.phoebe.app.domain.MusicLibrary
@@ -464,6 +465,7 @@ internal fun MobileBrowseShell(
     onCrossfadeSeconds: (Int) -> Unit,
     onScanLibraryOnLaunch: (Boolean) -> Unit,
     onNotifyWhenDownloadFinishes: (Boolean) -> Unit,
+    onPersistEqualizerSettings: (Boolean) -> Unit = {},
     downloadDirectory: String?,
     downloadCount: Int,
     defaultDownloadDirectoryLabel: String,
@@ -557,6 +559,7 @@ internal fun MobileBrowseShell(
                     onCrossfadeSeconds = onCrossfadeSeconds,
                     onScanLibraryOnLaunch = onScanLibraryOnLaunch,
                     onNotifyWhenDownloadFinishes = onNotifyWhenDownloadFinishes,
+                    onPersistEqualizerSettings = onPersistEqualizerSettings,
                     onHomeSections = onHomeSections,
                     onPersonalMix = onPersonalMix,
                     onGridColumns = onGridColumns,
@@ -1129,6 +1132,9 @@ internal fun MobilePlayer(
     @Suppress("UNUSED_PARAMETER") currentIndex: Int,
     castState: CastState = CastState(),
     remotePlaybackTarget: String? = null,
+    equalizerProfile: EqualizerProfile = EqualizerProfile.Default,
+    persistEqualizerSettings: Boolean = false,
+    equalizerRemoteUnavailable: Boolean = false,
     onToggle: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
@@ -1142,6 +1148,11 @@ internal fun MobilePlayer(
     onOpenSongDetail: (Track) -> Unit = {},
     onCast: () -> Unit = {},
     onLyrics: () -> Unit = {},
+    onEqualizerEnabled: (Boolean) -> Unit = {},
+    onEqualizerBandCount: (Int) -> Unit = {},
+    onEqualizerGain: (Int, Float) -> Unit = { _, _ -> },
+    onEqualizerReset: () -> Unit = {},
+    onPersistEqualizerSettings: (Boolean) -> Unit = {},
     onBack: () -> Unit,
     onSwipeDismiss: () -> Unit,
     handleSystemBack: Boolean = true,
@@ -1223,7 +1234,21 @@ internal fun MobilePlayer(
         else -> animatedOffset
     }
     val hasTrack = track != null
+    var equalizerOpen by remember { mutableStateOf(false) }
     val trackNavigationActions = LocalTrackNavigationActions.current
+    if (equalizerOpen) {
+        EqualizerDialog(
+            profile = equalizerProfile,
+            persistEnabled = persistEqualizerSettings,
+            remoteUnavailable = equalizerRemoteUnavailable,
+            onEnabledChange = onEqualizerEnabled,
+            onBandCountChange = onEqualizerBandCount,
+            onGainChange = onEqualizerGain,
+            onReset = onEqualizerReset,
+            onPersistChange = onPersistEqualizerSettings,
+            onDismiss = { equalizerOpen = false },
+        )
+    }
     PlatformBackHandler(
         enabled = handleSystemBack,
         onBack = {
@@ -1328,7 +1353,7 @@ internal fun MobilePlayer(
                         .padding(horizontal = 20.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Row(Modifier.width(88.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.width(132.dp), verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             modifier = Modifier.size(44.dp).clickable(onClick = onBack).semantics { contentDescription = "Back" },
                             contentAlignment = Alignment.Center,
@@ -1339,8 +1364,9 @@ internal fun MobilePlayer(
                     Spacer(Modifier.weight(1f))
                     SectionLabel("Now Playing", PhoebeUi.secondaryText)
                     Spacer(Modifier.weight(1f))
-                    Row(Modifier.width(88.dp), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.width(132.dp), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
                         TransportIcon(PhoebeIcon.Lyrics, "Lyrics", onLyrics)
+                        TransportIcon(PhoebeIcon.Equalizer, "Equalizer", { equalizerOpen = true }, active = equalizerProfile.enabled)
                         CastIcon(
                             active = castState.isConnected,
                             loading = castState.isBuffering,

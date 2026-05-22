@@ -68,6 +68,9 @@ internal fun DesktopPlayer(
     val lyricsState = playbackState.lyricsState
     val castState = playbackState.castState
     val remotePlaybackTarget = playbackState.remotePlaybackTarget
+    val equalizerProfile = playbackState.equalizerProfile
+    val persistEqualizerSettings = playbackState.persistEqualizerSettings
+    val equalizerRemoteUnavailable = playbackState.equalizerRemoteUnavailable
     val homeUiState = browseState.homeUiState
     val playHistory = browseState.playHistory
     val searchQuery = browseState.searchQuery
@@ -142,6 +145,11 @@ internal fun DesktopPlayer(
     val onSeek = playbackActions.onSeek
     val onCast = playbackActions.onCast
     val onLyrics = playbackActions.onLyrics
+    val onEqualizerEnabled = playbackActions.onEqualizerEnabled
+    val onEqualizerBandCount = playbackActions.onEqualizerBandCount
+    val onEqualizerGain = playbackActions.onEqualizerGain
+    val onEqualizerReset = playbackActions.onEqualizerReset
+    val onPersistEqualizerSettings = playbackActions.onPersistEqualizerSettings
     val onPlayQueue = playbackActions.onPlayQueue
     val onClearQueue = playbackActions.onClearQueue
     val onMoveUpNext = playbackActions.onMoveUpNext
@@ -173,6 +181,7 @@ internal fun DesktopPlayer(
     val onCrossfadeSeconds = settingsActions.onCrossfadeSeconds
     val onScanLibraryOnLaunch = settingsActions.onScanLibraryOnLaunch
     val onNotifyWhenDownloadFinishes = settingsActions.onNotifyWhenDownloadFinishes
+    val onPersistEqualizerSettingsFromSettings = settingsActions.onPersistEqualizerSettings
     val onDownloadDirectory = settingsActions.onDownloadDirectory
     val onDeleteAllDownloads = settingsActions.onDeleteAllDownloads
     val onUseLightAppearanceChange = settingsActions.onUseLightAppearanceChange
@@ -531,6 +540,7 @@ internal fun DesktopPlayer(
                                         onCrossfadeSeconds = onCrossfadeSeconds,
                                         onScanLibraryOnLaunch = onScanLibraryOnLaunch,
                                         onNotifyWhenDownloadFinishes = onNotifyWhenDownloadFinishes,
+                                        onPersistEqualizerSettings = onPersistEqualizerSettingsFromSettings,
                                         onHomeSections = onHomeSections,
                                         onPersonalMix = onPersonalMix,
                                         onGridColumns = onGridColumns,
@@ -603,6 +613,9 @@ internal fun DesktopPlayer(
                             volume = volume,
                             castState = castState,
                             remotePlaybackTarget = remotePlaybackTarget,
+                            equalizerProfile = equalizerProfile,
+                            persistEqualizerSettings = persistEqualizerSettings,
+                            equalizerRemoteUnavailable = equalizerRemoteUnavailable,
                             compact = compact,
                             lyricsVisible = section == BrowseSection.Lyrics && selectedPlaylistId == null,
                             upNextVisible = showQueue && desktopUpNextExpanded,
@@ -615,6 +628,11 @@ internal fun DesktopPlayer(
                             onVolume = onVolume,
                             onSeek = onSeek,
                             onLyrics = onLyrics,
+                            onEqualizerEnabled = onEqualizerEnabled,
+                            onEqualizerBandCount = onEqualizerBandCount,
+                            onEqualizerGain = onEqualizerGain,
+                            onEqualizerReset = onEqualizerReset,
+                            onPersistEqualizerSettings = onPersistEqualizerSettings,
                             onToggleUpNext = { desktopUpNextExpanded = !desktopUpNextExpanded },
                             onCast = onCast,
                         )

@@ -561,6 +561,13 @@ internal fun PhoebeIconView(
                 drawArc(tint, startAngle = -38f, sweepAngle = 76f, useCenter = false, topLeft = Offset(s * 0.54f, s * 0.38f), size = Size(s * 0.20f, s * 0.24f), style = stroke)
                 drawArc(tint, startAngle = -43f, sweepAngle = 86f, useCenter = false, topLeft = Offset(s * 0.58f, s * 0.28f), size = Size(s * 0.30f, s * 0.44f), style = stroke)
             }
+            PhoebeIcon.Equalizer -> {
+                val centers = listOf(0.22f to 0.64f, 0.40f to 0.36f, 0.58f to 0.54f, 0.76f to 0.25f)
+                centers.forEach { (x, knobY) ->
+                    line(x, 0.18f, x, 0.82f)
+                    drawCircle(tint, radius = s * 0.065f, center = p(x, knobY), style = stroke)
+                }
+            }
             PhoebeIcon.Cast -> {
                 line(0.20f, 0.28f, 0.80f, 0.28f)
                 line(0.80f, 0.28f, 0.80f, 0.70f)

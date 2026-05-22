@@ -69,7 +69,7 @@ internal enum class SettingsCategory(
 ) {
     Account("Account", "Profile and plans", PhoebeIcon.Music),
     Personalization("Personalization", "Mixes and recommendations", PhoebeIcon.Person),
-    AudioPlayback("Audio Playback", "Transitions and library scan", PhoebeIcon.Volume),
+    AudioPlayback("Audio Playback", "Transitions and EQ", PhoebeIcon.Equalizer),
     Library("Library", "Organize your library", PhoebeIcon.Library),
     Downloads("Downloads", "Manage downloads", PhoebeIcon.Download),
     Appearance("Appearance", "Theme and visuals", PhoebeIcon.Grid),
@@ -93,6 +93,7 @@ internal fun SettingsDesktopView(
     onCrossfadeSeconds: (Int) -> Unit,
     onScanLibraryOnLaunch: (Boolean) -> Unit,
     onNotifyWhenDownloadFinishes: (Boolean) -> Unit,
+    onPersistEqualizerSettings: (Boolean) -> Unit = {},
     onHomeSections: (List<HomeSection>) -> Unit,
     onPersonalMix: (PersonalMixPreferences) -> Unit,
     onGridColumns: (Int) -> Unit,
@@ -153,6 +154,7 @@ internal fun SettingsDesktopView(
                         settings = appSettings,
                         onCrossfadeSeconds = onCrossfadeSeconds,
                         onScanLibraryOnLaunch = onScanLibraryOnLaunch,
+                        onPersistEqualizerSettings = onPersistEqualizerSettings,
                     )
                     SettingsCategory.Account -> AccountSettingsCard(session = session)
                     SettingsCategory.Library -> {
@@ -195,6 +197,7 @@ internal fun SettingsMobileView(
     onCrossfadeSeconds: (Int) -> Unit,
     onScanLibraryOnLaunch: (Boolean) -> Unit,
     onNotifyWhenDownloadFinishes: (Boolean) -> Unit,
+    onPersistEqualizerSettings: (Boolean) -> Unit = {},
     onHomeSections: (List<HomeSection>) -> Unit,
     onPersonalMix: (PersonalMixPreferences) -> Unit,
     onGridColumns: (Int) -> Unit,
@@ -232,6 +235,7 @@ internal fun SettingsMobileView(
             settings = appSettings,
             onCrossfadeSeconds = onCrossfadeSeconds,
             onScanLibraryOnLaunch = onScanLibraryOnLaunch,
+            onPersistEqualizerSettings = onPersistEqualizerSettings,
             compact = true,
         )
         SectionLabel("DOWNLOADS", PhoebeUi.accentLight)
@@ -429,6 +433,7 @@ private fun AudioPlaybackSettingsCard(
     settings: AppSettings,
     onCrossfadeSeconds: (Int) -> Unit,
     onScanLibraryOnLaunch: (Boolean) -> Unit,
+    onPersistEqualizerSettings: (Boolean) -> Unit,
     compact: Boolean = false,
 ) {
     var localCrossfade by remember(settings.crossfadeSeconds) { mutableIntStateOf(settings.crossfadeSeconds) }
@@ -461,6 +466,12 @@ private fun AudioPlaybackSettingsCard(
             Text("12s", color = PhoebeUi.mutedText, fontSize = 11.sp)
         }
         Spacer(Modifier.height(12.dp))
+        SettingsSwitchRow(
+            title = "Persist equalizer",
+            subtitle = "Apply the current EQ profile after app restart",
+            checked = settings.persistEqualizerSettings,
+            onCheckedChange = onPersistEqualizerSettings,
+        )
         SettingsSwitchRow(
             title = "Scan library on launch",
             subtitle = "Refresh local folders when Phoebe starts",

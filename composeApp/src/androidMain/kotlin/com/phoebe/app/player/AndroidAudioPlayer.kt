@@ -12,6 +12,7 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.phoebe.app.AndroidContextHolder
 import com.phoebe.app.data.PlexClient
+import com.phoebe.app.domain.EqualizerProfile
 import com.phoebe.app.domain.Track
 import com.phoebe.app.platform.PhoebeLog
 import java.io.File
@@ -254,6 +255,10 @@ internal class AndroidAudioPlayer(
             }
             controllerMutex.withLock { controller?.volume = volume }
         }
+    }
+
+    override fun applyEqualizer(profile: EqualizerProfile) {
+        AndroidEqualizerState.profile = profile.normalized()
     }
 
     override fun startCrossfadeOnPlatform(

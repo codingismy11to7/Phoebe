@@ -1,5 +1,6 @@
 package com.phoebe.app.player
 
+import com.phoebe.app.domain.EqualizerProfile
 import com.phoebe.app.domain.PlayerState
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
@@ -21,6 +22,8 @@ abstract class SimpleAudioPlayer : AudioPlayer {
     private var playGeneration = 0
     private var crossfadeDurationMs = 0L
     private var crossfadeRequestKey: String? = null
+    protected var equalizerProfile: EqualizerProfile = EqualizerProfile.Default.normalized()
+        private set
 
     /** When false, a superseded or user-paused load must not start audible playback. */
     protected var playWhenReady = false
@@ -242,6 +245,12 @@ abstract class SimpleAudioPlayer : AudioPlayer {
         crossfadeDurationMs = durationMs.coerceIn(0L, MaxCrossfadeDurationMs)
     }
 
+    override fun setEqualizer(profile: EqualizerProfile) {
+        val normalized = profile.normalized()
+        equalizerProfile = normalized
+        applyEqualizer(normalized)
+    }
+
     override fun setUnityOutputVolume() {
         preferUnityOutputVolume = true
         setOutputVolume(effectiveOutputVolume())
@@ -401,6 +410,7 @@ abstract class SimpleAudioPlayer : AudioPlayer {
     protected open fun resume() = Unit
     protected open fun seek(positionMs: Long) = Unit
     protected open fun setOutputVolume(volume: Float) = Unit
+    protected open fun applyEqualizer(profile: EqualizerProfile) = Unit
 
     protected open fun startCrossfadeOnPlatform(
         queue: List<Track>,

@@ -5,6 +5,7 @@ import com.phoebe.app.domain.AppSettings
 import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.CollectionFacet
+import com.phoebe.app.domain.EqualizerProfile
 import com.phoebe.app.domain.ArtistRadioAvailability
 import com.phoebe.app.domain.HomeSection
 import com.phoebe.app.domain.JellyfinSyncMode
@@ -66,6 +67,7 @@ import com.phoebe.app.platform.openExternalUrl
 import com.phoebe.app.sources.LocalLibraryIO
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
@@ -172,6 +174,15 @@ class AppState(
         )
     val libraryUi = dependencies.libraryUiRepository.preferences
     val appSettings = dependencies.appSettingsRepository.settings
+    private val mutablePersistEqualizerSettings = MutableStateFlow(false)
+    private val mutableEqualizerProfile = MutableStateFlow(EqualizerProfile.Default.normalized())
+    val equalizerProfile: StateFlow<EqualizerProfile> = mutableEqualizerProfile.asStateFlow()
+    val equalizerRemoteUnavailable: StateFlow<Boolean> = combine(
+        cast,
+        mutableMusicAssistantRemotePlayback,
+    ) { castState, musicAssistantRemote ->
+        castState.isConnected || musicAssistantRemote != null
+    }.stateIn(scope, SharingStarted.Eagerly, false)
     val lastPlayedByArtist = dependencies.playHistoryRepository.lastPlayedByArtist
     val lastPlayedByAlbum = dependencies.playHistoryRepository.lastPlayedByAlbum
     val lastPlayedByTrack = dependencies.playHistoryRepository.lastPlayedByTrack
@@ -261,6 +272,15 @@ class AppState(
             dependencies.sessionRepository.restore(refreshConnections = false)
             dependencies.mediaSourcesRepository.restore()
             dependencies.appSettingsRepository.restore()
+            val restoredSettings = appSettings.value
+            mutablePersistEqualizerSettings.value = restoredSettings.persistEqualizerSettings
+            val startupEqualizer = if (restoredSettings.persistEqualizerSettings) {
+                restoredSettings.equalizerProfile.normalized()
+            } else {
+                EqualizerProfile.Default.normalized()
+            }
+            mutableEqualizerProfile.value = startupEqualizer
+            dependencies.audioPlayer.setEqualizer(startupEqualizer)
             dependencies.libraryUiRepository.restore()
             dependencies.searchHistoryRepository.restore()
             dependencies.audioPlayer.setCrossfadeDurationMs(appSettings.value.crossfadeSeconds * 1_000L)
@@ -317,7 +337,15 @@ class AppState(
     private fun bindAppSettingsToPlayback() {
         scope.launch {
             appSettings.collect { settings ->
+                mutablePersistEqualizerSettings.value = settings.persistEqualizerSettings
                 dependencies.audioPlayer.setCrossfadeDurationMs(settings.crossfadeSeconds * 1_000L)
+                if (settings.persistEqualizerSettings) {
+                    val profile = settings.equalizerProfile.normalized()
+                    if (mutableEqualizerProfile.value != profile) {
+                        mutableEqualizerProfile.value = profile
+                        dependencies.audioPlayer.setEqualizer(profile)
+                    }
+                }
             }
         }
     }
@@ -1459,6 +1487,52 @@ class AppState(
 
     fun setNotifyWhenDownloadFinishes(enabled: Boolean) = scope.launch {
         dependencies.appSettingsRepository.setNotifyWhenDownloadFinishes(enabled)
+    }
+
+    fun setEqualizerEnabled(enabled: Boolean) {
+        applyEqualizerProfile(mutableEqualizerProfile.value.withEnabled(enabled))
+    }
+
+    fun setEqualizerBandCount(count: Int) {
+        applyEqualizerProfile(mutableEqualizerProfile.value.withBandCount(count))
+    }
+
+    fun setEqualizerGain(index: Int, gainDb: Float) {
+        val current = mutableEqualizerProfile.value
+        val next = current
+            .withEnabled(true)
+            .withGain(index, gainDb)
+        applyEqualizerProfile(next)
+    }
+
+    fun resetEqualizer() {
+        val current = mutableEqualizerProfile.value.normalized()
+        applyEqualizerProfile(
+            EqualizerProfile.Default
+                .withBandCount(current.bandCount)
+                .withEnabled(current.enabled),
+        )
+    }
+
+    fun setPersistEqualizerSettings(enabled: Boolean) {
+        mutablePersistEqualizerSettings.value = enabled
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            dependencies.appSettingsRepository.setPersistEqualizerSettings(enabled, mutableEqualizerProfile.value)
+        }
+    }
+
+    private fun applyEqualizerProfile(profile: EqualizerProfile) {
+        val normalized = profile.normalized()
+        mutableEqualizerProfile.value = normalized
+        dependencies.audioPlayer.setEqualizer(normalized)
+        if (mutablePersistEqualizerSettings.value) {
+            scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                dependencies.appSettingsRepository.setEqualizerProfile(normalized)
+            }
+        }
+        if (equalizerRemoteUnavailable.value && normalized.enabled) {
+            surfaceTransientNotice("Equalizer changes apply on this device. Chromecast and remote players use their own audio path.")
+        }
     }
 
     fun download(track: Track) = launchDownload {

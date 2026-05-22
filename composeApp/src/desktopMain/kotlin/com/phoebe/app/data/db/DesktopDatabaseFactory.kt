@@ -25,7 +25,7 @@ actual suspend fun createSqlDriver(schema: SqlSchema<QueryResult.AsyncValue<Unit
     val driver = openDriver(dbFile, properties, schema)
 
     // Guard against a revision marker that was written even though the wipe failed.
-    if (dbFile.exists() && !libraryPrefsSchemaCompatible(dbFile)) {
+    if (dbFile.exists() && !appSettingsSchemaCompatible(dbFile)) {
         driver.close()
         deleteDatabaseFiles(dbFile)
         val rebuilt = openDriver(dbFile, properties, schema)
@@ -59,7 +59,7 @@ private fun wipeIfRevisionChanged(dbFile: File, revFile: File) {
     if (!dbFile.exists()) return
     val onDiskRev = revFile.takeIf { it.exists() }?.runCatching { readText().trim().toLong() }?.getOrNull()
     val revisionStale = onDiskRev != null && onDiskRev != LocalDbRevision
-    val schemaStale = !libraryPrefsSchemaCompatible(dbFile)
+    val schemaStale = !appSettingsSchemaCompatible(dbFile)
     if (revisionStale || schemaStale) {
         deleteDatabaseFiles(dbFile)
     }
@@ -74,13 +74,13 @@ internal fun deleteDatabaseFiles(dbFile: File) {
     File(dbFile.parentFile, "${dbFile.name}-shm").delete()
 }
 
-internal fun libraryPrefsSchemaCompatible(dbFile: File): Boolean =
+internal fun appSettingsSchemaCompatible(dbFile: File): Boolean =
     runCatching {
         DriverManager.getConnection("jdbc:sqlite:${dbFile.absolutePath}").use { connection ->
             connection.createStatement().use { statement ->
-                statement.executeQuery("PRAGMA table_info(LibraryPrefsRow)").use { rows ->
+                statement.executeQuery("PRAGMA table_info(AppSettingsRow)").use { rows ->
                     generateSequence { if (rows.next()) rows.getString("name") else null }
-                        .any { it == LocalDbRevision18Column }
+                        .any { it == LocalDbRevision19Column }
                 }
             }
         }
