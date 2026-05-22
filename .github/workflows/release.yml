@@ -491,10 +491,8 @@ jobs:
 
   web-pages-deploy:
     name: Deploy web to GitHub Pages
-    needs:
-      - version
-      - github-release
-    if: always() && needs.version.result == 'success' && needs.github-release.result == 'success'
+    needs: version
+    if: needs.version.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment:
