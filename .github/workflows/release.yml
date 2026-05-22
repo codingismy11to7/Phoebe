@@ -488,3 +488,64 @@ jobs:
             release-artifacts/**/*.flatpak
             release-artifacts/**/*.msi
             release-artifacts/**/*.dmg
+
+  web-deploy:
+    name: Deploy web
+    needs:
+      - version
+      - github-release
+    if: always() && needs.version.result == 'success' && needs.github-release.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      WEB_DEPLOY_HOST: ${{ secrets.WEB_DEPLOY_HOST }}
+      WEB_DEPLOY_USER: ${{ secrets.WEB_DEPLOY_USER }}
+      WEB_DEPLOY_SSH_KEY: ${{ secrets.WEB_DEPLOY_SSH_KEY }}
+      WEB_DEPLOY_KNOWN_HOSTS: ${{ secrets.WEB_DEPLOY_KNOWN_HOSTS }}
+      WEB_DEPLOY_PATH: ${{ secrets.WEB_DEPLOY_PATH }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Validate web deploy settings
+        shell: bash
+        run: |
+          missing=()
+          [[ -n "${WEB_DEPLOY_HOST}" ]] || missing+=("WEB_DEPLOY_HOST")
+          [[ -n "${WEB_DEPLOY_USER}" ]] || missing+=("WEB_DEPLOY_USER")
+          [[ -n "${WEB_DEPLOY_SSH_KEY}" ]] || missing+=("WEB_DEPLOY_SSH_KEY")
+          [[ -n "${WEB_DEPLOY_KNOWN_HOSTS}" ]] || missing+=("WEB_DEPLOY_KNOWN_HOSTS")
+          [[ -n "${WEB_DEPLOY_PATH}" ]] || missing+=("WEB_DEPLOY_PATH")
+          if (( ${#missing[@]} > 0 )); then
+            echo "::error::Missing required web deploy secrets: ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Build web bundle
+        run: ./gradlew :composeApp:wasmJsBrowserDistribution
+
+      - name: Configure SSH
+        shell: bash
+        run: |
+          mkdir -p "${HOME}/.ssh"
+          printf '%s\n' "${WEB_DEPLOY_SSH_KEY}" > "${HOME}/.ssh/deploy_key"
+          printf '%s\n' "${WEB_DEPLOY_KNOWN_HOSTS}" > "${HOME}/.ssh/known_hosts"
+          chmod 600 "${HOME}/.ssh/deploy_key"
+
+      - name: Deploy web bundle
+        shell: bash
+        run: |
+          rsync -az --delete \
+            -e "ssh -i ${HOME}/.ssh/deploy_key" \
+            composeApp/build/dist/wasmJs/productionExecutable/ \
+            "${WEB_DEPLOY_USER}@${WEB_DEPLOY_HOST}:${WEB_DEPLOY_PATH}/"

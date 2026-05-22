@@ -225,3 +225,64 @@ jobs:
           target: google_apis
           disable-animations: true
           script: ./gradlew :composeApp:connectedDebugAndroidTest -Pphoebe.realAudioTests=true
+
+  web-preview-deploy:
+    name: Deploy web preview
+    needs:
+      - web-screenshots
+      - wasm-test
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      WEB_DEPLOY_HOST: ${{ secrets.WEB_DEPLOY_HOST }}
+      WEB_DEPLOY_USER: ${{ secrets.WEB_DEPLOY_USER }}
+      WEB_DEPLOY_SSH_KEY: ${{ secrets.WEB_DEPLOY_SSH_KEY }}
+      WEB_DEPLOY_KNOWN_HOSTS: ${{ secrets.WEB_DEPLOY_KNOWN_HOSTS }}
+      WEB_PREVIEW_DEPLOY_PATH: ${{ secrets.WEB_PREVIEW_DEPLOY_PATH }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Validate web preview deploy settings
+        shell: bash
+        run: |
+          missing=()
+          [[ -n "${WEB_DEPLOY_HOST}" ]] || missing+=("WEB_DEPLOY_HOST")
+          [[ -n "${WEB_DEPLOY_USER}" ]] || missing+=("WEB_DEPLOY_USER")
+          [[ -n "${WEB_DEPLOY_SSH_KEY}" ]] || missing+=("WEB_DEPLOY_SSH_KEY")
+          [[ -n "${WEB_DEPLOY_KNOWN_HOSTS}" ]] || missing+=("WEB_DEPLOY_KNOWN_HOSTS")
+          [[ -n "${WEB_PREVIEW_DEPLOY_PATH}" ]] || missing+=("WEB_PREVIEW_DEPLOY_PATH")
+          if (( ${#missing[@]} > 0 )); then
+            echo "::error::Missing required web preview deploy secrets: ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Build web bundle
+        run: ./gradlew :composeApp:wasmJsBrowserDistribution
+
+      - name: Configure SSH
+        shell: bash
+        run: |
+          mkdir -p "${HOME}/.ssh"
+          printf '%s\n' "${WEB_DEPLOY_SSH_KEY}" > "${HOME}/.ssh/deploy_key"
+          printf '%s\n' "${WEB_DEPLOY_KNOWN_HOSTS}" > "${HOME}/.ssh/known_hosts"
+          chmod 600 "${HOME}/.ssh/deploy_key"
+
+      - name: Deploy web preview bundle
+        shell: bash
+        run: |
+          rsync -az --delete \
+            -e "ssh -i ${HOME}/.ssh/deploy_key" \
+            composeApp/build/dist/wasmJs/productionExecutable/ \
+            "${WEB_DEPLOY_USER}@${WEB_DEPLOY_HOST}:${WEB_PREVIEW_DEPLOY_PATH}/"
