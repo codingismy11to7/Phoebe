@@ -28,6 +28,8 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import com.phoebe.app.platform.catalogTrackIndexParallelism
@@ -779,6 +781,7 @@ open class JellyfinClient(
         }
 
         val pagesByIndex = mutableMapOf(0 to firstPage.Items)
+        val pageResultMutex = Mutex()
         val pageQueue = Channel<Int>(capacity = Channel.UNLIMITED)
         for (pageIndex in 1 until pageCount) {
             pageQueue.send(pageIndex)
@@ -795,14 +798,18 @@ open class JellyfinClient(
                         q("limit", limit)
                         block()
                     }
-                    pagesByIndex[pageIndex] = page.Items
-                    onPage(page.Items, total)
+                    pageResultMutex.withLock {
+                        pagesByIndex[pageIndex] = page.Items
+                        onPage(page.Items, total)
+                    }
                 }
             }
         }
         workers.joinAll()
 
-        val all = (0 until pageCount).flatMap { pagesByIndex[it].orEmpty() }
+        val all = pageResultMutex.withLock {
+            (0 until pageCount).flatMap { pagesByIndex[it].orEmpty() }
+        }
         PhoebeLog.d("JellyfinClient") { "pagedItemsParallel $label loaded=${all.size}" }
         JellyfinItemsResponse(Items = all, TotalRecordCount = total)
     }

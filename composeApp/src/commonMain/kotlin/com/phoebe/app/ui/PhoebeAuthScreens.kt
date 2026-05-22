@@ -490,9 +490,27 @@ internal fun MobileSignInWelcomeScreen(
     var providerUrl by remember { mutableStateOf("") }
     var providerUser by remember { mutableStateOf("") }
     var providerPassword by remember { mutableStateOf("") }
+    var scrollToProvidersAfterExpand by remember { mutableStateOf(false) }
+    var providerChoicesTopPx by remember { mutableStateOf<Float?>(null) }
     val pickLocalFolder = rememberPickLocalFolder(onPicked = onAddLocalFolder)
     val lightMode = LocalPhoebePalette.current == PhoebePaletteLight
     val scrollState = rememberScrollState()
+    val providerChoicesTopInsetPx = with(LocalDensity.current) { 16.dp.toPx() }
+    LaunchedEffect(scrollToProvidersAfterExpand, providersExpanded, providerChoicesTopPx, providerChoicesTopInsetPx) {
+        val choicesTop = providerChoicesTopPx
+        if (scrollToProvidersAfterExpand && providersExpanded && choicesTop != null) {
+            delay(80)
+            val target = (scrollState.value + choicesTop - providerChoicesTopInsetPx)
+                .roundToInt()
+                .coerceIn(0, scrollState.maxValue)
+            scrollState.animateScrollTo(
+                value = target,
+                animationSpec = tween(durationMillis = 360, easing = FastOutSlowInEasing),
+            )
+            scrollToProvidersAfterExpand = false
+            providerChoicesTopPx = null
+        }
+    }
     LaunchedEffect(jellyfinExpanded, expandedProvider) {
         if (jellyfinExpanded || expandedProvider != null) {
             delay(180)
@@ -596,7 +614,11 @@ internal fun MobileSignInWelcomeScreen(
             ) {
                 GradientActionButton(
                     text = "Add media provider",
-                    onClick = { providersExpanded = true },
+                    onClick = {
+                        providersExpanded = true
+                        providerChoicesTopPx = null
+                        scrollToProvidersAfterExpand = true
+                    },
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -606,7 +628,16 @@ internal fun MobileSignInWelcomeScreen(
                 enter = fadeIn(animationSpec = tween(180)) + expandVertically(animationSpec = tween(240)),
                 exit = fadeOut(animationSpec = tween(120)) + shrinkVertically(animationSpec = tween(180)),
             ) {
-                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .onGloballyPositioned {
+                            if (scrollToProvidersAfterExpand && providerChoicesTopPx == null) {
+                                providerChoicesTopPx = it.positionInRoot().y
+                            }
+                        },
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
                     ProviderChoiceRow(
                         painter = painterResource(Res.drawable.plex),
                         painterTint = Color(0xFFE5A00D),

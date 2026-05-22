@@ -14,6 +14,7 @@ import com.phoebe.app.platform.PhoebeLog
 import com.phoebe.app.platform.currentTimeMs
 import com.phoebe.app.sources.CatalogMerge
 import kotlin.random.Random
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
@@ -82,33 +83,34 @@ class PlexPlaybackReporter(
                     }
 
                     val previousTrack = lastTrack
+                    val previousIsPlaying = lastIsPlaying
                     if (previousTrack != null && previousTrack.id != track.id) {
                         reportLastStopped(sess, continuing = true)
                     }
 
-                    ensurePlayQueue(sess, player)
-
                     val isPlaying = player.isPlaying
-                    val stoppedAtEnd = lastTrack?.id == track.id &&
-                        lastIsPlaying == true &&
+                    val stoppedAtEnd = previousTrack?.id == track.id &&
+                        previousIsPlaying == true &&
                         !isPlaying &&
                         shouldReportStoppedAtRest(track, player)
+                    lastTrack = track
+                    lastPositionMs = player.positionMs
+                    lastIsPlaying = isPlaying
+
+                    ensurePlayQueue(sess, player)
+
                     when {
                         stoppedAtEnd -> {
                             reportStopped(track, player.positionMs, sess ?: lastSession, continuing = false)
                             stoppedTrackId = track.id
                         }
-                        lastTrack?.id != track.id || lastIsPlaying != isPlaying -> {
+                        previousTrack?.id != track.id || previousIsPlaying != isPlaying -> {
                             val state = if (isPlaying) PlexTimelineState.Playing else PlexTimelineState.Paused
                             reportTimeline(sess, track, player, state)
                             if (isPlaying) stoppedTrackId = null
                         }
                         isPlaying -> stoppedTrackId = null
                     }
-
-                    lastTrack = track
-                    lastPositionMs = player.positionMs
-                    lastIsPlaying = isPlaying
                 }
         } finally {
             withContext(NonCancellable) {
@@ -158,6 +160,7 @@ class PlexPlaybackReporter(
             failedPlayQueueSignature = null
             failedPlayQueueRetryAtMs = 0L
         }.onFailure { e ->
+            if (e is CancellationException) throw e
             PhoebeLog.d("PlexPlaybackReporter") { "play queue setup failed: ${e.message}" }
         }
     }
@@ -199,12 +202,16 @@ class PlexPlaybackReporter(
                 } else {
                     jellyfinClient.reportPlayback(server, sess.token, track.id.removePrefix("$prefix:"), timeMs, isPaused = false, event = JellyfinPlaybackEvent.Stop)
                 }
+            }.onFailure { e ->
+                if (e is CancellationException) throw e
             }
             return
         }
         if (sess != null && !sess.isPlex()) {
             runCatching {
                 providerRegistry.adapterFor(sess)?.reportPlayback(sess, track, timeMs, isPaused = false, event = JellyfinPlaybackEvent.Stop)
+            }.onFailure { e ->
+                if (e is CancellationException) throw e
             }
             return
         }
@@ -224,6 +231,7 @@ class PlexPlaybackReporter(
                 playQueueItemId = playQueueItemByRatingKey[ratingKey],
             )
         }.onFailure { e ->
+            if (e is CancellationException) throw e
             PhoebeLog.d("PlexPlaybackReporter") { "stopped timeline failed: ${e.message}" }
         }
     }
@@ -253,6 +261,7 @@ class PlexPlaybackReporter(
                     )
                 }
             }.onFailure { e ->
+                if (e is CancellationException) throw e
                 PhoebeLog.d("PlexPlaybackReporter") { "${sess.providerType.name} playback report failed: ${e.message}" }
             }
             return
@@ -261,6 +270,8 @@ class PlexPlaybackReporter(
             runCatching {
                 val event = if (state == PlexTimelineState.Playing && player.positionMs < 2_000L) JellyfinPlaybackEvent.Start else JellyfinPlaybackEvent.Progress
                 providerRegistry.adapterFor(sess)?.reportPlayback(sess, track, player.positionMs, state != PlexTimelineState.Playing, event)
+            }.onFailure { e ->
+                if (e is CancellationException) throw e
             }
             return
         }
@@ -280,6 +291,7 @@ class PlexPlaybackReporter(
                 playQueueItemId = playQueueItemByRatingKey[ratingKey],
             )
         }.onFailure { e ->
+            if (e is CancellationException) throw e
             PhoebeLog.d("PlexPlaybackReporter") { "timeline failed: ${e.message}" }
         }
     }

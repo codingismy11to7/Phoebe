@@ -9,3 +9,13 @@ script = ""
 name = "Run"
 icon = "run"
 command = "./gradlew :composeApp:run"
+
+[[actions]]
+name = "Web"
+icon = "debug"
+command = "./gradlew :composeApp:wasmJsBrowserDevelopmentRun"
+
+[[actions]]
+name = "Screenshots"
+icon = "test"
+command = "./gradlew :composeApp:recordRoborazziDebug && npm run web:screenshots:update"

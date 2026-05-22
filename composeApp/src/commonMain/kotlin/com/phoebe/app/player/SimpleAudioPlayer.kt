@@ -376,6 +376,15 @@ abstract class SimpleAudioPlayer : AudioPlayer {
         stopProgressTicker()
     }
 
+    protected fun surfacePlaybackNotice(generation: Int = playGeneration, message: String) {
+        if (!isPlayRequestCurrent(generation)) return
+        val current = mutableState.value
+        mutableState.value = current.copy(
+            playbackNoticeSerial = current.playbackNoticeSerial + 1,
+            playbackNoticeMessage = message,
+        )
+    }
+
     protected abstract fun playUri(uri: String)
 
     /** Seek within an already-loaded queue without tearing down platform output. */

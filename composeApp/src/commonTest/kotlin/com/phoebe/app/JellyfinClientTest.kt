@@ -12,6 +12,8 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -185,13 +187,16 @@ class JellyfinClientTest {
         val starts = mutableListOf<Int>()
         val seenFields = mutableListOf<String?>()
         val seenEnableImages = mutableListOf<String?>()
+        val seenRequestsMutex = Mutex()
         val engine = MockEngine { request ->
             when (request.url.encodedPath) {
                 "/Items" -> {
-                    starts += request.url.parameters["startIndex"]?.toIntOrNull() ?: 0
-                    seenFields += request.url.parameters["fields"]
-                    seenEnableImages += request.url.parameters["enableImages"]
                     val start = request.url.parameters["startIndex"]?.toIntOrNull() ?: 0
+                    seenRequestsMutex.withLock {
+                        starts += start
+                        seenFields += request.url.parameters["fields"]
+                        seenEnableImages += request.url.parameters["enableImages"]
+                    }
                     val items = (start until (start + pageSize).coerceAtMost(total)).joinToString(",") { index ->
                         """{ "Id": "album-$index", "Type": "MusicAlbum", "Name": "Album $index", "AlbumArtist": "Artist" }"""
                     }
@@ -247,13 +252,16 @@ class JellyfinClientTest {
         val server = PlexServer("jellyfin:test", "Jellyfin", "https://jellyfin.example", owned = true)
         val library = MusicLibrary("music", "Music")
         val starts = mutableListOf<Int>()
+        val startsMutex = Mutex()
         val pageSize = JellyfinClient.JellyfinPageSize
         val total = pageSize * 2 + 1
         val engine = MockEngine { request ->
             when (request.url.encodedPath) {
                 "/Items" -> {
                     val start = request.url.parameters["startIndex"]?.toIntOrNull() ?: 0
-                    starts += start
+                    startsMutex.withLock {
+                        starts += start
+                    }
                     val items = (start until (start + pageSize).coerceAtMost(total)).joinToString(",") { index ->
                         val trackNum = index + 1
                         """{ "Id": "track-$trackNum", "Type": "Audio", "Name": "Track $trackNum", "Album": "Album", "RunTimeTicks": 10000000 }"""

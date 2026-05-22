@@ -521,7 +521,7 @@ internal fun DesktopContent(
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (!playlistActions.playlistsEnabled) {
                         Text(
-                            "Sign in to Plex or Jellyfin, or add a local music folder to use playlists.",
+                            "Sign in to your provider, or add a local music folder to use playlists.",
                             color = PhoebeUi.mutedText,
                             fontSize = 14.sp,
                         )

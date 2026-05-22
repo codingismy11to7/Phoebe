@@ -941,6 +941,8 @@ data class PlayerState(
     val durationMs: Long = 0L,
     val playbackErrorSerial: Int = 0,
     val playbackErrorMessage: String? = null,
+    val playbackNoticeSerial: Int = 0,
+    val playbackNoticeMessage: String? = null,
     val shuffle: Boolean = false,
     val repeat: RepeatMode = RepeatMode.Off,
     val volume: Float = 0.7f,

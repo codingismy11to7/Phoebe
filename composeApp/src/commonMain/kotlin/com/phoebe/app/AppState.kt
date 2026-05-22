@@ -232,7 +232,7 @@ class AppState(
     private val mutableAuthInProgress = MutableStateFlow(false)
     val authInProgress: StateFlow<Boolean> = mutableAuthInProgress
 
-    private val mutableMessage = MutableStateFlow("Sign in to Plex or Jellyfin, or add a local music folder to get started.")
+    private val mutableMessage = MutableStateFlow("Sign in to your provider, or add a local music folder to get started.")
     val message: StateFlow<String> = mutableMessage
 
     private val mutablePlaybackSnackbar = MutableStateFlow<String?>(null)
@@ -360,6 +360,16 @@ class AppState(
                 val notice = state.playbackErrorMessage
                     ?: title?.let { "Couldn't play $it." }
                     ?: "Couldn't play that song."
+                mutableMessage.value = notice
+                mutablePlaybackSnackbar.value = notice
+            }
+        }
+        scope.launch {
+            var lastSerial = dependencies.audioPlayer.state.value.playbackNoticeSerial
+            dependencies.audioPlayer.state.collect { state ->
+                if (state.playbackNoticeSerial == lastSerial) return@collect
+                lastSerial = state.playbackNoticeSerial
+                val notice = state.playbackNoticeMessage ?: return@collect
                 mutableMessage.value = notice
                 mutablePlaybackSnackbar.value = notice
             }
@@ -1702,7 +1712,7 @@ class AppState(
                 dependencies.catalogRepository.createPlaylist(session.value, title, initialTracks)
             }
             else -> {
-                mutableMessage.value = "Sign in to Plex or Jellyfin, or add a local music folder to use playlists."
+                mutableMessage.value = "Sign in to your provider, or add a local music folder to use playlists."
                 return@launch
             }
         }

@@ -228,9 +228,6 @@ jobs:
 
   web-preview-deploy:
     name: Deploy web preview to GitHub Pages
-    needs:
-      - web-screenshots
-      - wasm-test
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 15

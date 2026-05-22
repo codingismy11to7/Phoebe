@@ -19,19 +19,25 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlin.coroutines.coroutineContext
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class PlexPlaybackReporterTest {
     @Test
     fun plexRatingKeyStripsPrefix() {
@@ -63,6 +69,7 @@ class PlexPlaybackReporterTest {
                 positionMs = 1_000L,
                 durationMs = track.durationMs,
             )
+            advanceUntilIdle()
             timelineStates.awaitSize(1)
 
             audioPlayer.mutableState.value = PlayerState(
@@ -72,12 +79,13 @@ class PlexPlaybackReporterTest {
                 positionMs = track.durationMs,
                 durationMs = track.durationMs,
             )
+            advanceUntilIdle()
             timelineStates.awaitSize(2)
+
+            assertEquals(listOf("playing", "stopped"), timelineStates.value, "requests=${requests.value}")
         } finally {
             scopeJob.cancelAndJoin()
         }
-
-        assertEquals(listOf("playing", "stopped"), timelineStates.value, "requests=${requests.value}")
     }
 
     @Test
@@ -100,9 +108,11 @@ class PlexPlaybackReporterTest {
             positionMs = 42_000L,
             durationMs = track.durationMs,
         )
+        advanceUntilIdle()
         timelineStates.awaitSize(1)
 
         scopeJob.cancelAndJoin()
+        advanceUntilIdle()
         timelineStates.awaitSize(2)
 
         assertEquals(listOf("playing", "stopped"), timelineStates.value, "requests=${requests.value}")
@@ -135,7 +145,7 @@ class PlexPlaybackReporterTest {
         continuingValues: MutableStateFlow<List<String?>> = MutableStateFlow(emptyList()),
         requests: MutableStateFlow<List<String>> = MutableStateFlow(emptyList()),
     ): MockEngine = MockEngine { request ->
-        requests.value = requests.value + request.url.encodedPath
+        requests.update { it + request.url.encodedPath }
         when {
             request.url.encodedPath == "/identity" -> respondJson(
                 """{"MediaContainer":{"machineIdentifier":"machine"}}""",
@@ -144,8 +154,8 @@ class PlexPlaybackReporterTest {
                 """{"MediaContainer":{"playQueueID":1,"Metadata":[{"ratingKey":"123","playQueueItemID":11,"title":"Song"}]}}""",
             )
             request.url.encodedPath.contains("timeline") -> {
-                timelineStates.value = timelineStates.value + request.url.parameters["state"].orEmpty()
-                continuingValues.value = continuingValues.value + request.url.parameters["continuing"]
+                timelineStates.update { it + request.url.parameters["state"].orEmpty() }
+                continuingValues.update { it + request.url.parameters["continuing"] }
                 respondJson("""{"MediaContainer":{"size":0}}""")
             }
             else -> respond("", HttpStatusCode.NotFound)
@@ -169,10 +179,10 @@ class PlexPlaybackReporterTest {
             downloadUrl = "https://plex.example:32400/library/parts/123/file.mp3",
         )
 
-    private suspend fun <T> MutableStateFlow<List<T>>.awaitSize(size: Int) {
-        withTimeout(2_000L) {
-            while (value.size < size) {
-                delay(10L)
+    private suspend fun <T> StateFlow<List<T>>.awaitSize(size: Int) {
+        withContext(Dispatchers.Default) {
+            withTimeout(2_000L) {
+                first { it.size >= size }
             }
         }
     }
