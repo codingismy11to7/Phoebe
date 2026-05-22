@@ -1,9 +1,8 @@
 package com.phoebe.app
 
-import com.phoebe.app.data.LibraryUiRepository
+import com.phoebe.app.data.AppSettingsRepository
 import com.phoebe.app.data.db.createPhoebeDatabase
-import com.phoebe.app.data.db.libraryPrefsSchemaCompatible
-import com.phoebe.app.platform.PlatformStorage
+import com.phoebe.app.data.db.appSettingsSchemaCompatible
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Before
@@ -30,22 +29,22 @@ class RevisionMigrationDesktopTest {
     }
 
     @Test
-    fun staleRevisionWithoutGridColumnsColumnIsRebuilt() = runTest {
+    fun staleRevisionWithoutEqualizerColumnIsRebuilt() = runTest {
         val root = File(System.getProperty("phoebe.storage.root"))
         val dbFile = File(root, "phoebe-debug.db")
         val revFile = File(root, "phoebe-debug.db.rev")
 
-        createLegacyLibraryPrefsDatabase(dbFile)
-        revFile.writeText("17")
+        createLegacyAppSettingsDatabase(dbFile)
+        revFile.writeText("18")
 
         assertTrue(dbFile.exists())
-        assertEquals(false, libraryPrefsSchemaCompatible(dbFile))
+        assertEquals(false, appSettingsSchemaCompatible(dbFile))
 
         val database = createPhoebeDatabase()
-        LibraryUiRepository(database, PlatformStorage()).restore()
+        AppSettingsRepository(database).restore()
 
-        assertTrue(libraryPrefsSchemaCompatible(dbFile))
-        assertEquals("18", revFile.readText().trim())
+        assertTrue(appSettingsSchemaCompatible(dbFile))
+        assertEquals("19", revFile.readText().trim())
     }
 
     @Test
@@ -54,55 +53,35 @@ class RevisionMigrationDesktopTest {
         val dbFile = File(root, "phoebe-debug.db")
         val revFile = File(root, "phoebe-debug.db.rev")
 
-        createLegacyLibraryPrefsDatabase(dbFile)
-        revFile.writeText("18")
+        createLegacyAppSettingsDatabase(dbFile)
+        revFile.writeText("19")
 
-        assertEquals(false, libraryPrefsSchemaCompatible(dbFile))
+        assertEquals(false, appSettingsSchemaCompatible(dbFile))
 
         val database = createPhoebeDatabase()
-        LibraryUiRepository(database, PlatformStorage()).restore()
+        AppSettingsRepository(database).restore()
 
-        assertTrue(libraryPrefsSchemaCompatible(dbFile))
+        assertTrue(appSettingsSchemaCompatible(dbFile))
     }
 
-    private fun createLegacyLibraryPrefsDatabase(dbFile: File) {
+    private fun createLegacyAppSettingsDatabase(dbFile: File) {
         DriverManager.getConnection("jdbc:sqlite:${dbFile.absolutePath}").use { connection ->
             connection.createStatement().use { statement ->
                 statement.execute(
                     """
-                    CREATE TABLE LibraryPrefsRow (
+                    CREATE TABLE AppSettingsRow (
                         id INTEGER NOT NULL PRIMARY KEY CHECK (id = 1) DEFAULT 1,
-                        sortBy TEXT NOT NULL,
-                        ascending INTEGER NOT NULL,
-                        colYear INTEGER NOT NULL,
-                        colGenre INTEGER NOT NULL,
-                        colFilepath INTEGER NOT NULL,
-                        colAudioCodec INTEGER NOT NULL,
-                        colBitrate INTEGER NOT NULL,
-                        colDuration INTEGER NOT NULL,
-                        colSampleRate INTEGER NOT NULL,
-                        colFileType INTEGER NOT NULL,
-                        colDateAdded INTEGER NOT NULL,
-                        colRating INTEGER NOT NULL DEFAULT 1,
-                        colFavorite INTEGER NOT NULL DEFAULT 1,
-                        homeSections TEXT NOT NULL DEFAULT '',
-                        personalMix TEXT NOT NULL DEFAULT '{}'
+                        crossfadeSeconds INTEGER NOT NULL DEFAULT 0,
+                        scanLibraryOnLaunch INTEGER NOT NULL DEFAULT 0,
+                        notifyWhenDownloadFinishes INTEGER NOT NULL DEFAULT 0
                     )
                     """.trimIndent(),
                 )
                 statement.execute(
                     """
-                    INSERT INTO LibraryPrefsRow(
-                        id, sortBy, ascending,
-                        colYear, colGenre, colFilepath, colAudioCodec, colBitrate,
-                        colDuration, colSampleRate, colFileType, colDateAdded, colRating, colFavorite,
-                        homeSections, personalMix
-                    ) VALUES (
-                        1, 'Name', 1,
-                        1, 1, 1, 1, 1,
-                        1, 1, 1, 1, 1, 1,
-                        'Mixes', '{}'
-                    )
+                    INSERT INTO AppSettingsRow(
+                        id, crossfadeSeconds, scanLibraryOnLaunch, notifyWhenDownloadFinishes
+                    ) VALUES (1, 0, 0, 0)
                     """.trimIndent(),
                 )
             }

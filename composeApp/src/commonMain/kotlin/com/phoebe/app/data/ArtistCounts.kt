@@ -135,13 +135,23 @@ private fun buildDerivedArtistAlbumCounts(
 fun catalogAlbumsForArtist(catalog: CatalogSnapshot, artistTitle: String): List<Album> =
     catalog.albums.filter { albumMatchesArtist(it, artistTitle) }.sortedBy { it.title.lowercase() }
 
-fun catalogTracksForArtist(catalog: CatalogSnapshot, artistTitle: String): List<Track> =
-    catalog.tracksByParent.values.asSequence()
-        .flatten()
+fun catalogTracksForArtist(catalog: CatalogSnapshot, artistTitle: String): List<Track> {
+    val artistAlbumIds = catalog.albums.asSequence()
+        .filter { albumMatchesArtist(it, artistTitle) }
+        .flatMap { albumIdAliases(it.id).asSequence() }
+        .toSet()
+    return catalog.tracksByParent.asSequence()
+        .flatMap { (parentId, tracks) ->
+            tracks.asSequence().filter { track ->
+                parentId in artistAlbumIds ||
+                    track.parentAlbumId?.let { albumIdAliases(it).any { id -> id in artistAlbumIds } } == true ||
+                    trackMatchesArtist(track, artistTitle)
+            }
+        }
         .distinctBy { it.id }
-        .filter { trackMatchesArtist(it, artistTitle) }
         .sortedWith(compareBy({ it.album.lowercase() }, { it.title.lowercase() }))
         .toList()
+}
 
 fun catalogArtistForAlbum(catalog: CatalogSnapshot, album: Album): Artist? {
     val title = album.artist.trim()
@@ -165,8 +175,33 @@ internal fun albumMatchesArtist(album: Album, artistTitle: String): Boolean {
 private fun trackMatchesArtist(track: Track, artistTitle: String): Boolean {
     val t = artistTitle.trim()
     if (t.isEmpty()) return false
-    return track.artist.contains(t, ignoreCase = true) ||
-        track.album.contains(t, ignoreCase = true)
+    return artistCreditContains(track.artist, t)
+}
+
+private fun artistCreditContains(credit: String, artistTitle: String): Boolean {
+    val title = artistTitle.trim()
+    if (title.isEmpty()) return false
+    val value = credit.trim()
+    if (value.isEmpty()) return false
+    if (value.equals(title, ignoreCase = true)) return true
+
+    var start = value.indexOf(title, ignoreCase = true)
+    while (start >= 0) {
+        val before = start - 1
+        val after = start + title.length
+        val startsOnBoundary = before < 0 || !value[before].isLetterOrDigit()
+        val endsOnBoundary = after >= value.length || !value[after].isLetterOrDigit()
+        if (startsOnBoundary && endsOnBoundary) return true
+        start = value.indexOf(title, startIndex = start + 1, ignoreCase = true)
+    }
+    return false
+}
+
+private fun albumIdAliases(id: String): List<String> {
+    val trimmed = id.trim()
+    if (trimmed.isEmpty()) return emptyList()
+    val unprefixed = trimmed.substringAfter(':')
+    return if (unprefixed != trimmed && unprefixed.isNotBlank()) listOf(trimmed, unprefixed) else listOf(trimmed)
 }
 
 fun catalogTracksForAlbum(catalog: CatalogSnapshot, albumId: String): List<Track> =

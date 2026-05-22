@@ -1,5 +1,6 @@
 package com.phoebe.app.player
 
+import com.phoebe.app.domain.EqualizerProfile
 import kotlinx.browser.document
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -20,6 +21,7 @@ private class WebAudioPlayer : SimpleAudioPlayer() {
     private var retryJob: Job? = null
     private var retryGeneration = -1
     private var retryCount = 0
+    private var sourcePreparedForWebEqualizer = false
 
     private val audio = (document.createElement("audio") as HTMLAudioElement).apply {
         preload = "auto"
@@ -41,9 +43,11 @@ private class WebAudioPlayer : SimpleAudioPlayer() {
         retryCount = 0
         retryJob?.cancel()
         audio.volume = effectiveOutputVolume().toDouble().coerceIn(0.0, 1.0)
+        prepareAudioElementForCurrentEqualizer()
         audio.currentTime = 0.0
         audio.src = uri
         audio.load()
+        applyCurrentEqualizer()
         audio.onplaying = {
             retryCount = 0
             syncFromAudio(generation, isBuffering = false)
@@ -72,7 +76,7 @@ private class WebAudioPlayer : SimpleAudioPlayer() {
             null
         }
         if (playWhenReady) {
-            audio.play()
+            playWebAudio(audio)
         }
     }
 
@@ -82,7 +86,7 @@ private class WebAudioPlayer : SimpleAudioPlayer() {
     }
 
     override fun resume() {
-        audio.play()
+        playWebAudio(audio)
     }
 
     override fun seek(positionMs: Long) {
@@ -91,6 +95,38 @@ private class WebAudioPlayer : SimpleAudioPlayer() {
 
     override fun setOutputVolume(volume: Float) {
         audio.volume = volume.toDouble().coerceIn(0.0, 1.0)
+    }
+
+    override fun applyEqualizer(profile: EqualizerProfile) {
+        val uri = currentUri
+        val needsReload = uri != null &&
+            GraphicEqualizerProcessor.isActive(equalizerProfile) &&
+            !sourcePreparedForWebEqualizer
+        if (needsReload) {
+            val positionSeconds = audio.currentTime
+            val wasPlaying = !audio.paused
+            prepareAudioElementForCurrentEqualizer()
+            audio.src = uri
+            audio.load()
+            audio.currentTime = positionSeconds
+            applyCurrentEqualizer()
+            if (wasPlaying || playWhenReady) {
+                playWebAudio(audio)
+            }
+        } else {
+            applyCurrentEqualizer()
+        }
+    }
+
+    private fun prepareAudioElementForCurrentEqualizer() {
+        val active = GraphicEqualizerProcessor.isActive(equalizerProfile)
+        prepareWebEqualizerAudio(audio, active)
+        sourcePreparedForWebEqualizer = active
+    }
+
+    private fun applyCurrentEqualizer() {
+        val normalized = equalizerProfile.normalized()
+        applyWebEqualizer(audio, webEqualizerPayload(normalized))
     }
 
     private fun syncFromAudio(generation: Int, isBuffering: Boolean) {
@@ -143,11 +179,13 @@ private class WebAudioPlayer : SimpleAudioPlayer() {
             if (!isPlayRequestCurrent(generation) || !playWhenReady) return@launch
             if (reload) {
                 val uri = currentUri ?: return@launch
+                prepareAudioElementForCurrentEqualizer()
                 audio.src = uri
                 audio.load()
                 audio.currentTime = positionSeconds
+                applyCurrentEqualizer()
             }
-            audio.play()
+            playWebAudio(audio)
         }
     }
 
@@ -156,3 +194,104 @@ private class WebAudioPlayer : SimpleAudioPlayer() {
         const val StreamRetryBaseDelayMs = 1_000L
     }
 }
+
+private fun webEqualizerPayload(profile: EqualizerProfile): String {
+    val normalized = profile.normalized()
+    val bands = normalized.bands.joinToString(
+        prefix = "[",
+        postfix = "]",
+    ) { band -> band.frequencyHz.toString() }
+    val gains = normalized.gainsDb.joinToString(
+        prefix = "[",
+        postfix = "]",
+    ) { gain -> gain.toString() }
+    return """{"enabled":${normalized.enabled},"bandCount":${normalized.bandCount},"bands":$bands,"gains":$gains}"""
+}
+
+@OptIn(ExperimentalWasmJsInterop::class)
+@JsFun(
+    """(audio, payload) => {
+        const profile = JSON.parse(payload);
+        if (!audio) return;
+        const active = profile.enabled && profile.gains?.some((gain) => Math.abs(gain) > 0.001);
+        let eq = globalThis.__phoebeEqualizer;
+        if (!active) {
+            if (eq && eq.audio === audio) {
+                try { eq.source.disconnect(); } catch (_) {}
+                for (const node of eq.nodes || []) {
+                    try { node.disconnect(); } catch (_) {}
+                }
+                eq.nodes = [];
+                try { eq.source.connect(eq.context.destination); } catch (_) {}
+            }
+            return;
+        }
+        const Ctx = globalThis.AudioContext || globalThis.webkitAudioContext;
+        if (!Ctx) return;
+        if (!eq || eq.audio !== audio) {
+            const context = eq?.context || new Ctx();
+            let source;
+            try {
+                source = context.createMediaElementSource(audio);
+            } catch (error) {
+                // A media element can only have one source node. Reuse the previous one if it exists.
+                if (!eq || eq.audio !== audio || !eq.source) return;
+                source = eq.source;
+            }
+            eq = { audio, context, source, nodes: [] };
+            globalThis.__phoebeEqualizer = eq;
+        }
+        eq.context.resume?.();
+        try { eq.source.disconnect(); } catch (_) {}
+        for (const node of eq.nodes || []) {
+            try { node.disconnect(); } catch (_) {}
+        }
+        eq.nodes = [];
+        let current = eq.source;
+        const q = profile.bandCount === 31 ? 4.2 : profile.bandCount === 15 ? 2.1 : profile.bandCount === 5 ? 0.9 : 1.35;
+        for (let i = 0; i < profile.bands.length; i++) {
+            const gain = profile.gains[i] || 0;
+            if (Math.abs(gain) <= 0.001) continue;
+            const filter = eq.context.createBiquadFilter();
+            filter.type = "peaking";
+            filter.frequency.value = profile.bands[i];
+            filter.Q.value = q;
+            filter.gain.value = gain;
+            current.connect(filter);
+            current = filter;
+            eq.nodes.push(filter);
+        }
+        current.connect(eq.context.destination);
+    }""",
+)
+private external fun applyWebEqualizer(audio: HTMLAudioElement, payload: String)
+
+@OptIn(ExperimentalWasmJsInterop::class)
+@JsFun(
+    """(audio, active) => {
+        if (!audio) return;
+        if (active) {
+            audio.crossOrigin = "anonymous";
+        } else if (!globalThis.__phoebeEqualizer || globalThis.__phoebeEqualizer.audio !== audio) {
+            audio.removeAttribute("crossorigin");
+        }
+    }""",
+)
+private external fun prepareWebEqualizerAudio(audio: HTMLAudioElement, active: Boolean)
+
+@OptIn(ExperimentalWasmJsInterop::class)
+@JsFun(
+    """(audio) => {
+        try {
+            const playResult = audio.play();
+            if (playResult && typeof playResult.catch === "function") {
+                playResult.catch((error) => {
+                    console.warn("Phoebe web audio playback was blocked or failed.", error);
+                });
+            }
+        } catch (error) {
+            console.warn("Phoebe web audio playback failed.", error);
+        }
+    }""",
+)
+private external fun playWebAudio(audio: HTMLAudioElement)

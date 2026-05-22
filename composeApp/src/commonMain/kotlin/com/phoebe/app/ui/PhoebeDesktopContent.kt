@@ -401,6 +401,14 @@ internal fun DesktopContent(
                 val filteredPlaylistTracks = remember(sortedPlaylistTracks, searchQuery) {
                     filterTracksByQuery(sortedPlaylistTracks, searchQuery)
                 }
+                val playFilteredPlaylistTracks: (List<Track>, Int) -> Unit = { _, visibleIndex ->
+                    val (queueTracks, queueIndex) = playbackQueueForVisibleTrack(
+                        sortedPlaylistTracks,
+                        filteredPlaylistTracks,
+                        visibleIndex,
+                    )
+                    onPlayTracks(queueTracks, queueIndex)
+                }
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     PlaylistTrackSummaryLine(
                         totalCount = sortedPlaylistTracks.size,
@@ -442,7 +450,7 @@ internal fun DesktopContent(
                         },
                         catalogRefreshing = catalogRefreshing,
                         showLoadingWhenEmpty = searchQuery.isBlank(),
-                        onPlayTracks = onPlayTracks,
+                        onPlayTracks = playFilteredPlaylistTracks,
                         onAddToUpNext = onAddToUpNext,
                         onDownload = onDownload,
                         libraryColumns = libraryUi.columns,

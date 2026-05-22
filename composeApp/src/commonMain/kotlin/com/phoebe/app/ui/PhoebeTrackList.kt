@@ -926,6 +926,20 @@ internal fun defaultPlaylistName(initialTracks: List<Track>): String =
         else -> "New Playlist"
     }
 
+/**
+ * Maps a tap from a filtered/visible track list back into the unfiltered source queue.
+ * This keeps Up Next aligned with the list the user would have seen after clearing the filter.
+ */
+internal fun playbackQueueForVisibleTrack(
+    sourceTracks: List<Track>,
+    visibleTracks: List<Track>,
+    visibleIndex: Int,
+): Pair<List<Track>, Int> {
+    val visibleTrack = visibleTracks.getOrNull(visibleIndex) ?: return visibleTracks to visibleIndex
+    val sourceIndex = sourceTracks.indexOfFirst { it.id == visibleTrack.id }
+    return if (sourceIndex >= 0) sourceTracks to sourceIndex else visibleTracks to visibleIndex
+}
+
 /** Filter a list of tracks by a free-form search query against title/artist/album. */
 internal fun filterTracksByQuery(tracks: List<Track>, query: String): List<Track> {
     val trimmed = query.trim()

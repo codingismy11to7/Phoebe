@@ -5,6 +5,7 @@ import com.phoebe.app.domain.AppSettings
 import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.CollectionFacet
+import com.phoebe.app.domain.EqualizerProfile
 import com.phoebe.app.domain.ArtistRadioAvailability
 import com.phoebe.app.domain.HomeSection
 import com.phoebe.app.domain.JellyfinSyncMode
@@ -30,6 +31,7 @@ import com.phoebe.app.domain.TrackMetadataUpdate
 import com.phoebe.app.domain.canAddToLocalPlaylist
 import com.phoebe.app.domain.canAddToPlexPlaylist
 import com.phoebe.app.domain.canTogglePlexLike
+import com.phoebe.app.domain.hasPlayableSource
 import com.phoebe.app.domain.isLocalPlaylist
 import com.phoebe.app.domain.isRemoteProviderPlaylist
 import com.phoebe.app.domain.isEmbyFamily
@@ -65,6 +67,7 @@ import com.phoebe.app.platform.openExternalUrl
 import com.phoebe.app.sources.LocalLibraryIO
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
@@ -171,6 +174,15 @@ class AppState(
         )
     val libraryUi = dependencies.libraryUiRepository.preferences
     val appSettings = dependencies.appSettingsRepository.settings
+    private val mutablePersistEqualizerSettings = MutableStateFlow(false)
+    private val mutableEqualizerProfile = MutableStateFlow(EqualizerProfile.Default.normalized())
+    val equalizerProfile: StateFlow<EqualizerProfile> = mutableEqualizerProfile.asStateFlow()
+    val equalizerRemoteUnavailable: StateFlow<Boolean> = combine(
+        cast,
+        mutableMusicAssistantRemotePlayback,
+    ) { castState, musicAssistantRemote ->
+        castState.isConnected || musicAssistantRemote != null
+    }.stateIn(scope, SharingStarted.Eagerly, false)
     val lastPlayedByArtist = dependencies.playHistoryRepository.lastPlayedByArtist
     val lastPlayedByAlbum = dependencies.playHistoryRepository.lastPlayedByAlbum
     val lastPlayedByTrack = dependencies.playHistoryRepository.lastPlayedByTrack
@@ -260,6 +272,15 @@ class AppState(
             dependencies.sessionRepository.restore(refreshConnections = false)
             dependencies.mediaSourcesRepository.restore()
             dependencies.appSettingsRepository.restore()
+            val restoredSettings = appSettings.value
+            mutablePersistEqualizerSettings.value = restoredSettings.persistEqualizerSettings
+            val startupEqualizer = if (restoredSettings.persistEqualizerSettings) {
+                restoredSettings.equalizerProfile.normalized()
+            } else {
+                EqualizerProfile.Default.normalized()
+            }
+            mutableEqualizerProfile.value = startupEqualizer
+            dependencies.audioPlayer.setEqualizer(startupEqualizer)
             dependencies.libraryUiRepository.restore()
             dependencies.searchHistoryRepository.restore()
             dependencies.audioPlayer.setCrossfadeDurationMs(appSettings.value.crossfadeSeconds * 1_000L)
@@ -270,6 +291,7 @@ class AppState(
                 refreshServers()
             }
             dependencies.catalogRepository.restoreCachedCatalog()
+            syncRemotePlayHistoryInBackground()
             val hasRemoteLibrary = session.value?.selectedLibrary != null
             val hasLocalFolders = mediaSources.value.localFolders.any { it.enabled }
             if (appSettings.value.scanLibraryOnLaunch && (hasRemoteLibrary || hasLocalFolders)) {
@@ -288,7 +310,6 @@ class AppState(
             }
             cacheDownloadedArtworkInBackground()
             warmPlaylistTracksInBackground()
-            syncRemotePlayHistoryInBackground()
             ensureLikedSongsPlaylistIfPossible()
             if (session.value?.token?.isNotBlank() == true &&
                 session.value?.selectedServer != null &&
@@ -316,7 +337,15 @@ class AppState(
     private fun bindAppSettingsToPlayback() {
         scope.launch {
             appSettings.collect { settings ->
+                mutablePersistEqualizerSettings.value = settings.persistEqualizerSettings
                 dependencies.audioPlayer.setCrossfadeDurationMs(settings.crossfadeSeconds * 1_000L)
+                if (settings.persistEqualizerSettings) {
+                    val profile = settings.equalizerProfile.normalized()
+                    if (mutableEqualizerProfile.value != profile) {
+                        mutableEqualizerProfile.value = profile
+                        dependencies.audioPlayer.setEqualizer(profile)
+                    }
+                }
             }
         }
     }
@@ -714,7 +743,6 @@ class AppState(
      * avoiding stale empty Plex refreshes overwriting a newer library load.
      */
     suspend fun refreshCatalogSuspended(catalogMessage: String? = "Library refreshed.", backgroundIfCached: Boolean = false) {
-        cancelRemotePlayHistorySync()
         val currentJob = currentCoroutineContext()[Job]
         catalogRefreshJob?.takeIf { it != currentJob }?.cancel()
         catalogRefreshJob = currentJob
@@ -725,7 +753,7 @@ class AppState(
             }
             warmPlaylistTracksInBackground()
             if (session.value.isPlex() || session.value.isEmbyFamily() || session.value.isNavidrome()) {
-                syncRemotePlayHistory(showMessage = false)
+                syncRemotePlayHistory(showMessage = false, recentOnly = backgroundIfCached)
             } else {
                 syncRemotePlayHistoryInBackground()
             }
@@ -809,12 +837,21 @@ class AppState(
     private fun startRemotePlayHistorySync(showMessage: Boolean) {
         val currentSession = session.value
         if (!currentSession.isPlex() && !currentSession.isEmbyFamily() && !currentSession.isNavidrome()) {
+            PhoebeLog.d("AppState") {
+                "play history sync skipped: provider=${currentSession?.providerType?.name ?: "none"}"
+            }
             if (showMessage) mutableMessage.value = "${currentSession.providerLabel()} play history sync is handled from playback progress."
             return
         }
+        if (showMessage) mutableMessage.value = "Syncing ${currentSession.providerLabel()} play history..."
+        PhoebeLog.d("AppState") {
+            "play history sync requested provider=${currentSession.providerLabel()} " +
+                "showMessage=$showMessage hasServer=${currentSession?.selectedServer != null} " +
+                "hasLibrary=${currentSession?.selectedLibrary != null}"
+        }
         playHistorySyncJob?.cancel()
         playHistorySyncJob = scope.launch {
-            syncRemotePlayHistory(showMessage = showMessage)
+            syncRemotePlayHistory(showMessage = showMessage, recentOnly = true)
         }
     }
 
@@ -829,30 +866,44 @@ class AppState(
         dependencies.catalogRepository.clearActiveSyncProgress()
     }
 
-    private suspend fun syncRemotePlayHistory(showMessage: Boolean): Any? {
+    private suspend fun syncRemotePlayHistory(showMessage: Boolean, recentOnly: Boolean): Any? {
         return runCatching {
             val currentSession = session.value
-            if (currentSession.isPlex()) {
-                runCatching {
-                    dependencies.catalogRepository.warmPlexHistoryTracks(currentSession)
-                }.onFailure { error ->
-                    PhoebeLog.d("AppState") { "Plex history track warm failed: ${error.message}" }
+            PhoebeLog.d("AppState") {
+                "play history sync started provider=${currentSession.providerLabel()} " +
+                    "recentOnly=$recentOnly catalogTracks=${catalog.value.tracksByParent.values.sumOf { it.size }}"
+            }
+            val result = if (currentSession.isPlex()) {
+                if (!recentOnly) {
+                    runCatching {
+                        dependencies.catalogRepository.warmPlexHistoryTracks(currentSession)
+                    }.onFailure { error ->
+                        PhoebeLog.d("AppState") { "Plex history track warm failed: ${error.message}" }
+                    }
                 }
-                dependencies.plexPlayHistorySyncer.sync(currentSession, catalog.value)
-                val refreshTrackIds = buildList {
-                    addAll(dependencies.playHistoryRepository.queryTopMostPlayed(30).map { it.trackId })
-                    addAll(dependencies.playHistoryRepository.queryTopRecentlyPlayed(30).map { it.trackId })
-                }.distinct()
-                dependencies.plexPlayHistorySyncer.refreshViewCountsForTrackIds(
-                    currentSession,
-                    refreshTrackIds,
-                )
+                val syncResult = if (recentOnly) {
+                    dependencies.plexPlayHistorySyncer.syncRecent(currentSession, catalog.value)
+                } else {
+                    dependencies.plexPlayHistorySyncer.sync(currentSession, catalog.value)
+                }
+                if (!recentOnly) {
+                    val refreshTrackIds = buildList {
+                        addAll(dependencies.playHistoryRepository.queryTopMostPlayed(30).map { it.trackId })
+                        addAll(dependencies.playHistoryRepository.queryTopRecentlyPlayed(30).map { it.trackId })
+                    }.distinct()
+                    dependencies.plexPlayHistorySyncer.refreshViewCountsForTrackIds(
+                        currentSession,
+                        refreshTrackIds,
+                    )
+                }
+                syncResult
             } else if (currentSession.isNavidrome()) {
                 dependencies.navidromePlayHistorySyncer.sync(currentSession, catalog.value)
             } else {
                 dependencies.jellyfinPlayHistorySyncer.sync(currentSession, catalog.value)
             }
             warmTracksForMostPlayed()
+            result
         }.onSuccess { result ->
             if (showMessage) {
                 mutableMessage.value = when (result) {
@@ -1216,6 +1267,10 @@ class AppState(
             }
             return
         }
+        if (track != null && !track.hasPlayableSource()) {
+            surfaceTransientNotice("Couldn't find a playable stream for ${track.title}. Try refreshing the library.")
+            return
+        }
         mutableMusicAssistantRemotePlayback.value = null
         if (track?.localUri.isNullOrBlank()) {
             dependencies.audioPlayer.play(tracks, index)
@@ -1454,6 +1509,52 @@ class AppState(
 
     fun setNotifyWhenDownloadFinishes(enabled: Boolean) = scope.launch {
         dependencies.appSettingsRepository.setNotifyWhenDownloadFinishes(enabled)
+    }
+
+    fun setEqualizerEnabled(enabled: Boolean) {
+        applyEqualizerProfile(mutableEqualizerProfile.value.withEnabled(enabled))
+    }
+
+    fun setEqualizerBandCount(count: Int) {
+        applyEqualizerProfile(mutableEqualizerProfile.value.withBandCount(count))
+    }
+
+    fun setEqualizerGain(index: Int, gainDb: Float) {
+        val current = mutableEqualizerProfile.value
+        val next = current
+            .withEnabled(true)
+            .withGain(index, gainDb)
+        applyEqualizerProfile(next)
+    }
+
+    fun resetEqualizer() {
+        val current = mutableEqualizerProfile.value.normalized()
+        applyEqualizerProfile(
+            EqualizerProfile.Default
+                .withBandCount(current.bandCount)
+                .withEnabled(current.enabled),
+        )
+    }
+
+    fun setPersistEqualizerSettings(enabled: Boolean) {
+        mutablePersistEqualizerSettings.value = enabled
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            dependencies.appSettingsRepository.setPersistEqualizerSettings(enabled, mutableEqualizerProfile.value)
+        }
+    }
+
+    private fun applyEqualizerProfile(profile: EqualizerProfile) {
+        val normalized = profile.normalized()
+        mutableEqualizerProfile.value = normalized
+        dependencies.audioPlayer.setEqualizer(normalized)
+        if (mutablePersistEqualizerSettings.value) {
+            scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                dependencies.appSettingsRepository.setEqualizerProfile(normalized)
+            }
+        }
+        if (equalizerRemoteUnavailable.value && normalized.enabled) {
+            surfaceTransientNotice("Equalizer changes apply on this device. Chromecast and remote players use their own audio path.")
+        }
     }
 
     fun download(track: Track) = launchDownload {

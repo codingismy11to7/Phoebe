@@ -8,6 +8,7 @@ import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.ArtistRadioAvailability
 import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.CollectionEntry
+import com.phoebe.app.domain.EqualizerProfile
 import com.phoebe.app.domain.HomeSection
 import com.phoebe.app.domain.JellyfinLibraryPageKind
 import com.phoebe.app.domain.JellyfinSyncMode
@@ -53,6 +54,9 @@ internal data class PlaybackUiState(
     val lyricsState: LyricsLoadState = LyricsLoadState.Idle,
     val castState: CastState = CastState(),
     val remotePlaybackTarget: String? = null,
+    val equalizerProfile: EqualizerProfile = EqualizerProfile.Default,
+    val persistEqualizerSettings: Boolean = false,
+    val equalizerRemoteUnavailable: Boolean = false,
 )
 
 internal data class PlaybackActions(
@@ -65,6 +69,11 @@ internal data class PlaybackActions(
     val onSeek: (Long) -> Unit,
     val onCast: () -> Unit = {},
     val onLyrics: () -> Unit = {},
+    val onEqualizerEnabled: (Boolean) -> Unit = {},
+    val onEqualizerBandCount: (Int) -> Unit = {},
+    val onEqualizerGain: (Int, Float) -> Unit = { _, _ -> },
+    val onEqualizerReset: () -> Unit = {},
+    val onPersistEqualizerSettings: (Boolean) -> Unit = {},
     val onPlayQueue: (Int) -> Unit,
     val onClearQueue: () -> Unit,
     val onMoveUpNext: (Int, Int) -> Unit,
@@ -153,6 +162,7 @@ internal data class AuthSetupActions(
     val onRemoveLocalFolder: (String) -> Unit,
     val onToggleLocalFolder: (String, Boolean) -> Unit,
     val onRefreshLibrary: () -> Unit,
+    val onRefreshPlayHistory: () -> Unit = {},
     val onJellyfinPage: (JellyfinLibraryPageKind, Int) -> Unit = { _, _ -> },
     val onSelectServer: (PlexServer) -> Unit,
     val onSelectLibrary: (MusicLibrary, JellyfinSyncMode?) -> Unit,
@@ -181,6 +191,7 @@ internal data class SettingsActions(
     val onCrossfadeSeconds: (Int) -> Unit,
     val onScanLibraryOnLaunch: (Boolean) -> Unit,
     val onNotifyWhenDownloadFinishes: (Boolean) -> Unit,
+    val onPersistEqualizerSettings: (Boolean) -> Unit = {},
     val onDownloadDirectory: (String?) -> Unit,
     val onDeleteAllDownloads: () -> Unit,
     val onUseLightAppearanceChange: (Boolean) -> Unit,

@@ -2,6 +2,7 @@ package com.phoebe.app.player
 
 import javazoom.spi.vorbis.sampled.file.VorbisAudioFileReader
 import com.phoebe.app.data.PlexClient
+import com.phoebe.app.domain.EqualizerProfile
 import com.phoebe.app.domain.Track
 import com.phoebe.app.platform.PhoebeLog
 import javafx.application.Platform
@@ -173,6 +174,9 @@ internal class DesktopAudioPlayer(
                 val playbackUri = file?.toURI()?.toString() ?: uri
                 fullyBufferedPlayback = file != null
                 if (!playJavaFxWithRetries(playbackUri, generation)) {
+                    if (file != null && trySampledFallbackAfterJavaFxFailure(file, generation)) {
+                        return@execute
+                    }
                     diagnostics.playbackError(PlaybackEnginePath.JavaFxMediaPlayer, "JavaFX playback failed to start")
                     markPlaybackFailed(generation = generation)
                     return@execute
@@ -240,6 +244,16 @@ internal class DesktopAudioPlayer(
         }
     }
 
+    override fun applyEqualizer(profile: EqualizerProfile) {
+        val normalized = profile.normalized()
+        playbackExecutor.execute {
+            JavaFxRuntime.runLater {
+                applyJavaFxEqualizer(player, normalized)
+                applyJavaFxEqualizer(fadingOutPlayer, normalized)
+            }
+        }
+    }
+
     override fun startCrossfadeOnPlatform(
         queue: List<Track>,
         targetIndex: Int,
@@ -274,6 +288,7 @@ internal class DesktopAudioPlayer(
             runCatching {
                 val media = Media(playbackUri)
                 val incoming = MediaPlayer(media)
+                applyJavaFxEqualizer(incoming, equalizerProfile)
                 var committed = false
                 var failed = false
                 fun fallbackToNormalPlayback() {
@@ -432,6 +447,77 @@ internal class DesktopAudioPlayer(
         applySampledVolume(v)
     }
 
+    private fun applyJavaFxEqualizer(mediaPlayer: MediaPlayer?, profile: EqualizerProfile) {
+        val player = mediaPlayer ?: return
+        val normalized = profile.normalized()
+        val equalizer = player.audioEqualizer
+        val platformBands = EqualizerProfile.bandsForCount(31)
+        val desiredBands = platformBands.map { band ->
+            javafx.scene.media.EqualizerBand(
+                band.frequencyHz.toDouble(),
+                equalizerBandwidthHz(band.frequencyHz, normalized.bandCount).toDouble(),
+                gainForJavaFxBand(normalized, band.frequencyHz).toDouble(),
+            )
+        }
+        val currentBands = equalizer.bands
+        val sameBandLayout = currentBands.size == desiredBands.size &&
+            currentBands.indices.all { index ->
+                kotlin.math.abs(currentBands[index].centerFrequency - desiredBands[index].centerFrequency) < 0.01
+            }
+        if (!sameBandLayout) {
+            if (player.status == MediaPlayer.Status.PLAYING || player.status == MediaPlayer.Status.STALLED) {
+                currentBands.forEach { band ->
+                    band.gain = gainForJavaFxBand(normalized, band.centerFrequency.toFloat()).toDouble()
+                }
+                equalizer.isEnabled = javaFxEqualizerActive(normalized)
+                return
+            }
+            equalizer.isEnabled = false
+            currentBands.setAll(desiredBands)
+        } else {
+            desiredBands.forEachIndexed { index, desired ->
+                currentBands[index].bandwidth = desired.bandwidth
+                currentBands[index].gain = desired.gain
+            }
+        }
+        equalizer.isEnabled = javaFxEqualizerActive(normalized)
+    }
+
+    private fun javaFxEqualizerActive(profile: EqualizerProfile): Boolean =
+        profile.normalized().let { normalized ->
+            normalized.enabled && EqualizerProfile.bandsForCount(31)
+                .any { band -> gainForJavaFxBand(normalized, band.frequencyHz) != 0f }
+        }
+
+    private fun gainForJavaFxBand(profile: EqualizerProfile, centerFrequencyHz: Float): Float {
+        if (!profile.enabled) return 0f
+        val center = centerFrequencyHz.coerceAtLeast(1f)
+        var closestIndex = -1
+        var closestDistance = Float.MAX_VALUE
+        profile.bands.forEachIndexed { index, band ->
+            val distance = kotlin.math.abs(kotlin.math.ln(center / band.frequencyHz))
+            if (distance < closestDistance) {
+                closestDistance = distance
+                closestIndex = index
+            }
+        }
+        return if (closestIndex >= 0 && closestDistance <= JavaFxEqualizerBandMatchTolerance) {
+            profile.gainsDb.getOrElse(closestIndex) { 0f }
+        } else {
+            0f
+        }
+    }
+
+    private fun equalizerBandwidthHz(centerFrequencyHz: Float, bandCount: Int): Float {
+        val multiplier = when (bandCount) {
+            31 -> 0.23f
+            15 -> 0.42f
+            5 -> 0.95f
+            else -> 0.62f
+        }
+        return (centerFrequencyHz * multiplier).coerceAtLeast(20f)
+    }
+
     private fun applySampledVolume(volume: Float) {
         val clip = sampledClip ?: return
         applyVolumeToClip(clip, volume)
@@ -462,6 +548,37 @@ internal class DesktopAudioPlayer(
 
     private fun preferSampledPlayback(file: File): Boolean {
         return sampledPlaybackExtensionFromSuffix(file.extension) != null
+    }
+
+    private fun preferSampledFallbackAfterJavaFxFailure(file: File): Boolean {
+        return when (file.extension.lowercase()) {
+            "mp3", "mpeg" -> true
+            else -> false
+        }
+    }
+
+    private fun trySampledFallbackAfterJavaFxFailure(file: File, generation: Int): Boolean {
+        if (!preferSampledFallbackAfterJavaFxFailure(file)) return false
+        if (!isPlayRequestCurrent(generation)) return true
+        disposeJavaFxBlocking()
+        val clip = openAndStartSampledClip(file) ?: run {
+            disposeSampled()
+            return false
+        }
+        if (!isPlayRequestCurrent(generation)) {
+            runCatching {
+                clip.stop()
+                clip.close()
+            }
+            return true
+        }
+        sampledClip = clip
+        diagnostics.engineSelected(PlaybackEnginePath.SampledClip)
+        startSampledProgressProbe(clip, generation)
+        applyVolumesFromState()
+        updateBufferedPosition(trackDurationOrClipDuration(generation, clip), generation)
+        markPlaybackReady(generation = generation)
+        return true
     }
 
     private fun sampledPlaybackExtensionFromUri(uri: String): String? {
@@ -691,9 +808,10 @@ internal class DesktopAudioPlayer(
             logPlaybackFailure(e)
             return null
         }
+        val playbackStream = applyEqualizerToPcmStream(prepared)
         return runCatching {
             val clip = AudioSystem.getClip()
-            val diagnosticsStream = copyPcmStreamForDiagnostics(prepared)
+            val diagnosticsStream = copyPcmStreamForDiagnostics(playbackStream)
             try {
                 clip.open(diagnosticsStream)
             } catch (e: Throwable) {
@@ -718,6 +836,41 @@ internal class DesktopAudioPlayer(
             diagnostics.playbackError(PlaybackEnginePath.SampledClip, e.message)
             null
         }
+    }
+
+    private fun applyEqualizerToPcmStream(stream: AudioInputStream): AudioInputStream {
+        val profile = equalizerProfile.normalized()
+        if (!GraphicEqualizerProcessor.isActive(profile)) return stream
+        val format = stream.format
+        if (format.sampleSizeInBits != 16 ||
+            format.frameSize <= 0 ||
+            format.channels <= 0 ||
+            format.sampleRate <= 0f ||
+            (format.encoding != AudioFormat.Encoding.PCM_SIGNED && format.encoding != AudioFormat.Encoding.PCM_UNSIGNED)
+        ) {
+            return stream
+        }
+        val input = stream.use { it.readAllBytes() }
+        val output = input.copyOf()
+        val processor = GraphicEqualizerProcessor(
+            sampleRateHz = format.sampleRate,
+            channelCount = format.channels,
+            profile = profile,
+        )
+        var offset = 0
+        while (offset + format.frameSize <= output.size) {
+            repeat(format.channels) { channel ->
+                val sampleOffset = offset + channel * 2
+                val sample = readPcm16(output, sampleOffset, format.isBigEndian, format.encoding) / 32768f
+                val processed = (processor.process(channel, sample) * 32767f)
+                    .toInt()
+                    .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
+                writePcm16(output, sampleOffset, processed, format.isBigEndian, format.encoding)
+            }
+            offset += format.frameSize
+        }
+        val frames = output.size.toLong() / format.frameSize.toLong()
+        return AudioInputStream(ByteArrayInputStream(output), format, frames)
     }
 
     private fun downloadRemoteAudio(uri: String, extension: String): File {
@@ -805,6 +958,7 @@ internal class DesktopAudioPlayer(
                 val media = Media(uri)
                 val mediaPlayer = MediaPlayer(media)
                 mediaPlayer.volume = effectiveOutputVolume().toDouble().coerceIn(0.0, 1.0)
+                applyJavaFxEqualizer(mediaPlayer, equalizerProfile)
                 mediaPlayer.audioSpectrumInterval = 0.05
                 mediaPlayer.audioSpectrumNumBands = 64
                 mediaPlayer.audioSpectrumThreshold = -80
@@ -980,6 +1134,7 @@ internal class DesktopAudioPlayer(
     }
 
     private companion object {
+        const val JavaFxEqualizerBandMatchTolerance = 0.045f
         const val MaxStreamRetryCount = 2
         const val StreamRetryBaseDelayMs = 1_000L
         const val JavaFxStartupTimeoutSeconds = 15L
@@ -1007,6 +1162,40 @@ private fun pcmRms(bytes: ByteArray, format: AudioFormat): Double {
         frameOffset += frameSize
     }
     return if (sampleCount == 0L) 0.0 else Math.sqrt(sumSquares / sampleCount.toDouble())
+}
+
+private fun readPcm16(
+    bytes: ByteArray,
+    offset: Int,
+    bigEndian: Boolean,
+    encoding: AudioFormat.Encoding,
+): Int {
+    val b0 = bytes[offset].toInt() and 0xFF
+    val b1 = bytes[offset + 1].toInt() and 0xFF
+    val raw = if (bigEndian) (b0 shl 8) or b1 else b0 or (b1 shl 8)
+    if (encoding == AudioFormat.Encoding.PCM_UNSIGNED) return raw - 32768
+    return (raw shl 16) shr 16
+}
+
+private fun writePcm16(
+    bytes: ByteArray,
+    offset: Int,
+    signedValue: Int,
+    bigEndian: Boolean,
+    encoding: AudioFormat.Encoding,
+) {
+    val raw = if (encoding == AudioFormat.Encoding.PCM_UNSIGNED) {
+        (signedValue + 32768).coerceIn(0, 65535)
+    } else {
+        signedValue and 0xFFFF
+    }
+    if (bigEndian) {
+        bytes[offset] = ((raw shr 8) and 0xFF).toByte()
+        bytes[offset + 1] = (raw and 0xFF).toByte()
+    } else {
+        bytes[offset] = (raw and 0xFF).toByte()
+        bytes[offset + 1] = ((raw shr 8) and 0xFF).toByte()
+    }
 }
 
 private fun normalizedPcmSample(bytes: ByteArray, offset: Int, sampleBytes: Int, format: AudioFormat): Double {

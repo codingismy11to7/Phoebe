@@ -186,6 +186,7 @@ internal fun Sidebar(
     onRemoveLocalFolder: (String) -> Unit,
     onToggleLocalFolder: (String, Boolean) -> Unit,
     onRefreshLibrary: () -> Unit,
+    onRefreshPlayHistory: () -> Unit,
 ) {
     var profileExpanded by remember { mutableStateOf(false) }
     val pickLocalFolder = rememberPickLocalFolder(onPicked = onAddLocalFolder)
@@ -382,12 +383,17 @@ internal fun Sidebar(
                             }
                         }
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(onClick = { pickLocalFolder() }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)) {
                             Text("Add local folder", fontSize = 11.sp)
                         }
-                        OutlinedButton(onClick = onRefreshLibrary, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)) {
-                            Text("Rescan", fontSize = 11.sp)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = onRefreshLibrary, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)) {
+                                Text("Rescan", fontSize = 11.sp)
+                            }
+                            OutlinedButton(onClick = onRefreshPlayHistory, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)) {
+                                Text("Sync history", fontSize = 11.sp)
+                            }
                         }
                     }
                 }

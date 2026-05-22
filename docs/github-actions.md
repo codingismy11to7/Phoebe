@@ -10,8 +10,11 @@ Pull requests targeting `main` run:
 - `npm run web:screenshots`
 - `./gradlew :composeApp:compileDebugAndroidTestKotlinAndroid`
 - `./gradlew :composeApp:connectedDebugAndroidTest` on a GitHub-hosted Android emulator
+- A production-mode Wasm build deployed to `https://phoebe-test.joetr.com/` after web screenshots and Wasm tests pass
 
 Screenshot failures upload Roborazzi and Playwright reports as workflow artifacts so the expected, actual, and diff images can be reviewed from the failed check.
+
+The PR web preview deploy runs only for pull requests from this repository, because GitHub does not expose repository secrets to forked pull requests. `phoebe-test.joetr.com` is a shared preview URL; the newest successful same-repository PR deploy wins.
 
 Update screenshot baselines locally with:
 
@@ -46,6 +49,66 @@ phoebe.versionCode=1002003
 ```
 
 The release workflow requires the pushed tag to match `phoebe.versionName`, so `phoebe.versionName=1.2.3` must be released with tag `release/1.2.3`. It validates that the version is plain semver, uses `phoebe.versionCode` for Android, builds Android, Linux, Windows, and macOS packages, renames the generated binaries to include `phoebe.versionName`, then creates a draft GitHub release with the generated APK, AAB, DEB, Flatpak bundle, MSI, and DMG assets attached.
+
+After the GitHub release is created successfully, the workflow builds the Wasm web distribution and deploys it to `https://phoebe.joetr.com/` over SSH with `rsync --delete`.
+
+Web deployment targets:
+
+- DNS: point `phoebe.joetr.com` at the web server with an `A`/`AAAA` record.
+- DNS: point `phoebe-test.joetr.com` at the web server with an `A`/`AAAA` record.
+- Production Apache document root: `/var/www/phoebe.joetr.com`
+- PR preview Apache document root: `/var/www/phoebe-test.joetr.com`
+- Release build output: `composeApp/build/dist/wasmJs/productionExecutable/`
+
+Production Apache virtual host:
+
+```apache
+<VirtualHost *:80>
+    ServerName phoebe.joetr.com
+    DocumentRoot /var/www/phoebe.joetr.com
+
+    <Directory /var/www/phoebe.joetr.com>
+        Require all granted
+        Options -Indexes
+        AllowOverride None
+        FallbackResource /index.html
+    </Directory>
+
+    AddType application/wasm .wasm
+</VirtualHost>
+```
+
+PR preview Apache virtual host:
+
+```apache
+<VirtualHost *:80>
+    ServerName phoebe-test.joetr.com
+    DocumentRoot /var/www/phoebe-test.joetr.com
+
+    <Directory /var/www/phoebe-test.joetr.com>
+        Require all granted
+        Options -Indexes
+        AllowOverride None
+        FallbackResource /index.html
+    </Directory>
+
+    AddType application/wasm .wasm
+</VirtualHost>
+```
+
+Server setup:
+
+```sh
+sudo mkdir -p /var/www/phoebe.joetr.com
+sudo mkdir -p /var/www/phoebe-test.joetr.com
+sudo chown -R deploy:deploy /var/www/phoebe.joetr.com
+sudo chown -R deploy:deploy /var/www/phoebe-test.joetr.com
+sudo a2ensite phoebe.joetr.com.conf
+sudo a2ensite phoebe-test.joetr.com.conf
+sudo systemctl reload apache2
+sudo certbot --apache -d phoebe.joetr.com
+sudo certbot --apache -d phoebe-test.joetr.com
+```
 
 ## Secrets
 
@@ -91,7 +154,16 @@ macOS signing and notarization:
 - `APPLE_APP_SPECIFIC_PASSWORD`: app-specific password for the Apple ID
 - `APPLE_TEAM_ID`
 
-Signing secrets are only read during tag releases. PR checks do not require secrets.
+Web deployment:
+
+- `WEB_DEPLOY_HOST`: server hostname or IP address
+- `WEB_DEPLOY_USER`: SSH user that owns `/var/www/phoebe.joetr.com`, for example `deploy`
+- `WEB_DEPLOY_SSH_KEY`: private SSH key for the deploy user
+- `WEB_DEPLOY_KNOWN_HOSTS`: server host key, for example from `ssh-keyscan phoebe.joetr.com`
+- `WEB_DEPLOY_PATH`: `/var/www/phoebe.joetr.com`
+- `WEB_PREVIEW_DEPLOY_PATH`: `/var/www/phoebe-test.joetr.com`
+
+Signing secrets are only read during tag releases. Web deploy secrets are read during tag releases and same-repository pull request previews.
 
 Encode binary certificates locally with:
 

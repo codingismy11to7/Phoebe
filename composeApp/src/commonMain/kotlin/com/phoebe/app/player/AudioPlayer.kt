@@ -1,5 +1,6 @@
 package com.phoebe.app.player
 
+import com.phoebe.app.domain.EqualizerProfile
 import com.phoebe.app.domain.PlayerState
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
@@ -23,6 +24,7 @@ interface AudioPlayer {
     fun setRepeat(mode: RepeatMode)
     fun setVolume(volume: Float)
     fun setCrossfadeDurationMs(durationMs: Long)
+    fun setEqualizer(profile: EqualizerProfile)
 
     /**
      * Keep per-app output at unity while [updateReportedVolume] mirrors the OS level on the slider.

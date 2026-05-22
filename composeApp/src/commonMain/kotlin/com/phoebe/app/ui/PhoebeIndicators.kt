@@ -6,12 +6,10 @@ import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandHorizontally
@@ -161,6 +159,7 @@ import com.phoebe.app.platform.createPlatformHttpClient
 import com.phoebe.app.platform.currentTimeMs
 import com.phoebe.app.platform.prefersReducedArtworkEffects
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import com.phoebe.app.sources.rememberPickLocalFolder
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
@@ -226,8 +225,8 @@ internal fun DragGhost() {
 
 /**
  * Three-bar animated equaliser used as a "this track is currently playing" indicator
- * inside library track rows. The bars pulse while [isPlaying] is true and freeze at a low
- * height when playback is paused.
+ * inside library track rows. The bars pulse while [isPlaying] is true and hold their
+ * current shape when playback is paused.
  */
 @Composable
 internal fun NowPlayingIndicator(
@@ -237,15 +236,14 @@ internal fun NowPlayingIndicator(
     barColor: Color = PhoebeUi.accentLight,
 ) {
     when {
-        isBuffering -> CircularProgressIndicator(
+        isPlaying && isBuffering -> CircularProgressIndicator(
             modifier = modifier,
             color = barColor,
             strokeWidth = 2.dp,
             trackColor = barColor.copy(alpha = 0.22f),
         )
-        isPlaying -> AnimatedNowPlayingIndicator(modifier = modifier, barColor = barColor)
-        else -> NowPlayingIndicatorBars(
-            heights = listOf(0.3f, 0.3f, 0.3f),
+        else -> AnimatedNowPlayingIndicator(
+            isPlaying = isPlaying,
             modifier = modifier,
             barColor = barColor,
         )
@@ -254,39 +252,38 @@ internal fun NowPlayingIndicator(
 
 @Composable
 internal fun AnimatedNowPlayingIndicator(
+    isPlaying: Boolean,
     modifier: Modifier = Modifier,
     barColor: Color = PhoebeUi.accentLight,
 ) {
-    val transition = rememberInfiniteTransition(label = "now-playing")
-    val bar1 by transition.animateFloat(
-        initialValue = 0.25f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 520, easing = androidx.compose.animation.core.FastOutSlowInEasing),
-            repeatMode = androidx.compose.animation.core.RepeatMode.Reverse,
-        ),
-        label = "bar1",
-    )
-    val bar2 by transition.animateFloat(
-        initialValue = 0.6f,
-        targetValue = 0.35f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 600, easing = androidx.compose.animation.core.FastOutSlowInEasing),
-            repeatMode = androidx.compose.animation.core.RepeatMode.Reverse,
-        ),
-        label = "bar2",
-    )
-    val bar3 by transition.animateFloat(
-        initialValue = 0.4f,
-        targetValue = 0.85f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 460, easing = androidx.compose.animation.core.FastOutSlowInEasing),
-            repeatMode = androidx.compose.animation.core.RepeatMode.Reverse,
-        ),
-        label = "bar3",
-    )
+    val bar1 = remember { Animatable(0.25f) }
+    val bar2 = remember { Animatable(0.6f) }
+    val bar3 = remember { Animatable(0.4f) }
+
+    LaunchedEffect(isPlaying) {
+        if (!isPlaying) return@LaunchedEffect
+        launch {
+            while (true) {
+                bar1.animateTo(1f, tween(durationMillis = 520, easing = FastOutSlowInEasing))
+                bar1.animateTo(0.25f, tween(durationMillis = 520, easing = FastOutSlowInEasing))
+            }
+        }
+        launch {
+            while (true) {
+                bar2.animateTo(0.35f, tween(durationMillis = 600, easing = FastOutSlowInEasing))
+                bar2.animateTo(0.6f, tween(durationMillis = 600, easing = FastOutSlowInEasing))
+            }
+        }
+        launch {
+            while (true) {
+                bar3.animateTo(0.85f, tween(durationMillis = 460, easing = FastOutSlowInEasing))
+                bar3.animateTo(0.4f, tween(durationMillis = 460, easing = FastOutSlowInEasing))
+            }
+        }
+    }
+
     NowPlayingIndicatorBars(
-        heights = listOf(bar1, bar2, bar3),
+        heights = listOf(bar1.value, bar2.value, bar3.value),
         modifier = modifier,
         barColor = barColor,
     )

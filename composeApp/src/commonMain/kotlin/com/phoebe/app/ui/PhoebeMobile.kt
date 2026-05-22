@@ -159,6 +159,7 @@ import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryUiPreferences
 import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.CollectionEntry
+import com.phoebe.app.domain.EqualizerProfile
 import com.phoebe.app.domain.LocalFolderMediaSourceConfig
 import com.phoebe.app.domain.MediaSourcesState
 import com.phoebe.app.domain.MusicLibrary
@@ -200,6 +201,9 @@ private val MobileToolbarChromeHeight = 56.dp
 private val MobileBottomNavChromeHeight = 68.dp
 private val MobileMiniPlayerChromeHeight = 66.dp
 private val MobileChromeScrollGap = 12.dp
+private val MobilePlayerMetadataReserveWithAlbum = 104.dp
+private val MobilePlayerMetadataReserveWithoutAlbum = 84.dp
+private val MobilePlayerRemoteTargetReserve = 18.dp
 
 @Composable
 internal fun MobileCompactMainFeature(
@@ -447,6 +451,7 @@ internal fun MobileBrowseShell(
     onSignOut: () -> Unit,
     onAddLocalFolder: (String?) -> Unit,
     onRefreshLibrary: () -> Unit,
+    onRefreshPlayHistory: () -> Unit = {},
     onJellyfinPage: (JellyfinLibraryPageKind, Int) -> Unit = { _, _ -> },
     onLibrarySortBy: (LibrarySortBy) -> Unit,
     onLibraryAscending: (Boolean) -> Unit,
@@ -461,6 +466,7 @@ internal fun MobileBrowseShell(
     onCrossfadeSeconds: (Int) -> Unit,
     onScanLibraryOnLaunch: (Boolean) -> Unit,
     onNotifyWhenDownloadFinishes: (Boolean) -> Unit,
+    onPersistEqualizerSettings: (Boolean) -> Unit = {},
     downloadDirectory: String?,
     downloadCount: Int,
     defaultDownloadDirectoryLabel: String,
@@ -554,6 +560,7 @@ internal fun MobileBrowseShell(
                     onCrossfadeSeconds = onCrossfadeSeconds,
                     onScanLibraryOnLaunch = onScanLibraryOnLaunch,
                     onNotifyWhenDownloadFinishes = onNotifyWhenDownloadFinishes,
+                    onPersistEqualizerSettings = onPersistEqualizerSettings,
                     onHomeSections = onHomeSections,
                     onPersonalMix = onPersonalMix,
                     onGridColumns = onGridColumns,
@@ -767,6 +774,13 @@ internal fun MobileBrowseShell(
                         text = { Text("Refresh library") },
                         onClick = {
                             onRefreshLibrary()
+                            menuExpanded = false
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Sync play history") },
+                        onClick = {
+                            onRefreshPlayHistory()
                             menuExpanded = false
                         },
                     )
@@ -1126,6 +1140,9 @@ internal fun MobilePlayer(
     @Suppress("UNUSED_PARAMETER") currentIndex: Int,
     castState: CastState = CastState(),
     remotePlaybackTarget: String? = null,
+    equalizerProfile: EqualizerProfile = EqualizerProfile.Default,
+    persistEqualizerSettings: Boolean = false,
+    equalizerRemoteUnavailable: Boolean = false,
     onToggle: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
@@ -1139,6 +1156,11 @@ internal fun MobilePlayer(
     onOpenSongDetail: (Track) -> Unit = {},
     onCast: () -> Unit = {},
     onLyrics: () -> Unit = {},
+    onEqualizerEnabled: (Boolean) -> Unit = {},
+    onEqualizerBandCount: (Int) -> Unit = {},
+    onEqualizerGain: (Int, Float) -> Unit = { _, _ -> },
+    onEqualizerReset: () -> Unit = {},
+    onPersistEqualizerSettings: (Boolean) -> Unit = {},
     onBack: () -> Unit,
     onSwipeDismiss: () -> Unit,
     handleSystemBack: Boolean = true,
@@ -1220,7 +1242,21 @@ internal fun MobilePlayer(
         else -> animatedOffset
     }
     val hasTrack = track != null
+    var equalizerOpen by remember { mutableStateOf(false) }
     val trackNavigationActions = LocalTrackNavigationActions.current
+    if (equalizerOpen) {
+        EqualizerDialog(
+            profile = equalizerProfile,
+            persistEnabled = persistEqualizerSettings,
+            remoteUnavailable = equalizerRemoteUnavailable,
+            onEnabledChange = onEqualizerEnabled,
+            onBandCountChange = onEqualizerBandCount,
+            onGainChange = onEqualizerGain,
+            onReset = onEqualizerReset,
+            onPersistChange = onPersistEqualizerSettings,
+            onDismiss = { equalizerOpen = false },
+        )
+    }
     PlatformBackHandler(
         enabled = handleSystemBack,
         onBack = {
@@ -1325,7 +1361,7 @@ internal fun MobilePlayer(
                         .padding(horizontal = 20.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Row(Modifier.width(88.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.width(132.dp), verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             modifier = Modifier.size(44.dp).clickable(onClick = onBack).semantics { contentDescription = "Back" },
                             contentAlignment = Alignment.Center,
@@ -1336,8 +1372,9 @@ internal fun MobilePlayer(
                     Spacer(Modifier.weight(1f))
                     SectionLabel("Now Playing", PhoebeUi.secondaryText)
                     Spacer(Modifier.weight(1f))
-                    Row(Modifier.width(88.dp), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.width(132.dp), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
                         TransportIcon(PhoebeIcon.Lyrics, "Lyrics", onLyrics)
+                        TransportIcon(PhoebeIcon.Equalizer, "Equalizer", { equalizerOpen = true }, active = equalizerProfile.enabled)
                         CastIcon(
                             active = castState.isConnected,
                             loading = castState.isBuffering,
@@ -1383,9 +1420,16 @@ internal fun MobilePlayer(
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(0.dp)),
                         ) {
+                            val baseMetadataReserve = if (track.album.isNotBlank()) {
+                                MobilePlayerMetadataReserveWithAlbum
+                            } else {
+                                MobilePlayerMetadataReserveWithoutAlbum
+                            }
+                            val metadataReserve = baseMetadataReserve +
+                                if (remotePlaybackTarget != null) MobilePlayerRemoteTargetReserve else 0.dp
                             val artworkSize = minOf(
                                 maxWidth,
-                                (maxHeight - 64.dp).coerceAtLeast(260.dp),
+                                (maxHeight - metadataReserve).coerceAtLeast(180.dp),
                             )
                             Column(
                                 Modifier

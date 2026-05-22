@@ -283,6 +283,8 @@ private fun PhoebeRootStateHolder(
     val libraries by state.libraries.collectAsState()
     val libraryUi by state.libraryUi.collectAsState()
     val appSettings by state.appSettings.collectAsState()
+    val equalizerProfile by state.equalizerProfile.collectAsState()
+    val equalizerRemoteUnavailable by state.equalizerRemoteUnavailable.collectAsState()
     val lastPlayedByArtist by state.lastPlayedByArtist.collectAsState()
     val lastPlayedByAlbum by state.lastPlayedByAlbum.collectAsState()
     val lastPlayedByTrack by state.lastPlayedByTrack.collectAsState()
@@ -976,7 +978,6 @@ private fun PhoebeRootStateHolder(
                     is AppScreen.Collections -> CollectionsScreen(
                         entry = scr.entry,
                         catalog = catalog,
-                        gridColumns = libraryUi.gridColumns,
                         modifier = Modifier.fillMaxSize(),
                         supportedCollectionEntries = supportedCollectionEntries,
                         onBack = { navigator.pop() },
@@ -986,7 +987,6 @@ private fun PhoebeRootStateHolder(
                         entry = scr.entry,
                         value = scr.value,
                         catalog = catalog,
-                        gridColumns = libraryUi.gridColumns,
                         modifier = Modifier.fillMaxSize(),
                         supportedCollectionEntries = supportedCollectionEntries,
                         onBack = { navigator.pop() },
@@ -1172,6 +1172,7 @@ private fun PhoebeRootStateHolder(
                         onSignOut = state::signOut,
                         onAddLocalFolder = state::addLocalFolderFromUri,
                         onRefreshLibrary = state::refreshCatalog,
+                        onRefreshPlayHistory = state::refreshPlayHistory,
                         onJellyfinPage = state::loadJellyfinLibraryPage,
                         onLibrarySortBy = state::setLibrarySortBy,
                         onLibraryAscending = state::setLibrarySortAscending,
@@ -1186,6 +1187,7 @@ private fun PhoebeRootStateHolder(
                         onCrossfadeSeconds = state::setCrossfadeSeconds,
                         onScanLibraryOnLaunch = state::setScanLibraryOnLaunch,
                         onNotifyWhenDownloadFinishes = state::setNotifyWhenDownloadFinishes,
+                        onPersistEqualizerSettings = state::setPersistEqualizerSettings,
                         downloadDirectory = downloadDirectory,
                         downloadCount = catalog.downloads.size,
                         defaultDownloadDirectoryLabel = state.defaultDownloadDirectoryLabel,
@@ -1280,6 +1282,9 @@ private fun PhoebeRootStateHolder(
                         lyricsState = lyricsState,
                         castState = cast,
                         remotePlaybackTarget = musicAssistantRemotePlayback?.target,
+                        equalizerProfile = equalizerProfile,
+                        persistEqualizerSettings = appSettings.persistEqualizerSettings,
+                        equalizerRemoteUnavailable = equalizerRemoteUnavailable,
                     ),
                     playbackActions = PlaybackActions(
                         onToggle = state::togglePlayPause,
@@ -1290,6 +1295,11 @@ private fun PhoebeRootStateHolder(
                         onVolume = state::setVolume,
                         onSeek = state::seekTo,
                         onCast = state::showCastPicker,
+                        onEqualizerEnabled = state::setEqualizerEnabled,
+                        onEqualizerBandCount = state::setEqualizerBandCount,
+                        onEqualizerGain = state::setEqualizerGain,
+                        onEqualizerReset = state::resetEqualizer,
+                        onPersistEqualizerSettings = state::setPersistEqualizerSettings,
                         onLyrics = {
                             selectedPlaylistId = null
                             navigator.openBrowse(
@@ -1414,6 +1424,7 @@ private fun PhoebeRootStateHolder(
                         onRemoveLocalFolder = state::removeLocalFolder,
                         onToggleLocalFolder = state::setLocalFolderEnabled,
                         onRefreshLibrary = state::refreshCatalog,
+                        onRefreshPlayHistory = state::refreshPlayHistory,
                         onJellyfinPage = state::loadJellyfinLibraryPage,
                         onSelectServer = { state.selectServer(it) },
                         onSelectLibrary = { library, mode -> state.selectLibrary(library, mode) },
@@ -1439,6 +1450,7 @@ private fun PhoebeRootStateHolder(
                         onCrossfadeSeconds = state::setCrossfadeSeconds,
                         onScanLibraryOnLaunch = state::setScanLibraryOnLaunch,
                         onNotifyWhenDownloadFinishes = state::setNotifyWhenDownloadFinishes,
+                        onPersistEqualizerSettings = state::setPersistEqualizerSettings,
                         onDownloadDirectory = state::setDownloadDirectory,
                         onDeleteAllDownloads = state::deleteAllDownloads,
                         onUseLightAppearanceChange = onUseLightAppearanceChange,
@@ -1667,6 +1679,9 @@ private fun MobilePlayerHost(
     handleSystemBack: Boolean = true,
 ) {
     val player by appState.player.collectAsState()
+    val appSettings by appState.appSettings.collectAsState()
+    val equalizerProfile by appState.equalizerProfile.collectAsState()
+    val equalizerRemoteUnavailable by appState.equalizerRemoteUnavailable.collectAsState()
     MobilePlayer(
         track = track,
         upNext = upNext,
@@ -1680,6 +1695,9 @@ private fun MobilePlayerHost(
         currentIndex = currentIndex,
         castState = castState,
         remotePlaybackTarget = remotePlaybackTarget,
+        equalizerProfile = equalizerProfile,
+        persistEqualizerSettings = appSettings.persistEqualizerSettings,
+        equalizerRemoteUnavailable = equalizerRemoteUnavailable,
         onToggle = onToggle,
         onPrevious = onPrevious,
         onNext = onNext,
@@ -1693,6 +1711,11 @@ private fun MobilePlayerHost(
         onOpenSongDetail = onOpenSongDetail,
         onCast = onCast,
         onLyrics = onLyrics,
+        onEqualizerEnabled = appState::setEqualizerEnabled,
+        onEqualizerBandCount = appState::setEqualizerBandCount,
+        onEqualizerGain = appState::setEqualizerGain,
+        onEqualizerReset = appState::resetEqualizer,
+        onPersistEqualizerSettings = appState::setPersistEqualizerSettings,
         onBack = onBack,
         onSwipeDismiss = onSwipeDismiss,
         handleSystemBack = handleSystemBack,

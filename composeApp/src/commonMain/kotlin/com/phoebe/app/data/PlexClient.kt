@@ -38,6 +38,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -723,7 +724,7 @@ class PlexClient(
             TrackStatsQuery(includeUserState = true, sort = null, playedOnly = false),
         )
         for (strategy in strategies) {
-            val stats = runCatching {
+            val stats = try {
                 fetchTrackPlaybackStatsPage(
                     server = server,
                     library = library,
@@ -732,20 +733,43 @@ class PlexClient(
                     size = size,
                     query = strategy,
                 )
-            }.onFailure { error ->
+            } catch (error: Throwable) {
+                if (error is CancellationException) throw error
                 PhoebeLog.d("PlexClient") {
                     "track playback stats query failed (start=$start sort=${strategy.sort} playedOnly=${strategy.playedOnly}): ${error.message}"
                 }
-            }.getOrNull().orEmpty()
+                emptyList()
+            }
             if (stats.isNotEmpty()) return stats
         }
         return emptyList()
     }
 
+    suspend fun recentTrackPlaybackStatsPage(
+        server: PlexServer,
+        library: MusicLibrary,
+        token: String,
+        start: Int,
+        size: Int,
+    ): List<PlexTrackPlaybackStat> = fetchTrackPlaybackStatsPage(
+        server = server,
+        library = library,
+        token = token,
+        start = start,
+        size = size,
+        query = TrackStatsQuery(
+            includeUserState = false,
+            sort = "lastViewedAt:desc",
+            playedOnly = true,
+            contentDirectoryId = library.key,
+        ),
+    )
+
     private data class TrackStatsQuery(
         val includeUserState: Boolean,
         val sort: String?,
         val playedOnly: Boolean,
+        val contentDirectoryId: String? = null,
     )
 
     private suspend fun fetchTrackPlaybackStatsPage(
@@ -757,6 +781,11 @@ class PlexClient(
         query: TrackStatsQuery,
     ): List<PlexTrackPlaybackStat> {
         val body = withReachableBase(server) { base ->
+            if (query.contentDirectoryId != null) {
+                PhoebeLog.d("PlexClient") {
+                    "recent track playback stats request base=$base library=${library.key} start=$start size=$size"
+                }
+            }
             val response = httpClient.get("$base/library/sections/${library.key}/all") {
                 plexServerAuth(token)
                 header(HttpHeaders.Accept, "application/json")
@@ -770,8 +799,9 @@ class PlexClient(
                 }
                 query.sort?.let { parameter("sort", it) }
                 if (query.playedOnly) {
-                    parameter("track.viewCount", "1")
+                    parameter("viewCount>=", 1)
                 }
+                query.contentDirectoryId?.let { parameter("contentDirectoryID", it) }
             }
             if (!response.status.isSuccess()) {
                 val errorBody = response.bodyAsText()
@@ -782,6 +812,11 @@ class PlexClient(
             }
             if (responseBody.isBlank()) {
                 error("Plex track playback stats returned an empty response via $base")
+            }
+            if (query.contentDirectoryId != null) {
+                PhoebeLog.d("PlexClient") {
+                    "recent track playback stats response base=$base bytes=${responseBody.length}"
+                }
             }
             responseBody
         }
@@ -1063,6 +1098,21 @@ class PlexClient(
         }
     }
 
+    suspend fun movePlaylistItemToTop(
+        server: PlexServer,
+        token: String,
+        playlistRatingKey: String,
+        playlistItemId: Long,
+    ) {
+        val response = withReachableBase(server) { base ->
+            httpClient.put("$base/playlists/$playlistRatingKey/items/$playlistItemId/move") {
+                plexServerAuth(token)
+                header(HttpHeaders.Accept, "application/json")
+            }
+        }
+        parsePlaylistResponse(response, "movePlaylistItemToTop", "playlist/$playlistRatingKey/item/$playlistItemId")
+    }
+
     suspend fun rateItem(
         server: PlexServer,
         token: String,
@@ -1110,26 +1160,51 @@ class PlexClient(
         var lastStatus = 0
         var lastBody = ""
         var lastBase = server.uri
+        var lastError: Throwable? = null
         for (base in bases) {
             lastBase = base
-            val response = timelineHttpRequest(base, token, sessionIdentifier) {
-                parameter("ratingKey", ratingKey)
-                parameter("key", "/library/metadata/$ratingKey")
-                parameter("identifier", LibraryIdentifier)
-                parameter("time", timeMs.coerceAtLeast(0L))
-                parameter("duration", durationMs.coerceAtLeast(0L))
-                parameter("state", state.wireValue)
-                continuing?.let { parameter("continuing", if (it) 1 else 0) }
-                playQueueItemId?.let { parameter("playQueueItemID", it) }
+            val response = try {
+                timelineHttpRequest(base, token, sessionIdentifier) {
+                    parameter("ratingKey", ratingKey)
+                    parameter("key", "/library/metadata/$ratingKey")
+                    parameter("identifier", LibraryIdentifier)
+                    parameter("time", timeMs.coerceAtLeast(0L))
+                    parameter("duration", durationMs.coerceAtLeast(0L))
+                    parameter("state", state.wireValue)
+                    continuing?.let { parameter("continuing", if (it) 1 else 0) }
+                    playQueueItemId?.let { parameter("playQueueItemID", it) }
+                }
+            } catch (error: Throwable) {
+                if (error is CancellationException) throw error
+                lastError = error
+                PhoebeLog.d("PlexClient") {
+                    "reportTimeline ${state.wireValue} failed on $base for '$ratingKey': ${error.message}"
+                }
+                continue
             }
             if (response.status.isSuccess()) {
                 apiBaseCache[server.id] = base
+                PhoebeLog.v("PlexClient") {
+                    "reportTimeline ${state.wireValue} ok for '$ratingKey' on $base"
+                }
                 return
             }
             lastStatus = response.status.value
             lastBody = response.bodyAsText()
             if (response.status.value != 401) break
         }
+        val statusDetail = if (lastStatus != 0) {
+            "HTTP $lastStatus from $lastBase: ${lastBody.take(300)}"
+        } else {
+            "network error from $lastBase: ${lastError?.message.orEmpty()}"
+        }
+        PhoebeLog.d("PlexClient") {
+            "reportTimeline ${state.wireValue} failed for '$ratingKey' after ${bases.size} base(s): $statusDetail"
+        }
+        throw IllegalStateException(
+            "Plex timeline ${state.wireValue} failed for '$ratingKey': $statusDetail",
+            lastError,
+        )
     }
 
     /**
@@ -1146,13 +1221,21 @@ class PlexClient(
         if (ratingKeys.isEmpty()) return null
         val uri = metadataUri(machineIdentifier, ratingKeys)
         val bases = server.reachableBaseUris(apiBaseCache[server.id])
+        var lastError: Throwable? = null
         for (base in bases) {
-            val response = httpClient.post("$base/playQueues") {
-                plexTimelineAuth(token)
-                parameter("type", "audio")
-                parameter("uri", uri)
-                parameter("key", startRatingKey)
-                parameter("continuous", 1)
+            val response = try {
+                httpClient.post("$base/playQueues") {
+                    plexTimelineAuth(token)
+                    parameter("type", "audio")
+                    parameter("uri", uri)
+                    parameter("key", startRatingKey)
+                    parameter("continuous", 1)
+                }
+            } catch (error: Throwable) {
+                if (error is CancellationException) throw error
+                lastError = error
+                PhoebeLog.d("PlexClient") { "createAudioPlayQueue failed on $base: ${error.message}" }
+                continue
             }
             val body = response.bodyAsText()
             if (!response.status.isSuccess()) {
@@ -1174,6 +1257,7 @@ class PlexClient(
             }
             return PlexPlayQueue(playQueueId = playQueueId, itemIdByRatingKey = itemIds)
         }
+        lastError?.let { PhoebeLog.d("PlexClient") { "createAudioPlayQueue failed on all bases: ${it.message}" } }
         return null
     }
 
@@ -1499,22 +1583,30 @@ class PlexClient(
         block: suspend (base: String) -> T,
     ): T {
         apiBaseCache[server.id]?.let { cached ->
-            val cachedResult = runCatching { block(cached) }
-            if (cachedResult.isSuccess) return cachedResult.getOrThrow()
+            try {
+                return block(cached)
+            } catch (error: Throwable) {
+                if (error is CancellationException) throw error
+            }
         }
         return baseResolveMutex.withLock {
             apiBaseCache[server.id]?.let { cached ->
-                val cachedResult = runCatching { block(cached) }
-                if (cachedResult.isSuccess) return@withLock cachedResult.getOrThrow()
+                try {
+                    return@withLock block(cached)
+                } catch (error: Throwable) {
+                    if (error is CancellationException) throw error
+                }
             }
             var lastError: Throwable? = null
             for (base in server.reachableBaseUris(apiBaseCache[server.id])) {
-                val result = runCatching { block(base) }
-                if (result.isSuccess) {
+                try {
+                    val result = block(base)
                     apiBaseCache[server.id] = base
-                    return@withLock result.getOrThrow()
+                    return@withLock result
+                } catch (error: Throwable) {
+                    if (error is CancellationException) throw error
+                    lastError = error
                 }
-                lastError = result.exceptionOrNull()
             }
             throw lastError ?: IllegalStateException("Could not reach Plex server '${server.name}'")
         }

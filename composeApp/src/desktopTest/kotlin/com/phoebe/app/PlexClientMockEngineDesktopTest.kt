@@ -9,6 +9,7 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import java.io.IOException
 import kotlinx.coroutines.runBlocking
 import org.junit.Test
 import kotlin.test.assertEquals
@@ -76,5 +77,40 @@ class PlexClientMockEngineDesktopTest {
         )
         assertEquals("GET", capturedMethod)
         assertEquals("secret-token", capturedToken)
+    }
+
+    @Test
+    fun reportTimelineRetriesNextBaseAfterConnectionClosed() = runBlocking {
+        val attemptedHosts = mutableListOf<String>()
+        val engine = MockEngine { request ->
+            attemptedHosts += request.url.host
+            if (request.url.host == "first.example") {
+                throw IOException("connection closed")
+            }
+            respond(
+                content = """{"MediaContainer":{"size":0}}""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, "application/json"),
+            )
+        }
+        val client = PlexClient(testHttpClient(engine))
+        client.reportTimeline(
+            server = PlexServer(
+                id = "id",
+                name = "plex",
+                uri = "http://first.example:32400",
+                owned = true,
+                connectionUris = listOf("http://first.example:32400", "http://second.example:32400"),
+                advertisedConnectionUris = listOf("http://first.example:32400", "http://second.example:32400"),
+            ),
+            token = "secret-token",
+            sessionIdentifier = "session-1",
+            ratingKey = "123",
+            timeMs = 5_000L,
+            durationMs = 180_000L,
+            state = PlexTimelineState.Stopped,
+        )
+
+        assertEquals(listOf("first.example", "second.example"), attemptedHosts)
     }
 }

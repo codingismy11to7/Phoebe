@@ -223,6 +223,7 @@ internal enum class PhoebeIcon {
     Play,
     Pause,
     Volume,
+    Equalizer,
     Queue,
     Cast,
     Download,

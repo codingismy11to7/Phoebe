@@ -9,8 +9,10 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
+import com.phoebe.app.domain.EqualizerProfile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import kotlin.math.roundToInt
 
 internal object AndroidPlaybackDiagnostics {
     var diagnostics: PlaybackDiagnostics = PlaybackDiagnostics.None
@@ -20,18 +22,14 @@ internal object AndroidPlaybackDiagnostics {
         engine: PlaybackEnginePath,
     ): ExoPlayer.Builder {
         diagnostics.engineSelected(engine)
-        return if (diagnostics === PlaybackDiagnostics.None) {
-            ExoPlayer.Builder(context)
-        } else {
-            ExoPlayer.Builder(
-                context,
-                DiagnosticRenderersFactory(
-                    context = context,
-                    diagnostics = diagnostics,
-                    engine = engine,
-                ),
-            )
-        }
+        return ExoPlayer.Builder(
+            context,
+            PhoebeRenderersFactory(
+                context = context,
+                diagnostics = diagnostics,
+                engine = engine,
+            ),
+        )
     }
 
     fun reset() {
@@ -39,7 +37,12 @@ internal object AndroidPlaybackDiagnostics {
     }
 }
 
-private class DiagnosticRenderersFactory(
+internal object AndroidEqualizerState {
+    @Volatile
+    var profile: EqualizerProfile = EqualizerProfile.Default.normalized()
+}
+
+private class PhoebeRenderersFactory(
     context: Context,
     private val diagnostics: PlaybackDiagnostics,
     private val engine: PlaybackEnginePath,
@@ -52,8 +55,110 @@ private class DiagnosticRenderersFactory(
         DefaultAudioSink.Builder(context)
             .setEnableFloatOutput(enableFloatOutput)
             .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
-            .setAudioProcessors(arrayOf(DiagnosticAudioProcessor(diagnostics, engine)))
+            .setAudioProcessors(
+                buildList<AudioProcessor> {
+                    add(AndroidEqualizerAudioProcessor(AndroidEqualizerState))
+                    if (diagnostics !== PlaybackDiagnostics.None) {
+                        add(DiagnosticAudioProcessor(diagnostics, engine))
+                    }
+                }.toTypedArray(),
+            )
             .build()
+}
+
+private class AndroidEqualizerAudioProcessor(
+    private val equalizerState: AndroidEqualizerState,
+) : BaseAudioProcessor() {
+    private var processor: GraphicEqualizerProcessor? = null
+    private var processorProfile: EqualizerProfile? = null
+    private var processorSampleRate = 0
+    private var processorChannelCount = 0
+
+    override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
+        return if (Util.isEncodingLinearPcm(inputAudioFormat.encoding)) {
+            inputAudioFormat
+        } else {
+            AudioProcessor.AudioFormat.NOT_SET
+        }
+    }
+
+    override fun queueInput(inputBuffer: ByteBuffer) {
+        val remaining = inputBuffer.remaining()
+        if (remaining <= 0) return
+        val profile = equalizerState.profile.normalized()
+        val sampleBytes = media3SampleBytes(inputAudioFormat.encoding)
+        if (!GraphicEqualizerProcessor.isActive(profile) ||
+            sampleBytes == null ||
+            inputAudioFormat.channelCount <= 0 ||
+            inputAudioFormat.sampleRate <= 0 ||
+            inputAudioFormat.encoding !in supportedEqualizerEncodings
+        ) {
+            val output = replaceOutputBuffer(remaining)
+            output.put(inputBuffer)
+            output.flip()
+            return
+        }
+
+        val eq = equalizerProcessor(profile)
+        val input = inputBuffer.order(byteOrderForEncoding(inputAudioFormat.encoding))
+        val output = replaceOutputBuffer(remaining).order(byteOrderForEncoding(inputAudioFormat.encoding))
+        val channelCount = inputAudioFormat.channelCount.coerceAtLeast(1)
+        val frameSize = sampleBytes * channelCount
+        while (input.remaining() >= frameSize) {
+            repeat(channelCount) { channel ->
+                val sample = when (inputAudioFormat.encoding) {
+                    C.ENCODING_PCM_FLOAT -> input.float.coerceIn(-1f, 1f)
+                    else -> input.short.toFloat() / 32768f
+                }
+                val processed = eq.process(channel, sample).coerceIn(-1f, 1f)
+                when (inputAudioFormat.encoding) {
+                    C.ENCODING_PCM_FLOAT -> output.putFloat(processed)
+                    else -> output.putShort((processed * 32767f).roundToInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort())
+                }
+            }
+        }
+        while (input.hasRemaining()) {
+            output.put(input.get())
+        }
+        output.flip()
+    }
+
+    override fun onFlush() {
+        resetProcessor()
+    }
+
+    override fun onReset() {
+        resetProcessor()
+    }
+
+    private fun equalizerProcessor(profile: EqualizerProfile): GraphicEqualizerProcessor {
+        val needsNew = processor == null ||
+            processorProfile != profile ||
+            processorSampleRate != inputAudioFormat.sampleRate ||
+            processorChannelCount != inputAudioFormat.channelCount
+        if (needsNew) {
+            processor = GraphicEqualizerProcessor(
+                sampleRateHz = inputAudioFormat.sampleRate.toFloat(),
+                channelCount = inputAudioFormat.channelCount.coerceAtLeast(1),
+                profile = profile,
+            )
+            processorProfile = profile
+            processorSampleRate = inputAudioFormat.sampleRate
+            processorChannelCount = inputAudioFormat.channelCount
+        }
+        return processor ?: GraphicEqualizerProcessor(
+            sampleRateHz = inputAudioFormat.sampleRate.toFloat(),
+            channelCount = inputAudioFormat.channelCount.coerceAtLeast(1),
+            profile = profile,
+        )
+    }
+
+    private fun resetProcessor() {
+        processor = null
+        processorProfile = null
+        processorSampleRate = 0
+        processorChannelCount = 0
+    }
 }
 
 private class DiagnosticAudioProcessor(
@@ -128,6 +233,18 @@ private fun media3SampleBytes(encoding: Int): Int? =
         C.ENCODING_PCM_FLOAT,
         -> 4
         else -> null
+    }
+
+private val supportedEqualizerEncodings = setOf(
+    C.ENCODING_PCM_16BIT,
+    C.ENCODING_PCM_16BIT_BIG_ENDIAN,
+    C.ENCODING_PCM_FLOAT,
+)
+
+private fun byteOrderForEncoding(encoding: Int): ByteOrder =
+    when (encoding) {
+        C.ENCODING_PCM_16BIT_BIG_ENDIAN -> ByteOrder.BIG_ENDIAN
+        else -> ByteOrder.LITTLE_ENDIAN
     }
 
 private fun media3NormalizedSample(

@@ -46,14 +46,12 @@ import com.phoebe.app.domain.CollectionFacet
 import com.phoebe.app.domain.CollectionTarget
 import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.data.splitCollectionTagLabels
-import com.phoebe.app.domain.LibraryUiPreferences
 import com.phoebe.app.platform.PhoebeLog
 
 @Composable
 internal fun CollectionsScreen(
     entry: CollectionEntry,
     catalog: CatalogSnapshot,
-    gridColumns: Int = LibraryUiPreferences.DefaultGridColumns,
     modifier: Modifier = Modifier,
     searchQuery: String = "",
     supportedCollectionEntries: Set<CollectionEntry> = allCollectionEntries().toSet(),
@@ -122,7 +120,6 @@ internal fun CollectionsScreen(
                 searchQuery = searchQuery,
                 compact = maxWidth < 700.dp,
                 viewMode = viewMode,
-                gridColumns = gridColumns,
                 state = gridState,
                 onCollectionValue = onCollectionValue,
                 modifier = Modifier.fillMaxSize(),
@@ -136,7 +133,6 @@ internal fun CollectionItemsScreen(
     entry: CollectionEntry,
     value: String,
     catalog: CatalogSnapshot,
-    gridColumns: Int = LibraryUiPreferences.DefaultGridColumns,
     modifier: Modifier = Modifier,
     searchQuery: String = "",
     supportedCollectionEntries: Set<CollectionEntry> = allCollectionEntries().toSet(),
@@ -211,7 +207,6 @@ internal fun CollectionItemsScreen(
                 loading = loading,
                 searchQuery = searchQuery,
                 viewMode = viewMode,
-                gridColumns = gridColumns,
                 state = gridState,
                 onArtist = onArtist,
                 onAlbum = onAlbum,
@@ -263,7 +258,6 @@ private fun CollectionValuesGrid(
     searchQuery: String,
     compact: Boolean,
     viewMode: LibraryViewMode,
-    gridColumns: Int,
     state: LazyGridState,
     onCollectionValue: (CollectionEntry, String) -> Unit,
     modifier: Modifier = Modifier,
@@ -283,7 +277,11 @@ private fun CollectionValuesGrid(
         return
     }
     LazyVerticalGrid(
-        columns = if (viewMode == LibraryViewMode.List) GridCells.Fixed(1) else libraryGridCells(gridColumns),
+        columns = if (viewMode == LibraryViewMode.List) {
+            GridCells.Fixed(1)
+        } else {
+            GridCells.Adaptive(if (compact) 148.dp else 184.dp)
+        },
         state = state,
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -330,7 +328,6 @@ private fun CollectionItemsGrid(
     loading: Boolean,
     searchQuery: String,
     viewMode: LibraryViewMode,
-    gridColumns: Int,
     state: LazyGridState,
     onArtist: (Artist) -> Unit,
     onAlbum: (Album) -> Unit,
@@ -351,7 +348,11 @@ private fun CollectionItemsGrid(
         return
     }
     LazyVerticalGrid(
-        columns = if (viewMode == LibraryViewMode.List) GridCells.Fixed(1) else libraryGridCells(gridColumns),
+        columns = if (viewMode == LibraryViewMode.List) {
+            GridCells.Fixed(1)
+        } else {
+            GridCells.Adaptive(if (compact) 132.dp else 158.dp)
+        },
         state = state,
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(12.dp),

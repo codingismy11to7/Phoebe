@@ -3,6 +3,7 @@ package com.phoebe.app.domain
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
+import kotlin.math.round
 
 @Serializable
 enum class MediaProviderType {
@@ -358,9 +359,14 @@ data class AppSettings(
     val crossfadeSeconds: Int = 0,
     val scanLibraryOnLaunch: Boolean = false,
     val notifyWhenDownloadFinishes: Boolean = false,
+    val persistEqualizerSettings: Boolean = false,
+    val equalizerProfile: EqualizerProfile = EqualizerProfile.Default,
 ) {
     fun normalized(): AppSettings =
-        copy(crossfadeSeconds = crossfadeSeconds.coerceIn(MinCrossfadeSeconds, MaxCrossfadeSeconds))
+        copy(
+            crossfadeSeconds = crossfadeSeconds.coerceIn(MinCrossfadeSeconds, MaxCrossfadeSeconds),
+            equalizerProfile = equalizerProfile.normalized(),
+        )
 
     companion object {
         val Default = AppSettings()
@@ -368,6 +374,155 @@ data class AppSettings(
         const val MaxCrossfadeSeconds = 12
     }
 }
+
+@Serializable
+data class EqualizerProfile(
+    val enabled: Boolean = false,
+    val bandCount: Int = DefaultBandCount,
+    val gainsDb: List<Float> = emptyList(),
+) {
+    val bands: List<EqualizerBand>
+        get() = bandsForCount(normalizedBandCount(bandCount))
+
+    fun normalized(): EqualizerProfile {
+        val count = normalizedBandCount(bandCount)
+        val normalizedGains = List(count) { index ->
+            gainsDb.getOrNull(index)?.normalizedGain() ?: 0f
+        }
+        return copy(bandCount = count, gainsDb = normalizedGains)
+    }
+
+    fun withBandCount(count: Int): EqualizerProfile {
+        val current = normalized()
+        val nextCount = normalizedBandCount(count)
+        if (nextCount == current.bandCount) return current
+        val currentBands = bandsForCount(current.bandCount)
+        val nextBands = bandsForCount(nextCount)
+        val currentByFrequency = currentBands
+            .mapIndexed { index, band -> band.frequencyHz to current.gainsDb.getOrElse(index) { 0f } }
+            .toMap()
+        val nextGains = nextBands.map { band -> currentByFrequency[band.frequencyHz] ?: 0f }
+        return current.copy(bandCount = nextCount, gainsDb = nextGains).normalized()
+    }
+
+    fun withGain(index: Int, gainDb: Float): EqualizerProfile {
+        val current = normalized()
+        if (index !in current.gainsDb.indices) return current
+        val next = current.gainsDb.toMutableList()
+        next[index] = gainDb.normalizedGain()
+        return current.copy(gainsDb = next)
+    }
+
+    fun withEnabled(enabled: Boolean): EqualizerProfile =
+        normalized().copy(enabled = enabled)
+
+    val isFlat: Boolean
+        get() = normalized().gainsDb.all { it == 0f }
+
+    companion object {
+        const val DefaultBandCount = 10
+        const val MinGainDb = -12f
+        const val MaxGainDb = 12f
+        const val GainStepDb = 0.5f
+        val SupportedBandCounts = listOf(5, 10, 15, 31)
+        val Default = EqualizerProfile()
+        val Flat = Default.normalized()
+
+        fun bandsForCount(count: Int): List<EqualizerBand> =
+            when (normalizedBandCount(count)) {
+                5 -> fiveBandTable
+                15 -> fifteenBandTable
+                31 -> thirtyOneBandTable
+                else -> tenBandTable
+            }
+
+        fun normalizedBandCount(count: Int): Int =
+            SupportedBandCounts.minBy { supported -> kotlin.math.abs(supported - count) }
+    }
+}
+
+@Serializable
+data class EqualizerBand(
+    val frequencyHz: Float,
+    val label: String,
+)
+
+private fun Float.normalizedGain(): Float =
+    (round(this / EqualizerProfile.GainStepDb) * EqualizerProfile.GainStepDb)
+        .coerceIn(EqualizerProfile.MinGainDb, EqualizerProfile.MaxGainDb)
+
+private val fiveBandTable = listOf(
+    EqualizerBand(63f, "63"),
+    EqualizerBand(250f, "250"),
+    EqualizerBand(1_000f, "1 k"),
+    EqualizerBand(4_000f, "4 k"),
+    EqualizerBand(16_000f, "16 k"),
+)
+
+private val tenBandTable = listOf(
+    EqualizerBand(31.5f, "31.5"),
+    EqualizerBand(63f, "63"),
+    EqualizerBand(125f, "125"),
+    EqualizerBand(250f, "250"),
+    EqualizerBand(500f, "500"),
+    EqualizerBand(1_000f, "1 k"),
+    EqualizerBand(2_000f, "2 k"),
+    EqualizerBand(4_000f, "4 k"),
+    EqualizerBand(8_000f, "8 k"),
+    EqualizerBand(16_000f, "16 k"),
+)
+
+private val fifteenBandTable = listOf(
+    EqualizerBand(25f, "25"),
+    EqualizerBand(40f, "40"),
+    EqualizerBand(63f, "63"),
+    EqualizerBand(100f, "100"),
+    EqualizerBand(160f, "160"),
+    EqualizerBand(250f, "250"),
+    EqualizerBand(400f, "400"),
+    EqualizerBand(630f, "630"),
+    EqualizerBand(1_000f, "1 k"),
+    EqualizerBand(1_600f, "1.6 k"),
+    EqualizerBand(2_500f, "2.5 k"),
+    EqualizerBand(4_000f, "4 k"),
+    EqualizerBand(6_300f, "6.3 k"),
+    EqualizerBand(10_000f, "10 k"),
+    EqualizerBand(16_000f, "16 k"),
+)
+
+private val thirtyOneBandTable = listOf(
+    EqualizerBand(20f, "20"),
+    EqualizerBand(25f, "25"),
+    EqualizerBand(31.5f, "31.5"),
+    EqualizerBand(40f, "40"),
+    EqualizerBand(50f, "50"),
+    EqualizerBand(63f, "63"),
+    EqualizerBand(80f, "80"),
+    EqualizerBand(100f, "100"),
+    EqualizerBand(125f, "125"),
+    EqualizerBand(160f, "160"),
+    EqualizerBand(200f, "200"),
+    EqualizerBand(250f, "250"),
+    EqualizerBand(315f, "315"),
+    EqualizerBand(400f, "400"),
+    EqualizerBand(500f, "500"),
+    EqualizerBand(630f, "630"),
+    EqualizerBand(800f, "800"),
+    EqualizerBand(1_000f, "1 k"),
+    EqualizerBand(1_250f, "1.25 k"),
+    EqualizerBand(1_600f, "1.6 k"),
+    EqualizerBand(2_000f, "2 k"),
+    EqualizerBand(2_500f, "2.5 k"),
+    EqualizerBand(3_150f, "3.15 k"),
+    EqualizerBand(4_000f, "4 k"),
+    EqualizerBand(5_000f, "5 k"),
+    EqualizerBand(6_300f, "6.3 k"),
+    EqualizerBand(8_000f, "8 k"),
+    EqualizerBand(10_000f, "10 k"),
+    EqualizerBand(12_500f, "12.5 k"),
+    EqualizerBand(16_000f, "16 k"),
+    EqualizerBand(20_000f, "20 k"),
+)
 
 @Serializable
 data class PersonalMixPreferences(
@@ -803,6 +958,9 @@ data class PlayerState(
 
 /** True when the track is played from on-device storage (local folder or download), not stream-only. */
 fun Track.isLocalMediaPlayback(): Boolean = !localUri.isNullOrBlank()
+
+/** True when the track has an in-app playback source instead of metadata-only history. */
+fun Track.hasPlayableSource(): Boolean = streamUrl.isNotBlank() || !localUri.isNullOrBlank()
 
 fun Track.isFromLocalFolder(folderId: String): Boolean = id.startsWith("local_${folderId}:")
 
