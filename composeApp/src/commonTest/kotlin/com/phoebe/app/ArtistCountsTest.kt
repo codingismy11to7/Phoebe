@@ -1,6 +1,7 @@
 package com.phoebe.app
 
 import com.phoebe.app.data.catalogArtistForAlbum
+import com.phoebe.app.data.catalogTracksForArtist
 import com.phoebe.app.data.enrichArtistAlbumCountsOnly
 import com.phoebe.app.data.dedupeArtistsByTitle
 import com.phoebe.app.data.enrichArtistArtwork
@@ -137,5 +138,59 @@ class ArtistCountsTest {
         assertEquals(artist, catalogArtistForAlbum(catalog, catalog.albums[0]))
         assertEquals(artist, catalogArtistForAlbum(catalog, catalog.albums[1]))
         assertNull(catalogArtistForAlbum(catalog, Album(id = "al3", title = "Other", artist = "")))
+    }
+
+    @Test
+    fun catalogTracksForArtistDoesNotMatchArtistNameInsideAnotherWord() {
+        val catalog = CatalogSnapshot(
+            albums = listOf(
+                Album(id = "gala-album", title = "Come Into My Life", artist = "Gala"),
+                Album(id = "galaxy-album", title = "Around the Bend EP", artist = "The Asteroids Galaxy Tour"),
+                Album(id = "galactic-album", title = "Every Sidewalk", artist = "The Galactic Heroes"),
+            ),
+            tracksByParent = mapOf(
+                "mixed" to listOf(
+                    Track("galaxy-track", "Around the Bend", "The Asteroids Galaxy Tour", "Around the Bend EP", 1L, "", ""),
+                    Track("galactic-track", "Sum of Your Parts", "The Galactic Heroes", "Every Sidewalk", 1L, "", ""),
+                    Track("gala-track", "Freed From Desire", "Gala", "Come Into My Life", 1L, "", ""),
+                    Track("gala-feat-track", "Come Into My Life", "Gala feat. Guest", "Come Into My Life", 1L, "", ""),
+                    Track("gala-album-title-track", "Not Hers", "Someone Else", "Gala Night", 1L, "", ""),
+                ),
+            ),
+        )
+
+        assertEquals(
+            listOf("gala-feat-track", "gala-track"),
+            catalogTracksForArtist(catalog, "Gala").map { it.id },
+        )
+    }
+
+    @Test
+    fun catalogTracksForArtistIncludesTracksBelongingToArtistAlbums() {
+        val catalog = CatalogSnapshot(
+            albums = listOf(Album(id = "plex:gala-album", title = "Come Into My Life", artist = "Gala")),
+            tracksByParent = mapOf(
+                "plex:gala-album" to listOf(
+                    Track("guest-track", "Album Cut", "Guest Vocalist", "Come Into My Life", 1L, "", ""),
+                ),
+                "playlist" to listOf(
+                    Track(
+                        id = "playlist-track",
+                        title = "Playlist Copy",
+                        artist = "Guest Vocalist",
+                        album = "Come Into My Life",
+                        durationMs = 1L,
+                        streamUrl = "",
+                        downloadUrl = "",
+                        parentAlbumId = "gala-album",
+                    ),
+                ),
+            ),
+        )
+
+        assertEquals(
+            listOf("guest-track", "playlist-track"),
+            catalogTracksForArtist(catalog, "Gala").map { it.id },
+        )
     }
 }
