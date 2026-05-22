@@ -19,14 +19,15 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeout
+import kotlin.coroutines.coroutineContext
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -43,13 +44,13 @@ class PlexPlaybackReporterTest {
     }
 
     @Test
-    fun reportsStoppedWhenTrackReachesEndWithoutTrackChange() = runBlocking {
+    fun reportsStoppedWhenTrackReachesEndWithoutTrackChange() = runTest {
         val timelineStates = MutableStateFlow<List<String>>(emptyList())
         val requests = MutableStateFlow<List<String>>(emptyList())
         val audioPlayer = FakeAudioPlayer()
         val reporter = newReporter(timelineEngine(timelineStates, requests = requests), audioPlayer)
-        val scopeJob = SupervisorJob()
-        val scope = CoroutineScope(scopeJob + Dispatchers.Default)
+        val scopeJob = SupervisorJob(coroutineContext[Job])
+        val scope = CoroutineScope(coroutineContext + scopeJob)
         val track = plexTrack()
 
         try {
@@ -80,14 +81,14 @@ class PlexPlaybackReporterTest {
     }
 
     @Test
-    fun reportsStoppedWhenReporterScopeCancelsDuringRemotePlayback() = runBlocking {
+    fun reportsStoppedWhenReporterScopeCancelsDuringRemotePlayback() = runTest {
         val timelineStates = MutableStateFlow<List<String>>(emptyList())
         val continuingValues = MutableStateFlow<List<String?>>(emptyList())
         val requests = MutableStateFlow<List<String>>(emptyList())
         val audioPlayer = FakeAudioPlayer()
         val reporter = newReporter(timelineEngine(timelineStates, continuingValues, requests), audioPlayer)
-        val scopeJob = SupervisorJob()
-        val scope = CoroutineScope(scopeJob + Dispatchers.Default)
+        val scopeJob = SupervisorJob(coroutineContext[Job])
+        val scope = CoroutineScope(coroutineContext + scopeJob)
         val track = plexTrack()
 
         reporter.start(scope, includePeriodicTimeline = false)
