@@ -1,9 +1,13 @@
 package com.phoebe.app.player
 
 import android.content.Context
+import androidx.annotation.OptIn
 import androidx.media3.common.C
+import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionParameters
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.BaseAudioProcessor
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.util.Util
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
@@ -40,6 +44,25 @@ internal object AndroidPlaybackDiagnostics {
 internal object AndroidEqualizerState {
     @Volatile
     var profile: EqualizerProfile = EqualizerProfile.Default.normalized()
+}
+
+@OptIn(UnstableApi::class)
+internal fun Player.applyPhoebeAudioOffloadPreference(
+    profile: EqualizerProfile = AndroidEqualizerState.profile,
+) {
+    val offloadMode = if (GraphicEqualizerProcessor.isActive(profile)) {
+        TrackSelectionParameters.AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_DISABLED
+    } else {
+        TrackSelectionParameters.AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_ENABLED
+    }
+    trackSelectionParameters = trackSelectionParameters
+        .buildUpon()
+        .setAudioOffloadPreferences(
+            TrackSelectionParameters.AudioOffloadPreferences.Builder()
+                .setAudioOffloadMode(offloadMode)
+                .build(),
+        )
+        .build()
 }
 
 private class PhoebeRenderersFactory(

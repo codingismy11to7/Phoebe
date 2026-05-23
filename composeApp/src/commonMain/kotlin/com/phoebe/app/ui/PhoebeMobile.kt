@@ -938,19 +938,11 @@ internal fun SwipeableMobileArtwork(
 ) {
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
-    val settleOffset = remember { Animatable(0f) }
-    var dragOffset by remember { mutableFloatStateOf(0f) }
-    var isDragging by remember { mutableStateOf(false) }
-    var settleJob by remember { mutableStateOf<Job?>(null) }
+    val settleOffset = remember(track.id) { Animatable(0f) }
+    var dragOffset by remember(track.id) { mutableFloatStateOf(0f) }
+    var isDragging by remember(track.id) { mutableStateOf(false) }
+    var settleJob by remember(track.id) { mutableStateOf<Job?>(null) }
     val latestTrackId by rememberUpdatedState(track.id)
-
-    LaunchedEffect(track.id) {
-        settleJob?.cancel()
-        settleOffset.stop()
-        settleOffset.snapTo(0f)
-        dragOffset = 0f
-        isDragging = false
-    }
 
     BoxWithConstraints(
         modifier = modifier

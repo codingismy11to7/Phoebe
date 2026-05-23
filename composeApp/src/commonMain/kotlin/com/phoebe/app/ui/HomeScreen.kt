@@ -3351,7 +3351,9 @@ private fun HomeArtworkTile(
     onClick: () -> Unit,
 ) {
     Column(
-        modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onClick),
+        modifier
+            .clip(RoundedCornerShape(8.dp))
+            .combinedClickable(onClick = onClick, onLongClick = {}),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         ArtworkImage(

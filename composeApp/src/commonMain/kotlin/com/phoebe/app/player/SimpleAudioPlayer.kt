@@ -33,6 +33,10 @@ abstract class SimpleAudioPlayer : AudioPlayer {
         playWhenReady = false
     }
 
+    protected fun adoptPlatformPlayIntent(playWhenReady: Boolean) {
+        this.playWhenReady = playWhenReady
+    }
+
     protected val activePlayGeneration: Int
         get() = playGeneration
 
@@ -84,6 +88,64 @@ abstract class SimpleAudioPlayer : AudioPlayer {
                 playQueueOnPlatform(queue, index, track, generation)
             }
         }
+    }
+
+    override fun prepare(queue: List<Track>, startIndex: Int, positionMs: Long) {
+        val previous = mutableState.value
+        val index = startIndex.coerceIn(queue.indices)
+        val track = queue.getOrNull(index)
+        val generation = ++playGeneration
+        crossfadeRequestKey = null
+        playWhenReady = false
+        stopProgressTicker()
+        stopCurrentPlaybackImmediately()
+        val boundedPositionMs = positionMs.coerceAtLeast(0L).let { position ->
+            val duration = track?.durationMs ?: 0L
+            if (duration > 0L) position.coerceAtMost(duration) else position
+        }
+        mutableState.value = previous.copy(
+            queue = queue,
+            currentIndex = if (track == null) -1 else index,
+            isPlaying = false,
+            isBuffering = track != null,
+            positionMs = boundedPositionMs,
+            bufferedPositionMs = boundedPositionMs,
+            durationMs = track?.durationMs ?: 0L,
+            playbackErrorMessage = null,
+        )
+        setOutputVolume(effectiveOutputVolume())
+        if (track != null) {
+            playQueueOnPlatform(queue, index, track, generation)
+            if (boundedPositionMs > 0L) {
+                seek(boundedPositionMs)
+            }
+        }
+    }
+
+    override fun suspendPlayback(queue: List<Track>, startIndex: Int, positionMs: Long) {
+        val previous = mutableState.value
+        val index = if (queue.isEmpty()) -1 else startIndex.coerceIn(queue.indices)
+        val track = queue.getOrNull(index)
+        playGeneration++
+        crossfadeRequestKey = null
+        playWhenReady = false
+        stopProgressTicker()
+        stopCurrentPlaybackImmediately()
+        val boundedPositionMs = positionMs.coerceAtLeast(0L).let { position ->
+            val duration = track?.durationMs ?: 0L
+            if (duration > 0L) position.coerceAtMost(duration) else position
+        }
+        mutableState.value = previous.copy(
+            queue = queue,
+            currentIndex = if (track == null) -1 else index,
+            isPlaying = false,
+            isBuffering = false,
+            positionMs = boundedPositionMs,
+            bufferedPositionMs = boundedPositionMs,
+            durationMs = track?.durationMs ?: 0L,
+            playbackErrorMessage = null,
+        )
+        setOutputVolume(effectiveOutputVolume())
     }
 
     override fun togglePlayPause() {

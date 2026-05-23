@@ -420,6 +420,8 @@ val compileMacMediaKeysNative = tasks.register<Exec>("compileMacMediaKeysNative"
         "-framework",
         "Foundation",
         "-framework",
+        "AppKit",
+        "-framework",
         "MediaPlayer",
         "-I$javaHome/include",
         "-I$javaHome/include/darwin",

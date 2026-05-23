@@ -16,6 +16,7 @@ import com.phoebe.app.sources.CatalogMerge
 import kotlin.random.Random
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
@@ -113,7 +114,7 @@ class PlexPlaybackReporter(
                     }
                 }
         } finally {
-            withContext(NonCancellable) {
+            withContext(NonCancellable + Dispatchers.Default) {
                 withTimeoutOrNull(ShutdownStopReportTimeoutMs) {
                     reportLastStopped(lastSession, continuing = false)
                 }

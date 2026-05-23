@@ -4,10 +4,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import com.phoebe.app.domain.PlayerState
 import com.phoebe.app.player.AndroidAudioPlayerHolder
+import kotlinx.coroutines.flow.StateFlow
 
 @Composable
 actual fun GlobalMediaKeysEffect(
-    @Suppress("UNUSED_PARAMETER") player: PlayerState,
+    @Suppress("UNUSED_PARAMETER") playerFlow: StateFlow<PlayerState>,
     onTogglePlayPause: () -> Unit,
     onPlay: () -> Unit,
     onPause: () -> Unit,

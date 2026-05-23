@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+VERSION="${1:-4.8.4}"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+VENDOR_DIR="$ROOT_DIR/iosApp/Vendor/GoogleCastSDK"
+SDK_URL="https://dl.google.com/dl/chromecast/sdk/ios/GoogleCastSDK-ios-${VERSION}_static.zip"
+TMP_DIR="$(mktemp -d)"
+
+cleanup() {
+  rm -rf "$TMP_DIR"
+}
+trap cleanup EXIT
+
+echo "Downloading Google Cast iOS Sender SDK ${VERSION}..."
+curl -L "$SDK_URL" -o "$TMP_DIR/google-cast-sdk.zip"
+
+echo "Extracting SDK..."
+unzip -q "$TMP_DIR/google-cast-sdk.zip" -d "$TMP_DIR/sdk"
+
+FRAMEWORK_PATH="$(find "$TMP_DIR/sdk" -name GoogleCast.xcframework -type d | head -n 1)"
+RESOURCES_PATH="$(find "$TMP_DIR/sdk" -name Resources -type d | head -n 1)"
+
+if [[ -z "$FRAMEWORK_PATH" ]]; then
+  echo "GoogleCast.xcframework was not found in the downloaded SDK." >&2
+  exit 1
+fi
+
+rm -rf "$VENDOR_DIR"
+mkdir -p "$VENDOR_DIR"
+cp -R "$FRAMEWORK_PATH" "$VENDOR_DIR/GoogleCast.xcframework"
+
+mkdir -p "$VENDOR_DIR/Resources"
+if [[ -n "$RESOURCES_PATH" ]]; then
+  find "$RESOURCES_PATH" -name "*.bundle" -type d | while read -r bundle; do
+    name="$(basename "$bundle")"
+    [[ -d "$VENDOR_DIR/Resources/$name" ]] || cp -R "$bundle" "$VENDOR_DIR/Resources/$name"
+  done
+else
+  find "$FRAMEWORK_PATH" -name "*.bundle" -type d | while read -r bundle; do
+    name="$(basename "$bundle")"
+    [[ -d "$VENDOR_DIR/Resources/$name" ]] || cp -R "$bundle" "$VENDOR_DIR/Resources/$name"
+  done
+fi
+
+echo "Installed Google Cast SDK into $VENDOR_DIR"

@@ -387,7 +387,7 @@ internal fun CatalogMenuSyncIndicator(modifier: Modifier = Modifier) {
         CatalogSyncPhase.LoadingLibrary -> when {
             syncState.message?.contains("Organizing", ignoreCase = true) == true ->
                 syncState.detail ?: "Linking artists to albums on device"
-            syncState.totalPlaylists != null && syncState.totalPlaylists!! > 0 ->
+            syncState.totalPlaylists != null && syncState.totalPlaylists > 0 ->
                 "${syncState.loadedAlbums} albums · ${syncState.totalPlaylists} playlists"
             syncState.loadedAlbums > 0 -> "${syncState.loadedAlbums} albums"
             else -> "From your server"

@@ -9,6 +9,19 @@ import kotlinx.coroutines.flow.StateFlow
 interface AudioPlayer {
     val state: StateFlow<PlayerState>
     fun play(queue: List<Track>, startIndex: Int = 0)
+    fun prepare(queue: List<Track>, startIndex: Int = 0, positionMs: Long = 0L) {
+        play(queue, startIndex)
+        if (positionMs > 0L) seekTo(positionMs)
+    }
+
+    /**
+     * Stop audible output while keeping the current queue and position available for UI state.
+     * Unlike [prepare], implementations may avoid loading the stream.
+     */
+    fun suspendPlayback(queue: List<Track>, startIndex: Int = 0, positionMs: Long = 0L) {
+        prepare(queue, startIndex, positionMs)
+    }
+
     fun togglePlayPause()
     fun clearQueue()
     /** Stop playback and discard the entire queue, including the current track. */

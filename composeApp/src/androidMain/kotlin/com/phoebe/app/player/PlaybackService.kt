@@ -9,7 +9,6 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
-import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaConstants
@@ -45,15 +44,6 @@ class PlaybackService : MediaLibraryService() {
             }
         }
 
-        override fun onDeviceVolumeChanged(volume: Int, muted: Boolean) {
-            if (AndroidPlaybackBridge.isCastActive?.invoke() != true) return
-            val maxVolume = mediaLibrarySession?.player?.deviceInfo?.maxVolume ?: 0
-            if (maxVolume <= 0) return
-            AndroidPlaybackBridge.onCastVolume?.invoke(
-                if (muted) 0f else (volume.toFloat() / maxVolume.toFloat()).coerceIn(0f, 1f),
-            )
-        }
-
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             updateLikeButton()
         }
@@ -85,10 +75,6 @@ class PlaybackService : MediaLibraryService() {
         ): Int {
             if (AndroidPlaybackBridge.isCastActive?.invoke() == true) {
                 val handled = when (playerCommand) {
-                    Player.COMMAND_PLAY_PAUSE -> {
-                        AndroidPlaybackBridge.onCastTogglePlayPause?.invoke()
-                        true
-                    }
                     Player.COMMAND_SEEK_TO_NEXT,
                     Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
                     -> {
@@ -284,19 +270,9 @@ class PlaybackService : MediaLibraryService() {
         setMediaNotificationProvider(notificationProvider)
         val player = AndroidPlaybackDiagnostics.newPlayerBuilder(this, PlaybackEnginePath.Media3)
             .setAudioAttributes(AudioAttributes.DEFAULT, /* handleAudioFocus= */ true)
-            .setLoadControl(
-                DefaultLoadControl.Builder()
-                    .setBufferDurationsMs(
-                        60_000,
-                        1_800_000,
-                        2_500,
-                        7_500,
-                    )
-                    .setPrioritizeTimeOverSizeThresholds(true)
-                    .build(),
-            )
             .setWakeMode(C.WAKE_MODE_LOCAL)
             .build()
+            .also { it.applyPhoebeAudioOffloadPreference(AndroidEqualizerState.profile) }
         val sessionPlayer = CastMediaSessionPlayer(player)
         AndroidPlaybackBridge.onCastMediaSessionState = { state ->
             sessionPlayer.updateCastState(state)

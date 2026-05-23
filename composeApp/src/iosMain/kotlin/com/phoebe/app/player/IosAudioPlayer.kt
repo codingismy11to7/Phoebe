@@ -369,7 +369,8 @@ private class IosAudioPlayer : SimpleAudioPlayer() {
     private fun cmTimeToMs(time: CValue<CMTime>): Long = cmTimeToMs(CMTimeGetSeconds(time))
 
     private companion object {
-        const val PreferredForwardBufferSeconds = 1_800.0
+        // Avoid asking AVPlayer to retain very large forward buffers on device.
+        const val PreferredForwardBufferSeconds = 60.0
         const val MaxStreamRetryCount = 5
         const val StreamRetryBaseDelayMs = 1_000L
         const val IosAssetTracksKey = "tracks"

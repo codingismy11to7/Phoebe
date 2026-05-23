@@ -36,6 +36,9 @@ private class IosSystemVolumeController : SystemVolumeController {
         if (pollJob != null) return
         ensureVolumeView()
         _volume.value = readSystemVolume()
+        IosCastBridge.onVolumeChanged = { normalized ->
+            _volume.value = normalized.coerceIn(0f, 1f)
+        }
         pollJob = scope.launch(Dispatchers.Main) {
             while (isActive) {
                 delay(POLL_MS)
@@ -50,6 +53,10 @@ private class IosSystemVolumeController : SystemVolumeController {
 
     override fun setVolume(value: Float) {
         val clamped = value.coerceIn(0f, 1f)
+        if (IosCastBridge.isCasting() && IosCastBridge.setCastVolume(clamped)) {
+            _volume.value = IosCastBridge.readCastVolume() ?: clamped
+            return
+        }
         _volume.value = clamped
         ignorePollsUntil = TimeSource.Monotonic.markNow() + IGNORE_POLL_MS.milliseconds
         ensureVolumeView()
@@ -68,7 +75,11 @@ private class IosSystemVolumeController : SystemVolumeController {
         volumeView?.subviews?.firstOrNull { it is UISlider } as? UISlider
 
     private fun readSystemVolume(): Float =
-        volumeSlider()?.value?.coerceIn(0f, 1f) ?: 0.7f
+        if (IosCastBridge.isCasting()) {
+            IosCastBridge.readCastVolume() ?: 0.7f
+        } else {
+            volumeSlider()?.value?.coerceIn(0f, 1f) ?: 0.7f
+        }
 
     companion object {
         const val POLL_MS = 400L

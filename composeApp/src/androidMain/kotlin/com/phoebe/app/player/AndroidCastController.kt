@@ -6,7 +6,10 @@ import android.media.AudioManager
 import com.google.android.gms.cast.MediaInfo
 import com.google.android.gms.cast.MediaLoadRequestData
 import com.google.android.gms.cast.MediaMetadata
+import com.google.android.gms.cast.MediaQueueData
+import com.google.android.gms.cast.MediaQueueItem
 import com.google.android.gms.cast.MediaSeekOptions
+import com.google.android.gms.cast.MediaStatus
 import com.google.android.gms.cast.framework.CastContext
 import com.google.android.gms.cast.framework.CastSession
 import com.google.android.gms.cast.framework.SessionManagerListener
@@ -42,6 +45,22 @@ private data class PendingCastHandoff(
     val requestId: Long,
 )
 
+private data class CastLoadRequest(
+    val requestData: MediaLoadRequestData,
+    val receiverQueueSize: Int,
+    val estimatedBytes: Int,
+)
+
+private data class AppQueueSnapshot(
+    val queue: List<Track>,
+    val currentIndex: Int,
+)
+
+private data class RemoteQueueEntry(
+    val track: Track,
+    val castUrl: String?,
+)
+
 private class AndroidCastController : CastController {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val appContext get() = AndroidContextHolder.application
@@ -51,6 +70,8 @@ private class AndroidCastController : CastController {
     private var audioPlayer: AudioPlayer? = null
     private var sessionListenerRegistered = false
     private var pendingHandoff: PendingCastHandoff? = null
+    private var expectedRemoteHandoff: PendingCastHandoff? = null
+    private var appQueueSnapshot: AppQueueSnapshot? = null
     private var loadRequestId = 0L
 
     private val mutableState = MutableStateFlow(
@@ -60,6 +81,9 @@ private class AndroidCastController : CastController {
     )
     override val state: StateFlow<CastState> = mutableState
 
+    override fun canLoadQueue(queue: List<Track>): CastQueueSupport =
+        queue.plexChromecastQueueSupport()
+
     private val remoteMediaClientListener = object : RemoteMediaClient.Callback() {
         override fun onStatusUpdated() {
             syncRemotePlayback()
@@ -68,7 +92,9 @@ private class AndroidCastController : CastController {
         override fun onMetadataUpdated() {
             syncRemotePlayback()
         }
-        override fun onQueueStatusUpdated() = Unit
+        override fun onQueueStatusUpdated() {
+            syncRemotePlayback()
+        }
         override fun onPreloadStatusUpdated() = Unit
     }
 
@@ -105,7 +131,6 @@ private class AndroidCastController : CastController {
         AndroidPlaybackBridge.onCastSkipNext = { next() }
         AndroidPlaybackBridge.onCastSkipPrevious = { previous() }
         AndroidPlaybackBridge.onCastSeekTo = { positionMs -> seekTo(positionMs) }
-        AndroidPlaybackBridge.onCastVolume = { volume -> applyCastVolume(volume) }
         AndroidPlaybackBridge.readCastVolume = { readCastVolumeNormalized() }
         AndroidPlaybackBridge.applyCastVolume = { volume -> applyCastVolume(volume) }
         AndroidPlaybackBridge.adjustCastVolumeStep = { up -> adjustCastVolumeStep(up) }
@@ -140,8 +165,9 @@ private class AndroidCastController : CastController {
     }
 
     private fun loadQueue(queue: List<Track>, startIndex: Int, startPositionMs: Long) {
-        if (!queue.isChromecastPlayableQueue()) {
-            mutableState.update { it.copy(message = "Chromecast can play Plex streaming songs only.") }
+        val support = canLoadQueue(queue)
+        if (!support.isSupported) {
+            mutableState.update { it.copy(message = support.message) }
             return
         }
         val session = castContext?.sessionManager?.currentCastSession
@@ -159,13 +185,16 @@ private class AndroidCastController : CastController {
         val wasLocalPlaying = localState?.isPlaying == true || servicePlaying
         loadRequestId++
         val requestId = loadRequestId
-        pendingHandoff = PendingCastHandoff(
+        rememberAppQueue(queue, index)
+        val handoff = PendingCastHandoff(
             queue = queue,
             index = index,
             positionMs = positionMs,
             wasLocalPlaying = wasLocalPlaying,
             requestId = requestId,
         )
+        pendingHandoff = handoff
+        expectedRemoteHandoff = handoff
         mutableState.update {
             it.copy(
                 isAvailable = true,
@@ -180,13 +209,17 @@ private class AndroidCastController : CastController {
                 message = null,
             )
         }
-        val pendingResult = client.load(
-            MediaLoadRequestData.Builder()
-                .setMediaInfo(track.toMediaInfo())
-                .setAutoplay(true)
-                .setCurrentTime(positionMs)
-                .build(),
-        )
+        val loadRequest = buildCastLoadRequest(queue, index, positionMs)
+        PhoebeLog.d("AndroidCastController") {
+            "loading cast queue receiverItems=${loadRequest.receiverQueueSize}/${queue.size} bytes=${loadRequest.estimatedBytes}"
+        }
+        val pendingResult = runCatching {
+            client.load(loadRequest.requestData)
+        }.getOrElse { error ->
+            PhoebeLog.d("AndroidCastController") { "cast load request rejected: ${error.message}" }
+            onCastLoadFailed(requestId, "Couldn't load this playlist on Chromecast. Playing on this device.")
+            return
+        }
         pendingResult.setResultCallback(
             ResultCallback { result ->
                 scope.launch {
@@ -244,15 +277,6 @@ private class AndroidCastController : CastController {
         return 1.0 / max
     }
 
-    private fun syncCastVolumeFromLocalMusicStream() {
-        if (!mutableState.value.isConnected) return
-        val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        val current = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-        val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-        if (max <= 0) return
-        applyCastVolume((current.toFloat() / max.toFloat()).coerceIn(0f, 1f))
-    }
-
     override fun next() {
         val current = mutableState.value
         val target = current.currentIndex + 1
@@ -296,7 +320,6 @@ private class AndroidCastController : CastController {
         if (castLocalQueueIfReceiverEmpty && client?.mediaInfo == null) {
             castCurrentLocalQueueIfPossible()
         }
-        syncCastVolumeFromLocalMusicStream()
         startPositionSync()
     }
 
@@ -305,6 +328,8 @@ private class AndroidCastController : CastController {
         loadTimeoutJob = null
         val pending = pendingHandoff
         pendingHandoff = null
+        expectedRemoteHandoff = null
+        appQueueSnapshot = null
         val previous = mutableState.value
         val localPlayer = audioPlayer
         if (pending != null) {
@@ -334,16 +359,83 @@ private class AndroidCastController : CastController {
         val previous = mutableState.value
         val isPlaying = client.isPlaying
         val isBuffering = client.isBuffering
-        val remoteTrack = client.mediaInfo?.toTrack()
-        val reusingPreviousQueue = remoteTrack != null &&
-            previous.queue.getOrNull(previous.currentIndex)?.streamUrl == remoteTrack.streamUrl
-        val queue = remoteTrack?.let { track ->
-            if (reusingPreviousQueue) previous.queue else listOf(track)
-        } ?: previous.queue
+        val status = client.mediaStatus
+        val queueItems = status?.queueItems.orEmpty()
+        val remoteTrack = client.currentItem?.media?.toTrack() ?: client.mediaInfo?.toTrack()
+        val remoteCastUrl = client.currentItem?.media?.contentId ?: client.mediaInfo?.contentId
+        val knownQueue = appQueueSnapshot?.queue?.takeIf { it.isNotEmpty() }
+            ?: pendingHandoff?.queue?.takeIf { it.isNotEmpty() }
+            ?: previous.queue
+        val remoteQueueEntries = queueItems.mapNotNull { item ->
+            val track = item.media?.toTrack() ?: return@mapNotNull null
+            RemoteQueueEntry(
+                track = knownQueue.firstOrNull { it.matchesCastMedia(track, item.media?.contentId) } ?: track,
+                castUrl = item.media?.contentId,
+            )
+        }
+        val remoteQueue = remoteQueueEntries.map { it.track }
+        val currentItemId = status?.currentItemId ?: client.currentItem?.itemId ?: MediaQueueItem.INVALID_ITEM_ID
+        val remoteQueueIndex = currentItemId.takeIf { it != MediaQueueItem.INVALID_ITEM_ID }?.let { itemId ->
+            queueItems.indexOfFirst { it.itemId == itemId }.takeIf { it >= 0 }
+        }
+        val currentQueueItem = remoteQueueIndex?.let { queueItems.getOrNull(it) }
+        val expectedHandoff = pendingHandoff ?: expectedRemoteHandoff
+        if (expectedHandoff != null) {
+            if (!remotePlaybackMatches(expectedHandoff, remoteTrack, remoteCastUrl, currentQueueItem)) return
+            if (expectedRemoteHandoff?.requestId == expectedHandoff.requestId) {
+                expectedRemoteHandoff = null
+            }
+        }
+        val currentQueueItemKnownIndex = currentQueueItem?.media?.let { media ->
+            val track = media.toTrack()
+            knownQueue.indexOfFirst { it.matchesCastMedia(track, media.contentId) }.takeIf { index -> index >= 0 }
+        }
+        val remoteMediaKnownIndex = remoteTrack?.let { track ->
+            knownQueue.indexOfFirst { it.matchesCastMedia(track, remoteCastUrl) }.takeIf { index -> index >= 0 }
+        }
+        val knownQueueTrackIndex = currentQueueItemKnownIndex ?: remoteMediaKnownIndex
+        val remoteQueueMatchesKnown = remoteQueueEntries.isNotEmpty() &&
+            knownQueue.isNotEmpty() &&
+            remoteQueueEntries.all { entry ->
+                knownQueue.any { it.matchesCastMedia(entry.track, entry.castUrl) }
+            }
+        val preservingKnownQueue = knownQueueTrackIndex != null || remoteQueueMatchesKnown
+        val queue = when {
+            preservingKnownQueue -> knownQueue
+            remoteQueue.isNotEmpty() -> remoteQueue
+            remoteTrack != null -> listOf(remoteTrack)
+            else -> knownQueue
+        }
         val currentIndex = when {
             queue.isEmpty() -> previous.currentIndex
-            reusingPreviousQueue -> previous.currentIndex.coerceIn(queue.indices)
+            preservingKnownQueue -> knownQueueTrackIndex
+                ?: remoteTrack?.let { track ->
+                    queue.indexOfFirst { it.matchesCastMedia(track, remoteCastUrl) }.takeIf { index -> index >= 0 }
+                }
+                ?: appQueueSnapshot?.currentIndex?.takeIf { it in queue.indices }
+                ?: previous.currentIndex.takeIf { it in queue.indices }
+                ?: 0
+            remoteQueue.isNotEmpty() -> remoteQueueIndex
+                ?: remoteTrack?.let { track ->
+                    queue.indexOfFirst { it.matchesCastMedia(track, remoteCastUrl) }.takeIf { index -> index >= 0 }
+                }
+                ?: previous.currentIndex.takeIf { it in queue.indices }
+                ?: 0
             else -> 0
+        }
+        if (queue.isNotEmpty() && currentIndex in queue.indices) {
+            rememberAppQueue(queue, currentIndex)
+        } else if (remoteQueue.isNotEmpty() || remoteTrack != null) {
+            appQueueSnapshot = null
+        }
+        if (status?.playerState == MediaStatus.PLAYER_STATE_IDLE &&
+            status.idleReason == MediaStatus.IDLE_REASON_FINISHED &&
+            pendingHandoff == null &&
+            currentIndex in queue.indices &&
+            currentIndex < queue.lastIndex
+        ) {
+            loadQueue(queue, currentIndex + 1)
+            return
         }
         val positionMs = client.approximateStreamPosition.coerceAtLeast(0L)
         val durationMs = client.streamDuration.coerceAtLeast(0L).takeIf { duration -> duration > 0L }
@@ -370,7 +462,7 @@ private class AndroidCastController : CastController {
         publishCastMediaSessionState()
         val localPlayer = audioPlayer
         if (client.isPlaying && localPlayer?.state?.value?.isPlaying == true) {
-            localPlayer.togglePlayPause()
+            suspendLocalPlayback()
         }
         if (AndroidPlaybackBridge.servicePlayer?.isPlaying == true) {
             suspendLocalPlayback()
@@ -468,6 +560,10 @@ private class AndroidCastController : CastController {
     private fun onCastLoadFailed(requestId: Long, message: String) {
         val handoff = pendingHandoff?.takeIf { it.requestId == requestId } ?: return
         pendingHandoff = null
+        if (expectedRemoteHandoff?.requestId == requestId) {
+            expectedRemoteHandoff = null
+        }
+        appQueueSnapshot = null
         restoreLocalPlayback(handoff)
         mutableState.update {
             it.copy(
@@ -490,155 +586,145 @@ private class AndroidCastController : CastController {
         val current = localPlayer.state.value
         val index = current.currentIndex
         if (index !in current.queue.indices) return
-        if (!current.queue.isChromecastPlayableQueue()) {
-            mutableState.update { it.copy(message = "Chromecast can play Plex streaming songs only.") }
+        val support = canLoadQueue(current.queue)
+        if (!support.isSupported) {
+            mutableState.update { it.copy(message = support.message) }
             return
         }
         loadQueue(current.queue, index, current.positionMs)
     }
 
+    private fun remotePlaybackMatches(
+        handoff: PendingCastHandoff,
+        remoteTrack: Track?,
+        remoteCastUrl: String?,
+        currentQueueItem: MediaQueueItem?,
+    ): Boolean {
+        val expectedTrack = handoff.queue.getOrNull(handoff.index) ?: return true
+        val media = currentQueueItem?.media
+        if (media != null && expectedTrack.matchesCastMedia(media.toTrack(), media.contentId)) return true
+        return remoteTrack?.let { expectedTrack.matchesCastMedia(it, remoteCastUrl) } == true
+    }
+
+    private fun rememberAppQueue(queue: List<Track>, currentIndex: Int) {
+        appQueueSnapshot = AppQueueSnapshot(
+            queue = queue,
+            currentIndex = currentIndex,
+        )
+    }
+
     private fun Track.toMediaInfo(): MediaInfo {
+        val descriptor = toCastMediaDescriptor()
         val metadata = MediaMetadata(MediaMetadata.MEDIA_TYPE_MUSIC_TRACK).apply {
-            putString(MediaMetadata.KEY_TITLE, title)
-            putString(MediaMetadata.KEY_ARTIST, artist)
-            putString(MediaMetadata.KEY_ALBUM_TITLE, album)
-            thumbUrl?.let { addImage(com.google.android.gms.common.images.WebImage(android.net.Uri.parse(it))) }
+            putString(MediaMetadata.KEY_TITLE, descriptor.title)
+            putString(MediaMetadata.KEY_ARTIST, descriptor.artist)
+            putString(MediaMetadata.KEY_ALBUM_TITLE, descriptor.album)
+            descriptor.thumbUrl?.let { addImage(com.google.android.gms.common.images.WebImage(android.net.Uri.parse(it))) }
         }
-        val mediaUrl = chromecastMediaUrl()
-        val contentType = chromecastContentType(mediaUrl)
         PhoebeLog.d("AndroidCastController") {
-            "loading cast media id=$id codec=$audioCodec contentType=$contentType transcode=${mediaUrl != streamUrl}"
+            "loading cast media id=${descriptor.trackId} codec=${descriptor.audioCodec} contentType=${descriptor.contentType} transcode=${descriptor.transcodesOriginal}"
         }
-        return MediaInfo.Builder(mediaUrl)
+        return MediaInfo.Builder(descriptor.castUrl)
             .setStreamType(MediaInfo.STREAM_TYPE_BUFFERED)
-            .setContentType(contentType)
+            .setContentType(descriptor.contentType)
             .setMetadata(metadata)
-            .setStreamDuration(durationMs)
-            .setCustomData(toCastCustomData(mediaUrl))
+            .setStreamDuration(descriptor.durationMs)
+            .setCustomData(descriptor.toCastCustomData())
             .build()
     }
 
-    private fun Track.toCastCustomData(mediaUrl: String): JSONObject =
+    private fun Track.toMediaQueueItem(): MediaQueueItem =
+        MediaQueueItem.Builder(toMediaInfo())
+            .setAutoplay(true)
+            .build()
+
+    private fun buildCastLoadRequest(queue: List<Track>, startIndex: Int, startPositionMs: Long): CastLoadRequest {
+        val tail = queue.drop(startIndex)
+        var itemCount = tail.size.coerceAtMost(MaxCastReceiverQueueItems)
+        var best: CastLoadRequest? = null
+        while (itemCount >= 1) {
+            val request = buildMediaLoadRequest(
+                queue = tail.take(itemCount),
+                startPositionMs = startPositionMs,
+            )
+            val bytes = request.estimatedByteSize()
+            val castRequest = CastLoadRequest(
+                requestData = request,
+                receiverQueueSize = itemCount,
+                estimatedBytes = bytes,
+            )
+            best = castRequest
+            if (bytes <= MaxCastLoadMessageBytes || itemCount == 1) return castRequest
+            itemCount = (itemCount / 2).coerceAtLeast(1)
+        }
+        return requireNotNull(best)
+    }
+
+    private fun buildMediaLoadRequest(queue: List<Track>, startPositionMs: Long): MediaLoadRequestData {
+        val queueData = MediaQueueData.Builder()
+            .setItems(queue.map { it.toMediaQueueItem() })
+            .setStartIndex(0)
+            .setStartTime(startPositionMs)
+            .setRepeatMode(MediaStatus.REPEAT_MODE_REPEAT_OFF)
+            .build()
+        return MediaLoadRequestData.Builder()
+            .setQueueData(queueData)
+            .setAutoplay(true)
+            .build()
+    }
+
+    private fun MediaLoadRequestData.estimatedByteSize(): Int =
+        toJson().toString().toByteArray(Charsets.UTF_8).size
+
+    private fun CastMediaDescriptor.toCastCustomData(): JSONObject =
         JSONObject().apply {
-            put(CAST_TRACK_ID, id)
-            put(CAST_TRACK_TITLE, title)
-            put(CAST_TRACK_ARTIST, artist)
-            put(CAST_TRACK_ALBUM, album)
-            put(CAST_TRACK_DURATION_MS, durationMs)
-            put(CAST_TRACK_STREAM_URL, streamUrl)
-            put(CAST_TRACK_CAST_URL, mediaUrl)
-            put(CAST_TRACK_DOWNLOAD_URL, downloadUrl)
-            thumbUrl?.let { put(CAST_TRACK_THUMB_URL, it) }
-            filepath?.let { put(CAST_TRACK_FILEPATH, it) }
-            audioCodec?.let { put(CAST_TRACK_AUDIO_CODEC, it) }
+            put(CastMediaCustomDataKeys.TrackId, trackId)
+            put(CastMediaCustomDataKeys.Title, title)
+            put(CastMediaCustomDataKeys.Artist, artist)
+            put(CastMediaCustomDataKeys.Album, album)
+            put(CastMediaCustomDataKeys.DurationMs, durationMs)
+            put(CastMediaCustomDataKeys.StreamUrl, streamUrl)
+            put(CastMediaCustomDataKeys.CastUrl, castUrl)
+            put(CastMediaCustomDataKeys.DownloadUrl, downloadUrl)
+            thumbUrl?.let { put(CastMediaCustomDataKeys.ThumbUrl, it) }
+            filepath?.let { put(CastMediaCustomDataKeys.Filepath, it) }
+            audioCodec?.let { put(CastMediaCustomDataKeys.AudioCodec, it) }
         }
 
     private fun MediaInfo.toTrack(): Track {
         val data = customData
         val remoteMetadata = metadata
-        val title = data?.optString(CAST_TRACK_TITLE).takeUnless { it.isNullOrBlank() }
+        val title = data?.optString(CastMediaCustomDataKeys.Title).takeUnless { it.isNullOrBlank() }
             ?: remoteMetadata?.getString(MediaMetadata.KEY_TITLE).orEmpty()
-        val artist = data?.optString(CAST_TRACK_ARTIST).takeUnless { it.isNullOrBlank() }
+        val artist = data?.optString(CastMediaCustomDataKeys.Artist).takeUnless { it.isNullOrBlank() }
             ?: remoteMetadata?.getString(MediaMetadata.KEY_ARTIST).orEmpty()
-        val album = data?.optString(CAST_TRACK_ALBUM).takeUnless { it.isNullOrBlank() }
+        val album = data?.optString(CastMediaCustomDataKeys.Album).takeUnless { it.isNullOrBlank() }
             ?: remoteMetadata?.getString(MediaMetadata.KEY_ALBUM_TITLE).orEmpty()
-        val streamUrl = data?.optString(CAST_TRACK_STREAM_URL).takeUnless { it.isNullOrBlank() }
+        val streamUrl = data?.optString(CastMediaCustomDataKeys.StreamUrl).takeUnless { it.isNullOrBlank() }
             ?: contentId.orEmpty()
-        val thumbUrl = data?.optString(CAST_TRACK_THUMB_URL).takeUnless { it.isNullOrBlank() }
+        val thumbUrl = data?.optString(CastMediaCustomDataKeys.ThumbUrl).takeUnless { it.isNullOrBlank() }
             ?: remoteMetadata?.images?.firstOrNull()?.url?.toString()
-        val durationMs = data?.optLong(CAST_TRACK_DURATION_MS, 0L)?.takeIf { it > 0L }
+        val durationMs = data?.optLong(CastMediaCustomDataKeys.DurationMs, 0L)?.takeIf { it > 0L }
             ?: streamDuration.takeIf { it > 0L }
             ?: 0L
-        return Track(
-            id = data?.optString(CAST_TRACK_ID).takeUnless { it.isNullOrBlank() }
-                ?: "cast:${streamUrl.hashCode()}",
-            title = title.ifBlank { "Chromecast audio" },
+        return castTrackFromMediaFields(
+            trackId = data?.optString(CastMediaCustomDataKeys.TrackId),
+            title = title,
             artist = artist,
             album = album,
             durationMs = durationMs,
             streamUrl = streamUrl,
-            downloadUrl = data?.optString(CAST_TRACK_DOWNLOAD_URL).orEmpty(),
+            castUrl = data?.optString(CastMediaCustomDataKeys.CastUrl) ?: contentId,
+            downloadUrl = data?.optString(CastMediaCustomDataKeys.DownloadUrl),
             thumbUrl = thumbUrl,
-            filepath = data?.optString(CAST_TRACK_FILEPATH).takeUnless { it.isNullOrBlank() },
-            audioCodec = data?.optString(CAST_TRACK_AUDIO_CODEC).takeUnless { it.isNullOrBlank() },
+            filepath = data?.optString(CastMediaCustomDataKeys.Filepath),
+            audioCodec = data?.optString(CastMediaCustomDataKeys.AudioCodec),
         )
     }
 
-    private fun Track.chromecastMediaUrl(): String {
-        if (hasChromecastDirectPlayableCodec()) return streamUrl
-        val ratingKey = id.removePrefix("plex:").takeIf { id.startsWith("plex:") && it.isNotBlank() }
-            ?: return streamUrl
-        val uri = android.net.Uri.parse(streamUrl)
-        val token = uri.getQueryParameter("X-Plex-Token").orEmpty()
-        if (uri.scheme.isNullOrBlank() || uri.authority.isNullOrBlank() || token.isBlank()) return streamUrl
-        return uri.buildUpon()
-            .encodedPath("/music/:/transcode/universal/start.mp3")
-            .clearQuery()
-            .appendQueryParameter("path", "/library/metadata/$ratingKey")
-            .appendQueryParameter("mediaIndex", "0")
-            .appendQueryParameter("partIndex", "0")
-            .appendQueryParameter("protocol", "http")
-            .appendQueryParameter("format", "mp3")
-            .appendQueryParameter("audioCodec", "mp3")
-            .appendQueryParameter("directPlay", "0")
-            .appendQueryParameter("directStream", "0")
-            .appendQueryParameter("X-Plex-Token", token)
-            .build()
-            .toString()
-    }
-
-    private fun Track.hasChromecastDirectPlayableCodec(): Boolean =
-        when (audioCodec?.lowercase()) {
-            "aac", "mp3", "mp4", "m4a" -> true
-            else -> {
-                val path = filepath ?: streamUrl.substringBefore('?').substringBefore('#')
-                when (path.substringAfterLast('.', missingDelimiterValue = "").lowercase()) {
-                    "aac", "mp3", "m4a", "mp4" -> true
-                    else -> false
-                }
-            }
-        }
-
-    private fun Track.chromecastContentType(mediaUrl: String): String =
-        if (mediaUrl != streamUrl) {
-            "audio/mpeg"
-        } else {
-            chromecastDirectContentType()
-        }
-
-    private fun Track.chromecastDirectContentType(): String =
-        when (audioCodec?.lowercase()) {
-            "aac" -> "audio/aac"
-            "mp3" -> "audio/mpeg"
-            "alac", "m4a", "mp4" -> "audio/mp4"
-            "flac" -> "audio/flac"
-            "ogg", "opus", "vorbis" -> "audio/ogg"
-            "wav" -> "audio/wav"
-            else -> {
-                val path = filepath ?: streamUrl.substringBefore('?').substringBefore('#')
-                when (path.substringAfterLast('.', missingDelimiterValue = "").lowercase()) {
-                    "aac" -> "audio/aac"
-                    "m4a", "mp4" -> "audio/mp4"
-                    "flac" -> "audio/flac"
-                    "ogg", "oga", "opus" -> "audio/ogg"
-                    "wav" -> "audio/wav"
-                    else -> "audio/mpeg"
-                }
-            }
-        }
-
     private companion object {
         const val LOAD_TIMEOUT_MS = 30_000L
-        const val CAST_TRACK_ID = "phoebeTrackId"
-        const val CAST_TRACK_TITLE = "title"
-        const val CAST_TRACK_ARTIST = "artist"
-        const val CAST_TRACK_ALBUM = "album"
-        const val CAST_TRACK_DURATION_MS = "durationMs"
-        const val CAST_TRACK_STREAM_URL = "streamUrl"
-        const val CAST_TRACK_CAST_URL = "castUrl"
-        const val CAST_TRACK_DOWNLOAD_URL = "downloadUrl"
-        const val CAST_TRACK_THUMB_URL = "thumbUrl"
-        const val CAST_TRACK_FILEPATH = "filepath"
-        const val CAST_TRACK_AUDIO_CODEC = "audioCodec"
+        const val MaxCastLoadMessageBytes = 450_000
+        const val MaxCastReceiverQueueItems = 80
     }
 }

@@ -90,7 +90,7 @@ class PlayHistoryRepository(
                 MostPlayedEntry(
                     trackId = row.track_id,
                     playCount = row.playCount ?: 0L,
-                    lastPlayedMs = row.lastPlayedMs ?: 0L,
+                    lastPlayedMs = row.lastPlayedMs,
                     artist = row.artist,
                     album = row.album,
                 )
@@ -146,7 +146,7 @@ class PlayHistoryRepository(
                     MostPlayedEntry(
                         trackId = row.track_id,
                         playCount = row.playCount ?: 0L,
-                        lastPlayedMs = row.lastPlayedMs ?: 0L,
+                        lastPlayedMs = row.lastPlayedMs,
                         artist = row.artist,
                         album = row.album,
                     )

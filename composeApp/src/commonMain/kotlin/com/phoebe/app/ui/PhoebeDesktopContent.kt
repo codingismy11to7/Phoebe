@@ -278,13 +278,29 @@ internal fun HomeNothingPlayingHero() {
 }
 
 @Composable
-internal fun EmptyNowPlayingArtworkSlot(modifier: Modifier = Modifier, glyphSp: TextUnit = 52.sp) {
-    Box(
+internal fun EmptyNowPlayingArtworkSlot(
+    modifier: Modifier = Modifier,
+    glyphSp: TextUnit = 52.sp,
+    shadowElevation: Dp = 18.dp,
+    shadowAlpha: Float = 0.28f,
+) {
+    val shape = RoundedCornerShape(14.dp)
+    val shadowColor = Color.Black.copy(alpha = shadowAlpha)
+    val decorationModifier = if (shadowElevation > 0.dp && !prefersReducedArtworkEffects()) {
+        modifier.shadow(
+            shadowElevation,
+            shape,
+            ambientColor = shadowColor,
+            spotColor = shadowColor,
+        )
+    } else {
         modifier
-            .shadow(18.dp, RoundedCornerShape(14.dp), ambientColor = Color.Black.copy(alpha = 0.28f))
-            .clip(RoundedCornerShape(14.dp))
+    }
+    Box(
+        decorationModifier
+            .clip(shape)
             .background(PhoebeUi.glass)
-            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(14.dp)),
+            .border(BorderStroke(1.dp, PhoebeUi.border), shape),
         contentAlignment = Alignment.Center,
     ) {
         PhoebeIconView(PhoebeIcon.Music, tint = PhoebeUi.mutedText.copy(alpha = 0.42f), modifier = Modifier.size(glyphSp.value.dp))

@@ -23,7 +23,6 @@ object AndroidPlaybackBridge {
     var onCastSkipNext: (() -> Unit)? = null
     var onCastSkipPrevious: (() -> Unit)? = null
     var onCastSeekTo: ((Long) -> Unit)? = null
-    var onCastVolume: ((Float) -> Unit)? = null
     var onEnsureLocalPlaybackPaused: (() -> Unit)? = null
     var readCastVolume: (() -> Float)? = null
     var applyCastVolume: ((Float) -> Unit)? = null
