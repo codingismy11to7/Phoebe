@@ -138,7 +138,7 @@ class PlaybackService : MediaLibraryService() {
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
             return listenableFuture("onGetChildren") {
                 val source = AndroidPlaybackRuntime.ensureInstalledNow()
-                val children = source.getChildren(parentId)
+                val children = source.getChildren(parentId).paged(page, pageSize)
                 LibraryResult.ofItemList(ImmutableList.copyOf(children), params)
             }
         }

@@ -218,6 +218,21 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.random.Random
 
+private const val MobilePlaybackStartDelayMs = 160L
+
+private data class PendingMobilePlaybackPreview(
+    val tracks: List<Track>,
+    val index: Int,
+) {
+    val currentTrack: Track?
+        get() = tracks.getOrNull(index)
+
+    val previousTrack: Track?
+        get() = tracks.getOrNull(index - 1)
+
+    val upNext: List<Track>
+        get() = if (index + 1 <= tracks.lastIndex) tracks.drop(index + 1) else emptyList()
+}
 
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
@@ -275,6 +290,7 @@ private fun PhoebeRootStateHolder(
     val radioStartingIds by state.radioStartingIds.collectAsState()
     val artistRadioAvailability by state.artistRadioAvailability.collectAsState()
     val downloadDirectory by state.downloadDirectory.collectAsState()
+    val activeDownloadJobCount by state.activeDownloadJobCount.collectAsState()
     val pin by state.pin.collectAsState()
     val servers by state.servers.collectAsState()
     val jellyfinServers by state.jellyfinServers.collectAsState()
@@ -443,8 +459,11 @@ private fun PhoebeRootStateHolder(
             isBuffering = shellPlayback.isBuffering,
         )
     }
-    val downloadStatus = remember(catalog.downloads) {
-        DownloadStatusSnapshot(catalog.downloads.associateBy { it.trackId })
+    val downloadStatus = remember(catalog.downloads, activeDownloadJobCount) {
+        DownloadStatusSnapshot(
+            itemsByTrackId = catalog.downloads.associateBy { it.trackId },
+            hasActiveDownloadJobs = activeDownloadJobCount > 0,
+        )
     }
     val playHistory = remember(
         lastPlayedByArtist,
@@ -538,6 +557,40 @@ private fun PhoebeRootStateHolder(
             collectionMixSeed = navigator.routes.collectionMixSeed(),
         )
     }
+    val mobilePlaybackScope = rememberCoroutineScope()
+    var pendingMobilePlaybackJob by remember { mutableStateOf<Job?>(null) }
+    var pendingMobilePlaybackPreview by remember { mutableStateOf<PendingMobilePlaybackPreview?>(null) }
+    LaunchedEffect(currentTrack?.id, pendingMobilePlaybackPreview?.currentTrack?.id) {
+        val preview = pendingMobilePlaybackPreview ?: return@LaunchedEffect
+        if (preview.currentTrack?.id == currentTrack?.id) {
+            pendingMobilePlaybackPreview = null
+        }
+    }
+    val playTracksFromMobile: (List<Track>, Int) -> Unit = playTracksFromMobile@{ tracks, index ->
+        if (tracks.isEmpty()) return@playTracksFromMobile
+        val collectionMixSeed = navigator.routes.collectionMixSeed()
+        val previewIndex = index.coerceIn(0, tracks.lastIndex)
+        pendingMobilePlaybackPreview = PendingMobilePlaybackPreview(tracks, previewIndex)
+        navigator.openPlayer()
+        pendingMobilePlaybackJob?.cancel()
+        pendingMobilePlaybackJob = mobilePlaybackScope.launch {
+            delay(MobilePlaybackStartDelayMs)
+            state.playTracks(
+                tracks = tracks,
+                index = index,
+                collectionMixSeed = collectionMixSeed,
+            )
+            delay(1_500L)
+            if (pendingMobilePlaybackPreview?.currentTrack?.id == tracks.getOrNull(previewIndex)?.id) {
+                pendingMobilePlaybackPreview = null
+            }
+        }
+    }
+    val mobilePlayerTrack = pendingMobilePlaybackPreview?.currentTrack ?: currentTrack
+    val mobilePlayerUpNext = pendingMobilePlaybackPreview?.upNext ?: upNext
+    val mobilePlayerPreviousTrack = pendingMobilePlaybackPreview?.previousTrack
+        ?: playerQueue.queue.getOrNull(currentIndex - 1)
+    val mobilePlayerCurrentIndex = pendingMobilePlaybackPreview?.index ?: currentIndex
     val personalMixCatalog = rememberUpdatedState(catalog)
     val personalMixHomeUiState = rememberUpdatedState(homeUiState)
     val personalMixPreferences = rememberUpdatedState(libraryUi.personalMix)
@@ -559,8 +612,7 @@ private fun PhoebeRootStateHolder(
                 if (tracks.isEmpty()) return@launch
                 recentPersonalMixKeys = (recentPersonalMixKeys + tracks.map { it.personalMixIdentityKey() })
                     .let { keys -> if (keys.size > 100) keys.drop(keys.size - 100).toSet() else keys.toSet() }
-                playTracks(tracks, 0)
-                navigator.openPlayer()
+                playTracksFromMobile(tracks, 0)
             }
             Unit
         }
@@ -907,10 +959,7 @@ private fun PhoebeRootStateHolder(
                         searchQuery = searchQuery,
                         onBack = { navigator.pop() },
                         onAlbum = { navigator.open(it.route()) },
-                        onPlayTracks = { tracks, index ->
-                            playTracks(tracks, index)
-                            navigator.openPlayer()
-                        },
+                        onPlayTracks = playTracksFromMobile,
                         onAddToUpNext = state::addToUpNext,
                         onDownload = state::download,
                         onDownloadArtist = state::download,
@@ -929,10 +978,7 @@ private fun PhoebeRootStateHolder(
                         modifier = Modifier.fillMaxSize(),
                         searchQuery = searchQuery,
                         onBack = { navigator.pop() },
-                        onPlayTracks = { tracks, index ->
-                            playTracks(tracks, index)
-                            navigator.openPlayer()
-                        },
+                        onPlayTracks = playTracksFromMobile,
                         onAddToUpNext = state::addToUpNext,
                         onDownload = state::download,
                         onDownloadAlbum = state::download,
@@ -943,10 +989,7 @@ private fun PhoebeRootStateHolder(
                         track = scr.track,
                         modifier = Modifier.fillMaxSize(),
                         onBack = { navigator.pop() },
-                        onPlay = {
-                            playTracks(listOf(scr.track), 0)
-                            navigator.openPlayer()
-                        },
+                        onPlay = { playTracksFromMobile(listOf(scr.track), 0) },
                         onAddToUpNext = state::addToUpNext,
                         onDownload = state::download,
                         onOpenLyrics = { navigator.open(PhoebeRoute.Lyrics(it.id)) },
@@ -968,10 +1011,7 @@ private fun PhoebeRootStateHolder(
                         onBack = { navigator.pop() },
                         onArtist = { navigator.open(it.route()) },
                         onAlbum = { navigator.open(it.route()) },
-                        onPlayTracks = { tracks, index ->
-                            playTracks(tracks, index)
-                            navigator.openPlayer()
-                        },
+                        onPlayTracks = playTracksFromMobile,
                         onAddToUpNext = state::addToUpNext,
                         onDownload = state::download,
                     )
@@ -1000,10 +1040,7 @@ private fun PhoebeRootStateHolder(
                         resolvedTracksById = resolvedTracksById,
                         modifier = Modifier.fillMaxSize(),
                         onBack = { navigator.pop() },
-                        onPlayTracks = { tracks, index ->
-                            playTracks(tracks, index)
-                            navigator.openPlayer()
-                        },
+                        onPlayTracks = playTracksFromMobile,
                         onAddToUpNext = state::addToUpNext,
                         onDownload = state::download,
                     )
@@ -1045,10 +1082,7 @@ private fun PhoebeRootStateHolder(
                         searchQuery = searchQuery,
                         onSearchQuery = { searchQuery = it },
                         onBack = exitPlaylistDetail,
-                        onPlayTracks = { tracks, index ->
-                            playTracks(tracks, index)
-                            navigator.openPlayer()
-                        },
+                        onPlayTracks = playTracksFromMobile,
                         onAddToUpNext = state::addToUpNext,
                         onDownload = state::download,
                         onDownloadPlaylist = state::download,
@@ -1056,10 +1090,10 @@ private fun PhoebeRootStateHolder(
                     )
                     AppScreen.Player -> MobilePlayerHost(
                         appState = state,
-                        track = currentTrack,
-                        upNext = upNext,
-                        previousTrack = playerQueue.queue.getOrNull(currentIndex - 1),
-                        currentIndex = currentIndex,
+                        track = mobilePlayerTrack,
+                        upNext = mobilePlayerUpNext,
+                        previousTrack = mobilePlayerPreviousTrack,
+                        currentIndex = mobilePlayerCurrentIndex,
                         castState = cast,
                         remotePlaybackTarget = musicAssistantRemotePlayback?.target,
                         onToggle = state::togglePlayPause,
@@ -1159,10 +1193,7 @@ private fun PhoebeRootStateHolder(
                         radioStartingIds = radioStartingIds,
                         onPlayRadioStation = state::playRadioStation,
                         onPlayPersonalMix = playPersonalMix,
-                        onPlayTracks = { tracks, index ->
-                            playTracks(tracks, index)
-                            navigator.openPlayer()
-                        },
+                        onPlayTracks = playTracksFromMobile,
                         onAddToUpNext = state::addToUpNext,
                         onDownload = state::download,
                         onOpenNowPlaying = { navigator.openPlayer() },
@@ -1225,10 +1256,10 @@ private fun PhoebeRootStateHolder(
                     ) {
                         MobilePlayerHost(
                             appState = state,
-                            track = currentTrack,
-                            upNext = upNext,
-                            previousTrack = playerQueue.queue.getOrNull(currentIndex - 1),
-                            currentIndex = currentIndex,
+                            track = mobilePlayerTrack,
+                            upNext = mobilePlayerUpNext,
+                            previousTrack = mobilePlayerPreviousTrack,
+                            currentIndex = mobilePlayerCurrentIndex,
                             castState = cast,
                             remotePlaybackTarget = musicAssistantRemotePlayback?.target,
                             onToggle = state::togglePlayPause,

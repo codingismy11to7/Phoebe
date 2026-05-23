@@ -64,7 +64,6 @@ import com.phoebe.app.platform.PhoebeLog
 import com.phoebe.app.platform.currentTimeMs
 import com.phoebe.app.platform.discoverJellyfinServers as discoverJellyfinServersOnNetwork
 import com.phoebe.app.platform.openExternalUrl
-import com.phoebe.app.sources.LocalLibraryIO
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -254,7 +253,9 @@ class AppState(
     private val mutableDownloadDirectory = MutableStateFlow<String?>(null)
     val downloadDirectory: StateFlow<String?> = mutableDownloadDirectory
 
-    private var playRequestGeneration = 0
+    private val mutableActiveDownloadJobCount = MutableStateFlow(0)
+    val activeDownloadJobCount: StateFlow<Int> = mutableActiveDownloadJobCount
+
     private var collectionMixGeneration = 0
     private var recentAlbumWarmSignature: String? = null
     private var playedAlbumWarmSignature: String? = null
@@ -264,6 +265,10 @@ class AppState(
     private var catalogRefreshJob: Job? = null
     private var playHistorySyncJob: Job? = null
     private val activeDownloadJobs = mutableSetOf<Job>()
+
+    private fun publishActiveDownloadJobCount() {
+        mutableActiveDownloadJobCount.value = activeDownloadJobs.size
+    }
 
     init {
         scope.launch {
@@ -1260,7 +1265,6 @@ class AppState(
         index: Int = 0,
         collectionMixSeed: CollectionMixSeed? = null,
     ) {
-        val requestGeneration = ++playRequestGeneration
         collectionMixGeneration++
         val track = tracks.getOrNull(index)
         if (dependencies.castController.state.value.isConnected) {
@@ -1297,24 +1301,9 @@ class AppState(
             return
         }
         mutableMusicAssistantRemotePlayback.value = null
-        if (track?.localUri.isNullOrBlank()) {
-            dependencies.audioPlayer.play(tracks, index)
-            collectionMixSeed?.toCollectionMix()?.let { mix ->
-                scheduleCollectionMix(mix, tracks.map { it.id }.toSet())
-            }
-            return
-        }
-
-        scope.launch {
-            val ok = runCatching {
-                LocalLibraryIO.fileExists(track.localUri)
-            }.getOrDefault(false)
-            if (requestGeneration != playRequestGeneration) return@launch
-            if (ok) {
-                dependencies.audioPlayer.play(tracks, index)
-            } else {
-                mutableMessage.value = "Could not open file (missing or inaccessible): ${track.title}"
-            }
+        dependencies.audioPlayer.play(tracks, index)
+        collectionMixSeed?.toCollectionMix()?.let { mix ->
+            scheduleCollectionMix(mix, tracks.map { it.id }.toSet())
         }
     }
 
@@ -1615,11 +1604,20 @@ class AppState(
             try {
                 val result = block()
                 notifyDownloadFinishedIfNeeded(result)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                PhoebeLog.d("AppState") { "download failed: ${error.message}" }
+                mutableMessage.value = error.message?.takeIf { it.isNotBlank() }
+                    ?.let { "Download failed: $it" }
+                    ?: "Download failed."
             } finally {
                 activeDownloadJobs.remove(downloadJob)
+                publishActiveDownloadJobCount()
             }
         }
         activeDownloadJobs += downloadJob
+        publishActiveDownloadJobCount()
         return downloadJob
     }
 
@@ -1683,8 +1681,17 @@ class AppState(
                 val noun = if (result.completed == 1) singular else plural
                 "Downloaded ${result.completed} $noun."
             }
-            result.completed > 0 -> "Downloaded ${result.completed} of ${result.total} songs. ${result.failed} failed."
-            else -> "Couldn't download those songs."
+            result.failed == 0 && result.completed > 0 && result.skipped > 0 -> {
+                val noun = if (result.completed == 1) singular else plural
+                "Downloaded ${result.completed} $noun. ${result.skipped} unavailable."
+            }
+            result.failed == 0 && result.skipped > 0 -> "No downloadable songs found."
+            result.completed > 0 -> {
+                val percent = ((result.completed.toFloat() / result.total.toFloat()) * 100f).toInt().coerceIn(0, 100)
+                val skipped = result.skipped.takeIf { it > 0 }?.let { " $it unavailable." }.orEmpty()
+                "Downloaded ${result.completed} of ${result.total} songs ($percent%). ${result.failed} failed.$skipped"
+            }
+            else -> "Couldn't download those songs. 0% downloaded."
         }
 
     /**

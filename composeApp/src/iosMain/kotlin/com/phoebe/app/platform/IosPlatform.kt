@@ -109,6 +109,24 @@ actual class PlatformStorage actual constructor() {
         return NSURL.fileURLWithPath(path).absoluteString ?: "file://$path"
     }
 
+    actual suspend fun writeByteStream(name: String, readChunk: suspend () -> ByteArray?): String {
+        val chunks = mutableListOf<ByteArray>()
+        var totalBytes = 0
+        while (true) {
+            val chunk = readChunk() ?: break
+            if (chunk.isEmpty()) continue
+            chunks += chunk
+            totalBytes += chunk.size
+        }
+        val bytes = ByteArray(totalBytes)
+        var offset = 0
+        chunks.forEach { chunk ->
+            chunk.copyInto(bytes, destinationOffset = offset)
+            offset += chunk.size
+        }
+        return writeBytes(name, bytes)
+    }
+
     actual suspend fun readDownloadDirectory(): String? =
         defaults.stringForKey(DownloadDirectoryKey)?.takeIf { it.isNotBlank() }
 

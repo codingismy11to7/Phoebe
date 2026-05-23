@@ -19,6 +19,7 @@ expect class PlatformStorage() {
     suspend fun readBytes(name: String): ByteArray?
     suspend fun readUriBytes(uri: String): ByteArray?
     suspend fun writeBytes(name: String, bytes: ByteArray): String
+    suspend fun writeByteStream(name: String, readChunk: suspend () -> ByteArray?): String
     suspend fun readDownloadDirectory(): String?
     suspend fun writeDownloadDirectory(uri: String?)
     fun defaultDownloadDirectoryLabel(): String

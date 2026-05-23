@@ -152,6 +152,28 @@ actual class PlatformStorage actual constructor() {
         }.toURI().toString()
     }
 
+    actual suspend fun writeByteStream(name: String, readChunk: suspend () -> ByteArray?): String = withContext(Dispatchers.IO) {
+        val downloadTree = readDownloadDirectory()
+        if (downloadTree != null) {
+            writeByteStreamToTree(downloadTree, name, readChunk)?.let { return@withContext it }
+        }
+        val file = defaultDownloadDirectory().resolve(name.removePrefix("downloads/")).apply {
+            parentFile?.mkdirs()
+        }
+        try {
+            file.outputStream().use { stream ->
+                while (true) {
+                    val chunk = readChunk() ?: break
+                    if (chunk.isNotEmpty()) stream.write(chunk)
+                }
+            }
+        } catch (error: Throwable) {
+            file.takeIf { it.exists() }?.delete()
+            throw error
+        }
+        file.toURI().toString()
+    }
+
     actual suspend fun readDownloadDirectory(): String? =
         readText(DownloadDirectoryFile)?.takeIf { it.isNotBlank() }
 
@@ -237,18 +259,52 @@ actual class PlatformStorage actual constructor() {
         }
         val existing = parent.findFile(fileName)
         existing?.delete()
-        val mimeType = when (fileName.substringAfterLast('.', "").lowercase()) {
-            "mp3" -> "audio/mpeg"
-            "m4a", "aac" -> "audio/mp4"
-            "flac" -> "audio/flac"
-            "wav" -> "audio/wav"
-            "ogg", "opus" -> "audio/ogg"
-            else -> "application/octet-stream"
-        }
+        val mimeType = downloadMimeType(fileName)
         val doc = parent.createFile(mimeType, fileName) ?: return null
-        context.contentResolver.openOutputStream(doc.uri)?.use { stream ->
+        val outputStream = context.contentResolver.openOutputStream(doc.uri) ?: run {
+            doc.delete()
+            return null
+        }
+        outputStream.use { stream ->
             stream.write(bytes)
-        } ?: return null
+        }
+        return doc.uri.toString()
+    }
+
+    private suspend fun writeByteStreamToTree(
+        rootUri: String,
+        name: String,
+        readChunk: suspend () -> ByteArray?,
+    ): String? {
+        val context = AndroidContextHolder.application
+        val rootDoc = DocumentFile.fromTreeUri(context, Uri.parse(rootUri)) ?: return null
+        val relative = name.removePrefix("downloads/").trim('/')
+        val segments = relative.split('/').mapNotNull { it.trim().takeIf(String::isNotBlank) }
+        val fileName = segments.lastOrNull() ?: "download.audio"
+        val parent = segments.dropLast(1).fold(rootDoc) { directory, segment ->
+            directory.findFile(segment)?.takeIf { it.isDirectory }
+                ?: directory.createDirectory(segment)
+                ?: return null
+        }
+        val existing = parent.findFile(fileName)
+        existing?.delete()
+        val mimeType = downloadMimeType(fileName)
+        val doc = parent.createFile(mimeType, fileName) ?: return null
+        val outputStream = context.contentResolver.openOutputStream(doc.uri) ?: run {
+            doc.delete()
+            return null
+        }
+        try {
+            outputStream.use { stream ->
+                while (true) {
+                    val chunk = readChunk() ?: break
+                    if (chunk.isNotEmpty()) stream.write(chunk)
+                }
+            }
+        } catch (error: Throwable) {
+            doc.delete()
+            throw error
+        }
         return doc.uri.toString()
     }
 }
@@ -258,6 +314,16 @@ private fun File.canonicalOrNull(): File? =
 
 private fun File.isDescendantOf(parent: File): Boolean =
     runCatching { toPath().startsWith(parent.toPath()) }.getOrDefault(false)
+
+private fun downloadMimeType(fileName: String): String =
+    when (fileName.substringAfterLast('.', "").lowercase()) {
+        "mp3" -> "audio/mpeg"
+        "m4a", "aac" -> "audio/mp4"
+        "flac" -> "audio/flac"
+        "wav" -> "audio/wav"
+        "ogg", "opus" -> "audio/ogg"
+        else -> "application/octet-stream"
+    }
 
 actual class DownloadNotifier actual constructor() {
     actual suspend fun notifyDownloadFinished(title: String, body: String): Boolean = withContext(Dispatchers.IO) {

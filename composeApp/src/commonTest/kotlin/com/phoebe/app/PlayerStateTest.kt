@@ -70,6 +70,47 @@ class PlayerStateTest {
     }
 
     @Test
+    fun clickingCurrentBufferingStreamTrackReassertsPlaybackIntent() {
+        val player = SlowTestPlayer()
+        val tracks = listOf(
+            Track("t1", "One", "Artist", "Album", 60_000, "http://a", ""),
+        )
+
+        player.play(tracks, 0)
+        player.platformPlayWhenReady(false)
+        player.play(tracks, 0)
+        player.finishPendingLoad()
+
+        assertTrue(player.state.value.isPlaying)
+        assertEquals(1, player.resumeCalls)
+    }
+
+    @Test
+    fun clickingCurrentBufferingDownloadedTrackReassertsPlaybackIntent() {
+        val player = SlowTestPlayer()
+        val tracks = listOf(
+            Track(
+                id = "t1",
+                title = "One",
+                artist = "Artist",
+                album = "Album",
+                durationMs = 60_000,
+                streamUrl = "http://a",
+                downloadUrl = "",
+                localUri = "file:///downloads/one.mp3",
+            ),
+        )
+
+        player.play(tracks, 0)
+        player.platformPlayWhenReady(false)
+        player.play(tracks, 0)
+        player.finishPendingLoad()
+
+        assertTrue(player.state.value.isPlaying)
+        assertEquals(1, player.resumeCalls)
+    }
+
+    @Test
     fun rapidSameQueueSkipsOnlyPlayFinalTrack() {
         val player = SlowTestPlayer()
         val tracks = listOf(
@@ -506,8 +547,13 @@ private class SuspendTrackingTestPlayer : SimpleAudioPlayer() {
 
 private class SlowTestPlayer : SimpleAudioPlayer() {
     private val pendingLoads = mutableSetOf<Int>()
+    var resumeCalls = 0
 
     override fun playUri(uri: String) = Unit
+
+    override fun resume() {
+        resumeCalls++
+    }
 
     override fun playQueueOnPlatform(queue: List<Track>, startIndex: Int, track: Track, generation: Int) {
         pendingLoads += generation
@@ -525,6 +571,10 @@ private class SlowTestPlayer : SimpleAudioPlayer() {
 
     fun finishPendingLoad() {
         finishLoad(activePlayGeneration)
+    }
+
+    fun platformPlayWhenReady(playWhenReady: Boolean) {
+        adoptPlatformPlayIntent(playWhenReady)
     }
 }
 

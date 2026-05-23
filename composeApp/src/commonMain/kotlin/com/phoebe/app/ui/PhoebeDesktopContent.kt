@@ -92,7 +92,9 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
@@ -157,6 +159,7 @@ import com.phoebe.app.domain.supportsPlexPlaylists
 import com.phoebe.app.platform.createPlatformHttpClient
 import com.phoebe.app.platform.currentTimeMs
 import com.phoebe.app.platform.prefersReducedArtworkEffects
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import com.phoebe.app.sources.rememberPickLocalFolder
 import io.ktor.client.HttpClient
@@ -166,6 +169,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 import kotlin.math.max
 
@@ -530,9 +534,20 @@ internal fun DesktopContent(
             section == BrowseSection.Playlists -> {
                 val playlistActions = LocalPlaylistActions.current
                 val catalogSyncInProgress = LocalCatalogSyncInProgress.current
-                val visiblePlaylists = remember(playlistActions.playlists, searchQuery) {
-                    filterPlaylistsByQuery(playlistActions.playlists, searchQuery)
+                val sourcePlaylists = playlistActions.playlists
+                val visiblePlaylists by produceState<List<Playlist>?>(
+                    initialValue = null,
+                    sourcePlaylists,
+                    searchQuery,
+                ) {
+                    value = null
+                    withFrameNanos { }
+                    value = withContext(Dispatchers.Default) {
+                        filterPlaylistsByQuery(sourcePlaylists, searchQuery)
+                    }
                 }
+                val preparedVisiblePlaylists = visiblePlaylists.orEmpty()
+                val preparingPlaylists = visiblePlaylists == null && sourcePlaylists.isNotEmpty()
                 val showPlaylistSyncProgress = catalogSyncInProgress && searchQuery.isBlank()
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (!playlistActions.playlistsEnabled) {
@@ -545,7 +560,16 @@ internal fun DesktopContent(
                         if (showPlaylistSyncProgress) {
                             CatalogLoadingStrip()
                         }
-                        if (visiblePlaylists.isEmpty()) {
+                        if (preparingPlaylists) {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                LibraryLoadingStrip()
+                                Text(
+                                    "Loading playlists...",
+                                    color = PhoebeUi.mutedText,
+                                    fontSize = 14.sp,
+                                )
+                            }
+                        } else if (preparedVisiblePlaylists.isEmpty()) {
                             if (!showPlaylistSyncProgress) {
                                 Text(
                                     if (searchQuery.isNotBlank()) {
@@ -558,18 +582,23 @@ internal fun DesktopContent(
                                 )
                             }
                         } else {
-                            visiblePlaylists.forEach { playlist ->
-                                val liked = playlist.isLikedSongsPlaylist()
-                                Box(Modifier.draggablePlaylist(playlist).playlistDropTarget(playlist)) {
-                                    PlaylistRow(
-                                        icon = if (liked) PhoebeIcon.Heart else null,
-                                        title = playlist.title,
-                                        subtitle = "${playlist.trackCount} songs",
-                                        thumbUrl = playlist.thumbUrl,
-                                        accent = liked,
-                                        onClick = { onPlaylist(playlist) },
-                                        onLongClick = { playlistActions.onShufflePlaylist(playlist) },
-                                    )
+                            LazyColumn(
+                                modifier = Modifier.fillMaxSize(),
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                items(preparedVisiblePlaylists, key = { it.id }, contentType = { "playlist" }) { playlist ->
+                                    val liked = playlist.isLikedSongsPlaylist()
+                                    Box(Modifier.draggablePlaylist(playlist).playlistDropTarget(playlist)) {
+                                        PlaylistRow(
+                                            icon = if (liked) PhoebeIcon.Heart else null,
+                                            title = playlist.title,
+                                            subtitle = "${playlist.trackCount} songs",
+                                            thumbUrl = playlist.thumbUrl,
+                                            accent = liked,
+                                            onClick = { onPlaylist(playlist) },
+                                            onLongClick = { playlistActions.onShufflePlaylist(playlist) },
+                                        )
+                                    }
                                 }
                             }
                         }

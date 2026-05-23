@@ -292,11 +292,14 @@ internal fun PlayButton(
     onClick: () -> Unit,
     enabled: Boolean = true,
 ) {
-    val scale by animateFloatAsState(
-        if ((isPlaying || isBuffering) && enabled) 1f else 0.98f,
+    val motionEnabled = LocalContinuousMotionEnabled.current
+    val targetScale = if ((isPlaying || isBuffering) && enabled) 1f else 0.98f
+    val scaleState = animateFloatAsState(
+        targetScale,
         spring(),
         label = "play-button-scale",
     )
+    val scale = if (motionEnabled) scaleState.value else targetScale
     val gradient = if (enabled) {
         Brush.linearGradient(listOf(PhoebeUi.accentLight, PhoebeUi.accent))
     } else {
@@ -329,28 +332,55 @@ internal fun PlayButton(
             .semantics { this.contentDescription = contentDescription },
         contentAlignment = Alignment.Center,
     ) {
-        AnimatedContent(
-            targetState = isBuffering,
-            transitionSpec = {
-                fadeIn(tween(160)) togetherWith fadeOut(tween(120))
-            },
-            label = "play-button-icon",
-        ) { loading ->
-            if (loading) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(spinnerSize),
-                    color = PhoebeUi.primaryText,
-                    strokeWidth = 2.dp,
-                    trackColor = PhoebeUi.primaryText.copy(alpha = 0.22f),
-                )
-            } else {
-                MorphingPlayPauseIcon(
+        if (motionEnabled) {
+            AnimatedContent(
+                targetState = isBuffering,
+                transitionSpec = {
+                    fadeIn(tween(160)) togetherWith fadeOut(tween(120))
+                },
+                label = "play-button-icon",
+            ) { loading ->
+                PlayButtonGlyph(
+                    loading = loading,
                     isPlaying = isPlaying,
-                    tint = if (enabled) PhoebeUi.primaryText else PhoebeUi.mutedText.copy(alpha = 0.55f),
-                    modifier = Modifier.size(iconSize),
+                    enabled = enabled,
+                    spinnerSize = spinnerSize,
+                    iconSize = iconSize,
                 )
             }
+        } else {
+            PlayButtonGlyph(
+                loading = isBuffering,
+                isPlaying = isPlaying,
+                enabled = enabled,
+                spinnerSize = spinnerSize,
+                iconSize = iconSize,
+            )
         }
+    }
+}
+
+@Composable
+private fun PlayButtonGlyph(
+    loading: Boolean,
+    isPlaying: Boolean,
+    enabled: Boolean,
+    spinnerSize: Dp,
+    iconSize: Dp,
+) {
+    if (loading) {
+        CircularProgressIndicator(
+            modifier = Modifier.size(spinnerSize),
+            color = PhoebeUi.primaryText,
+            strokeWidth = 2.dp,
+            trackColor = PhoebeUi.primaryText.copy(alpha = 0.22f),
+        )
+    } else {
+        MorphingPlayPauseIcon(
+            isPlaying = isPlaying,
+            tint = if (enabled) PhoebeUi.primaryText else PhoebeUi.mutedText.copy(alpha = 0.55f),
+            modifier = Modifier.size(iconSize),
+        )
     }
 }
 
@@ -360,11 +390,14 @@ private fun MorphingPlayPauseIcon(
     tint: Color,
     modifier: Modifier = Modifier,
 ) {
-    val morph by animateFloatAsState(
-        targetValue = if (isPlaying) 1f else 0f,
+    val motionEnabled = LocalContinuousMotionEnabled.current
+    val targetMorph = if (isPlaying) 1f else 0f
+    val morphState = animateFloatAsState(
+        targetValue = targetMorph,
         animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing),
         label = "play-pause-morph",
     )
+    val morph = if (motionEnabled) morphState.value else targetMorph
 
     Canvas(modifier) {
         val s = size.minDimension
@@ -464,6 +497,11 @@ internal fun WaveformDurationBar(
     val bufferedColor = PhoebeUi.primaryText.copy(alpha = 0.34f)
     val unplayedBase = PhoebeUi.waveformUnplayed
     val playheadColor = PhoebeUi.waveformPlayhead
+    val waveformAmplitudes = remember(seed, durationMs, maxBarSlots) {
+        FloatArray(maxBarSlots.coerceAtLeast(20)) { index ->
+            if (durationMs > 0L) waveBarHeight(seed, index) else 0.12f
+        }
+    }
     Canvas(
         modifier.semantics {
             this.contentDescription = contentDescription
@@ -477,7 +515,7 @@ internal fun WaveformDurationBar(
         val queued = unplayedBase
         for (i in 0 until barSlots) {
             val frac = (i + 0.5f) / barSlots
-            val amp = if (durationMs > 0L) waveBarHeight(seed, i) else 0.12f
+            val amp = waveformAmplitudes[i]
             val barH = size.height * amp
             val x = i * slotW + (slotW - barW) / 2f
             val color = when {
