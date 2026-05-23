@@ -323,7 +323,9 @@ class CatalogRepository(
             blocking = false,
         )
         val cachedShell = trace.disk("readCatalogShellFromDatabase") {
-            withContext(Dispatchers.Default) { readCatalogShellFromDatabase() }
+            withContext(Dispatchers.Default) {
+                readCatalogShellFromDatabase().withoutInactiveLocalFolderCatalog(activeLocalFolderIds())
+            }
         }
         val downloads = trace.disk("readDownloadsFromDatabase") {
             withContext(Dispatchers.Default) {
@@ -374,7 +376,9 @@ class CatalogRepository(
             mutableCatalogSyncState.value = CatalogSyncState()
             return
         }
-        val repaired = removeMissingLocalArtworkReferences(parsed)
+        val repaired = removeMissingLocalArtworkReferences(
+            parsed.withoutInactiveLocalFolderCatalog(activeLocalFolderIds()),
+        )
         trace.disk("migrateLegacyCatalogToDatabase") {
             withContext(Dispatchers.Default) { runCatalogDbWrite { persist(repaired) } }
         }
@@ -1936,16 +1940,17 @@ class CatalogRepository(
         previous: CatalogSnapshot,
         session: PlexSession?,
     ): ReconciledSnapshot {
+        val sanitizedPrevious = previous.withoutInactiveLocalFolderCatalog(activeLocalFolderIds())
         // The Plex builder prefetches tracks after the first metadata publish. To avoid wiping
         // lazily-loaded entries that the user has accumulated, keep previous entries for any
         // parent that still exists and let newly-fetched data overlay them later.
         val knownParents =
             (merged.albums.asSequence().map { it.id } +
                 merged.playlists.asSequence().map { it.id }).toSet()
-        val localPlaylists = previous.playlists.filter { it.isLocalPlaylist() }
+        val localPlaylists = sanitizedPrevious.playlists.filter { it.isLocalPlaylist() }
         val localPlaylistIds = localPlaylists.map { it.id }.toSet()
         val currentToken = session.serverAuthToken()
-        val preservedTracks = previous.tracksByParent
+        val preservedTracks = sanitizedPrevious.tracksByParent
             .filterKeys { it in knownParents || it in localPlaylistIds }
             .filterValues { tracks ->
                 tracks.all { it.shouldPreserveAcrossPlexRefresh(currentToken) }
@@ -1975,13 +1980,13 @@ class CatalogRepository(
         val reconciled = merged.copy(
             playlists = reconciledPlaylists + localPlaylists,
             tracksByParent = preservedTracks + merged.tracksByParent,
-            collectionValues = previous.collectionValues,
-            collectionValueLoads = previous.collectionValueLoads,
-            collectionTags = previous.collectionTags,
-            downloads = previous.downloads,
+            collectionValues = sanitizedPrevious.collectionValues,
+            collectionValueLoads = sanitizedPrevious.collectionValueLoads,
+            collectionTags = sanitizedPrevious.collectionTags,
+            downloads = sanitizedPrevious.downloads,
         )
         return ReconciledSnapshot(
-            snapshot = preserveDateAdded(previous, reconciled),
+            snapshot = preserveDateAdded(sanitizedPrevious, reconciled),
             stalePlaylists = staleForRefetch,
         )
     }
@@ -2375,7 +2380,8 @@ class CatalogRepository(
     }
 
     private suspend fun tracksToPreserveDuringRefresh(previous: CatalogSnapshot): Map<String, List<Track>> {
-        if (previous.tracksByParent.isNotEmpty()) return previous.tracksByParent
+        val sanitizedPrevious = previous.withoutInactiveLocalFolderCatalog(activeLocalFolderIds())
+        if (sanitizedPrevious.tracksByParent.isNotEmpty()) return sanitizedPrevious.tracksByParent
         return readTracksFromDatabase().tracksByParent
     }
 
@@ -5916,7 +5922,10 @@ class CatalogRepository(
     }
 
     private suspend fun readTracksFromDatabase(): CatalogSnapshot {
-        val trackRows = database.catalogQueries.selectAllTracks().awaitAsList()
+        val activeLocalFolderIds = activeLocalFolderIds()
+        val trackRows = database.catalogQueries.selectAllTracks()
+            .awaitAsList()
+            .filterNot { row -> row.id.isInactiveLocalFolderCatalogId(activeLocalFolderIds) }
         yield()
         val tracksById: Map<String, Track> = trackRows.associate { row ->
                 row.id to Track(
@@ -5945,6 +5954,7 @@ class CatalogRepository(
         yield()
         val tracksByParent: Map<String, List<Track>> = database.catalogQueries.selectTrackParents()
             .awaitAsList()
+            .filterNot { row -> row.parentId.isInactiveLocalFolderCatalogId(activeLocalFolderIds) }
             .groupBy { it.parentId }
             .mapValues { (_, entries) ->
                 entries.sortedBy { it.position }
@@ -5965,6 +5975,12 @@ class CatalogRepository(
             downloads = downloads,
         )
     }
+
+    private fun activeLocalFolderIds(): Set<String> =
+        mediaSourcesRepository.state.value.localFolders
+            .asSequence()
+            .filter { it.enabled }
+            .mapTo(mutableSetOf()) { it.id }
 
     private fun CatalogSnapshot.isNotEmpty(): Boolean =
         artists.isNotEmpty() ||
@@ -6197,3 +6213,28 @@ private fun CatalogSnapshot.withoutLocalFolderCatalog(): CatalogSnapshot =
 private fun String.isLocalPlaylistId(): Boolean = startsWith(LOCAL_PLAYLIST_ID_PREFIX)
 
 private fun String.isLocalFolderCatalogId(): Boolean = startsWith("local_")
+
+private fun CatalogSnapshot.withoutInactiveLocalFolderCatalog(activeFolderIds: Set<String>): CatalogSnapshot =
+    copy(
+        artists = artists.filterNot { it.id.isInactiveLocalFolderCatalogId(activeFolderIds) },
+        albums = albums.filterNot { it.id.isInactiveLocalFolderCatalogId(activeFolderIds) },
+        tracksByParent = tracksByParent
+            .filterKeys { !it.isInactiveLocalFolderCatalogId(activeFolderIds) }
+            .mapValues { (_, tracks) ->
+                tracks.filterNot { it.id.isInactiveLocalFolderCatalogId(activeFolderIds) }
+            }
+            .filterValues { it.isNotEmpty() },
+        collectionTags = collectionTags.filterNot { it.itemId.isInactiveLocalFolderCatalogId(activeFolderIds) },
+    )
+
+private fun String.isInactiveLocalFolderCatalogId(activeFolderIds: Set<String>): Boolean {
+    val folderId = localFolderCatalogId() ?: return false
+    return folderId !in activeFolderIds
+}
+
+private fun String.localFolderCatalogId(): String? {
+    if (!startsWith("local_")) return null
+    return removePrefix("local_")
+        .substringBefore(':')
+        .takeIf { it.isNotBlank() }
+}

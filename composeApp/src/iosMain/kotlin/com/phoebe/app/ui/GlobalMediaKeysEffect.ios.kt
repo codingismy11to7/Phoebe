@@ -4,14 +4,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.snapshotFlow
 import com.phoebe.app.domain.PlayerState
 import com.phoebe.app.player.IosNowPlayingCenter
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.StateFlow
 
 @Composable
 actual fun GlobalMediaKeysEffect(
-    player: PlayerState,
+    playerFlow: StateFlow<PlayerState>,
     onTogglePlayPause: () -> Unit,
     onPlay: () -> Unit,
     onPause: () -> Unit,
@@ -19,7 +19,6 @@ actual fun GlobalMediaKeysEffect(
     onPrevious: () -> Unit,
     onSeek: (Long) -> Unit,
 ) {
-    val playerState = rememberUpdatedState(player)
     val toggle = rememberUpdatedState(onTogglePlayPause)
     val play = rememberUpdatedState(onPlay)
     val pause = rememberUpdatedState(onPause)
@@ -40,8 +39,8 @@ actual fun GlobalMediaKeysEffect(
         }
     }
 
-    LaunchedEffect(Unit) {
-        snapshotFlow { playerState.value }.collectLatest { state ->
+    LaunchedEffect(playerFlow) {
+        playerFlow.collectLatest { state ->
             val track = state.currentTrack
             val durationMs = when {
                 state.durationMs > 0L -> state.durationMs

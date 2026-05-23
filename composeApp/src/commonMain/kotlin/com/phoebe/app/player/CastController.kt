@@ -22,8 +22,23 @@ data class CastState(
     val currentTrack: Track? get() = queue.getOrNull(currentIndex)
 }
 
+val CastState.isPlaybackActive: Boolean
+    get() = isConnected && queue.isNotEmpty()
+
+data class CastQueueSupport(
+    val isSupported: Boolean,
+    val message: String? = null,
+) {
+    companion object {
+        fun supported(): CastQueueSupport = CastQueueSupport(isSupported = true)
+        fun unsupported(message: String): CastQueueSupport =
+            CastQueueSupport(isSupported = false, message = message)
+    }
+}
+
 interface CastController {
     val state: StateFlow<CastState>
+    fun canLoadQueue(queue: List<Track>): CastQueueSupport
     fun showDevicePicker()
     fun disconnect()
     fun loadQueue(queue: List<Track>, startIndex: Int = 0)
@@ -44,6 +59,8 @@ open class UnavailableCastController(
     }
 
     override fun disconnect() = Unit
+    override fun canLoadQueue(queue: List<Track>): CastQueueSupport =
+        CastQueueSupport.unsupported(unavailableMessage)
     override fun loadQueue(queue: List<Track>, startIndex: Int) = showDevicePicker()
     override fun togglePlayPause() = Unit
     override fun next() = Unit
@@ -55,6 +72,13 @@ fun Track.isChromecastPlayable(): Boolean =
     isPlexLibraryTrack() && !isLocalMediaPlayback() && streamUrl.isNotBlank()
 
 fun List<Track>.isChromecastPlayableQueue(): Boolean = isNotEmpty() && all { it.isChromecastPlayable() }
+
+fun List<Track>.plexChromecastQueueSupport(): CastQueueSupport =
+    if (isChromecastPlayableQueue()) {
+        CastQueueSupport.supported()
+    } else {
+        CastQueueSupport.unsupported("Chromecast can play Plex streaming songs only.")
+    }
 
 fun CastState.asPlayerState(fallback: PlayerState): PlayerState =
     fallback.copy(

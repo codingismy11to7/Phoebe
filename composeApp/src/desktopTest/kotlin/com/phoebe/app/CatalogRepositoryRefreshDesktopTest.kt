@@ -82,6 +82,57 @@ class CatalogRepositoryRefreshDesktopTest {
     }
 
     @Test
+    fun restoreCachedCatalogSkipsLocalFolderRowsWhenSourceWasCleared() = runTest {
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        db.transaction {
+            db.catalogQueries.upsertArtist("plex:artist", "Plex Artist", null, 1L, 0L, 0L, null, null, null, null, null, 0L)
+            db.catalogQueries.upsertAlbum("plex:album", "Plex Album", "Plex Artist", 2024L, null, 0L, null, null, null, null, null, 0L)
+            db.catalogQueries.upsertArtist("local_lf-old:artist:1", "Local Artist", null, 1L, 1L, 1L, 123L, null, null, null, null, 0L)
+            db.catalogQueries.upsertAlbum("local_lf-old:album:1", "Local Album", "Local Artist", 2024L, null, 1L, 123L, null, null, null, null, 0L)
+            db.catalogQueries.upsertTrack(
+                id = "local_lf-old:track:1",
+                title = "Local Song",
+                artist = "Local Artist",
+                album = "Local Album",
+                durationMs = 1_000L,
+                streamUrl = "",
+                downloadUrl = "",
+                thumbUrl = null,
+                localArtworkUri = null,
+                localUri = "file:///stale/local-song.mp3",
+                year = 2024L,
+                genre = null,
+                mood = null,
+                style = null,
+                filepath = "local-song.mp3",
+                audioCodec = null,
+                bitrateKbps = null,
+                dateAddedMs = 123L,
+                rating = null,
+                parentAlbumId = "local_lf-old:album:1",
+            )
+            db.catalogQueries.upsertTrackParent("local_lf-old:album:1", "local_lf-old:track:1", 0L)
+        }
+        val engine = MockEngine { respond("", HttpStatusCode.NotFound) }
+        val http = testHttpClient(engine)
+        val media = MediaSourcesRepository(db, PlatformStorage())
+        val repo = CatalogRepository(
+            plexClient = PlexClient(http),
+            database = db,
+            storage = PlatformStorage(),
+            httpClient = http,
+            mediaSourcesRepository = media,
+        )
+
+        repo.restoreCachedCatalog()
+
+        assertEquals(listOf("plex:artist"), repo.catalog.value.artists.map { it.id })
+        assertEquals(listOf("plex:album"), repo.catalog.value.albums.map { it.id })
+        assertTrue(repo.catalog.value.tracksByParent.values.flatten().none { it.id.startsWith("local_") })
+    }
+
+    @Test
     fun refreshLocalFoldersOnlyReportsScanCompletion() = runTest {
         val music = temp.newFolder("local-scan")
         File(music, "alpha.mp3").writeBytes(minimalMp3Bytes())

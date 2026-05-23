@@ -143,12 +143,16 @@ object IosNowPlayingCenter {
 
         publishNowPlaying()
 
-        if (url == null || cachedArtwork != null) return
+        if (url == null || cachedArtwork != null || artworkJob?.isActive == true) return
         artworkJob = artworkScope.launch {
-            val image = IosArtworkLoader.load(url) ?: return@launch
-            if (url != lastArtworkUrl) return@launch
-            cachedArtwork = createArtwork(image)
-            publishNowPlaying()
+            try {
+                val image = IosArtworkLoader.load(url) ?: return@launch
+                if (url != lastArtworkUrl) return@launch
+                cachedArtwork = createArtwork(image)
+                publishNowPlaying()
+            } finally {
+                if (url == lastArtworkUrl) artworkJob = null
+            }
         }
     }
 

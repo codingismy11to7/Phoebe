@@ -1,3 +1,5 @@
+better tablet layout support
+
 ios
 -car play - Apple CarPlay entitlement — request com.apple.developer.carplay-audio in the Apple Developer portal and enable it on your App ID. Without it, signing will fail even though the code is in place.
 

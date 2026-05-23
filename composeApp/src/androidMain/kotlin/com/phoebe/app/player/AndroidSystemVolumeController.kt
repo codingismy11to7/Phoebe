@@ -51,7 +51,7 @@ private class AndroidSystemVolumeController : SystemVolumeController {
             override fun onReceive(context: Context, intent: Intent) {
                 if (intent.action != VOLUME_CHANGED_ACTION) return
                 if (intent.getIntExtra(EXTRA_VOLUME_STREAM_TYPE, -1) != AudioManager.STREAM_MUSIC) return
-                publishVolume(forwardToCast = AndroidPlaybackBridge.isCastActive?.invoke() == true)
+                publishVolume()
             }
         }
         val filter = IntentFilter(VOLUME_CHANGED_ACTION)
@@ -83,15 +83,12 @@ private class AndroidSystemVolumeController : SystemVolumeController {
         _volume.value = if (max > 0) target.toFloat() / max else clamped
     }
 
-    private fun publishVolume(forwardToCast: Boolean = AndroidPlaybackBridge.isCastActive?.invoke() == true) {
-        val normalized = readStreamVolumeNormalized()
-        if (forwardToCast) {
-            AndroidPlaybackBridge.applyCastVolume?.invoke(normalized)
-        }
-        _volume.value = if (forwardToCast) {
-            AndroidPlaybackBridge.readCastVolume?.invoke() ?: normalized
+    private fun publishVolume() {
+        val castActive = AndroidPlaybackBridge.isCastActive?.invoke() == true
+        _volume.value = if (castActive) {
+            AndroidPlaybackBridge.readCastVolume?.invoke() ?: _volume.value
         } else {
-            normalized
+            readStreamVolumeNormalized()
         }
     }
 

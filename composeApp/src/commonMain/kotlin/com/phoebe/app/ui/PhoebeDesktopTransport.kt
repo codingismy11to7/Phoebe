@@ -234,14 +234,25 @@ internal fun DesktopTransport(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (track != null) {
-            TrackArtworkImage(
-                track,
-                Modifier
+            BottomTransportArtworkShadow(
+                modifier = Modifier
                     .size(56.dp)
                     .clickable { trackNavigationActions.onOpenAlbumForTrack(track) },
-            )
+            ) {
+                TrackArtworkImage(
+                    track,
+                    Modifier.fillMaxSize(),
+                    elevated = false,
+                )
+            }
         } else {
-            EmptyNowPlayingArtworkSlot(Modifier.size(56.dp), glyphSp = 20.sp)
+            BottomTransportArtworkShadow(Modifier.size(56.dp)) {
+                EmptyNowPlayingArtworkSlot(
+                    Modifier.fillMaxSize(),
+                    glyphSp = 20.sp,
+                    shadowElevation = 0.dp,
+                )
+            }
         }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.width(if (compact) 156.dp else 190.dp)) {
@@ -330,6 +341,12 @@ internal fun DesktopTransport(
             Box(Modifier.height(40.dp), contentAlignment = Alignment.Center) {
                 VolumeSlider(volume, onVolume, Modifier.width(if (compact) 84.dp else 112.dp))
             }
+            CastIcon(
+                active = castState.isConnected,
+                loading = castState.isBuffering,
+                enabled = castState.isAvailable || castState.isConnected,
+                onClick = onCast,
+            )
             TransportIcon(
                 PhoebeIcon.Equalizer,
                 "Equalizer",
@@ -348,6 +365,27 @@ internal fun DesktopTransport(
                 onClick = onToggleUpNext,
             )
         }
+    }
+}
+
+@Composable
+private fun BottomTransportArtworkShadow(
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    val shape = RoundedCornerShape(14.dp)
+    val shadowColor = Color.Black.copy(alpha = 0.24f)
+    Box(
+        modifier.shadow(
+            elevation = 12.dp,
+            shape = shape,
+            clip = false,
+            ambientColor = shadowColor,
+            spotColor = shadowColor,
+        ),
+        contentAlignment = Alignment.Center,
+    ) {
+        content()
     }
 }
 

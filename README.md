@@ -6,7 +6,7 @@
 
 Phoebe is a Compose Multiplatform music player for Plex, Jellyfin, Emby, Subsonic-compatible servers (Navidrome, etc.), Music Assistant, local folders, Android, iOS, desktop (JVM), and the browser (Kotlin/Wasm).
 
-Try the web build at [phoebe.joetr.com](https://phoebe.joetr.com), or grab native installers and mobile binaries from [GitHub Releases](https://github.com/j-roskopf/Phoebe/releases).
+Try the web build at [music.joetr.com](https://music.joetr.com), or grab native installers and mobile binaries from [GitHub Releases](https://github.com/j-roskopf/Phoebe/releases).
 
 ## Music providers
 
@@ -34,7 +34,7 @@ Phoebe can sign in to one remote music source at a time (plus optional local fol
 | Artist radio / mix | Plex stations | Instant mix | Instant mix³ | Not wired⁴ | Via MA² | — |
 | Collections (genre / mood / style) | All three | Genre | Genre | Genre | Genre | From tags |
 | Import server play history | Yes | No | No | No | No | — |
-| Chromecast (Android) | Yes | — | — | — | — | — |
+| Chromecast (Android/iOS) | Yes | — | — | — | — | — |
 
 ¹ Music Assistant items are modeled as **Library + Control**: Phoebe can browse the MA library and often delegates playback to Music Assistant’s default player queue. Direct stream URLs are used when the server exposes them; many upstream provider tracks are not guaranteed to play inside Phoebe alone.
 
@@ -110,7 +110,7 @@ For UI architecture and navigation rules, see [Compose Architecture Guidelines](
 
 - **Volume** — OS system volume where supported; on Linux Flatpak, volume can be adjusted via host `pactl` when sandboxed.
 - **Global media keys** — Desktop play/pause (Space when no text field is focused), media-key shortcuts, and a macOS native bridge for hardware media keys.
-- **Chromecast (Android)** — Google Cast queue and transport when a Cast device is connected; volume keys route to Cast while casting. Unsupported codecs (for example FLAC) are sent through Plex’s universal MP3 transcode URL; local playback pauses only after the Cast load succeeds.
+- **Chromecast (Android/iOS)** — Google Cast queue and transport when a Cast device is connected; volume keys route to Cast while casting. Unsupported codecs (for example FLAC) are sent through Plex’s universal MP3 transcode URL; local playback pauses only after the Cast load succeeds.
 - **Android Auto** — Media browse tree over the cached catalog for in-car browsing.
 - **CarPlay (iOS)** — Browse and play from the CarPlay template (requires the CarPlay audio entitlement on your App ID for distribution signing).
 - **Window chrome** — macOS unified title bar (full-window content, transparent title bar); Windows caption/border colors and immersive dark mode matched to the app theme via DWM.
@@ -125,14 +125,14 @@ For UI architecture and navigation rules, see [Compose Architecture Guidelines](
 
 | Platform | Get Phoebe | Local folders | Cast | Notes |
 |----------|------------|---------------|------|--------|
-| **Web (Wasm)** | [Open phoebe.joetr.com](https://phoebe.joetr.com) | Yes (browser picker, current session) | — | Browser build deployed from release CI; Plex streaming, local picked-file playback, HTML audio playback, SQLDelight Web Worker DB, and WebAudio EQ when the source permits access. |
+| **Web (Wasm)** | [Open music.joetr.com](https://music.joetr.com) | Yes (browser picker, current session) | — | Browser build deployed from release CI; Plex streaming, local picked-file playback, HTML audio playback, SQLDelight Web Worker DB, and WebAudio EQ when the source permits access. |
 | **Arch Linux** | [GitHub Releases](https://github.com/j-roskopf/Phoebe/releases) (`.flatpak`) | Yes (folder picker) | — | Use the Flatpak bundle on Arch and other non-Debian distributions. |
 | **Debian / Ubuntu** | [GitHub Releases](https://github.com/j-roskopf/Phoebe/releases) (`.deb`) | Yes (folder picker) | — | Native JVM desktop package with tuned heap and Skiko GPU cache settings. |
 | **Other Linux** | [GitHub Releases](https://github.com/j-roskopf/Phoebe/releases) (`.flatpak`) | Yes (folder picker) | — | Flatpak bundle is built alongside the DEB package. |
 | **Windows** | [GitHub Releases](https://github.com/j-roskopf/Phoebe/releases) (`.msi`) | Yes (folder picker) | — | Signed MSI release; window caption/border colors follow the app theme. |
 | **macOS** | [GitHub Releases](https://github.com/j-roskopf/Phoebe/releases) (`.dmg`) | Yes (folder picker) | — | Signed and notarized DMG; native bridge handles hardware media keys. |
 | **Android** | [GitHub Releases](https://github.com/j-roskopf/Phoebe/releases) (`.apk`, `.aab`) | Yes (SAF tree URI) | Chromecast | Android Auto browse, Media3 playback, Cast queue/transport, and instrumented playback tests on CI. |
-| **iOS** | [GitHub Releases](https://github.com/j-roskopf/Phoebe/releases) | Yes (native folder picker) | Stub (Cast SDK not bundled) | iOS app target with AVPlayer playback and CarPlay browse/play in code; release CI does not upload a signed IPA yet. |
+| **iOS** | [GitHub Releases](https://github.com/j-roskopf/Phoebe/releases) | Yes (native folder picker) | Chromecast (manual SDK setup) | iOS app target with AVPlayer playback, Google Cast sender support, and CarPlay browse/play in code; release CI does not upload a signed IPA yet. |
 
 ## What works now
 
@@ -221,6 +221,13 @@ PR CI runs desktop tests, Wasm tests, Roborazzi screenshot verification, Playwri
 ```
 
 The Android SDK path is set in `local.properties` for this machine and ignored by git.
+
+**iOS debug build:**
+
+```bash
+scripts/install-ios-google-cast-sdk.sh
+xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' build
+```
 
 ## Releases
 

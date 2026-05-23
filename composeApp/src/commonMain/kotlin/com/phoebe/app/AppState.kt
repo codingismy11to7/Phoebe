@@ -58,7 +58,7 @@ import com.phoebe.app.data.defaultPlexRadioStations
 import com.phoebe.app.playlists.PlaylistExportFormat
 import com.phoebe.app.playlists.PlaylistExporter
 import com.phoebe.app.player.asPlayerState
-import com.phoebe.app.player.isChromecastPlayableQueue
+import com.phoebe.app.player.isPlaybackActive
 import com.phoebe.app.domain.RecentSearchItem
 import com.phoebe.app.platform.PhoebeLog
 import com.phoebe.app.platform.currentTimeMs
@@ -70,6 +70,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -126,7 +127,7 @@ class AppState(
         mutableMusicAssistantRemotePlayback,
     ) { audio, castState, musicAssistantRemote ->
         when {
-            castState.isConnected && castState.queue.isNotEmpty() -> castState.asPlayerState(audio)
+            castState.isPlaybackActive -> castState.asPlayerState(audio)
             musicAssistantRemote != null -> PlayerState(
                 queue = musicAssistantRemote.tracks,
                 currentIndex = musicAssistantRemote.index,
@@ -181,7 +182,7 @@ class AppState(
         cast,
         mutableMusicAssistantRemotePlayback,
     ) { castState, musicAssistantRemote ->
-        castState.isConnected || musicAssistantRemote != null
+        castState.isPlaybackActive || musicAssistantRemote != null
     }.stateIn(scope, SharingStarted.Eagerly, false)
     val lastPlayedByArtist = dependencies.playHistoryRepository.lastPlayedByArtist
     val lastPlayedByAlbum = dependencies.playHistoryRepository.lastPlayedByAlbum
@@ -331,6 +332,7 @@ class AppState(
         bindAppSettingsToPlayback()
         recordPlaybackHistory()
         surfacePlaybackFailures()
+        surfaceCastMessages()
         dependencies.plexPlaybackReporter.start(scope)
     }
 
@@ -373,6 +375,21 @@ class AppState(
                 mutableMessage.value = notice
                 mutablePlaybackSnackbar.value = notice
             }
+        }
+    }
+
+    private fun surfaceCastMessages() {
+        scope.launch {
+            dependencies.castController.state
+                .map { it.message }
+                .distinctUntilChanged()
+                .collect { notice ->
+                    val message = notice?.takeIf { it.isNotBlank() } ?: return@collect
+                    if (message == "Chromecast requires Chrome with Cast support.") return@collect
+                    if (message.startsWith("Sending ") && message.endsWith(" to Chromecast...")) return@collect
+                    mutableMessage.value = message
+                    mutablePlaybackSnackbar.value = message
+                }
         }
     }
 
@@ -1248,12 +1265,10 @@ class AppState(
         val track = tracks.getOrNull(index)
         if (dependencies.castController.state.value.isConnected) {
             mutableMusicAssistantRemotePlayback.value = null
-            if (!tracks.isChromecastPlayableQueue()) {
-                mutableMessage.value = "Chromecast can play Plex streaming songs only."
+            val support = dependencies.castController.canLoadQueue(tracks)
+            if (!support.isSupported) {
+                mutableMessage.value = support.message ?: "This queue can't be cast to Chromecast."
                 return
-            }
-            if (dependencies.audioPlayer.state.value.isPlaying) {
-                dependencies.audioPlayer.togglePlayPause()
             }
             dependencies.castController.loadQueue(tracks, index)
             return
@@ -1352,7 +1367,7 @@ class AppState(
         val remoteTarget = mutableMusicAssistantRemotePlayback.value?.target
         if (remoteTarget != null) {
             mutableMessage.value = "Music Assistant playback is running on $remoteTarget. Use Music Assistant for pause/resume."
-        } else if (dependencies.castController.state.value.isConnected) {
+        } else if (dependencies.castController.state.value.isPlaybackActive) {
             dependencies.castController.togglePlayPause()
         } else {
             dependencies.audioPlayer.togglePlayPause()
@@ -1382,7 +1397,7 @@ class AppState(
     fun clearQueue() {
         if (mutableMusicAssistantRemotePlayback.value != null) {
             mutableMusicAssistantRemotePlayback.value = null
-        } else if (dependencies.castController.state.value.isConnected) {
+        } else if (dependencies.castController.state.value.isPlaybackActive) {
             dependencies.castController.disconnect()
         } else {
             dependencies.audioPlayer.clearQueue()
@@ -1409,7 +1424,7 @@ class AppState(
         val remote = mutableMusicAssistantRemotePlayback.value
         if (remote != null) {
             playTracks(remote.tracks, (remote.index + 1).coerceIn(0, remote.tracks.lastIndex))
-        } else if (dependencies.castController.state.value.isConnected) {
+        } else if (dependencies.castController.state.value.isPlaybackActive) {
             dependencies.castController.next()
         } else {
             dependencies.audioPlayer.next()
@@ -1419,7 +1434,7 @@ class AppState(
         val remote = mutableMusicAssistantRemotePlayback.value
         if (remote != null) {
             playTracks(remote.tracks, (remote.index - 1).coerceIn(0, remote.tracks.lastIndex))
-        } else if (dependencies.castController.state.value.isConnected) {
+        } else if (dependencies.castController.state.value.isPlaybackActive) {
             dependencies.castController.previous()
         } else {
             dependencies.audioPlayer.previous()
@@ -1434,7 +1449,7 @@ class AppState(
         playTracks(current.queue, target)
     }
     fun seekTo(positionMs: Long) {
-        if (dependencies.castController.state.value.isConnected) {
+        if (dependencies.castController.state.value.isPlaybackActive) {
             dependencies.castController.seekTo(positionMs)
         } else {
             dependencies.audioPlayer.seekTo(positionMs)
@@ -2002,8 +2017,13 @@ class AppState(
     }
 
     fun signOut() {
-        cancelCatalogRefresh()
-        cancelRemotePlayHistorySync()
+        val refreshJob = catalogRefreshJob
+        val historyJob = playHistorySyncJob
+        catalogRefreshJob = null
+        playHistorySyncJob = null
+        refreshJob?.cancel()
+        historyJob?.cancel()
+        dependencies.catalogRepository.clearActiveSyncProgress()
         mostPlayedWarmSignature = null
         recentAlbumWarmSignature = null
         playedAlbumWarmSignature = null
@@ -2017,11 +2037,17 @@ class AppState(
         requestNavigation(AppNavigationRequest.SignIn)
         mutableMessage.value = "Signing out…"
         scope.launch {
-            runCatching {
+            val signedOut = runCatching {
+                refreshJob?.cancelAndJoin()
+                historyJob?.cancelAndJoin()
                 dependencies.sessionRepository.signOut()
                 dependencies.deleteDatabaseDataForSignOut()
-            }.onFailure { mutableMessage.value = it.message ?: "Something went sideways." }
-            mutableMessage.value = "Signed out."
+            }.onFailure {
+                mutableMessage.value = it.message ?: "Something went sideways."
+            }.isSuccess
+            if (signedOut) {
+                mutableMessage.value = "Signed out."
+            }
         }
     }
 

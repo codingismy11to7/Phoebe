@@ -11,13 +11,9 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.phoebe.app.AndroidContextHolder
-import com.phoebe.app.data.PlexClient
 import com.phoebe.app.domain.EqualizerProfile
 import com.phoebe.app.domain.Track
 import com.phoebe.app.platform.PhoebeLog
-import java.io.File
-import java.net.HttpURLConnection
-import java.net.URL
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -46,6 +42,24 @@ internal object AndroidAudioPlayerHolder {
     }
 }
 
+private data class PendingControllerTarget(
+    val queueIds: List<String>,
+    val platformIndex: Int,
+    val generation: Int,
+)
+
+private data class LoadedPlatformQueue(
+    val queueIds: List<String>,
+    val firstAppIndex: Int,
+    val itemCount: Int,
+) {
+    fun platformIndexFor(appIndex: Int): Int? =
+        (appIndex - firstAppIndex).takeIf { it in 0 until itemCount }
+
+    fun appIndexFor(platformIndex: Int): Int? =
+        (firstAppIndex + platformIndex).takeIf { platformIndex in 0 until itemCount }
+}
+
 internal class AndroidAudioPlayer(
     private val diagnostics: PlaybackDiagnostics = AndroidPlaybackDiagnostics.diagnostics,
 ) : SimpleAudioPlayer() {
@@ -60,7 +74,6 @@ internal class AndroidAudioPlayer(
     private var platformLoadJob: Job? = null
     private var seekJob: Job? = null
     private var bufferingTimeoutJob: Job? = null
-    private var fullTrackBufferJob: Job? = null
     private var retryJob: Job? = null
     private var crossfadeJob: Job? = null
     private var crossfadePlayer: ExoPlayer? = null
@@ -69,7 +82,9 @@ internal class AndroidAudioPlayer(
     private var retryGeneration = -1
     private var retryCount = 0
     private val controllerMutex = Mutex()
-    private var loadedQueueIds: List<String>? = null
+    private var loadedPlatformQueue: LoadedPlatformQueue? = null
+    private var appControllerMutationInProgress = false
+    private var pendingControllerTarget: PendingControllerTarget? = null
 
     private val controllerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -87,6 +102,7 @@ internal class AndroidAudioPlayer(
         override fun onPlayerError(error: PlaybackException) {
             PhoebeLog.d("AndroidAudioPlayer") { "playback failed: ${error.message}" }
             diagnostics.playbackError(PlaybackEnginePath.Media3, error.message)
+            pendingControllerTarget = null
             stopBufferingTimeout()
             schedulePlaybackRetry(error, activePlayGeneration)
             stopPositionSyncLoop()
@@ -100,7 +116,11 @@ internal class AndroidAudioPlayer(
         AndroidPlaybackBridge.onTrackEnded = { next() }
         AndroidPlaybackBridge.onPlayQueue = { queue, index -> play(queue, index) }
         AndroidPlaybackBridge.onAdoptQueue = { queue, index, playing ->
-            loadedQueueIds = queue.map { it.id }
+            loadedPlatformQueue = LoadedPlatformQueue(
+                queueIds = queue.map { it.id },
+                firstAppIndex = 0,
+                itemCount = queue.size,
+            )
             adoptQueueState(queue, index, playing)
         }
         AndroidPlaybackBridge.onEnsureLocalPlaybackPaused = { forceLocalPlaybackPaused() }
@@ -117,12 +137,12 @@ internal class AndroidAudioPlayer(
         withContext(Dispatchers.Main.immediate) {
             platformLoadJob?.cancel()
             platformLoadJob = null
+            pendingControllerTarget = null
             seekJob?.cancel()
             seekJob = null
             stopAndroidCrossfade()
             stopPositionSyncLoop()
             stopBufferingTimeout()
-            stopFullTrackBufferProbe()
             stopRetry()
             controllerMutex.withLock {
                 controller?.removeListener(controllerListener)
@@ -148,13 +168,15 @@ internal class AndroidAudioPlayer(
         runPlatformLoad(generation) { player ->
             val targetIndex = startIndex.coerceIn(queue.indices)
             val queueIds = queue.map { it.id }
-            if (loadedQueueIds == queueIds &&
-                player.mediaItemCount == queue.size &&
-                targetIndex < player.mediaItemCount
-            ) {
-                startFullTrackBufferProbe(track, generation)
+            val loaded = loadedPlatformQueue
+            val platformIndex = loaded
+                ?.takeIf { it.queueIds == queueIds && player.mediaItemCount == it.itemCount }
+                ?.platformIndexFor(targetIndex)
+            if (platformIndex != null) {
+                expectControllerTarget(queueIds, platformIndex, generation)
                 player.pause()
-                player.seekTo(targetIndex, 0L)
+                player.seekTo(platformIndex, 0L)
+                updateOptimisticLocalBufferedPosition(track, generation)
                 player.volume = effectiveOutputVolume()
                 if (playWhenReady) {
                     player.play()
@@ -181,9 +203,8 @@ internal class AndroidAudioPlayer(
         platformLoadJob = null
         stopAndroidCrossfade()
         stopBufferingTimeout()
-        stopFullTrackBufferProbe()
         stopRetry()
-        loadedQueueIds = null
+        loadedPlatformQueue = null
         scope.launch {
             controllerMutex.withLock {
                 controller?.run {
@@ -258,7 +279,9 @@ internal class AndroidAudioPlayer(
     }
 
     override fun applyEqualizer(profile: EqualizerProfile) {
-        AndroidEqualizerState.profile = profile.normalized()
+        val normalized = profile.normalized()
+        AndroidEqualizerState.profile = normalized
+        AndroidPlaybackBridge.servicePlayer?.applyPhoebeAudioOffloadPreference(normalized)
     }
 
     override fun startCrossfadeOnPlatform(
@@ -330,7 +353,7 @@ internal class AndroidAudioPlayer(
                 crossfadeOwnedTrackId = track.id
                 adoptCrossfadeTarget(queue, targetIndex, incoming.currentPosition.coerceAtLeast(0L), generation)
                 diagnostics.crossfadeCommitted(PlaybackEnginePath.Media3Crossfade, track.id)
-                startFullTrackBufferProbe(track, generation)
+                updateOptimisticLocalBufferedPosition(track, generation)
                 startCrossfadeOwnedSync(incoming, queue, targetIndex, generation)
             } catch (error: CancellationException) {
                 throw error
@@ -453,7 +476,7 @@ internal class AndroidAudioPlayer(
                     next()
                     break
                 }
-                delay(250)
+                delay(FinePositionSyncIntervalMs)
             }
         }
     }
@@ -495,7 +518,12 @@ internal class AndroidAudioPlayer(
                 controllerMutex.withLock {
                     val player = controller ?: return@withLock
                     if (!isPlayRequestCurrent(generation)) return@withLock
-                    block(player)
+                    appControllerMutationInProgress = true
+                    try {
+                        block(player)
+                    } finally {
+                        appControllerMutationInProgress = false
+                    }
                     if (isPlayRequestCurrent(generation)) {
                         syncFromController(generation)
                     }
@@ -504,6 +532,7 @@ internal class AndroidAudioPlayer(
                 throw e
             } catch (error: Throwable) {
                 PhoebeLog.d("AndroidAudioPlayer") { "platform load failed: ${error.message}" }
+                pendingControllerTarget = null
                 stopBufferingTimeout()
                 markPlaybackFailed(generation)
             }
@@ -517,87 +546,36 @@ internal class AndroidAudioPlayer(
         queueIds: List<String>,
         generation: Int,
     ) {
+        val windowStartIndex = targetIndex
+        val windowTracks = queue.subList(
+            windowStartIndex,
+            (windowStartIndex + MaxPlatformQueueItems).coerceAtMost(queue.size),
+        )
+        expectControllerTarget(queueIds, platformIndex = 0, generation)
         player.pause()
         player.stop()
         player.clearMediaItems()
         player.volume = effectiveOutputVolume()
-        player.setMediaItems(queue.map { playbackMediaItem(it, inAppPlayback = true) }, targetIndex, 0L)
+        player.setMediaItems(windowTracks.map { playbackMediaItem(it, inAppPlayback = true) }, 0, 0L)
         player.prepare()
-        loadedQueueIds = queueIds
-        queue.getOrNull(targetIndex)?.let { startFullTrackBufferProbe(it, generation) }
+        loadedPlatformQueue = LoadedPlatformQueue(
+            queueIds = queueIds,
+            firstAppIndex = windowStartIndex,
+            itemCount = windowTracks.size,
+        )
+        queue.getOrNull(targetIndex)?.let { updateOptimisticLocalBufferedPosition(it, generation) }
         if (playWhenReady) {
             player.play()
         }
     }
 
-    private fun startFullTrackBufferProbe(track: Track, generation: Int) {
-        stopFullTrackBufferProbe()
+    private fun updateOptimisticLocalBufferedPosition(track: Track, generation: Int) {
         val durationMs = track.durationMs.takeIf { it > 0L } ?: return
         val uri = track.localUri ?: track.streamUrl
         if (uri.isBlank()) return
-        if (!uri.startsWith("http://", ignoreCase = true) && !uri.startsWith("https://", ignoreCase = true)) {
+        if (!uri.isHttpUrl()) {
             updateBufferedPosition(durationMs, generation)
-            return
         }
-        val estimatedBitrateBytesPerSecond = ((track.bitrateKbps ?: FallbackBitrateKbps).coerceAtLeast(64) * 1_000L) / 8L
-        fullTrackBufferJob = scope.launch(Dispatchers.IO) {
-            var connection: HttpURLConnection? = null
-            var temp: File? = null
-            try {
-                connection = (URL(uri).openConnection() as HttpURLConnection).apply {
-                    requestMethod = "GET"
-                    connectTimeout = 15_000
-                    readTimeout = 45_000
-                    instanceFollowRedirects = true
-                    setRequestProperty("User-Agent", "Phoebe/0.1.0 (https://github.com/phoebe)")
-                    setRequestProperty("X-Plex-Client-Identifier", PlexClient.ClientIdentifier)
-                }
-                val status = connection.responseCode
-                if (status !in 200..299) return@launch
-                val contentLength = connection.contentLengthLong.takeIf { it > 0L }
-                val buffer = ByteArray(64 * 1024)
-                var bytesReadTotal = 0L
-                var lastReportMs = 0L
-                temp = File.createTempFile("phoebe-android-buffer-", ".audio", appContext.cacheDir)
-                connection.inputStream.use { input ->
-                    temp.outputStream().use { output ->
-                        while (isActive && isPlayRequestCurrent(generation)) {
-                            val read = input.read(buffer)
-                            if (read < 0) break
-                            output.write(buffer, 0, read)
-                            bytesReadTotal += read
-                            val bufferedMs = if (contentLength != null) {
-                                val bufferedMs = ((bytesReadTotal.toDouble() / contentLength.toDouble()) * durationMs)
-                                    .toLong()
-                                    .coerceIn(0L, durationMs)
-                                bufferedMs
-                            } else {
-                                ((bytesReadTotal * 1_000L) / estimatedBitrateBytesPerSecond)
-                                    .coerceIn(0L, durationMs)
-                            }
-                            if (bufferedMs - lastReportMs >= BufferProbeReportIntervalMs || bufferedMs == durationMs) {
-                                lastReportMs = bufferedMs
-                                updateBufferedPosition(bufferedMs, generation)
-                            }
-                        }
-                    }
-                }
-                if (isActive && isPlayRequestCurrent(generation)) {
-                    updateBufferedPosition(durationMs, generation)
-                }
-            } catch (error: Throwable) {
-                if (error is CancellationException) throw error
-                PhoebeLog.d("AndroidAudioPlayer") { "full-track buffer probe stopped: ${error.message}" }
-            } finally {
-                connection?.disconnect()
-                temp?.delete()
-            }
-        }
-    }
-
-    private fun stopFullTrackBufferProbe() {
-        fullTrackBufferJob?.cancel()
-        fullTrackBufferJob = null
     }
 
     private fun startPlaybackService() {
@@ -621,13 +599,20 @@ internal class AndroidAudioPlayer(
         val player = controller ?: return
         val appState = state.value
         val controllerIndex = player.currentMediaItemIndex
-        if (appState.currentIndex >= 0 &&
-            controllerIndex >= 0 &&
-            controllerIndex != appState.currentIndex
-        ) {
+        val loaded = loadedPlatformQueue
+        val appControllerIndex = loaded?.appIndexFor(controllerIndex) ?: controllerIndex
+        if (pendingControllerTarget != null) {
             val queueIds = appState.queue.map { it.id }
-            if (loadedQueueIds == queueIds && controllerIndex in appState.queue.indices) {
-                adoptQueueState(appState.queue, controllerIndex, player.isPlaying)
+            if (isWaitingForControllerTarget(queueIds, controllerIndex, generation)) return
+        }
+        if (appState.currentIndex >= 0 &&
+            appControllerIndex >= 0 &&
+            appControllerIndex != appState.currentIndex
+        ) {
+            if (appControllerMutationInProgress) return
+            val queueIds = appState.queue.map { it.id }
+            if (loaded?.queueIds == queueIds && appControllerIndex in appState.queue.indices) {
+                adoptQueueState(appState.queue, appControllerIndex, player.isPlaying)
             } else {
                 return
             }
@@ -640,6 +625,9 @@ internal class AndroidAudioPlayer(
             return
         }
         val buffering = player.playbackState == Player.STATE_BUFFERING
+        if (!appControllerMutationInProgress) {
+            adoptPlatformPlayIntent(player.playWhenReady)
+        }
         reportPlaybackDiagnostics(
             engine = PlaybackEnginePath.Media3,
             positionMs = controllerPosition,
@@ -668,20 +656,46 @@ internal class AndroidAudioPlayer(
         }
     }
 
+    private fun expectControllerTarget(queueIds: List<String>, platformIndex: Int, generation: Int) {
+        pendingControllerTarget = PendingControllerTarget(
+            queueIds = queueIds,
+            platformIndex = platformIndex,
+            generation = generation,
+        )
+    }
+
+    private fun isWaitingForControllerTarget(
+        queueIds: List<String>,
+        controllerIndex: Int,
+        generation: Int,
+    ): Boolean {
+        val pending = pendingControllerTarget ?: return false
+        if (pending.generation != generation || pending.queueIds != queueIds) {
+            pendingControllerTarget = null
+            return false
+        }
+        if (controllerIndex == pending.platformIndex) {
+            pendingControllerTarget = null
+            return false
+        }
+        return true
+    }
+
     private fun controllerMatchesAppState(player: Player, generation: Int): Boolean {
         if (!isPlayRequestCurrent(generation)) return false
         val appIndex = state.value.currentIndex
         if (appIndex < 0) return true
         val controllerIndex = player.currentMediaItemIndex
-        return controllerIndex < 0 || controllerIndex == appIndex
+        val appControllerIndex = loadedPlatformQueue?.appIndexFor(controllerIndex) ?: controllerIndex
+        return controllerIndex < 0 || appControllerIndex == appIndex
     }
 
     private fun startPositionSyncLoop(generation: Int) {
         if (positionSyncJob?.isActive == true) return
         positionSyncJob = scope.launch {
             while (isActive) {
-                delay(250)
                 val player = controller ?: break
+                delay(positionSyncIntervalMs(player))
                 if (!player.isPlaying || !controllerMatchesAppState(player, generation)) break
                 reportPlaybackDiagnostics(
                     engine = PlaybackEnginePath.Media3,
@@ -700,6 +714,16 @@ internal class AndroidAudioPlayer(
                     generation = generation,
                 )
             }
+        }
+    }
+
+    private fun positionSyncIntervalMs(player: Player): Long {
+        val durationMs = state.value.durationMs.takeIf { it > 0L } ?: return NormalPositionSyncIntervalMs
+        val remainingMs = durationMs - player.currentPosition.coerceAtLeast(0L)
+        return if (remainingMs in 0L..FinePositionSyncWindowMs) {
+            FinePositionSyncIntervalMs
+        } else {
+            NormalPositionSyncIntervalMs
         }
     }
 
@@ -814,10 +838,15 @@ internal class AndroidAudioPlayer(
         const val PlaybackBufferingTimeoutMs = 30_000L
         const val MaxStreamRetryCount = 5
         const val StreamRetryBaseDelayMs = 1_000L
-        const val BufferProbeReportIntervalMs = 1_000L
-        const val FallbackBitrateKbps = 256
+        const val NormalPositionSyncIntervalMs = 1_000L
+        const val FinePositionSyncIntervalMs = 250L
+        const val FinePositionSyncWindowMs = 12_000L
+        const val MaxPlatformQueueItems = 24
         const val CrossfadeSteps = 24
         const val CrossfadePrepareTimeoutMs = 5_000L
         const val CrossfadeMinimumFadeMs = 500L
     }
 }
+
+private fun String.isHttpUrl(): Boolean =
+    startsWith("http://", ignoreCase = true) || startsWith("https://", ignoreCase = true)

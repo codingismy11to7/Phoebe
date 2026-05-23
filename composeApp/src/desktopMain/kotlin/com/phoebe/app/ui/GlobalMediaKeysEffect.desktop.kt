@@ -4,7 +4,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.snapshotFlow
 import com.github.kwhat.jnativehook.GlobalScreen
 import com.github.kwhat.jnativehook.dispatcher.SwingDispatchService
 import com.github.kwhat.jnativehook.keyboard.NativeKeyEvent
@@ -13,18 +12,23 @@ import com.phoebe.app.domain.PlayerState
 import com.phoebe.app.media.MacMediaSession
 import com.phoebe.app.media.loadMacMediaDylib
 import com.phoebe.app.platform.PhoebeLog
+import java.util.function.LongConsumer
 import java.util.logging.Level
 import java.util.logging.LogManager
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.StateFlow
 
 private val isMacOs: Boolean
     get() = System.getProperty("os.name").orEmpty().lowercase().contains("mac")
 
 private data class MacNowPlayingSnapshot(
+    val trackId: String,
     val title: String,
     val artist: String,
+    val album: String,
+    val artworkUrl: String,
     val positionBucketMs: Long,
     val durationMs: Long,
     val playing: Boolean,
@@ -32,7 +36,7 @@ private data class MacNowPlayingSnapshot(
 
 @Composable
 actual fun GlobalMediaKeysEffect(
-    player: PlayerState,
+    playerFlow: StateFlow<PlayerState>,
     onTogglePlayPause: () -> Unit,
     onPlay: () -> Unit,
     onPause: () -> Unit,
@@ -40,15 +44,15 @@ actual fun GlobalMediaKeysEffect(
     onPrevious: () -> Unit,
     onSeek: (Long) -> Unit,
 ) {
-    val playerState = rememberUpdatedState(player)
     val toggle = rememberUpdatedState(onTogglePlayPause)
     val play = rememberUpdatedState(onPlay)
     val pause = rememberUpdatedState(onPause)
     val next = rememberUpdatedState(onNext)
     val previous = rememberUpdatedState(onPrevious)
+    val seek = rememberUpdatedState(onSeek)
 
     if (isMacOs) {
-        LaunchedEffect(Unit) {
+        LaunchedEffect(playerFlow) {
             if (!loadMacMediaDylib()) {
                 PhoebeLog.d("Phoebe") {
                     "macOS media bridge dylib not found. Run a desktop build on a Mac first " +
@@ -61,6 +65,7 @@ actual fun GlobalMediaKeysEffect(
             MacMediaSession.onPause = Runnable { pause.value.invoke() }
             MacMediaSession.onNext = Runnable { next.value.invoke() }
             MacMediaSession.onPrevious = Runnable { previous.value.invoke() }
+            MacMediaSession.onSeek = LongConsumer { positionMs -> seek.value.invoke(positionMs) }
             runCatching {
                 MacMediaSession.nativeInit()
             }.onFailure { e ->
@@ -68,27 +73,15 @@ actual fun GlobalMediaKeysEffect(
                 return@LaunchedEffect
             }
             try {
-                snapshotFlow { playerState.value }
-                    .map { state ->
-                        val track = state.currentTrack
-                        val durationMs = when {
-                            state.durationMs > 0L -> state.durationMs
-                            track != null && track.durationMs > 0L -> track.durationMs
-                            else -> 0L
-                        }
-                        MacNowPlayingSnapshot(
-                            title = track?.title.orEmpty(),
-                            artist = track?.artist.orEmpty(),
-                            positionBucketMs = state.positionMs / 1_000L,
-                            durationMs = durationMs,
-                            playing = state.isPlaying,
-                        )
-                    }
+                playerFlow
+                    .map { it.toMacNowPlayingSnapshot() }
                     .distinctUntilChanged()
                     .collectLatest { snapshot ->
                         MacMediaSession.nativeUpdateNowPlaying(
                             snapshot.title,
                             snapshot.artist,
+                            snapshot.album,
+                            snapshot.artworkUrl,
                             snapshot.positionBucketMs * 1_000L,
                             snapshot.durationMs,
                             snapshot.playing,
@@ -154,4 +147,23 @@ actual fun GlobalMediaKeysEffect(
             }
         }
     }
+}
+
+private fun PlayerState.toMacNowPlayingSnapshot(): MacNowPlayingSnapshot {
+    val track = currentTrack
+    val durationMs = when {
+        this.durationMs > 0L -> this.durationMs
+        track != null && track.durationMs > 0L -> track.durationMs
+        else -> 0L
+    }
+    return MacNowPlayingSnapshot(
+        trackId = track?.id.orEmpty(),
+        title = track?.title.orEmpty(),
+        artist = track?.artist.orEmpty(),
+        album = track?.album.orEmpty(),
+        artworkUrl = track?.localArtworkUri?.takeIf { it.isNotBlank() } ?: track?.thumbUrl.orEmpty(),
+        positionBucketMs = positionMs / 1_000L,
+        durationMs = durationMs,
+        playing = isPlaying,
+    )
 }

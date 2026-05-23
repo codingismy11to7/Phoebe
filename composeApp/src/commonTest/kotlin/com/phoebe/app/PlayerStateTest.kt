@@ -175,6 +175,29 @@ class PlayerStateTest {
     }
 
     @Test
+    fun platformPlayIntentCanResumeAfterAppPause() {
+        val player = PlatformStateTestPlayer()
+        val tracks = listOf(
+            Track("t1", "One", "Artist", "Album", 60_000, "http://a", ""),
+        )
+
+        player.play(tracks, 0)
+        player.platformPlayback(positionMs = 10_000, durationMs = 60_000, bufferedPositionMs = 20_000)
+        assertTrue(player.state.value.isPlaying)
+
+        player.togglePlayPause()
+        assertFalse(player.state.value.isPlaying)
+
+        player.platformPlayback(positionMs = 11_000, durationMs = 60_000, bufferedPositionMs = 20_000)
+        assertFalse(player.state.value.isPlaying)
+
+        player.platformPlayWhenReady(true)
+        player.platformPlayback(positionMs = 12_000, durationMs = 60_000, bufferedPositionMs = 21_000)
+
+        assertTrue(player.state.value.isPlaying)
+    }
+
+    @Test
     fun newTrackResetsBufferedPosition() {
         val player = PlatformStateTestPlayer()
         val tracks = listOf(
@@ -434,6 +457,28 @@ class PlayerStateTest {
         assertFalse(player.state.value.isPlaying)
         assertEquals(0.5f, player.state.value.volume)
     }
+
+    @Test
+    fun suspendPlaybackKeepsQueueWithoutReloadingPlatformOutput() {
+        val player = SuspendTrackingTestPlayer()
+        val tracks = listOf(
+            Track("t1", "One", "Artist", "Album", 60_000, "http://a", ""),
+            Track("t2", "Two", "Artist", "Album", 90_000, "http://b", ""),
+        )
+
+        player.play(tracks, 0)
+        val loadsAfterPlay = player.playUriCalls
+        val stopsAfterPlay = player.stopCalls
+
+        player.suspendPlayback(tracks, 1, positionMs = 12_000)
+
+        assertEquals(tracks[1], player.state.value.currentTrack)
+        assertEquals(12_000, player.state.value.positionMs)
+        assertFalse(player.state.value.isPlaying)
+        assertFalse(player.state.value.isBuffering)
+        assertEquals(loadsAfterPlay, player.playUriCalls)
+        assertEquals(stopsAfterPlay + 1, player.stopCalls)
+    }
 }
 
 private class TestPlayer : SimpleAudioPlayer() {
@@ -442,6 +487,20 @@ private class TestPlayer : SimpleAudioPlayer() {
     override fun playUri(uri: String) {
         lastUri = uri
         markPlaybackReady()
+    }
+}
+
+private class SuspendTrackingTestPlayer : SimpleAudioPlayer() {
+    var playUriCalls = 0
+    var stopCalls = 0
+
+    override fun playUri(uri: String) {
+        playUriCalls++
+        markPlaybackReady()
+    }
+
+    override fun stopCurrentPlaybackImmediately() {
+        stopCalls++
     }
 }
 
@@ -515,14 +574,23 @@ private class PositionTrackingTestPlayer : SimpleAudioPlayer() {
 private class PlatformStateTestPlayer : SimpleAudioPlayer() {
     override fun playUri(uri: String) = Unit
 
-    fun platformPlayback(positionMs: Long, durationMs: Long, bufferedPositionMs: Long) {
+    fun platformPlayback(
+        positionMs: Long,
+        durationMs: Long,
+        bufferedPositionMs: Long,
+        isPlaying: Boolean = true,
+    ) {
         applyPlatformPlayback(
             positionMs = positionMs,
             durationMs = durationMs,
-            isPlaying = true,
+            isPlaying = isPlaying,
             isBuffering = false,
             bufferedPositionMs = bufferedPositionMs,
         )
+    }
+
+    fun platformPlayWhenReady(playWhenReady: Boolean) {
+        adoptPlatformPlayIntent(playWhenReady)
     }
 
     fun failPlayback(message: String? = null) {

@@ -69,12 +69,26 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         if let urlString = item.imageUrl, let url = URL(string: urlString) {
             URLSession.shared.dataTask(with: url) { data, _, _ in
                 guard let data, let image = UIImage(data: data) else { return }
+                let resizedImage = self.resizedImage(image, maxDimension: 96)
                 DispatchQueue.main.async {
-                    listItem.setImage(image)
+                    listItem.setImage(resizedImage)
                 }
             }.resume()
         }
         return listItem
+    }
+
+    private func resizedImage(_ image: UIImage, maxDimension: CGFloat) -> UIImage {
+        let size = image.size
+        let largestDimension = max(size.width, size.height)
+        guard largestDimension > maxDimension, largestDimension > 0 else { return image }
+
+        let scale = maxDimension / largestDimension
+        let targetSize = CGSize(width: size.width * scale, height: size.height * scale)
+        let renderer = UIGraphicsImageRenderer(size: targetSize)
+        return renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: targetSize))
+        }
     }
 }
 
