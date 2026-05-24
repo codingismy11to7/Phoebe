@@ -24,10 +24,13 @@ class RealAudioPlaybackDesktopTest {
 
                 player.play(listOf(track), 0)
 
-                assumeTrue("JavaFX media playback did not start for $fixture", waitUntil {
-                    diagnostics.hasEngine(PlaybackEnginePath.JavaFxMediaPlayer) &&
-                        player.state.value.isPlaying
-                })
+                assertTrue(
+                    waitUntil {
+                        diagnostics.hasEngine(PlaybackEnginePath.JavaFxMediaPlayer) &&
+                            player.state.value.isPlaying
+                    },
+                    "JavaFX media playback did not start for $fixture; engines=${diagnostics.engineEvents()} errors=${diagnostics.errorEvents()}",
+                )
                 assertTrue(waitUntil { diagnostics.hasEnergy(PlaybackEnginePath.JavaFxMediaPlayer) })
                 assertTrue(waitUntil { player.state.value.positionMs > 0L })
                 assertTrue(diagnostics.hasPlayingEvent(PlaybackEnginePath.JavaFxMediaPlayer))
@@ -49,10 +52,13 @@ class RealAudioPlaybackDesktopTest {
 
                 player.play(listOf(track), 0)
 
-                assumeTrue("Sampled audio playback did not start for $fixture", waitUntil {
-                    diagnostics.hasEngine(PlaybackEnginePath.SampledClip) &&
-                        player.state.value.isPlaying
-                })
+                assertTrue(
+                    waitUntil {
+                        diagnostics.hasEngine(PlaybackEnginePath.SampledClip) &&
+                            player.state.value.isPlaying
+                    },
+                    "Sampled audio playback did not start for $fixture; engines=${diagnostics.engineEvents()} errors=${diagnostics.errorEvents()}",
+                )
                 assertTrue(diagnostics.hasEnergy(PlaybackEnginePath.SampledClip))
                 assertTrue(waitUntil { player.state.value.positionMs > 0L })
                 assertTrue(diagnostics.hasPlayingEvent(PlaybackEnginePath.SampledClip))
@@ -74,10 +80,13 @@ class RealAudioPlaybackDesktopTest {
             player.setCrossfadeDurationMs(12_000)
             player.play(listOf(first, second), 0)
 
-            assumeTrue("JavaFX media playback did not start for crossfade", waitUntil {
-                diagnostics.hasEngine(PlaybackEnginePath.JavaFxMediaPlayer) &&
-                    player.state.value.isPlaying
-            })
+            assertTrue(
+                waitUntil {
+                    diagnostics.hasEngine(PlaybackEnginePath.JavaFxMediaPlayer) &&
+                        player.state.value.isPlaying
+                },
+                "JavaFX media playback did not start for crossfade; engines=${diagnostics.engineEvents()} errors=${diagnostics.errorEvents()}",
+            )
             assertTrue(waitUntil(timeoutMs = 20_000) {
                 player.state.value.currentTrack?.id == second.id &&
                     diagnostics.hasCommitted(PlaybackEnginePath.JavaFxMediaPlayer, second.id)
@@ -142,6 +151,7 @@ class RealAudioPlaybackDesktopTest {
         private val playingEngines = Collections.synchronizedSet(mutableSetOf<PlaybackEnginePath>())
         private val committed = Collections.synchronizedList(mutableListOf<Pair<PlaybackEnginePath, String>>())
         private val volumes = Collections.synchronizedList(mutableListOf<Pair<PlaybackEnginePath, VolumeSample>>())
+        private val errors = Collections.synchronizedList(mutableListOf<Pair<PlaybackEnginePath, String?>>())
 
         override fun engineSelected(engine: PlaybackEnginePath) {
             engines += engine
@@ -168,6 +178,10 @@ class RealAudioPlaybackDesktopTest {
             committed += engine to incomingTrackId
         }
 
+        override fun playbackError(engine: PlaybackEnginePath, message: String?) {
+            errors += engine to message
+        }
+
         fun hasEngine(engine: PlaybackEnginePath): Boolean = engine in engines
 
         fun hasEnergy(engine: PlaybackEnginePath): Boolean = (energyByEngine[engine] ?: 0.0) > 0.000001
@@ -175,6 +189,10 @@ class RealAudioPlaybackDesktopTest {
         fun hasPlayingEvent(engine: PlaybackEnginePath): Boolean = engine in playingEngines
 
         fun hasCommitted(engine: PlaybackEnginePath, trackId: String): Boolean = engine to trackId in committed
+
+        fun engineEvents(): List<PlaybackEnginePath> = engines.toList()
+
+        fun errorEvents(): List<Pair<PlaybackEnginePath, String?>> = errors.toList()
 
         fun volumeSteps(engine: PlaybackEnginePath): List<VolumeSample> =
             volumes.filter { it.first == engine }.map { it.second }

@@ -45,3 +45,24 @@ test('web chromecast mock connects and loads a remote stream', async ({ page }) 
   expect(results.passed).toBe(true);
   expect(results.message).toContain('mock Chromecast connected');
 });
+
+test('web local playback regression starts real browser audio after tap', async ({ page }) => {
+  await page.goto('/?e2e=localPlaybackRegression', { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(
+    () => (window as unknown as { phoebeE2eReady?: boolean }).phoebeE2eReady === true,
+    undefined,
+    { timeout: 60_000 },
+  );
+  await page.locator('#phoebe-web-playback-regression-play').click();
+  await page.waitForFunction(
+    () => {
+      const results = (window as unknown as { phoebeE2eResults?: { passed?: boolean } }).phoebeE2eResults;
+      return results?.passed === true;
+    },
+    undefined,
+    { timeout: 10_000 },
+  );
+  const results = await page.evaluate(() => (window as unknown as { phoebeE2eResults: { passed: boolean; message: string } }).phoebeE2eResults);
+  expect(results.passed).toBe(true);
+  expect(results.message).toContain('web local playback started');
+});

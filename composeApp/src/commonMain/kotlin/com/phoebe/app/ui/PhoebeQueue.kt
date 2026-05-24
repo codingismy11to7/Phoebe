@@ -410,6 +410,7 @@ internal fun UpNextRow(
         modifier = Modifier
             .fillMaxWidth()
             .height(rowHeight)
+            .then(if (active) Modifier else Modifier.playTrackTarget(track))
             .clip(RoundedCornerShape(10.dp))
             .background(
                 if (active) PhoebeUi.accent.copy(alpha = 0.10f)

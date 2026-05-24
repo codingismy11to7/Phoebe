@@ -4,7 +4,8 @@
 
 Pull requests targeting `main` run:
 
-- `./gradlew :composeApp:desktopTest`
+- `xvfb-run -a ./gradlew :composeApp:desktopTest -Pphoebe.realAudioTests=true` on Ubuntu with a PulseAudio null sink
+- `./gradlew :composeApp:desktopTest -Pphoebe.realAudioTests=true --tests com.phoebe.app.ui.PlaybackStartupRegressionDesktopTest` on macOS
 - `./gradlew :composeApp:wasmJsTest`
 - `./gradlew :composeApp:verifyRoborazziDebug`
 - `npm run web:screenshots`

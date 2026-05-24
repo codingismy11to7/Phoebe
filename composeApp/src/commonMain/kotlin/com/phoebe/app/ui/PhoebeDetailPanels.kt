@@ -148,6 +148,7 @@ import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryUiPreferences
 import com.phoebe.app.domain.CatalogSnapshot
+import com.phoebe.app.domain.DownloadItem
 import com.phoebe.app.domain.DownloadState
 import com.phoebe.app.domain.LocalFolderMediaSourceConfig
 import com.phoebe.app.domain.MediaSourcesState
@@ -518,7 +519,7 @@ private fun SongActionRow(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             contentPadding = PaddingValues(end = 4.dp),
         ) {
-            item("play") { SongActionButton(PhoebeIcon.Play, "Play", onPlay) }
+            item("play") { SongActionButton(PhoebeIcon.Play, "Play", Modifier.playTrackTarget(track), onPlay) }
             item("up-next") { SongActionButton(PhoebeIcon.Queue, "Up Next") { onAddToUpNext(track) } }
             item("lyrics") { SongActionButton(PhoebeIcon.Lyrics, "Lyrics") { onOpenLyrics(track) } }
             item("download") { DownloadActionButton("Download", listOf(track)) { onDownload(track) } }
@@ -528,7 +529,7 @@ private fun SongActionRow(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            SongActionButton(PhoebeIcon.Play, "Play", onPlay)
+            SongActionButton(PhoebeIcon.Play, "Play", Modifier.playTrackTarget(track), onPlay)
             SongActionButton(PhoebeIcon.Queue, "Up Next") { onAddToUpNext(track) }
             SongActionButton(PhoebeIcon.Lyrics, "Lyrics") { onOpenLyrics(track) }
             DownloadActionButton("Download", listOf(track)) { onDownload(track) }
@@ -537,9 +538,9 @@ private fun SongActionRow(
 }
 
 @Composable
-internal fun SongActionButton(icon: PhoebeIcon, label: String, onClick: () -> Unit) {
+internal fun SongActionButton(icon: PhoebeIcon, label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Row(
-        Modifier
+        modifier
             .clip(RoundedCornerShape(999.dp))
             .clickable(onClick = onClick)
             .background(PhoebeUi.elevatedFill)
@@ -572,10 +573,7 @@ internal fun DownloadActionButton(
     var confirmDelete by remember(uniqueTracks.map { it.id }) { mutableStateOf(false) }
     var confirmCancel by remember(uniqueTracks.map { it.id }) { mutableStateOf(false) }
     val progress = when {
-        active.isNotEmpty() -> {
-            val activeProgress = active.map { it.progress.coerceIn(0f, 1f) }.average().toFloat()
-            ((complete + activeProgress) / uniqueTracks.size.toFloat()).coerceIn(0f, 1f)
-        }
+        active.isNotEmpty() -> downloadActionProgress(complete, active, uniqueTracks.size)
         allComplete || allDownloadableComplete -> 1f
         failed > 0 -> (complete.toFloat() / uniqueTracks.size.toFloat()).coerceIn(0f, 1f)
         else -> null
@@ -583,7 +581,7 @@ internal fun DownloadActionButton(
     val isActive = active.isNotEmpty()
     val hasFailures = failed > 0
     val statusLabel = when {
-        (isActive || hasFailures) && uniqueTracks.size > 1 -> "${((progress ?: 0f) * 100).toInt()}%"
+        (isActive || hasFailures) && uniqueTracks.size > 1 -> downloadPercentLabel(progress ?: 0f)
         allDownloadableComplete && unavailable > 0 -> "$unavailable skipped"
         else -> null
     }
@@ -653,6 +651,22 @@ internal fun DownloadActionButton(
             },
         )
     }
+}
+
+internal fun downloadActionProgress(completed: Int, activeItems: List<DownloadItem>, total: Int): Float? {
+    if (total <= 0 || activeItems.isEmpty()) return null
+    val completedProgress = completed.coerceIn(0, total).toFloat()
+    val activeProgress = activeItems.sumOf { item ->
+        item.progress.coerceIn(0f, 1f).toDouble()
+    }.toFloat()
+    return ((completedProgress + activeProgress) / total.toFloat()).coerceIn(0f, 1f)
+}
+
+internal fun downloadPercentLabel(progress: Float): String {
+    val normalized = progress.coerceIn(0f, 1f)
+    val percent = (normalized * 100f).toInt()
+    val visiblePercent = if (normalized > 0f && percent == 0) 1 else percent
+    return "${visiblePercent.coerceIn(0, 100)}%"
 }
 
 @Composable

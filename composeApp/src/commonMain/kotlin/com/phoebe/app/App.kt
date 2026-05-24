@@ -94,7 +94,7 @@ fun App(
 
     var useLightAppearance by remember(readyDependencies) { mutableStateOf(false) }
     var appearanceTintId by remember(readyDependencies) { mutableStateOf(PhoebeTintOption.Purple.id) }
-    var homeScreenLayoutMode by remember(readyDependencies) { mutableStateOf(HomeScreenLayoutMode.Default) }
+    var homeScreenLayoutMode by remember(readyDependencies) { mutableStateOf<HomeScreenLayoutMode?>(null) }
 
     LaunchedEffect(readyDependencies) {
         installPlatformPlayback(readyDependencies)
@@ -119,6 +119,8 @@ fun App(
     }
 
     PhoebeTheme(useLightAppearance = useLightAppearance, tintId = appearanceTintId) {
+        val resolvedHomeScreenLayoutMode = homeScreenLayoutMode ?: return@PhoebeTheme
+
         GlobalMediaKeysEffect(
             playerFlow = state.player,
             onTogglePlayPause = { state.mediaKeyTogglePlayPause() },
@@ -163,7 +165,7 @@ fun App(
                         )
                     }
                 },
-                homeScreenLayoutMode = homeScreenLayoutMode,
+                homeScreenLayoutMode = resolvedHomeScreenLayoutMode,
                 onHomeScreenLayoutModeChange = { value ->
                     homeScreenLayoutMode = value
                     scope.launch {

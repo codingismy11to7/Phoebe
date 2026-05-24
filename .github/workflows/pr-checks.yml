@@ -31,14 +31,32 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Install ffmpeg
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Install ffmpeg and audio dependencies
+        run: >
+          sudo apt-get update &&
+          sudo apt-get install -y
+          ffmpeg
+          xvfb
+          libgtk-3-0
+          pulseaudio
+          pulseaudio-utils
+          libasound2-plugins
+          gstreamer1.0-tools
+          gstreamer1.0-pulseaudio
+          gstreamer1.0-plugins-base
+          gstreamer1.0-plugins-good
+          gstreamer1.0-plugins-bad
+          gstreamer1.0-plugins-ugly
+          gstreamer1.0-libav
+
+      - name: Start Linux virtual audio sink
+        run: bash ./scripts/setup-linux-audio-ci.sh
 
       - name: Fetch test audio fixtures
         run: ./scripts/fetch-test-audio.sh
 
       - name: Run desktop tests
-        run: ./gradlew :composeApp:desktopTest -Pphoebe.realAudioTests=true
+        run: xvfb-run -a ./gradlew :composeApp:desktopTest -Pphoebe.realAudioTests=true
 
       - name: Upload desktop screenshot artifacts
         if: failure()
@@ -49,6 +67,45 @@ jobs:
           path: |
             composeApp/build/reports/roborazzi/**
             composeApp/build/outputs/roborazzi/**
+            composeApp/build/test-results/desktopTest/**
+
+  desktop-playback-macos:
+    name: Desktop playback regression (macOS)
+    runs-on: macos-26
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Install ffmpeg
+        run: brew install ffmpeg
+
+      - name: Fetch test audio fixtures
+        run: ./scripts/fetch-test-audio.sh
+
+      - name: Run macOS desktop playback regression
+        run: >
+          ./gradlew :composeApp:desktopTest
+          -Pphoebe.realAudioTests=true
+          --tests com.phoebe.app.ui.PlaybackStartupRegressionDesktopTest
+
+      - name: Upload macOS desktop playback artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-playback-macos-artifacts
+          if-no-files-found: ignore
+          path: |
             composeApp/build/test-results/desktopTest/**
 
   android-screenshots:

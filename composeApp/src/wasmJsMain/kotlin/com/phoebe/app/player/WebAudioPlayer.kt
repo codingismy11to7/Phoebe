@@ -14,7 +14,13 @@ import org.w3c.dom.HTMLAudioElement
 actual fun createAudioPlayer(): AudioPlayer = WebAudioPlayer()
 
 @OptIn(ExperimentalWasmJsInterop::class)
-private class WebAudioPlayer : SimpleAudioPlayer() {
+internal fun createWebAudioPlayerForTests(diagnostics: PlaybackDiagnostics): AudioPlayer =
+    WebAudioPlayer(diagnostics)
+
+@OptIn(ExperimentalWasmJsInterop::class)
+private class WebAudioPlayer(
+    private val diagnostics: PlaybackDiagnostics = PlaybackDiagnostics.None,
+) : SimpleAudioPlayer() {
     override val useProgressTicker: Boolean = false
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -50,6 +56,7 @@ private class WebAudioPlayer : SimpleAudioPlayer() {
         }
         val playbackUri = resolveWebLocalAudioUri(uri)
         val generation = activePlayGeneration
+        diagnostics.engineSelected(PlaybackEnginePath.WebAudioElement)
         currentUri = playbackUri
         retryGeneration = generation
         retryCount = 0
@@ -136,6 +143,14 @@ private class WebAudioPlayer : SimpleAudioPlayer() {
             retryCount = 0
             startWebAudioPrefetchIfNeeded(currentUri, generation)
             syncFromAudio(generation, isBuffering = false)
+            diagnostics.platformPlaying(
+                PlaybackEnginePath.WebAudioElement,
+                (audio.currentTime * 1000.0).toLong().coerceAtLeast(0L),
+                webAudioPlaybackDurationMs(
+                    currentDurationMs = state.value.durationMs,
+                    browserDurationSeconds = audio.duration,
+                ),
+            )
             markPlaybackReady(generation = generation)
         }
         audio.onpause = {
@@ -174,6 +189,7 @@ private class WebAudioPlayer : SimpleAudioPlayer() {
         audio.onerror = { _, _, _, _, _ ->
             clearPendingReloadRestore()
             if (!retryWithoutCors(generation)) {
+                diagnostics.playbackError(PlaybackEnginePath.WebAudioElement, webAudioErrorMessage(audio))
                 scheduleRetry(generation, reload = true)
             }
             null
@@ -248,12 +264,15 @@ private class WebAudioPlayer : SimpleAudioPlayer() {
 
     private fun syncFromAudio(generation: Int, isBuffering: Boolean) {
         if (!isPlayRequestCurrent(generation)) return
-        val durationMs = if (audio.duration.isFinite() && audio.duration > 0.0) {
-            (audio.duration * 1000.0).toLong()
-        } else {
-            state.value.durationMs
-        }
+        val durationMs = webAudioPlaybackDurationMs(
+            currentDurationMs = state.value.durationMs,
+            browserDurationSeconds = audio.duration,
+        )
         val positionMs = (audio.currentTime * 1000.0).toLong().coerceAtLeast(0L)
+        diagnostics.playbackProgress(PlaybackEnginePath.WebAudioElement, positionMs, durationMs)
+        if (!audio.paused && !isBuffering) {
+            diagnostics.platformPlaying(PlaybackEnginePath.WebAudioElement, positionMs, durationMs)
+        }
         applyPlatformPlayback(
             positionMs = positionMs,
             durationMs = durationMs,
@@ -264,13 +283,15 @@ private class WebAudioPlayer : SimpleAudioPlayer() {
         )
     }
 
-    private fun bufferedPositionMs(positionMs: Long, durationMs: Long): Long =
-        webAudioBufferedPositionMs(
+    private fun bufferedPositionMs(positionMs: Long, durationMs: Long): Long {
+        if (durationMs > 0L && currentUri?.isRemoteWebAudioUri() == false) return durationMs
+        return webAudioBufferedPositionMs(
             positionMs = positionMs,
             durationMs = durationMs,
             bufferedRanges = audio.buffered.toWebAudioTimeRanges(),
             prefetchedPositionMs = prefetchedBufferedPositionMs(durationMs),
         )
+    }
 
     private fun startWebAudioPrefetch(uri: String, generation: Int) {
         if (!uri.startsWith("http://", ignoreCase = true) && !uri.startsWith("https://", ignoreCase = true)) return
@@ -396,6 +417,21 @@ data class WebAudioTimeRange(
     val startMs: Long,
     val endMs: Long,
 )
+
+fun String.isRemoteWebAudioUri(): Boolean =
+    startsWith("http://", ignoreCase = true) || startsWith("https://", ignoreCase = true)
+
+fun webAudioPlaybackDurationMs(
+    currentDurationMs: Long,
+    browserDurationSeconds: Double,
+): Long {
+    if (currentDurationMs > 0L) return currentDurationMs
+    return if (browserDurationSeconds.isFinite() && browserDurationSeconds > 0.0) {
+        (browserDurationSeconds * 1000.0).toLong()
+    } else {
+        0L
+    }
+}
 
 fun webAudioBufferedPositionMs(
     positionMs: Long,
@@ -629,6 +665,23 @@ private external fun isWebEqualizerAttached(audio: HTMLAudioElement): Boolean
     }""",
 )
 private external fun disposeWebAudioElement(audio: HTMLAudioElement)
+
+@OptIn(ExperimentalWasmJsInterop::class)
+@JsFun(
+    """(audio) => {
+        const error = audio && audio.error;
+        if (!error) return "";
+        const code = Number(error.code || 0);
+        const names = {
+            1: "MEDIA_ERR_ABORTED",
+            2: "MEDIA_ERR_NETWORK",
+            3: "MEDIA_ERR_DECODE",
+            4: "MEDIA_ERR_SRC_NOT_SUPPORTED"
+        };
+        return names[code] || ("HTMLMediaElement error " + code);
+    }""",
+)
+private external fun webAudioErrorMessage(audio: HTMLAudioElement): String
 
 @OptIn(ExperimentalWasmJsInterop::class)
 @JsFun(

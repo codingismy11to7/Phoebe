@@ -62,6 +62,24 @@ val composeDesktopTarget = when {
     else -> "linux-x64"
 }
 
+fun usesJvmWithAarch64C1OsrBug(): Boolean {
+    if (System.getProperty("os.arch") != "aarch64") return false
+    val version = Runtime.version()
+    return when (version.feature()) {
+        17 -> version.update() < 16
+        21 -> version.update() < 6
+        else -> false
+    }
+}
+
+val aarch64C1OsrWorkaroundJvmArgs = if (usesJvmWithAarch64C1OsrBug()) {
+    // JDK-8310844/JDK-8320682: C1 OSR compilation can abort the VM with
+    // "Field too big for insn" on older AArch64 JDK 17/21 builds.
+    listOf("-XX:-UseOnStackReplacement")
+} else {
+    emptyList()
+}
+
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.androidApplication)
@@ -345,7 +363,7 @@ compose.desktop {
             "-XX:MaxHeapFreeRatio=20",
             "-XX:+UseStringDeduplication",
             "-Dskiko.gpu.resourceCacheLimit=64M",
-        )
+        ) + aarch64C1OsrWorkaroundJvmArgs
         if (System.getProperty("os.name").lowercase().contains("mac")) {
             val mediaKeysDylibPath =
                 layout.buildDirectory.get().asFile.resolve("native/macos/libPhoebeMediaKeys.dylib").absolutePath
