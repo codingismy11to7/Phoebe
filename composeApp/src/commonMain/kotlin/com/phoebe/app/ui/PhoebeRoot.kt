@@ -218,8 +218,6 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.random.Random
 
-private const val MobilePlaybackStartDelayMs = 160L
-
 private data class PendingMobilePlaybackPreview(
     val tracks: List<Track>,
     val index: Int,
@@ -573,13 +571,12 @@ private fun PhoebeRootStateHolder(
         pendingMobilePlaybackPreview = PendingMobilePlaybackPreview(tracks, previewIndex)
         navigator.openPlayer()
         pendingMobilePlaybackJob?.cancel()
+        state.playTracks(
+            tracks = tracks,
+            index = index,
+            collectionMixSeed = collectionMixSeed,
+        )
         pendingMobilePlaybackJob = mobilePlaybackScope.launch {
-            delay(MobilePlaybackStartDelayMs)
-            state.playTracks(
-                tracks = tracks,
-                index = index,
-                collectionMixSeed = collectionMixSeed,
-            )
             delay(1_500L)
             if (pendingMobilePlaybackPreview?.currentTrack?.id == tracks.getOrNull(previewIndex)?.id) {
                 pendingMobilePlaybackPreview = null
@@ -591,6 +588,9 @@ private fun PhoebeRootStateHolder(
     val mobilePlayerPreviousTrack = pendingMobilePlaybackPreview?.previousTrack
         ?: playerQueue.queue.getOrNull(currentIndex - 1)
     val mobilePlayerCurrentIndex = pendingMobilePlaybackPreview?.index ?: currentIndex
+    val pendingMobilePlaybackTrackId = pendingMobilePlaybackPreview?.currentTrack?.id
+    val mobilePlaybackStarting = pendingMobilePlaybackTrackId != null &&
+        pendingMobilePlaybackTrackId != currentTrack?.id
     val personalMixCatalog = rememberUpdatedState(catalog)
     val personalMixHomeUiState = rememberUpdatedState(homeUiState)
     val personalMixPreferences = rememberUpdatedState(libraryUi.personalMix)
@@ -1094,6 +1094,7 @@ private fun PhoebeRootStateHolder(
                         upNext = mobilePlayerUpNext,
                         previousTrack = mobilePlayerPreviousTrack,
                         currentIndex = mobilePlayerCurrentIndex,
+                        playbackStarting = mobilePlaybackStarting,
                         castState = cast,
                         remotePlaybackTarget = musicAssistantRemotePlayback?.target,
                         onToggle = state::togglePlayPause,
@@ -1260,6 +1261,7 @@ private fun PhoebeRootStateHolder(
                             upNext = mobilePlayerUpNext,
                             previousTrack = mobilePlayerPreviousTrack,
                             currentIndex = mobilePlayerCurrentIndex,
+                            playbackStarting = mobilePlaybackStarting,
                             castState = cast,
                             remotePlaybackTarget = musicAssistantRemotePlayback?.target,
                             onToggle = state::togglePlayPause,
@@ -1690,6 +1692,7 @@ private fun MobilePlayerHost(
     upNext: List<Track>,
     previousTrack: Track?,
     currentIndex: Int,
+    playbackStarting: Boolean = false,
     castState: CastState,
     remotePlaybackTarget: String?,
     onToggle: () -> Unit,
@@ -1713,16 +1716,17 @@ private fun MobilePlayerHost(
     val appSettings by appState.appSettings.collectAsState()
     val equalizerProfile by appState.equalizerProfile.collectAsState()
     val equalizerRemoteUnavailable by appState.equalizerRemoteUnavailable.collectAsState()
+    val showStartingState = playbackStarting && track?.id != player.currentTrack?.id
     MobilePlayer(
         track = track,
         upNext = upNext,
         previousTrack = previousTrack,
-        isPlaying = player.isPlaying,
-        isBuffering = player.isBuffering,
+        isPlaying = if (showStartingState) false else player.isPlaying,
+        isBuffering = player.isBuffering || showStartingState,
         shuffle = player.shuffle,
         repeat = player.repeat,
-        positionMs = player.positionMs,
-        bufferedPositionMs = player.bufferedPositionMs,
+        positionMs = if (showStartingState) 0L else player.positionMs,
+        bufferedPositionMs = if (showStartingState) 0L else player.bufferedPositionMs,
         currentIndex = currentIndex,
         castState = castState,
         remotePlaybackTarget = remotePlaybackTarget,

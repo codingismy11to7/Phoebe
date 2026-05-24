@@ -796,6 +796,7 @@ internal fun MobileSongRow(
     Row(
         Modifier
             .fillMaxWidth()
+            .playTrackTarget(track)
             .clip(RoundedCornerShape(12.dp))
             .combinedClickable(
                 onClick = onPlay,
@@ -804,11 +805,11 @@ internal fun MobileSongRow(
             .background(
                 if (isNowPlaying) PhoebeUi.accent.copy(alpha = 0.14f) else Color.Transparent,
             )
-            .padding(horizontal = 6.dp, vertical = 8.dp),
+            .padding(horizontal = 6.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(50.dp), contentAlignment = Alignment.Center) {
             TrackArtworkImage(
                 track,
                 Modifier.fillMaxSize(),
@@ -832,17 +833,19 @@ internal fun MobileSongRow(
                 }
             }
         }
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
             MobileSongRowText(
                 track.title,
                 color = if (isNowPlaying) PhoebeUi.accentLight else PhoebeUi.primaryText,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.SemiBold,
+                lineHeight = 15.sp,
             )
             MobileSongRowText(
                 track.artist,
                 color = PhoebeUi.secondaryText,
                 fontSize = 11.sp,
+                lineHeight = 13.sp,
             )
             if (track.album.isNotBlank()) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -850,6 +853,7 @@ internal fun MobileSongRow(
                         track.album,
                         color = PhoebeUi.mutedText,
                         fontSize = 10.sp,
+                        lineHeight = 12.sp,
                         modifier = Modifier.weight(1f, fill = false),
                     )
                     TrackStateBadges(
@@ -869,7 +873,6 @@ internal fun MobileSongRow(
                 )
             }
         }
-        TrackDownloadIndicator(track, onDownload = onDownload)
         Text(formatMinutesSeconds(track.durationMs), color = PhoebeUi.mutedText, fontSize = 11.sp)
         if (columns.favorite) {
             LikeButton(
@@ -913,11 +916,13 @@ private fun MobileSongRowText(
     fontSize: TextUnit,
     modifier: Modifier = Modifier,
     fontWeight: FontWeight? = null,
+    lineHeight: TextUnit = fontSize,
 ) {
     Text(
         text,
         color = color,
         fontSize = fontSize,
+        lineHeight = lineHeight,
         fontWeight = fontWeight,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,

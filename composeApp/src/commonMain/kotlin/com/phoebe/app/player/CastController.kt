@@ -50,8 +50,11 @@ interface CastController {
 
 open class UnavailableCastController(
     private val unavailableMessage: String = "Chromecast is not available on this platform.",
+    surfaceInitialMessage: Boolean = true,
 ) : CastController {
-    private val mutableState = MutableStateFlow(CastState(message = unavailableMessage))
+    private val mutableState = MutableStateFlow(
+        CastState(message = unavailableMessage.takeIf { surfaceInitialMessage }),
+    )
     override val state: StateFlow<CastState> = mutableState
 
     override fun showDevicePicker() {

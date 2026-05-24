@@ -279,12 +279,13 @@ internal fun ContentTrackRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .playTrackTarget(track)
                 .clip(RoundedCornerShape(10.dp))
                 .combinedClickable(onClick = onPlay, onLongClick = { menuExpanded = true })
                 .background(
                     if (isNowPlaying) PhoebeUi.accent.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.045f),
                 )
-                .padding(10.dp),
+                .padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -298,7 +299,7 @@ internal fun ContentTrackRow(
                     PhoebeIconView(PhoebeIcon.Drag, tint = PhoebeUi.mutedText, modifier = Modifier.size(15.dp))
                 }
             }
-            Box(Modifier.size(46.dp), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(50.dp), contentAlignment = Alignment.Center) {
                 TrackArtworkImage(
                     track,
                     Modifier.fillMaxSize().sharedArtworkTransition(sharedKey),
@@ -321,21 +322,23 @@ internal fun ContentTrackRow(
                     }
                 }
             }
-            Column(Modifier.weight(1f)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 AutoScrollingText(
                     track.title,
                     color = if (isNowPlaying) PhoebeUi.accentLight else PhoebeUi.primaryText,
                     fontWeight = FontWeight.Bold,
                     fontSize = 14.sp,
+                    lineHeight = 17.sp,
                     modifier = Modifier.sharedBoundsTransition(sharedKey?.let { "$it:title" }),
                 )
-                AutoScrollingText(track.artist, color = PhoebeUi.secondaryText, fontSize = 12.sp)
+                AutoScrollingText(track.artist, color = PhoebeUi.secondaryText, fontSize = 12.sp, lineHeight = 15.sp)
                 if (track.album.isNotBlank()) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         AutoScrollingText(
                             track.album,
                             color = PhoebeUi.mutedText,
                             fontSize = 11.sp,
+                            lineHeight = 14.sp,
                             modifier = Modifier.weight(1f, fill = false),
                         )
                         TrackStateBadges(
@@ -398,9 +401,6 @@ internal fun ContentTrackRow(
                     onRating = { ratingActions.onRateTrack(track, it) },
                     starSize = 11.dp,
                 )
-            }
-            if (!compactLayout) {
-                TrackDownloadIndicator(track, onDownload = onDownload)
             }
             if (cols.favorite) {
                 LikeButton(
@@ -630,7 +630,7 @@ internal fun TrackActionMenu(
                             Text(
                                 if (downloadItem?.state?.name == "Queued") "Queued" else "Downloading",
                             )
-                            Text("${(downloadProgress * 100).toInt()}%", color = PhoebeUi.mutedText)
+                            Text(downloadPercentLabel(downloadProgress), color = PhoebeUi.mutedText)
                         }
                     } else {
                         Text(

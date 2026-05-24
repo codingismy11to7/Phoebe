@@ -7,26 +7,39 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.phoebe.app.domain.LocalFolderMediaSourceConfig
 import com.phoebe.app.domain.Track
+import com.phoebe.app.player.AudioPlayer
+import com.phoebe.app.player.PlaybackDiagnostics
+import com.phoebe.app.player.PlaybackEnginePath
 import com.phoebe.app.player.SimpleAudioPlayer
 import com.phoebe.app.player.createCastController
+import com.phoebe.app.player.createWebAudioPlayerForTests
 import com.phoebe.app.sources.LocalFolderCatalogBuilder
 import com.phoebe.app.playlists.PlaylistExportFormat
 import com.phoebe.app.playlists.PlaylistExporter
 import com.phoebe.app.sources.LocalLibraryIO
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlin.time.TimeSource
 
 @Composable
 fun PhoebeWasmE2eApp(e2eMode: String? = null) {
+    if (e2eMode == "localPlaybackRegression") {
+        PhoebeWasmLocalPlaybackRegressionApp()
+        return
+    }
+
     var status by remember { mutableStateOf("running") }
     var details by remember { mutableStateOf("") }
 
@@ -49,7 +62,147 @@ fun PhoebeWasmE2eApp(e2eMode: String? = null) {
     }
 }
 
+@Composable
+private fun PhoebeWasmLocalPlaybackRegressionApp() {
+    var status by remember { mutableStateOf("preparing") }
+    var details by remember { mutableStateOf("") }
+    var preparedTrack by remember { mutableStateOf<Track?>(null) }
+    val scope = rememberCoroutineScope()
+    val diagnostics = remember { WasmPlaybackStartupProbe() }
+    val player = remember { createWebAudioPlayerForTests(diagnostics) }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            removeWasmPlaybackRegressionButton()
+            player.stopPlayback()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        val rootUri = seedPlayableWavBrowserLocalFolder()
+        val snapshot = LocalFolderCatalogBuilder.build(
+            LocalFolderMediaSourceConfig(
+                id = "web-playback-regression",
+                rootUri = rootUri,
+                label = "Web Playback Regression",
+                enabled = true,
+            ),
+        )
+        val track = snapshot.tracksByParent.values.flatten().singleOrNull()
+        if (track == null || track.localUri.isNullOrBlank() || !LocalLibraryIO.fileExists(track.localUri.orEmpty())) {
+            val message = "web playback regression fixture was not indexed"
+            status = "failed"
+            details = message
+            publishWasmE2eResults(false, message)
+            return@LaunchedEffect
+        }
+
+        preparedTrack = track
+        status = "ready"
+        details = "Ready to play ${track.title}"
+        installWasmPlaybackRegressionButton("Play ${track.title}") {
+            val selected = preparedTrack
+            if (selected == null) {
+                publishWasmE2eResults(false, "playback regression clicked before fixture was ready")
+                return@installWasmPlaybackRegressionButton
+            }
+            diagnostics.markPlayRequested()
+            player.play(listOf(selected), 0)
+            scope.launch {
+                val result = awaitWasmPlaybackRegressionResult(player, diagnostics, selected)
+                status = if (result.passed) "passed" else "failed"
+                details = result.message
+                publishWasmE2eResults(result.passed, result.message)
+            }
+        }
+        publishWasmE2eReady(true, "web local playback regression ready")
+    }
+
+    MaterialTheme {
+        Column(Modifier.fillMaxSize().padding(16.dp)) {
+            Text("Phoebe wasm playback regression: $status")
+            Text(details)
+        }
+    }
+}
+
 private data class WasmE2eResult(val passed: Boolean, val message: String)
+
+private class WasmPlaybackStartupProbe : PlaybackDiagnostics {
+    private val timeSource = TimeSource.Monotonic
+    private var startedAt = timeSource.markNow()
+    var firstPlatformPlayingMs: Long? = null
+        private set
+    var firstDecodedEnergyMs: Long? = null
+        private set
+    var errors: List<String> = emptyList()
+        private set
+    var engines: List<PlaybackEnginePath> = emptyList()
+        private set
+
+    val firstAudioMs: Long?
+        get() = firstDecodedEnergyMs ?: firstPlatformPlayingMs
+
+    fun markPlayRequested() {
+        startedAt = timeSource.markNow()
+        firstPlatformPlayingMs = null
+        firstDecodedEnergyMs = null
+        errors = emptyList()
+        engines = emptyList()
+    }
+
+    override fun engineSelected(engine: PlaybackEnginePath) {
+        if (engine !in engines) engines = engines + engine
+    }
+
+    override fun platformPlaying(engine: PlaybackEnginePath, positionMs: Long, durationMs: Long) {
+        engineSelected(engine)
+        if (firstPlatformPlayingMs == null) firstPlatformPlayingMs = elapsedMs()
+    }
+
+    override fun decodedAudioEnergy(engine: PlaybackEnginePath, rms: Double) {
+        if (rms <= 0.000001 || !rms.isFinite()) return
+        engineSelected(engine)
+        if (firstDecodedEnergyMs == null) firstDecodedEnergyMs = elapsedMs()
+    }
+
+    override fun playbackError(engine: PlaybackEnginePath, message: String?) {
+        engineSelected(engine)
+        errors = errors + "${engine.name}: ${message ?: "unknown playback error"}"
+    }
+
+    private fun elapsedMs(): Long = startedAt.elapsedNow().inWholeMilliseconds.coerceAtLeast(0L)
+}
+
+private suspend fun awaitWasmPlaybackRegressionResult(
+    player: AudioPlayer,
+    diagnostics: WasmPlaybackStartupProbe,
+    track: Track,
+): WasmE2eResult {
+    val started = TimeSource.Monotonic.markNow()
+    while (started.elapsedNow().inWholeMilliseconds <= WebPlaybackStartupThresholdMs) {
+        val firstAudioMs = diagnostics.firstAudioMs
+        val state = player.state.value
+        if (firstAudioMs != null &&
+            state.currentTrack?.id == track.id &&
+            state.isPlaying &&
+            !state.isBuffering
+        ) {
+            return WasmE2eResult(
+                true,
+                "web local playback started ${track.title} in ${firstAudioMs}ms via ${diagnostics.engines.joinToString()}",
+            )
+        }
+        if (diagnostics.errors.isNotEmpty()) {
+            return WasmE2eResult(false, "web local playback failed: ${diagnostics.errors.joinToString()}")
+        }
+        delay(50)
+    }
+    return WasmE2eResult(
+        false,
+        "web local playback did not start within ${WebPlaybackStartupThresholdMs}ms; engines=${diagnostics.engines.joinToString()} state=${player.state.value}",
+    )
+}
 
 private suspend fun runWasmE2eChecks(): WasmE2eResult {
     val snapshot = LocalFolderCatalogBuilder.build(
@@ -154,6 +307,8 @@ private suspend fun runWasmCastMockE2eChecks(): WasmE2eResult {
     return WasmE2eResult(true, "mock Chromecast connected and loaded ${track.title}")
 }
 
+private const val WebPlaybackStartupThresholdMs = 5_000L
+
 private class WasmRecordingAudioPlayer : SimpleAudioPlayer() {
     var lastUri: String? = null
 
@@ -170,6 +325,15 @@ private class WasmRecordingAudioPlayer : SimpleAudioPlayer() {
     }""",
 )
 private external fun publishWasmE2eResults(passed: Boolean, message: String)
+
+@OptIn(ExperimentalWasmJsInterop::class)
+@JsFun(
+    """(ready, message) => {
+        globalThis.phoebeE2eReady = !!ready;
+        globalThis.phoebeE2eReadyMessage = String(message ?? "");
+    }""",
+)
+private external fun publishWasmE2eReady(ready: Boolean, message: String)
 
 @JsFun(
     """
@@ -278,3 +442,106 @@ private external fun installWasmCastE2eMock()
 
 @JsFun("() => String(globalThis.__phoebeCastE2eLoadedContentId || '')")
 private external fun wasmCastE2eLoadedContentId(): String
+
+@JsFun(
+    """
+    () => {
+        const store = globalThis.__phoebeLocalFileStore ||
+            (globalThis.__phoebeLocalFileStore = { folders: new Map(), files: new Map() });
+        const id = "web-playback-regression-folder";
+        const folderLabel = "Playback Regression";
+        const rootUri = "phoebe-web-folder://" + id + "/" + encodeURIComponent(folderLabel);
+        for (const key of Array.from(store.files.keys())) {
+            if (String(key).startsWith("phoebe-web-file://" + id + "/")) {
+                store.files.delete(key);
+            }
+        }
+        const sampleRate = 44100;
+        const seconds = 0.65;
+        const sampleCount = Math.floor(sampleRate * seconds);
+        const dataBytes = sampleCount * 2;
+        const bytes = new Uint8Array(44 + dataBytes);
+        const view = new DataView(bytes.buffer);
+        const text = (offset, value) => {
+            for (let i = 0; i < value.length; i++) bytes[offset + i] = value.charCodeAt(i);
+        };
+        text(0, "RIFF");
+        view.setUint32(4, 36 + dataBytes, true);
+        text(8, "WAVE");
+        text(12, "fmt ");
+        view.setUint32(16, 16, true);
+        view.setUint16(20, 1, true);
+        view.setUint16(22, 1, true);
+        view.setUint32(24, sampleRate, true);
+        view.setUint32(28, sampleRate * 2, true);
+        view.setUint16(32, 2, true);
+        view.setUint16(34, 16, true);
+        text(36, "data");
+        view.setUint32(40, dataBytes, true);
+        for (let i = 0; i < sampleCount; i++) {
+            const envelope = Math.min(1, i / 400) * Math.min(1, (sampleCount - i) / 400);
+            const sample = Math.round(Math.sin((2 * Math.PI * 440 * i) / sampleRate) * 0.26 * envelope * 32767);
+            view.setInt16(44 + i * 2, sample, true);
+        }
+        const relativePath = "alpha.wav";
+        const file = new File([bytes], relativePath, { type: "audio/wav", lastModified: 1234 });
+        const uri = "phoebe-web-file://" + id + "/" + relativePath;
+        const stored = {
+            file,
+            folderId: id,
+            folderLabel,
+            uri,
+            objectUrl: null,
+            relativePath,
+            name: relativePath,
+            parentPath: "",
+            ext: "wav"
+        };
+        store.files.set(uri, stored);
+        store.folders.set(id, { id, rootUri, label: folderLabel, files: [stored], textFiles: new Map() });
+        return rootUri;
+    }
+    """,
+)
+private external fun seedPlayableWavBrowserLocalFolder(): String
+
+@JsFun(
+    """
+    (label, callback) => {
+        const id = "phoebe-web-playback-regression-play";
+        let button = document.getElementById(id);
+        if (!button) {
+            button = document.createElement("button");
+            button.id = id;
+            button.style.position = "fixed";
+            button.style.top = "12px";
+            button.style.left = "12px";
+            button.style.zIndex = "2147483647";
+            button.style.padding = "10px 14px";
+            button.style.borderRadius = "8px";
+            button.style.border = "1px solid #aaa";
+            button.style.background = "#111";
+            button.style.color = "#fff";
+            button.style.font = "14px system-ui, sans-serif";
+            document.body.appendChild(button);
+        }
+        button.textContent = String(label || "Play");
+        button.disabled = false;
+        button.onclick = () => callback();
+    }
+    """,
+)
+private external fun installWasmPlaybackRegressionButton(label: String, callback: () -> Unit)
+
+@JsFun(
+    """
+    () => {
+        const button = document.getElementById("phoebe-web-playback-regression-play");
+        if (button) {
+            button.onclick = null;
+            try { button.remove(); } catch (_) {}
+        }
+    }
+    """,
+)
+private external fun removeWasmPlaybackRegressionButton()

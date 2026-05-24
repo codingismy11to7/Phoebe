@@ -3,6 +3,7 @@ package com.phoebe.app.player
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.os.SystemClock
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
@@ -72,6 +73,7 @@ internal class AndroidAudioPlayer(
     private var controller: MediaController? = null
     private var positionSyncJob: Job? = null
     private var platformLoadJob: Job? = null
+    private var platformStopJob: Job? = null
     private var seekJob: Job? = null
     private var bufferingTimeoutJob: Job? = null
     private var retryJob: Job? = null
@@ -81,6 +83,8 @@ internal class AndroidAudioPlayer(
     private var crossfadeOwnedTrackId: String? = null
     private var retryGeneration = -1
     private var retryCount = 0
+    private var pendingAutoplayGeneration = -1
+    private var pendingAutoplayStartedAtMs = 0L
     private val controllerMutex = Mutex()
     private var loadedPlatformQueue: LoadedPlatformQueue? = null
     private var appControllerMutationInProgress = false
@@ -92,6 +96,10 @@ internal class AndroidAudioPlayer(
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
+            syncFromController()
+        }
+
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
             syncFromController()
         }
 
@@ -137,6 +145,9 @@ internal class AndroidAudioPlayer(
         withContext(Dispatchers.Main.immediate) {
             platformLoadJob?.cancel()
             platformLoadJob = null
+            platformStopJob?.cancel()
+            platformStopJob = null
+            clearPendingAutoplay()
             pendingControllerTarget = null
             seekJob?.cancel()
             seekJob = null
@@ -179,6 +190,7 @@ internal class AndroidAudioPlayer(
                 updateOptimisticLocalBufferedPosition(track, generation)
                 player.volume = effectiveOutputVolume()
                 if (playWhenReady) {
+                    markPendingAutoplay(generation)
                     player.play()
                 }
             } else {
@@ -205,9 +217,11 @@ internal class AndroidAudioPlayer(
         stopBufferingTimeout()
         stopRetry()
         loadedPlatformQueue = null
-        scope.launch {
+        clearPendingAutoplay()
+        platformStopJob?.cancel()
+        platformStopJob = scope.launch {
             controllerMutex.withLock {
-                controller?.run {
+                activeLocalPlayer()?.run {
                     pause()
                     stop()
                     clearMediaItems()
@@ -217,13 +231,14 @@ internal class AndroidAudioPlayer(
     }
 
     override fun pause() {
+        clearPendingAutoplay()
         scope.launch {
             val ownedPlayer = ownedCrossfadePlayer()
             if (ownedPlayer != null) {
                 ownedPlayer.pause()
                 syncFromCrossfadePlayer(ownedPlayer)
             } else {
-                controllerMutex.withLock { controller?.pause() }
+                controllerMutex.withLock { activeLocalPlayer()?.pause() }
                 syncFromController()
             }
         }
@@ -238,7 +253,8 @@ internal class AndroidAudioPlayer(
                 syncFromCrossfadePlayer(ownedPlayer)
             } else {
                 controllerMutex.withLock {
-                    controller?.run {
+                    activeLocalPlayer()?.run {
+                        markPendingAutoplay(activePlayGeneration)
                         volume = effectiveOutputVolume()
                         play()
                     }
@@ -260,7 +276,7 @@ internal class AndroidAudioPlayer(
             } else {
                 controllerMutex.withLock {
                     if (!isPlayRequestCurrent(generation)) return@withLock
-                    controller?.seekTo(positionMs)
+                    activeLocalPlayer()?.seekTo(positionMs)
                 }
                 syncFromController(generation)
             }
@@ -274,7 +290,7 @@ internal class AndroidAudioPlayer(
                 ownedPlayer.volume = volume
                 return@launch
             }
-            controllerMutex.withLock { controller?.volume = volume }
+            controllerMutex.withLock { activeLocalPlayer()?.volume = volume }
         }
     }
 
@@ -304,7 +320,7 @@ internal class AndroidAudioPlayer(
             AndroidPlaybackBridge.suppressServiceEndedCallback = true
             try {
                 val outgoingOwnedByPlayback = ownedCrossfadePlayer()
-                val outgoing: Player = outgoingOwnedByPlayback ?: controller ?: return@launch
+                val outgoing: Player = outgoingOwnedByPlayback ?: activeLocalPlayer() ?: return@launch
                 diagnostics.crossfadeStarted(
                     engine = PlaybackEnginePath.Media3Crossfade,
                     outgoingTrackId = state.value.currentTrack?.id,
@@ -320,7 +336,7 @@ internal class AndroidAudioPlayer(
                 incoming.play()
                 if (!waitUntilReady(incoming, generation, CrossfadePrepareTimeoutMs)) return@launch
                 if (!isPlayRequestCurrent(generation)) return@launch
-                if (outgoingOwnedByPlayback == null && controller !== outgoing) return@launch
+                if (outgoingOwnedByPlayback == null && activeLocalPlayer() !== outgoing) return@launch
                 if (outgoingOwnedByPlayback != null && crossfadePlayer !== outgoingOwnedByPlayback) return@launch
 
                 val remainingMs = outgoing.duration
@@ -332,7 +348,7 @@ internal class AndroidAudioPlayer(
                     .coerceAtLeast(CrossfadeMinimumFadeMs)
                 fadeVolumes(outgoing, incoming, fadeDurationMs, baseVolume, generation)
                 if (!isPlayRequestCurrent(generation)) return@launch
-                if (outgoingOwnedByPlayback == null && controller !== outgoing) return@launch
+                if (outgoingOwnedByPlayback == null && activeLocalPlayer() !== outgoing) return@launch
                 if (outgoingOwnedByPlayback != null && crossfadePlayer !== outgoingOwnedByPlayback) return@launch
 
                 if (outgoingOwnedByPlayback != null) {
@@ -341,7 +357,7 @@ internal class AndroidAudioPlayer(
                     outgoingOwnedByPlayback.release()
                 } else {
                     controllerMutex.withLock {
-                        if (!isPlayRequestCurrent(generation) || controller !== outgoing) return@withLock
+                        if (!isPlayRequestCurrent(generation) || activeLocalPlayer() !== outgoing) return@withLock
                         outgoing.pause()
                         outgoing.volume = 0f
                     }
@@ -379,6 +395,7 @@ internal class AndroidAudioPlayer(
             player.setMediaItem(MediaItem.fromUri(uri))
             player.prepare()
             if (playWhenReady) {
+                markPendingAutoplay(generation)
                 player.play()
             }
         }
@@ -386,6 +403,7 @@ internal class AndroidAudioPlayer(
 
     private fun forceLocalPlaybackPaused() {
         cancelPlayIntent()
+        clearPendingAutoplay()
         stopPositionSyncLoop()
         stopBufferingTimeout()
         val current = state.value
@@ -397,6 +415,21 @@ internal class AndroidAudioPlayer(
             isPlaying = false,
             isBuffering = false,
         )
+    }
+
+    private fun activeLocalPlayer(): Player? =
+        AndroidPlaybackBridge.servicePlayer ?: controller
+
+    private fun markPendingAutoplay(generation: Int) {
+        if (pendingAutoplayGeneration != generation) {
+            pendingAutoplayStartedAtMs = SystemClock.elapsedRealtime()
+        }
+        pendingAutoplayGeneration = generation
+    }
+
+    private fun clearPendingAutoplay() {
+        pendingAutoplayGeneration = -1
+        pendingAutoplayStartedAtMs = 0L
     }
 
     private fun stopAndroidCrossfade() {
@@ -505,6 +538,8 @@ internal class AndroidAudioPlayer(
 
     private fun runPlatformLoad(generation: Int, block: suspend (Player) -> Unit) {
         platformLoadJob?.cancel()
+        platformStopJob?.cancel()
+        platformStopJob = null
         stopAndroidCrossfade()
         seekJob?.cancel()
         stopBufferingTimeout()
@@ -516,7 +551,7 @@ internal class AndroidAudioPlayer(
                 startPlaybackService()
                 ensureController()
                 controllerMutex.withLock {
-                    val player = controller ?: return@withLock
+                    val player = activeLocalPlayer() ?: return@withLock
                     if (!isPlayRequestCurrent(generation)) return@withLock
                     appControllerMutationInProgress = true
                     try {
@@ -533,6 +568,7 @@ internal class AndroidAudioPlayer(
             } catch (error: Throwable) {
                 PhoebeLog.d("AndroidAudioPlayer") { "platform load failed: ${error.message}" }
                 pendingControllerTarget = null
+                clearPendingAutoplay()
                 stopBufferingTimeout()
                 markPlaybackFailed(generation)
             }
@@ -565,6 +601,7 @@ internal class AndroidAudioPlayer(
         )
         queue.getOrNull(targetIndex)?.let { updateOptimisticLocalBufferedPosition(it, generation) }
         if (playWhenReady) {
+            markPendingAutoplay(generation)
             player.play()
         }
     }
@@ -596,7 +633,7 @@ internal class AndroidAudioPlayer(
     private fun syncFromController(generation: Int = activePlayGeneration) {
         if (!isPlayRequestCurrent(generation)) return
         if (crossfadePlayer != null && crossfadeOwnedTrackId != null) return
-        val player = controller ?: return
+        val player = activeLocalPlayer() ?: return
         val appState = state.value
         val controllerIndex = player.currentMediaItemIndex
         val loaded = loadedPlatformQueue
@@ -625,6 +662,45 @@ internal class AndroidAudioPlayer(
             return
         }
         val buffering = player.playbackState == Player.STATE_BUFFERING
+        val autoplayPending = pendingAutoplayGeneration == generation &&
+            playWhenReady &&
+            appState.currentTrack != null &&
+            player.playbackState != Player.STATE_ENDED &&
+            !player.isPlaying
+        if (autoplayPending) {
+            if (!appControllerMutationInProgress) {
+                player.play()
+            }
+            val autoplayElapsedMs = SystemClock.elapsedRealtime() - pendingAutoplayStartedAtMs
+            if (autoplayElapsedMs >= AutoplayStartRetryMs &&
+                player.playbackState == Player.STATE_READY &&
+                player.playbackSuppressionReason == Player.PLAYBACK_SUPPRESSION_REASON_NONE
+            ) {
+                schedulePlaybackRetry(null, generation)
+                return
+            }
+            reportPlaybackDiagnostics(
+                engine = PlaybackEnginePath.Media3,
+                positionMs = controllerPosition,
+                durationMs = player.duration.coerceAtLeast(0L),
+                isPlaying = false,
+            )
+            applyPlatformPlayback(
+                positionMs = controllerPosition,
+                durationMs = player.duration.coerceAtLeast(0L),
+                isPlaying = false,
+                isBuffering = true,
+                bufferedPositionMs = player.bufferedPosition
+                    .coerceAtLeast(controllerPosition)
+                    .coerceAtLeast(0L),
+                generation = generation,
+            )
+            startBufferingTimeout(generation)
+            return
+        }
+        if (player.isPlaying && pendingAutoplayGeneration == generation) {
+            clearPendingAutoplay()
+        }
         val transientPauseDuringAppLoad = playWhenReady && appState.isBuffering && !player.playWhenReady
         if (transientPauseDuringAppLoad) {
             startBufferingTimeout(generation)
@@ -699,7 +775,7 @@ internal class AndroidAudioPlayer(
         if (positionSyncJob?.isActive == true) return
         positionSyncJob = scope.launch {
             while (isActive) {
-                val player = controller ?: break
+                val player = activeLocalPlayer() ?: break
                 delay(positionSyncIntervalMs(player))
                 if (!player.isPlaying || !controllerMatchesAppState(player, generation)) break
                 reportPlaybackDiagnostics(
@@ -755,6 +831,7 @@ internal class AndroidAudioPlayer(
     private fun schedulePlaybackRetry(error: PlaybackException?, generation: Int) {
         if (!isPlayRequestCurrent(generation) || !playWhenReady) return
         if (error != null && !error.isRecoverableStreamError()) {
+            clearPendingAutoplay()
             markPlaybackFailed(generation)
             return
         }
@@ -764,6 +841,7 @@ internal class AndroidAudioPlayer(
         }
         if (retryCount >= MaxStreamRetryCount) {
             PhoebeLog.d("AndroidAudioPlayer") { "stream retry exhausted" }
+            clearPendingAutoplay()
             markPlaybackFailed(generation)
             return
         }
@@ -771,7 +849,7 @@ internal class AndroidAudioPlayer(
         retryJob?.cancel()
         val delayMs = StreamRetryBaseDelayMs * retryCount
         retryJob = scope.launch {
-            val player = controller ?: return@launch
+            val player = activeLocalPlayer() ?: return@launch
             val positionMs = player.currentPosition.coerceAtLeast(0L)
             applyPlatformPlayback(
                 positionMs = positionMs,
@@ -784,9 +862,10 @@ internal class AndroidAudioPlayer(
             delay(delayMs)
             if (!isPlayRequestCurrent(generation) || !playWhenReady) return@launch
             controllerMutex.withLock {
-                val retryPlayer = controller ?: return@withLock
+                val retryPlayer = activeLocalPlayer() ?: return@withLock
                 retryPlayer.seekTo(positionMs)
                 retryPlayer.prepare()
+                markPendingAutoplay(generation)
                 retryPlayer.play()
             }
             syncFromController(generation)
@@ -841,6 +920,7 @@ internal class AndroidAudioPlayer(
 
     private companion object {
         const val PlaybackBufferingTimeoutMs = 30_000L
+        const val AutoplayStartRetryMs = 2_000L
         const val MaxStreamRetryCount = 5
         const val StreamRetryBaseDelayMs = 1_000L
         const val NormalPositionSyncIntervalMs = 1_000L

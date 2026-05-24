@@ -5,6 +5,8 @@ import com.phoebe.app.domain.DownloadState
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.mergeDownloadCopiesById
 import com.phoebe.app.ui.DownloadStatusSnapshot
+import com.phoebe.app.ui.downloadActionProgress
+import com.phoebe.app.ui.downloadPercentLabel
 import kotlin.test.assertEquals
 import kotlin.test.Test
 import kotlin.test.assertFalse
@@ -128,6 +130,26 @@ class DownloadStatusSnapshotDesktopTest {
         assertTrue(DownloadStatusSnapshot().isComplete(merged.single()))
     }
 
+    @Test
+    fun downloadActionProgressSumsActiveItemsAcrossBatch() {
+        val activeItems = listOf(
+            downloadItem("plex:t1", DownloadState.Downloading, progress = 0.5f),
+        ) + (2..10).map { index ->
+            downloadItem("plex:t$index", DownloadState.Queued, progress = 0f)
+        }
+
+        val progress = requireNotNull(downloadActionProgress(completed = 0, activeItems = activeItems, total = 10))
+
+        assertEquals(0.05f, progress, 0.0001f)
+        assertEquals("5%", downloadPercentLabel(progress))
+    }
+
+    @Test
+    fun downloadPercentLabelShowsStartedSubPercentProgress() {
+        assertEquals("1%", downloadPercentLabel(0.005f))
+        assertEquals("0%", downloadPercentLabel(0f))
+    }
+
     private fun track(
         localUri: String? = null,
         downloadUrl: String = "https://plex.example/downloads/t1.mp3",
@@ -141,5 +163,14 @@ class DownloadStatusSnapshotDesktopTest {
             streamUrl = "https://plex.example/stream/t1.mp3",
             downloadUrl = downloadUrl,
             localUri = localUri,
+        )
+
+    private fun downloadItem(id: String, state: DownloadState, progress: Float): DownloadItem =
+        DownloadItem(
+            trackId = id,
+            title = "Song $id",
+            artist = "Artist",
+            state = state,
+            progress = progress,
         )
 }

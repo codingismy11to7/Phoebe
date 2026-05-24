@@ -1708,6 +1708,7 @@ internal fun SongsTableHeader(columns: LibraryColumnVisibility) {
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         TableHeaderCell("# Title", modifier = Modifier.weight(2.2f).padding(start = 92.dp))
         TableHeaderCell("Artist", modifier = Modifier.weight(1.4f))
@@ -1721,7 +1722,7 @@ internal fun SongsTableHeader(columns: LibraryColumnVisibility) {
         if (columns.filepath) TableHeaderCell("File Path", modifier = Modifier.weight(1.4f))
         if (columns.rating) TableHeaderCell("Rating", modifier = Modifier.width(86.dp))
         if (columns.favorite) TableHeaderCell("Fav", modifier = Modifier.width(44.dp))
-        Spacer(Modifier.width(78.dp))
+        Spacer(Modifier.width(74.dp))
     }
 }
 
@@ -1750,6 +1751,7 @@ internal fun SongRow(
     Row(
         modifier
             .fillMaxWidth()
+            .playTrackTarget(track)
             .then(if (playlistDragEnabled) Modifier.draggableSong(track) else Modifier)
             .openContextMenuOnSecondaryClick(enabled = hasMenu) { menuExpanded = true }
             .clip(RoundedCornerShape(10.dp))
@@ -1761,8 +1763,9 @@ internal fun SongRow(
                     else -> PhoebeUi.libraryHoverRow
                 },
             )
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 16.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(modifier = Modifier.weight(2.2f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             if (playlistDragEnabled) {
@@ -1817,8 +1820,6 @@ internal fun SongRow(
         TableCellText(track.artist, modifier = Modifier.weight(1.4f), color = PhoebeUi.secondaryText)
         TableAlbumCell(
             album = track.album,
-            liked = !columns.favorite && canLike && liked,
-            downloaded = downloaded,
             modifier = Modifier.weight(1.6f),
         )
         if (columns.duration) TableCellText(formatMinutesSeconds(track.durationMs), modifier = Modifier.width(70.dp), color = PhoebeUi.secondaryText)
@@ -1843,17 +1844,19 @@ internal fun SongRow(
                 starSize = 13.dp,
             )
         }
-        TrackDownloadIndicator(
-            track = track,
-            modifier = Modifier.width(34.dp),
-            onDownload = onDownload,
-        )
         if (columns.favorite) {
             LikeButton(
                 liked = liked,
                 enabled = canLike,
                 onClick = { likeActions.onToggleLiked(track) },
                 modifier = Modifier.width(44.dp),
+            )
+        }
+        Box(Modifier.width(30.dp), contentAlignment = Alignment.Center) {
+            TrackStateBadges(
+                liked = !columns.favorite && canLike && liked,
+                downloaded = downloaded,
+                iconSize = 11.dp,
             )
         }
         Box(Modifier.width(44.dp), contentAlignment = Alignment.Center) {
@@ -2106,29 +2109,16 @@ internal fun TableCellText(text: String, modifier: Modifier = Modifier, color: C
 @Composable
 private fun TableAlbumCell(
     album: String,
-    liked: Boolean,
-    downloaded: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    Row(
-        modifier,
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(5.dp),
-    ) {
-        Text(
-            album,
-            color = PhoebeUi.secondaryText,
-            fontSize = 12.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f, fill = false),
-        )
-        TrackStateBadges(
-            liked = liked,
-            downloaded = downloaded,
-            iconSize = 11.dp,
-        )
-    }
+    Text(
+        album,
+        color = PhoebeUi.secondaryText,
+        fontSize = 12.sp,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier,
+    )
 }
 
 internal fun formatHoursMinutes(ms: Long): String {

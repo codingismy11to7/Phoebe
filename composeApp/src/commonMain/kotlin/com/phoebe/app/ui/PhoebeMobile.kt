@@ -173,13 +173,13 @@ import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.defaultCollectionEntries
 import com.phoebe.app.player.CastState
 import com.phoebe.app.domain.isEmbyFamily
-import com.phoebe.app.domain.isLocalMediaPlayback
 import com.phoebe.app.domain.isJellyfin
 import com.phoebe.app.domain.isNavidrome
 import com.phoebe.app.domain.isRemoteLibraryTrack
 import com.phoebe.app.domain.supportsPlexPlaylists
 import com.phoebe.app.platform.createPlatformHttpClient
 import com.phoebe.app.platform.currentTimeMs
+import com.phoebe.app.platform.isDesktopPlatform
 import com.phoebe.app.platform.prefersReducedArtworkEffects
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
@@ -195,8 +195,6 @@ import kotlinx.coroutines.sync.withPermit
 import kotlin.math.abs
 import kotlin.math.max
 
-private const val MobileBufferFallbackTickMs = 500L
-private const val MobileBufferFallbackAdvanceMs = 2_000L
 private const val MobilePlayerArtworkLoadDelayMs = 96L
 private const val MobilePlayerContinuousMotionDelayMs = 240L
 private val MobileToolbarChromeHeight = 56.dp
@@ -1172,46 +1170,13 @@ internal fun MobilePlayer(
 ) {
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
-    val remoteDurationMs = track
-        ?.takeUnless { it.isLocalMediaPlayback() }
-        ?.durationMs
-        ?.takeIf { it > 0L }
-    val latestPositionMs by rememberUpdatedState(positionMs)
-    val latestBufferedPositionMs by rememberUpdatedState(bufferedPositionMs)
-    var estimatedRemoteBufferedPositionMs by remember(track?.id) {
-        mutableStateOf(max(positionMs, bufferedPositionMs))
-    }
-
-    LaunchedEffect(track?.id) {
-        estimatedRemoteBufferedPositionMs = max(positionMs, bufferedPositionMs)
-    }
-    LaunchedEffect(remoteDurationMs, bufferedPositionMs, positionMs) {
-        val duration = remoteDurationMs
-        if (duration == null) {
-            estimatedRemoteBufferedPositionMs = bufferedPositionMs
-            return@LaunchedEffect
-        }
-        estimatedRemoteBufferedPositionMs = max(
-            estimatedRemoteBufferedPositionMs,
-            max(positionMs, bufferedPositionMs),
-        ).coerceAtMost(duration)
-    }
-    LaunchedEffect(track?.id, remoteDurationMs, isPlaying, isBuffering) {
-        val duration = remoteDurationMs ?: return@LaunchedEffect
-        if (!isPlaying && !isBuffering) return@LaunchedEffect
-        while (estimatedRemoteBufferedPositionMs < duration) {
-            delay(MobileBufferFallbackTickMs)
-            val platformFloor = max(latestPositionMs, latestBufferedPositionMs)
-            estimatedRemoteBufferedPositionMs = max(estimatedRemoteBufferedPositionMs, platformFloor)
-                .plus(MobileBufferFallbackAdvanceMs)
-                .coerceAtMost(duration)
-        }
-    }
-    val timelineBufferedPositionMs = remember(remoteDurationMs, bufferedPositionMs, estimatedRemoteBufferedPositionMs) {
-        remoteDurationMs?.let { duration ->
-            max(bufferedPositionMs, estimatedRemoteBufferedPositionMs).coerceIn(0L, duration)
-        } ?: bufferedPositionMs
-    }
+    val timelineBufferedPositionMs = rememberTimelineBufferedPositionMs(
+        track = track,
+        positionMs = positionMs,
+        bufferedPositionMs = bufferedPositionMs,
+        isPlaying = isPlaying,
+        isBuffering = isBuffering,
+    )
     val retainedSheetState = rememberRetainedMobilePlayerUpNextSheetState(
         key = "mobile-player-up-next-sheet",
         initiallyExpanded = initialUpNextExpanded,
@@ -1398,12 +1363,14 @@ internal fun MobilePlayer(
                     Row(Modifier.width(132.dp), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
                         TransportIcon(PhoebeIcon.Lyrics, "Lyrics", onLyrics)
                         TransportIcon(PhoebeIcon.Equalizer, "Equalizer", { equalizerOpen = true }, active = equalizerProfile.enabled)
-                        CastIcon(
-                            active = castState.isConnected,
-                            loading = castState.isBuffering,
-                            enabled = castState.isAvailable || castState.isConnected,
-                            onClick = onCast,
-                        )
+                        if (!isDesktopPlatform()) {
+                            CastIcon(
+                                active = castState.isConnected,
+                                loading = castState.isBuffering,
+                                enabled = castState.isAvailable || castState.isConnected,
+                                onClick = onCast,
+                            )
+                        }
                     }
                 }
 

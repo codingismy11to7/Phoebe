@@ -152,11 +152,11 @@ import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.canTogglePlexLike
 import com.phoebe.app.player.CastState
-import com.phoebe.app.domain.isLocalMediaPlayback
 import com.phoebe.app.domain.isRemoteLibraryTrack
 import com.phoebe.app.domain.supportsPlexPlaylists
 import com.phoebe.app.platform.createPlatformHttpClient
 import com.phoebe.app.platform.currentTimeMs
+import com.phoebe.app.platform.isDesktopPlatform
 import com.phoebe.app.platform.prefersReducedArtworkEffects
 import kotlinx.coroutines.delay
 import com.phoebe.app.sources.rememberPickLocalFolder
@@ -206,11 +206,20 @@ internal fun DesktopTransport(
     onCast: () -> Unit,
 ) {
     val hasTrack = track != null
+    val timelineBufferedPositionMs = rememberTimelineBufferedPositionMs(
+        track = track,
+        positionMs = positionMs,
+        bufferedPositionMs = bufferedPositionMs,
+        isPlaying = isPlaying,
+        isBuffering = isBuffering,
+    )
     val likeActions = LocalLikeActions.current
     val trackNavigationActions = LocalTrackNavigationActions.current
     val canLike = track != null && likeActions.likesEnabled && track.canTogglePlexLike()
     val liked = track != null && likeActions.isLiked(track)
+    val showCastControls = !isDesktopPlatform()
     var equalizerOpen by remember { mutableStateOf(false) }
+    var transportOptionsOpen by remember { mutableStateOf(false) }
     if (equalizerOpen) {
         EqualizerDialog(
             profile = equalizerProfile,
@@ -224,19 +233,47 @@ internal fun DesktopTransport(
             onDismiss = { equalizerOpen = false },
         )
     }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(124.dp)
-            .background(PhoebeUi.panel)
-            .border(BorderStroke(1.dp, PhoebeUi.border))
-            .padding(horizontal = 24.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val overflowSecondaryControls = maxWidth < 960.dp
+        val denseTransport = maxWidth < 760.dp
+        val horizontalPadding = when {
+            denseTransport -> 16.dp
+            overflowSecondaryControls -> 18.dp
+            compact -> 20.dp
+            else -> 24.dp
+        }
+        val artworkSize = if (denseTransport) 52.dp else 56.dp
+        val titleWidth = when {
+            denseTransport -> 122.dp
+            overflowSecondaryControls -> 132.dp
+            compact -> 156.dp
+            else -> 190.dp
+        }
+        val transportGap = when {
+            denseTransport -> 8.dp
+            overflowSecondaryControls -> 14.dp
+            compact -> 18.dp
+            else -> 24.dp
+        }
+        val transportWidthCap = when {
+            overflowSecondaryControls -> 360.dp
+            compact -> 320.dp
+            else -> 640.dp
+        }
+        val inlineVolume = !denseTransport
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(124.dp)
+                .background(PhoebeUi.panel)
+                .border(BorderStroke(1.dp, PhoebeUi.border))
+                .padding(horizontal = horizontalPadding, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
         if (track != null) {
             BottomTransportArtworkShadow(
                 modifier = Modifier
-                    .size(56.dp)
+                    .size(artworkSize)
                     .clickable { trackNavigationActions.onOpenAlbumForTrack(track) },
             ) {
                 TrackArtworkImage(
@@ -246,7 +283,7 @@ internal fun DesktopTransport(
                 )
             }
         } else {
-            BottomTransportArtworkShadow(Modifier.size(56.dp)) {
+            BottomTransportArtworkShadow(Modifier.size(artworkSize)) {
                 EmptyNowPlayingArtworkSlot(
                     Modifier.fillMaxSize(),
                     glyphSp = 20.sp,
@@ -254,8 +291,8 @@ internal fun DesktopTransport(
                 )
             }
         }
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.width(if (compact) 156.dp else 190.dp)) {
+        Spacer(Modifier.width(if (denseTransport) 10.dp else 12.dp))
+        Column(Modifier.width(titleWidth)) {
             Text(
                 track?.title ?: "Nothing playing",
                 color = PhoebeUi.primaryText,
@@ -295,20 +332,26 @@ internal fun DesktopTransport(
             onClick = { track?.let(likeActions.onToggleLiked) },
             modifier = Modifier.size(34.dp),
         )
-        AudioQualityBadge(track = track, compact = true, modifier = Modifier.padding(start = 8.dp))
-        Spacer(Modifier.width(if (compact) 12.dp else 24.dp))
+        if (!overflowSecondaryControls) {
+            AudioQualityBadge(track = track, compact = true, modifier = Modifier.padding(start = 8.dp))
+        }
+        Spacer(Modifier.width(if (overflowSecondaryControls || compact) 10.dp else 24.dp))
         BoxWithConstraints(
             modifier = Modifier
                 .weight(1f),
             contentAlignment = Alignment.Center,
         ) {
-            val transportWidth = maxWidth.coerceAtMost(if (compact) 320.dp else 640.dp)
+            val transportWidth = maxWidth.coerceAtMost(transportWidthCap)
             Column(
                 modifier = Modifier.width(transportWidth),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(24.dp), verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(48.dp)) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(transportGap),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.height(48.dp),
+                ) {
                     ShuffleIcon(active = shuffle, onClick = onShuffle)
                     TransportIcon(PhoebeIcon.Previous, "Previous Track", onPrevious)
                     PlayButton(isPlaying, isBuffering, 48.dp, onToggle, enabled = hasTrack)
@@ -317,7 +360,7 @@ internal fun DesktopTransport(
                 }
                 ProgressLine(
                     positionMs = positionMs,
-                    bufferedPositionMs = bufferedPositionMs,
+                    bufferedPositionMs = timelineBufferedPositionMs,
                     durationMs = track?.durationMs ?: 0L,
                     waveformSeed = track?.let(::trackWaveformSeed) ?: "",
                     modifier = Modifier.fillMaxWidth(),
@@ -325,47 +368,209 @@ internal fun DesktopTransport(
                     barHeight = 20.dp,
                     labelFontSize = 11.sp,
                     labelSpacing = 2.dp,
-                    maxBarSlots = if (compact) 140 else 220,
+                    maxBarSlots = when {
+                        denseTransport -> 88
+                        overflowSecondaryControls || compact -> 140
+                        else -> 220
+                    },
                 )
             }
         }
-        Spacer(Modifier.width(if (compact) 12.dp else 24.dp))
+        Spacer(Modifier.width(if (overflowSecondaryControls || compact) 10.dp else 24.dp))
         Row(
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(if (overflowSecondaryControls) 8.dp else 10.dp),
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.height(40.dp),
+            modifier = Modifier.height(44.dp),
         ) {
-            Box(Modifier.height(40.dp), contentAlignment = Alignment.Center) {
-                PhoebeIconView(PhoebeIcon.Volume, tint = PhoebeUi.secondaryText, modifier = Modifier.size(20.dp))
+            if (!overflowSecondaryControls || inlineVolume) {
+                Box(Modifier.height(40.dp), contentAlignment = Alignment.Center) {
+                    PhoebeIconView(PhoebeIcon.Volume, tint = PhoebeUi.secondaryText, modifier = Modifier.size(20.dp))
+                }
+                Box(Modifier.height(40.dp), contentAlignment = Alignment.Center) {
+                    VolumeSlider(
+                        volume,
+                        onVolume,
+                        Modifier.width(
+                            when {
+                                overflowSecondaryControls -> 72.dp
+                                compact -> 84.dp
+                                else -> 112.dp
+                            },
+                        ),
+                    )
+                }
             }
-            Box(Modifier.height(40.dp), contentAlignment = Alignment.Center) {
-                VolumeSlider(volume, onVolume, Modifier.width(if (compact) 84.dp else 112.dp))
+            if (overflowSecondaryControls) {
+                Box {
+                    TransportIcon(
+                        PhoebeIcon.More,
+                        "More playback options",
+                        { transportOptionsOpen = true },
+                        active = (showCastControls && castState.isConnected) ||
+                            equalizerProfile.enabled ||
+                            lyricsVisible ||
+                            upNextVisible,
+                    )
+                    PlaybackOptionsMenu(
+                        expanded = transportOptionsOpen,
+                        includeVolume = !inlineVolume,
+                        showCastControls = showCastControls,
+                        volume = volume,
+                        castState = castState,
+                        equalizerEnabled = equalizerProfile.enabled,
+                        lyricsVisible = lyricsVisible,
+                        upNextVisible = upNextVisible,
+                        upNextToggleEnabled = upNextToggleEnabled,
+                        onDismiss = { transportOptionsOpen = false },
+                        onVolume = onVolume,
+                        onCast = onCast,
+                        onEqualizer = { equalizerOpen = true },
+                        onLyrics = onLyrics,
+                        onToggleUpNext = onToggleUpNext,
+                    )
+                }
+            } else {
+                if (showCastControls) {
+                    CastIcon(
+                        active = castState.isConnected,
+                        loading = castState.isBuffering,
+                        enabled = castState.isAvailable || castState.isConnected,
+                        onClick = onCast,
+                    )
+                }
+                TransportIcon(
+                    PhoebeIcon.Equalizer,
+                    "Equalizer",
+                    { equalizerOpen = true },
+                    active = equalizerProfile.enabled,
+                )
+                TransportIcon(
+                    PhoebeIcon.Lyrics,
+                    if (lyricsVisible) "Hide Lyrics" else "Show Lyrics",
+                    onLyrics,
+                    active = lyricsVisible,
+                )
+                UpNextToggleIcon(
+                    visible = upNextVisible,
+                    enabled = upNextToggleEnabled,
+                    onClick = onToggleUpNext,
+                )
             }
-            CastIcon(
-                active = castState.isConnected,
-                loading = castState.isBuffering,
-                enabled = castState.isAvailable || castState.isConnected,
-                onClick = onCast,
-            )
-            TransportIcon(
-                PhoebeIcon.Equalizer,
-                "Equalizer",
-                { equalizerOpen = true },
-                active = equalizerProfile.enabled,
-            )
-            TransportIcon(
-                PhoebeIcon.Lyrics,
-                if (lyricsVisible) "Hide Lyrics" else "Show Lyrics",
-                onLyrics,
-                active = lyricsVisible,
-            )
-            UpNextToggleIcon(
-                visible = upNextVisible,
-                enabled = upNextToggleEnabled,
-                onClick = onToggleUpNext,
-            )
+        }
         }
     }
+}
+
+@Composable
+private fun PlaybackOptionsMenu(
+    expanded: Boolean,
+    includeVolume: Boolean,
+    showCastControls: Boolean,
+    volume: Float,
+    castState: CastState,
+    equalizerEnabled: Boolean,
+    lyricsVisible: Boolean,
+    upNextVisible: Boolean,
+    upNextToggleEnabled: Boolean,
+    onDismiss: () -> Unit,
+    onVolume: (Float) -> Unit,
+    onCast: () -> Unit,
+    onEqualizer: () -> Unit,
+    onLyrics: () -> Unit,
+    onToggleUpNext: () -> Unit,
+) {
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        if (includeVolume) {
+            Row(
+                modifier = Modifier
+                    .width(224.dp)
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                PhoebeIconView(PhoebeIcon.Volume, tint = PhoebeUi.secondaryText, modifier = Modifier.size(18.dp))
+                VolumeSlider(volume, onVolume, Modifier.weight(1f))
+            }
+        }
+        if (showCastControls) {
+            PlaybackOptionsMenuItem(
+                icon = PhoebeIcon.Cast,
+                text = when {
+                    castState.isBuffering -> "Connecting to Chromecast"
+                    castState.isConnected -> "Casting"
+                    castState.isAvailable -> "Cast"
+                    else -> "Cast unavailable"
+                },
+                active = castState.isConnected || castState.isBuffering,
+                enabled = (castState.isAvailable || castState.isConnected) && !castState.isBuffering,
+                onClick = {
+                    onCast()
+                    onDismiss()
+                },
+            )
+        }
+        PlaybackOptionsMenuItem(
+            icon = PhoebeIcon.Equalizer,
+            text = "Equalizer",
+            active = equalizerEnabled,
+            onClick = {
+                onEqualizer()
+                onDismiss()
+            },
+        )
+        PlaybackOptionsMenuItem(
+            icon = PhoebeIcon.Lyrics,
+            text = if (lyricsVisible) "Hide Lyrics" else "Show Lyrics",
+            active = lyricsVisible,
+            onClick = {
+                onLyrics()
+                onDismiss()
+            },
+        )
+        PlaybackOptionsMenuItem(
+            icon = PhoebeIcon.Queue,
+            text = if (upNextVisible) "Hide Up Next" else "Show Up Next",
+            active = upNextVisible,
+            enabled = upNextToggleEnabled,
+            onClick = {
+                onToggleUpNext()
+                onDismiss()
+            },
+        )
+    }
+}
+
+@Composable
+private fun PlaybackOptionsMenuItem(
+    icon: PhoebeIcon,
+    text: String,
+    active: Boolean,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    DropdownMenuItem(
+        text = {
+            Text(
+                text,
+                color = if (enabled) PhoebeUi.primaryText else PhoebeUi.mutedText,
+                fontSize = 13.sp,
+                fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+            )
+        },
+        leadingIcon = {
+            PhoebeIconView(
+                icon,
+                tint = when {
+                    !enabled -> PhoebeUi.mutedText.copy(alpha = 0.45f)
+                    active -> PhoebeUi.accentLight
+                    else -> PhoebeUi.secondaryText
+                },
+                modifier = Modifier.size(18.dp),
+            )
+        },
+        enabled = enabled,
+        onClick = onClick,
+    )
 }
 
 @Composable

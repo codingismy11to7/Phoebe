@@ -93,6 +93,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -169,6 +170,9 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.yield
 import kotlin.math.max
+
+private const val TimelineBufferFallbackTickMs = 500L
+private const val TimelineBufferFallbackAdvanceMs = 2_000L
 
 @Composable
 internal fun PillTextField(
@@ -461,6 +465,56 @@ private val PlayButtonRightPauseShape = listOf(
 /** Stable per-track seed so wave shape differs across library even when ids are opaque or similar. */
 internal fun trackWaveformSeed(track: Track): String =
     "${track.id}\u0000${track.title}\u0000${track.artist}\u0000${track.album}\u0000${track.durationMs}"
+
+@Composable
+internal fun rememberTimelineBufferedPositionMs(
+    track: Track?,
+    positionMs: Long,
+    bufferedPositionMs: Long,
+    isPlaying: Boolean,
+    isBuffering: Boolean,
+): Long {
+    val remoteDurationMs = track
+        ?.takeUnless { it.isLocalMediaPlayback() }
+        ?.durationMs
+        ?.takeIf { it > 0L }
+    val latestPositionMs by rememberUpdatedState(positionMs)
+    val latestBufferedPositionMs by rememberUpdatedState(bufferedPositionMs)
+    var estimatedRemoteBufferedPositionMs by remember(track?.id) {
+        mutableStateOf(max(positionMs, bufferedPositionMs))
+    }
+
+    LaunchedEffect(track?.id) {
+        estimatedRemoteBufferedPositionMs = max(positionMs, bufferedPositionMs)
+    }
+    LaunchedEffect(remoteDurationMs, bufferedPositionMs, positionMs) {
+        val duration = remoteDurationMs
+        if (duration == null) {
+            estimatedRemoteBufferedPositionMs = bufferedPositionMs
+            return@LaunchedEffect
+        }
+        estimatedRemoteBufferedPositionMs = max(
+            estimatedRemoteBufferedPositionMs,
+            max(positionMs, bufferedPositionMs),
+        ).coerceAtMost(duration)
+    }
+    LaunchedEffect(track?.id, remoteDurationMs, isPlaying, isBuffering) {
+        val duration = remoteDurationMs ?: return@LaunchedEffect
+        if (!isPlaying && !isBuffering) return@LaunchedEffect
+        while (estimatedRemoteBufferedPositionMs < duration) {
+            delay(TimelineBufferFallbackTickMs)
+            val platformFloor = max(latestPositionMs, latestBufferedPositionMs)
+            estimatedRemoteBufferedPositionMs = max(estimatedRemoteBufferedPositionMs, platformFloor)
+                .plus(TimelineBufferFallbackAdvanceMs)
+                .coerceAtMost(duration)
+        }
+    }
+    return remember(remoteDurationMs, bufferedPositionMs, estimatedRemoteBufferedPositionMs) {
+        remoteDurationMs?.let { duration ->
+            max(bufferedPositionMs, estimatedRemoteBufferedPositionMs).coerceIn(0L, duration)
+        } ?: bufferedPositionMs
+    }
+}
 
 internal fun waveBarHeight(seed: String, index: Int): Float {
     var h = 0L

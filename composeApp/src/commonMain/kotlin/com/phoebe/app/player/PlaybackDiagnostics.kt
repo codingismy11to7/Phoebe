@@ -5,6 +5,8 @@ internal enum class PlaybackEnginePath {
     Media3Crossfade,
     JavaFxMediaPlayer,
     SampledClip,
+    SampledStream,
+    WebAudioElement,
 }
 
 internal interface PlaybackDiagnostics {
