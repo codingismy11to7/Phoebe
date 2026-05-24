@@ -95,6 +95,44 @@ class PhoebeNavigationTest {
     }
 
     @Test
+    fun homeRequestDoesNotResetActiveBrowseSection() {
+        val navigator = PhoebeNavigator(PhoebeRoute.Browse())
+
+        navigator.openBrowse(BrowseSection.Playlists)
+        navigator.handle(AppNavigationRequest.Home)
+
+        assertEquals(listOf(PhoebeRoute.Browse(BrowseSection.Playlists)), navigator.routes)
+    }
+
+    @Test
+    fun homeRequestDoesNotClearActiveBrowseDetailStack() {
+        val navigator = PhoebeNavigator(PhoebeRoute.Browse())
+
+        navigator.openBrowse(BrowseSection.Playlists)
+        navigator.open(PhoebeRoute.PlaylistDetail("playlist-1"))
+        navigator.handle(AppNavigationRequest.Home)
+
+        assertEquals(
+            listOf(
+                PhoebeRoute.Browse(BrowseSection.Playlists),
+                PhoebeRoute.PlaylistDetail("playlist-1"),
+            ),
+            navigator.routes,
+        )
+    }
+
+    @Test
+    fun homeRequestStillLeavesSetupFlow() {
+        val navigator = PhoebeNavigator(PhoebeRoute.SignIn)
+
+        navigator.handle(AppNavigationRequest.ServerPicker)
+        navigator.handle(AppNavigationRequest.LibraryPicker)
+        navigator.handle(AppNavigationRequest.Home)
+
+        assertEquals(listOf(PhoebeRoute.Browse()), navigator.routes)
+    }
+
+    @Test
     fun collectionDrillDownPopReturnsToCollectionsRoute() {
         val navigator = PhoebeNavigator(PhoebeRoute.Browse())
         val entry = CollectionEntry(CollectionTarget.Artists, CollectionFacet.Genre)

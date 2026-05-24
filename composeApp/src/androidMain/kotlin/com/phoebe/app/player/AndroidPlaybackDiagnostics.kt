@@ -9,6 +9,7 @@ import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.BaseAudioProcessor
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.util.Util
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.audio.AudioSink
@@ -18,6 +19,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.roundToInt
 
+@OptIn(UnstableApi::class)
 internal object AndroidPlaybackDiagnostics {
     var diagnostics: PlaybackDiagnostics = PlaybackDiagnostics.None
 
@@ -33,12 +35,33 @@ internal object AndroidPlaybackDiagnostics {
                 diagnostics = diagnostics,
                 engine = engine,
             ),
-        )
+        ).setLoadControl(PhoebeLoadControlConfig.create())
     }
 
     fun reset() {
         diagnostics = PlaybackDiagnostics.None
     }
+}
+
+@OptIn(UnstableApi::class)
+internal object PhoebeLoadControlConfig {
+    const val MinBufferMs = 60_000
+    const val MaxBufferMs = 300_000
+    const val BufferForPlaybackMs = 1_000
+    const val BufferForPlaybackAfterRebufferMs = 2_000
+    const val TargetBufferBytes = 12 * 1024 * 1024
+
+    fun create(): DefaultLoadControl =
+        DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                MinBufferMs,
+                MaxBufferMs,
+                BufferForPlaybackMs,
+                BufferForPlaybackAfterRebufferMs,
+            )
+            .setTargetBufferBytes(TargetBufferBytes)
+            .setPrioritizeTimeOverSizeThresholds(false)
+            .build()
 }
 
 internal object AndroidEqualizerState {

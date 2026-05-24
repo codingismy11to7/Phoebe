@@ -197,6 +197,8 @@ import kotlin.math.max
 
 private const val MobileBufferFallbackTickMs = 500L
 private const val MobileBufferFallbackAdvanceMs = 2_000L
+private const val MobilePlayerArtworkLoadDelayMs = 96L
+private const val MobilePlayerContinuousMotionDelayMs = 240L
 private val MobileToolbarChromeHeight = 56.dp
 private val MobileBottomNavChromeHeight = 68.dp
 private val MobileMiniPlayerChromeHeight = 66.dp
@@ -942,6 +944,7 @@ internal fun SwipeableMobileArtwork(
     var dragOffset by remember(track.id) { mutableFloatStateOf(0f) }
     var isDragging by remember(track.id) { mutableStateOf(false) }
     var settleJob by remember(track.id) { mutableStateOf<Job?>(null) }
+    var swipePreviewDirection by remember(track.id) { mutableStateOf(0) }
     val latestTrackId by rememberUpdatedState(track.id)
 
     BoxWithConstraints(
@@ -955,6 +958,11 @@ internal fun SwipeableMobileArtwork(
         val widthPx = with(density) { maxWidth.toPx() }
         val swipeThresholdPx = with(density) { 56.dp.toPx() }
         fun artworkOffsetPx(): Float = if (isDragging) dragOffset else settleOffset.value
+        fun previewDirectionFor(offsetPx: Float): Int = when {
+            offsetPx < 0f && nextTrack != null -> -1
+            offsetPx > 0f && previousTrack != null -> 1
+            else -> 0
+        }
 
         fun settleToCenter(fromOffset: Float) {
             settleJob?.cancel()
@@ -967,6 +975,7 @@ internal fun SwipeableMobileArtwork(
                         dampingRatio = Spring.DampingRatioMediumBouncy,
                     ),
                 )
+                swipePreviewDirection = 0
             }
         }
 
@@ -1022,6 +1031,9 @@ internal fun SwipeableMobileArtwork(
                         )
                     }
                 }
+                if (latestTrackId == startingTrackId) {
+                    swipePreviewDirection = 0
+                }
             }
         }
 
@@ -1033,46 +1045,46 @@ internal fun SwipeableMobileArtwork(
                         onDragStart = {
                             settleJob?.cancel()
                             dragOffset = settleOffset.value
+                            swipePreviewDirection = previewDirectionFor(dragOffset)
                             isDragging = true
                             scope.launch { settleOffset.stop() }
                         },
                         onDragEnd = {
-                            isDragging = false
                             val releaseOffset = dragOffset
+                            swipePreviewDirection = previewDirectionFor(releaseOffset)
+                            isDragging = false
                             dragOffset = 0f
                             animateSwipeCommit(releaseOffset)
                         },
                         onDragCancel = {
-                            isDragging = false
                             val releaseOffset = dragOffset
+                            swipePreviewDirection = previewDirectionFor(releaseOffset)
+                            isDragging = false
                             dragOffset = 0f
                             settleToCenter(releaseOffset)
                         },
-                        onHorizontalDrag = { _, dragAmount -> dragOffset += dragAmount },
+                        onHorizontalDrag = { _, dragAmount ->
+                            dragOffset += dragAmount
+                            swipePreviewDirection = previewDirectionFor(dragOffset)
+                        },
                     )
                 },
         ) {
-            if (nextTrack != null) {
+            if (nextTrack != null && swipePreviewDirection < 0) {
                 TrackArtworkImage(
                     nextTrack,
                     Modifier
                         .fillMaxSize()
-                        .offset { IntOffset((widthPx + artworkOffsetPx()).roundToInt(), 0) }
-                        .graphicsLayer {
-                            alpha = if (artworkOffsetPx() < 0f) 1f else 0f
-                        },
+                        .offset { IntOffset((widthPx + artworkOffsetPx()).roundToInt(), 0) },
                     radius = 10.dp,
                 )
             }
-            if (previousTrack != null) {
+            if (previousTrack != null && swipePreviewDirection > 0) {
                 TrackArtworkImage(
                     previousTrack,
                     Modifier
                         .fillMaxSize()
-                        .offset { IntOffset((artworkOffsetPx() - widthPx).roundToInt(), 0) }
-                        .graphicsLayer {
-                            alpha = if (artworkOffsetPx() > 0f) 1f else 0f
-                        },
+                        .offset { IntOffset((artworkOffsetPx() - widthPx).roundToInt(), 0) },
                     radius = 10.dp,
                 )
             }
@@ -1234,6 +1246,25 @@ internal fun MobilePlayer(
         else -> animatedOffset
     }
     val hasTrack = track != null
+    val inheritedArtworkLoadingEnabled = LocalArtworkLoadingEnabled.current
+    val inheritedContinuousMotionEnabled = LocalContinuousMotionEnabled.current
+    var playerArtworkLoadingEnabled by remember(track?.id) { mutableStateOf(false) }
+    var playerContinuousMotionEnabled by remember(track?.id) { mutableStateOf(false) }
+    val playerMotionEnabled = inheritedContinuousMotionEnabled && playerContinuousMotionEnabled
+    LaunchedEffect(track?.id, inheritedArtworkLoadingEnabled) {
+        playerArtworkLoadingEnabled = false
+        if (track != null && inheritedArtworkLoadingEnabled) {
+            delay(MobilePlayerArtworkLoadDelayMs)
+            playerArtworkLoadingEnabled = true
+        }
+    }
+    LaunchedEffect(track?.id, inheritedContinuousMotionEnabled) {
+        playerContinuousMotionEnabled = false
+        if (track != null && inheritedContinuousMotionEnabled) {
+            delay(MobilePlayerContinuousMotionDelayMs)
+            playerContinuousMotionEnabled = true
+        }
+    }
     var equalizerOpen by remember { mutableStateOf(false) }
     val trackNavigationActions = LocalTrackNavigationActions.current
     if (equalizerOpen) {
@@ -1437,13 +1468,19 @@ internal fun MobilePlayer(
                                         .size(artworkSize)
                                         .align(Alignment.Start),
                                 ) {
-                                    SwipeableMobileArtwork(
-                                        track = track,
-                                        nextTrack = upNext.firstOrNull(),
-                                        previousTrack = previousTrack,
-                                        onSkipQueueBy = onSkipQueueBy,
-                                        modifier = Modifier.fillMaxSize(),
-                                    )
+                                    val artworkLoadsEnabled = inheritedArtworkLoadingEnabled &&
+                                        playerArtworkLoadingEnabled
+                                    CompositionLocalProvider(
+                                        LocalArtworkLoadingEnabled provides artworkLoadsEnabled,
+                                    ) {
+                                        SwipeableMobileArtwork(
+                                            track = track,
+                                            nextTrack = upNext.firstOrNull(),
+                                            previousTrack = previousTrack,
+                                            onSkipQueueBy = onSkipQueueBy,
+                                            modifier = Modifier.fillMaxSize(),
+                                        )
+                                    }
                                     AudioQualityBadge(
                                         track = track,
                                         onArtwork = true,
@@ -1453,24 +1490,33 @@ internal fun MobilePlayer(
                                     )
                                 }
                                 Spacer(Modifier.height(20.dp))
-                                AutoScrollingText(track.title, color = PhoebeUi.primaryText, fontSize = 22.sp, fontWeight = FontWeight.Black)
-                                AutoScrollingText(
-                                    track.artist,
-                                    color = PhoebeUi.secondaryText,
-                                    fontSize = 15.sp,
-                                    modifier = Modifier.clickable(enabled = track.artist.isNotBlank()) {
-                                        trackNavigationActions.onOpenArtistForTrack(track)
-                                    },
-                                )
-                                if (track.album.isNotBlank()) {
+                                CompositionLocalProvider(
+                                    LocalContinuousMotionEnabled provides playerMotionEnabled,
+                                ) {
                                     AutoScrollingText(
-                                        track.album,
-                                        color = PhoebeUi.mutedText,
-                                        fontSize = 13.sp,
-                                        modifier = Modifier.clickable {
-                                            trackNavigationActions.onOpenAlbumForTrack(track)
+                                        track.title,
+                                        color = PhoebeUi.primaryText,
+                                        fontSize = 22.sp,
+                                        fontWeight = FontWeight.Black,
+                                    )
+                                    AutoScrollingText(
+                                        track.artist,
+                                        color = PhoebeUi.secondaryText,
+                                        fontSize = 15.sp,
+                                        modifier = Modifier.clickable(enabled = track.artist.isNotBlank()) {
+                                            trackNavigationActions.onOpenArtistForTrack(track)
                                         },
                                     )
+                                    if (track.album.isNotBlank()) {
+                                        AutoScrollingText(
+                                            track.album,
+                                            color = PhoebeUi.mutedText,
+                                            fontSize = 13.sp,
+                                            modifier = Modifier.clickable {
+                                                trackNavigationActions.onOpenAlbumForTrack(track)
+                                            },
+                                        )
+                                    }
                                 }
                                 if (remotePlaybackTarget != null) {
                                     Text(
@@ -1510,16 +1556,18 @@ internal fun MobilePlayer(
                     onSeek = if (hasTrack) onSeek else null,
                 )
                 Spacer(Modifier.height(22.dp))
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 20.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    ShuffleIcon(active = shuffle, onClick = onShuffle)
-                    TransportIcon(PhoebeIcon.Previous, "Previous Track", onPrevious)
-                    PlayButton(isPlaying, isBuffering, 58.dp, onToggle, enabled = hasTrack)
-                    TransportIcon(PhoebeIcon.Next, "Next Track", onNext)
-                    RepeatIcon(mode = repeat, onClick = onRepeat)
+                CompositionLocalProvider(LocalContinuousMotionEnabled provides playerMotionEnabled) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        ShuffleIcon(active = shuffle, onClick = onShuffle)
+                        TransportIcon(PhoebeIcon.Previous, "Previous Track", onPrevious)
+                        PlayButton(isPlaying, isBuffering, 58.dp, onToggle, enabled = hasTrack)
+                        TransportIcon(PhoebeIcon.Next, "Next Track", onNext)
+                        RepeatIcon(mode = repeat, onClick = onRepeat)
+                    }
                 }
                 Spacer(Modifier.height(12.dp))
 

@@ -521,11 +521,11 @@ internal class AndroidAudioPlayer(
                     appControllerMutationInProgress = true
                     try {
                         block(player)
+                        if (isPlayRequestCurrent(generation)) {
+                            syncFromController(generation)
+                        }
                     } finally {
                         appControllerMutationInProgress = false
-                    }
-                    if (isPlayRequestCurrent(generation)) {
-                        syncFromController(generation)
                     }
                 }
             } catch (e: CancellationException) {
@@ -625,6 +625,11 @@ internal class AndroidAudioPlayer(
             return
         }
         val buffering = player.playbackState == Player.STATE_BUFFERING
+        val transientPauseDuringAppLoad = playWhenReady && appState.isBuffering && !player.playWhenReady
+        if (transientPauseDuringAppLoad) {
+            startBufferingTimeout(generation)
+            return
+        }
         if (!appControllerMutationInProgress) {
             adoptPlatformPlayIntent(player.playWhenReady)
         }

@@ -297,6 +297,28 @@ data class Track(
     val parentAlbumId: String? = null,
 )
 
+internal fun List<Track>.mergeDownloadCopiesById(): List<Track> {
+    val merged = linkedMapOf<String, Track>()
+    forEach { track ->
+        val existing = merged[track.id]
+        if (existing == null) {
+            merged[track.id] = track
+        } else {
+            merged[track.id] = existing.copy(
+                streamUrl = existing.streamUrl.ifBlank { track.streamUrl },
+                downloadUrl = existing.downloadUrl.ifBlank { track.downloadUrl },
+                thumbUrl = existing.thumbUrl ?: track.thumbUrl,
+                localArtworkUri = existing.localArtworkUri ?: track.localArtworkUri,
+                localUri = existing.localUri ?: track.localUri,
+                filepath = existing.filepath ?: track.filepath,
+                audioCodec = existing.audioCodec ?: track.audioCodec,
+                bitrateKbps = existing.bitrateKbps ?: track.bitrateKbps,
+            )
+        }
+    }
+    return merged.values.toList()
+}
+
 data class TrackMetadataUpdate(
     val trackId: String,
     val title: String,

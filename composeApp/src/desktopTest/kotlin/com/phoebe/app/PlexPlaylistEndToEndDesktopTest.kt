@@ -1,15 +1,22 @@
 package com.phoebe.app
 
+import app.cash.sqldelight.async.coroutines.awaitAsList
 import app.cash.sqldelight.db.SqlDriver
 import com.phoebe.app.data.CatalogRepository
 import com.phoebe.app.data.MediaSourcesRepository
 import com.phoebe.app.data.PlexClient
+import com.phoebe.app.domain.DownloadState
 import com.phoebe.app.domain.Track
 import com.phoebe.app.platform.PlatformStorage
 import com.phoebe.app.testing.newInMemoryPhoebeDatabase
 import com.phoebe.app.testing.plexCatalogMockEngine
 import com.phoebe.app.testing.testHttpClient
 import com.phoebe.app.testing.testPlexSession
+import io.ktor.client.engine.mock.MockEngine
+import io.ktor.client.engine.mock.respond
+import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
+import io.ktor.http.headersOf
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Before
@@ -191,6 +198,158 @@ class PlexPlaylistEndToEndDesktopTest {
 
         assertEquals(listOf("plex:t1"), tracks.map { it.id })
         assertEquals(1995, tracks.single().year)
+    }
+
+    @Test
+    fun largeDownloadPreflightSkipsTracksWithoutDownloadUrls() = runTest {
+        val (db, sqlDriver) = newInMemoryPhoebeDatabase()
+        driver = sqlDriver
+        val http = testHttpClient(plexCatalogMockEngine())
+        val repo = catalogRepository(db, http)
+        val tracks = (0 until 1_000).map { index ->
+            Track(
+                id = "plex:missing-$index",
+                title = "Missing $index",
+                artist = "Artist One",
+                album = "Album One",
+                durationMs = 1_000,
+                streamUrl = "",
+                downloadUrl = "",
+            )
+        }
+        tracks.take(3).forEach { track ->
+            db.downloadsQueries.upsert(
+                trackId = track.id,
+                title = track.title,
+                artist = track.artist,
+                dlState = DownloadState.Failed.name,
+                progress = 0.0,
+                localUri = null,
+            )
+        }
+
+        val result = repo.downloadTracks(tracks)
+
+        assertEquals(1_000, result.total)
+        assertEquals(0, result.completed)
+        assertEquals(0, result.failed)
+        assertEquals(1_000, result.skipped)
+        assertTrue(repo.catalog.value.downloads.isEmpty())
+        val persisted = db.downloadsQueries.selectAll().awaitAsList()
+        assertTrue(persisted.isEmpty())
+    }
+
+    @Test
+    fun downloadTracksStreamsAudioToStorage() = runTest {
+        val payload = ByteArray(160 * 1024) { index -> (index % 251).toByte() }
+        var downloadRequests = 0
+        var artworkRequests = 0
+        val (db, sqlDriver) = newInMemoryPhoebeDatabase()
+        driver = sqlDriver
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/downloads/t1.mp3" -> {
+                    downloadRequests++
+                    respond(
+                        content = payload,
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(
+                            HttpHeaders.ContentLength to listOf(payload.size.toString()),
+                            HttpHeaders.ContentType to listOf("audio/mpeg"),
+                        ),
+                    )
+                }
+                "/art/t1.jpg" -> {
+                    artworkRequests++
+                    respond(
+                        content = ByteArray(1024) { 7 },
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType to listOf("image/jpeg")),
+                    )
+                }
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val http = testHttpClient(engine)
+        val repo = catalogRepository(db, http)
+        PlatformStorage().writeDownloadDirectory(temp.newFolder("downloads").toURI().toString())
+        val track = Track(
+            id = "plex:t-stream",
+            title = "Streamed Song",
+            artist = "Artist One",
+            album = "Album One",
+            durationMs = 1_000,
+            streamUrl = "https://plex.example/stream/t1.mp3",
+            downloadUrl = "https://plex.example/downloads/t1.mp3",
+            thumbUrl = "https://plex.example/art/t1.jpg",
+        )
+
+        val result = repo.downloadTracks(listOf(track))
+
+        assertEquals(1, result.total)
+        assertEquals(1, result.completed)
+        assertEquals(0, result.failed)
+        val downloaded = repo.catalog.value.downloads.single()
+        assertEquals(DownloadState.Complete, downloaded.state)
+        assertEquals(1f, downloaded.progress)
+        val localUri = requireNotNull(downloaded.localUri)
+        val stored = PlatformStorage().readUriBytes(localUri)
+        assertNotNull(stored)
+        assertTrue(payload.contentEquals(stored))
+        val persisted = db.downloadsQueries.selectAll().awaitAsList().single()
+        assertEquals(DownloadState.Complete.name, persisted.dlState)
+        assertEquals(localUri, persisted.localUri)
+        assertEquals(1, downloadRequests)
+        assertEquals(0, artworkRequests)
+
+        val retryResult = repo.downloadTracks(listOf(track))
+
+        assertEquals(1, retryResult.total)
+        assertEquals(1, retryResult.completed)
+        assertEquals(0, retryResult.failed)
+        assertEquals(1, downloadRequests)
+        assertEquals(0, artworkRequests)
+    }
+
+    @Test
+    fun downloadFailsWhenResponseEndsBeforeDeclaredContentLength() = runTest {
+        val payload = ByteArray(96 * 1024) { index -> (index % 199).toByte() }
+        val (db, sqlDriver) = newInMemoryPhoebeDatabase()
+        driver = sqlDriver
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/downloads/t1.mp3" -> respond(
+                    content = payload,
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(
+                        HttpHeaders.ContentLength to listOf((payload.size + 1).toString()),
+                        HttpHeaders.ContentType to listOf("audio/mpeg"),
+                    ),
+                )
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val http = testHttpClient(engine)
+        val repo = catalogRepository(db, http)
+        PlatformStorage().writeDownloadDirectory(temp.newFolder("downloads-open-body").toURI().toString())
+        val track = Track(
+            id = "plex:t-open-body",
+            title = "Short Body Song",
+            artist = "Artist One",
+            album = "Album One",
+            durationMs = 1_000,
+            streamUrl = "https://plex.example/stream/t1.mp3",
+            downloadUrl = "https://plex.example/downloads/t1.mp3",
+        )
+
+        val result = repo.downloadTracks(listOf(track))
+
+        assertEquals(1, result.total)
+        assertEquals(0, result.completed)
+        assertEquals(1, result.failed)
+        val downloaded = repo.catalog.value.downloads.single()
+        assertEquals(DownloadState.Failed, downloaded.state)
+        assertEquals(null, downloaded.localUri)
     }
 
     private fun catalogRepository(db: com.phoebe.app.db.PhoebeDatabase, http: io.ktor.client.HttpClient): CatalogRepository {

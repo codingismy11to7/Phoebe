@@ -207,13 +207,22 @@ internal val LocalTracksLoading = compositionLocalOf { emptySet<String>() }
 
 internal data class DownloadStatusSnapshot(
     val itemsByTrackId: Map<String, DownloadItem> = emptyMap(),
+    val hasActiveDownloadJobs: Boolean = false,
 ) {
     fun itemFor(track: Track): DownloadItem? = itemsByTrackId[track.id]
+
     fun isComplete(track: Track): Boolean =
-        track.localUri != null || itemFor(track)?.state == DownloadState.Complete
+        track.localUri != null ||
+            itemFor(track)?.state == DownloadState.Complete ||
+            !itemFor(track)?.localUri.isNullOrBlank()
 
     fun isActive(track: Track): Boolean =
-        itemFor(track)?.state in setOf(DownloadState.Queued, DownloadState.Downloading)
+        hasActiveDownloadJobs &&
+            !isComplete(track) &&
+            itemFor(track)?.state in setOf(DownloadState.Queued, DownloadState.Downloading)
+
+    fun isFailed(track: Track): Boolean =
+        track.downloadUrl.isNotBlank() && !isComplete(track) && itemFor(track)?.state == DownloadState.Failed
 }
 
 internal val LocalDownloadStatus = compositionLocalOf { DownloadStatusSnapshot() }

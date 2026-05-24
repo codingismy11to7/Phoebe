@@ -97,6 +97,28 @@ actual class PlatformStorage actual constructor() {
         }.toURI().toString()
     }
 
+    actual suspend fun writeByteStream(name: String, readChunk: suspend () -> ByteArray?): String = withContext(Dispatchers.IO) {
+        val targetRoot = readDownloadDirectory()
+            ?.let { runCatching { Paths.get(URI(it)).toFile() }.getOrNull() }
+            ?: defaultDownloadDirectory()
+        val relativeName = name.removePrefix("downloads/")
+        val file = targetRoot.resolve(relativeName).apply {
+            parentFile?.mkdirs()
+        }
+        try {
+            file.outputStream().use { stream ->
+                while (true) {
+                    val chunk = readChunk() ?: break
+                    if (chunk.isNotEmpty()) stream.write(chunk)
+                }
+            }
+        } catch (error: Throwable) {
+            file.takeIf { it.exists() }?.delete()
+            throw error
+        }
+        file.toURI().toString()
+    }
+
     actual suspend fun readDownloadDirectory(): String? =
         readText(DownloadDirectoryFile)?.takeIf { it.isNotBlank() }
 

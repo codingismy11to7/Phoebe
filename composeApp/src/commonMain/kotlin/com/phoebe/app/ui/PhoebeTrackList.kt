@@ -141,6 +141,7 @@ import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryUiPreferences
 import com.phoebe.app.domain.CatalogSnapshot
+import com.phoebe.app.domain.DownloadState
 import com.phoebe.app.domain.LocalFolderMediaSourceConfig
 import com.phoebe.app.domain.MediaSourcesState
 import com.phoebe.app.domain.MusicLibrary
@@ -438,6 +439,7 @@ internal fun TrackDownloadIndicator(
     var confirmCancel by remember(track.id) { mutableStateOf(false) }
     val isActive = downloads.isActive(track)
     val isComplete = downloads.isComplete(track)
+    val isFailed = downloads.isFailed(track)
     val clickModifier = if (onDownload != null) {
         Modifier
             .clip(CircleShape)
@@ -465,6 +467,11 @@ internal fun TrackDownloadIndicator(
                 PhoebeIcon.Check,
                 tint = PhoebeUi.accentLight,
                 modifier = Modifier.size(15.dp),
+            )
+            isFailed -> PhoebeIconView(
+                PhoebeIcon.Close,
+                tint = PhoebeUi.accentLight,
+                modifier = Modifier.size(14.dp),
             )
             else -> PhoebeIconView(
                 PhoebeIcon.Download,
@@ -522,6 +529,7 @@ internal fun TrackActionMenu(
     val downloadItem = track?.let { downloads.itemFor(it) }
     val downloadActive = track?.let { downloads.isActive(it) } == true
     val downloadComplete = track?.let { downloads.isComplete(it) } == true
+    val downloadFailed = track?.let { downloads.isFailed(it) } == true
     val downloadProgress = downloadItem?.progress?.coerceIn(0f, 1f) ?: 0f
     var confirmDeleteDownload by remember(track?.id) { mutableStateOf(false) }
     var confirmCancelDownload by remember(track?.id) { mutableStateOf(false) }
@@ -625,7 +633,13 @@ internal fun TrackActionMenu(
                             Text("${(downloadProgress * 100).toInt()}%", color = PhoebeUi.mutedText)
                         }
                     } else {
-                        Text(if (downloadComplete) "Delete Download" else "Download Song")
+                        Text(
+                            when {
+                                downloadComplete -> "Delete Download"
+                                downloadFailed -> "Retry Download"
+                                else -> "Download Song"
+                            },
+                        )
                     }
                 },
                 onClick = {

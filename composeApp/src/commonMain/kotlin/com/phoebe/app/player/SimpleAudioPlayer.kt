@@ -52,11 +52,17 @@ abstract class SimpleAudioPlayer : AudioPlayer {
             previous.currentIndex == index &&
             previous.currentTrack?.id == track.id
         ) {
-            if (!previous.isPlaying && !previous.isBuffering) {
-                playGeneration++
-                playWhenReady = true
-                mutableState.value = previous.copy(isPlaying = true, playbackErrorMessage = null)
-                resume()
+            if (previous.isPlaying && !previous.isBuffering && playWhenReady) {
+                return
+            }
+            crossfadeRequestKey = null
+            playWhenReady = true
+            mutableState.value = previous.copy(
+                isPlaying = !previous.isBuffering,
+                playbackErrorMessage = null,
+            )
+            resume()
+            if (!previous.isBuffering) {
                 startProgressTicker()
             }
             return

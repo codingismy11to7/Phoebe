@@ -87,12 +87,15 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
@@ -157,12 +160,14 @@ import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.isLocalMediaPlayback
 import com.phoebe.app.domain.isLocalPlaylist
 import com.phoebe.app.domain.isRemoteLibraryTrack
+import com.phoebe.app.domain.mergeDownloadCopiesById
 import com.phoebe.app.domain.supportsPlexPlaylists
 import com.phoebe.app.playlists.PlaylistExportFormat
 import com.phoebe.app.platform.createPlatformHttpClient
 import com.phoebe.app.platform.currentTimeMs
 import com.phoebe.app.platform.prefersReducedArtworkEffects
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
 import com.phoebe.app.sources.rememberPickLocalFolder
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
@@ -171,6 +176,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 import kotlin.math.max
 
@@ -556,11 +562,13 @@ internal fun DownloadActionButton(
 ) {
     val downloads = LocalDownloadStatus.current
     val downloadActions = LocalDownloadActions.current
-    val uniqueTracks = remember(tracks) { tracks.distinctBy { it.id } }
-    val items = uniqueTracks.mapNotNull { downloads.itemFor(it) }
+    val uniqueTracks = remember(tracks) { tracks.mergeDownloadCopiesById() }
     val complete = uniqueTracks.count { downloads.isComplete(it) }
-    val active = items.filter { it.state == DownloadState.Queued || it.state == DownloadState.Downloading }
+    val active = uniqueTracks.mapNotNull { track -> downloads.itemFor(track)?.takeIf { downloads.isActive(track) } }
+    val failed = uniqueTracks.count { downloads.isFailed(it) }
     val allComplete = uniqueTracks.isNotEmpty() && complete == uniqueTracks.size
+    val unavailable = uniqueTracks.count { track -> !downloads.isComplete(track) && track.downloadUrl.isBlank() }
+    val allDownloadableComplete = complete > 0 && complete + unavailable == uniqueTracks.size
     var confirmDelete by remember(uniqueTracks.map { it.id }) { mutableStateOf(false) }
     var confirmCancel by remember(uniqueTracks.map { it.id }) { mutableStateOf(false) }
     val progress = when {
@@ -568,25 +576,30 @@ internal fun DownloadActionButton(
             val activeProgress = active.map { it.progress.coerceIn(0f, 1f) }.average().toFloat()
             ((complete + activeProgress) / uniqueTracks.size.toFloat()).coerceIn(0f, 1f)
         }
-        allComplete -> 1f
+        allComplete || allDownloadableComplete -> 1f
+        failed > 0 -> (complete.toFloat() / uniqueTracks.size.toFloat()).coerceIn(0f, 1f)
         else -> null
     }
     val isActive = active.isNotEmpty()
+    val hasFailures = failed > 0
     val statusLabel = when {
-        isActive && uniqueTracks.size > 1 -> "${((progress ?: 0f) * 100).toInt()}%"
+        (isActive || hasFailures) && uniqueTracks.size > 1 -> "${((progress ?: 0f) * 100).toInt()}%"
+        allDownloadableComplete && unavailable > 0 -> "$unavailable skipped"
         else -> null
     }
     val labelText = when {
         isActive -> "Downloading"
-        allComplete -> "Downloaded"
+        allComplete || allDownloadableComplete -> "Downloaded"
+        hasFailures && complete > 0 -> "Partly Downloaded"
+        hasFailures -> "Download Failed"
         else -> label
     }
     val iconColor = when {
-        isActive || allComplete -> PhoebeUi.accentLight
+        isActive || allComplete || allDownloadableComplete || hasFailures -> PhoebeUi.accentLight
         else -> PhoebeUi.mutedText
     }
     LibraryToolbarButton(
-        icon = if (allComplete) PhoebeIcon.Check else PhoebeIcon.Download,
+        icon = if (allComplete || allDownloadableComplete) PhoebeIcon.Check else PhoebeIcon.Download,
         label = labelText,
         value = statusLabel,
         iconTint = iconColor,
@@ -594,7 +607,7 @@ internal fun DownloadActionButton(
         onClick = {
             if (isActive) {
                 confirmCancel = true
-            } else if (allComplete) {
+            } else if (allComplete || allDownloadableComplete) {
                 confirmDelete = true
             } else {
                 onClick()
@@ -1768,6 +1781,11 @@ internal fun PlaylistExportMenu(
     }
 }
 
+private data class PlaylistTrackListState(
+    val sortedTracks: List<Track>,
+    val visibleTracks: List<Track>,
+)
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun PlaylistDetailPanel(
@@ -1791,12 +1809,27 @@ internal fun PlaylistDetailPanel(
 
     var sortBy by remember(playlist.id) { mutableStateOf(LibrarySortBy.PlaylistOrder) }
     var ascending by remember(playlist.id) { mutableStateOf(true) }
-    val sortedTracks = remember(tracks, sortBy, ascending) {
-        sortTracksForLibrary(tracks, sortBy, ascending)
+    val trackListState by produceState<PlaylistTrackListState?>(
+        initialValue = null,
+        tracks,
+        sortBy,
+        ascending,
+        searchQuery,
+    ) {
+        value = null
+        withFrameNanos { }
+        value = withContext(Dispatchers.Default) {
+            val sorted = sortTracksForLibrary(tracks, sortBy, ascending)
+            PlaylistTrackListState(
+                sortedTracks = sorted,
+                visibleTracks = filterTracksByQuery(sorted, searchQuery),
+            )
+        }
     }
-    val visibleTracks = remember(sortedTracks, searchQuery) {
-        filterTracksByQuery(sortedTracks, searchQuery)
-    }
+    val sortedTracks = trackListState?.sortedTracks.orEmpty()
+    val visibleTracks = trackListState?.visibleTracks.orEmpty()
+    val preparingTracks = trackListState == null && (tracks.isNotEmpty() || searchQuery.isNotBlank())
+    val actionTracks = if (preparingTracks) emptyList() else tracks
     val playVisibleTrack = { visibleIndex: Int ->
         val (queueTracks, queueIndex) = playbackQueueForVisibleTrack(sortedTracks, visibleTracks, visibleIndex)
         onPlayTracks(queueTracks, queueIndex)
@@ -1808,129 +1841,145 @@ internal fun PlaylistDetailPanel(
     BoxWithConstraints(modifier.fillMaxSize()) {
         val useTable = maxWidth >= 640.dp
         val listState = RetainedLazyListStates.remember("playlist-detail:${playlist.id}")
-    LazyColumn(
-        state = listState,
-        modifier = Modifier.fillMaxSize().padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        item(contentType = "playlist-header") {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                DetailSectionIntro(
-                    onBack = onBack,
-                    label = "Playlist",
-                    alignBackIconToContentStart = !useTable,
-                )
-                Text(playlist.title, color = PhoebeUi.primaryText, fontSize = 24.sp, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                PlaylistTrackSummaryLine(
-                    totalCount = sortedTracks.size,
-                    visibleCount = visibleTracks.size,
-                    searchQuery = searchQuery,
-                )
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    LikeButton(
-                        liked = favoriteActions.isFavorite(playlist),
-                        enabled = true,
-                        onClick = { favoriteActions.onTogglePlaylist(playlist) },
-                    )
-                    if (ratingActions.ratingsEnabled && (playlist.id.startsWith("plex:") || playlist.id.startsWith("jellyfin:"))) {
-                        RatingStars(
-                            rating = ratingActions.ratingFor(playlist),
-                            enabled = true,
-                            onRating = { ratingActions.onRatePlaylist(playlist, it) },
-                            starSize = 16.dp,
-                            showClear = true,
+        val scrolling by remember(listState) { derivedStateOf { listState.isScrollInProgress } }
+        val artworkLoadingEnabled = LocalArtworkLoadingEnabled.current && (useTable || !scrolling)
+
+        CompositionLocalProvider(LocalArtworkLoadingEnabled provides artworkLoadingEnabled) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize().padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                item(contentType = "playlist-header") {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        DetailSectionIntro(
+                            onBack = onBack,
+                            label = "Playlist",
+                            alignBackIconToContentStart = !useTable,
+                        )
+                        Text(playlist.title, color = PhoebeUi.primaryText, fontSize = 24.sp, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        PlaylistTrackSummaryLine(
+                            totalCount = if (preparingTracks) tracks.size else sortedTracks.size,
+                            visibleCount = if (preparingTracks) tracks.size else visibleTracks.size,
+                            searchQuery = searchQuery,
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            LikeButton(
+                                liked = favoriteActions.isFavorite(playlist),
+                                enabled = true,
+                                onClick = { favoriteActions.onTogglePlaylist(playlist) },
+                            )
+                            if (ratingActions.ratingsEnabled && (playlist.id.startsWith("plex:") || playlist.id.startsWith("jellyfin:"))) {
+                                RatingStars(
+                                    rating = ratingActions.ratingFor(playlist),
+                                    enabled = true,
+                                    onRating = { ratingActions.onRatePlaylist(playlist, it) },
+                                    starSize = 16.dp,
+                                    showClear = true,
+                                )
+                            }
+                        }
+                        SearchPill(
+                            query = searchQuery,
+                            onQueryChange = onSearchQuery,
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                            placeholder = "Search songs and artists",
+                        )
+                        if (!useTable) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(top = 4.dp),
+                            ) {
+                                DownloadActionButton("Download Playlist", actionTracks) { onDownloadPlaylist(playlist) }
+                                PlaylistExportMenu(playlist = playlist)
+                            }
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        DetailSectionHeader(
+                            title = "Tracks",
+                            sortBy = sortBy,
+                            sortKeys = listOf(LibrarySortBy.PlaylistOrder, LibrarySortBy.Name, LibrarySortBy.Album, LibrarySortBy.Year, LibrarySortBy.DateAdded),
+                            sortLabel = { key ->
+                                when (key) {
+                                    LibrarySortBy.PlaylistOrder -> "Playlist order"
+                                    LibrarySortBy.Album -> "Album name"
+                                    LibrarySortBy.Year -> "Release date"
+                                    LibrarySortBy.DateAdded -> "Date added"
+                                    else -> "Song name"
+                                }
+                            },
+                            onSortBy = { sortBy = it },
+                            ascending = ascending,
+                            onAscending = { ascending = it },
+                            columns = libraryUi.columns,
+                            onColumns = onLibraryColumns,
+                            actions = {
+                                if (useTable) {
+                                    DownloadActionButton("Download Playlist", actionTracks) { onDownloadPlaylist(playlist) }
+                                    PlaylistExportMenu(playlist = playlist)
+                                }
+                            },
                         )
                     }
                 }
-                SearchPill(
-                    query = searchQuery,
-                    onQueryChange = onSearchQuery,
-                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                    placeholder = "Search songs and artists",
-                )
-                if (!useTable) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(top = 4.dp),
-                    ) {
-                        DownloadActionButton("Download Playlist", tracks) { onDownloadPlaylist(playlist) }
-                        PlaylistExportMenu(playlist = playlist)
+                if (preparingTracks) {
+                    item(contentType = "playlist-preparing") {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            CatalogLoadingStrip()
+                            Text(
+                                "Preparing songs...",
+                                color = PhoebeUi.mutedText,
+                                fontSize = 15.sp,
+                            )
+                        }
+                    }
+                } else if (visibleTracks.isEmpty()) {
+                    item(contentType = "playlist-empty") {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (playlist.id in LocalTracksLoading.current && searchQuery.isBlank()) CatalogLoadingStrip()
+                            Text(
+                                when {
+                                    searchQuery.isNotBlank() -> "No tracks / artists in this playlist match \"$searchQuery\"."
+                                    playlist.id in LocalTracksLoading.current -> "Fetching songs…"
+                                    else -> "No tracks loaded for this playlist yet."
+                                },
+                                color = PhoebeUi.mutedText,
+                                fontSize = 15.sp,
+                            )
+                        }
+                    }
+                } else if (useTable) {
+                    item(contentType = "playlist-track-header") {
+                        SongsTableHeader(libraryUi.columns)
+                    }
+                    itemsIndexed(visibleTracks, key = { _, t -> t.id }, contentType = { _, _ -> "playlist-track" }) { index, track ->
+                        SongRow(
+                            track = track,
+                            selected = false,
+                            columns = libraryUi.columns,
+                            onSelect = { playVisibleTrack(index) },
+                            onPlay = { playVisibleTrack(index) },
+                            onAddToUpNext = { onAddToUpNext(track) },
+                            onDownload = { onDownload(track) },
+                            modifier = Modifier.animateItem(),
+                        )
+                    }
+                } else {
+                    itemsIndexed(visibleTracks, key = { _, t -> t.id }, contentType = { _, _ -> "playlist-track" }) { index, track ->
+                        MobileSongRow(
+                            track = track,
+                            columns = libraryUi.columns,
+                            isNowPlaying = track.id == nowPlaying.trackId,
+                            nowPlayingIsPlaying = nowPlaying.isPlaying,
+                            nowPlayingIsBuffering = nowPlaying.isBuffering,
+                            onPlay = { playVisibleTrack(index) },
+                            onAddToUpNext = { onAddToUpNext(track) },
+                            onDownload = { onDownload(track) },
+                        )
                     }
                 }
-                Spacer(Modifier.height(6.dp))
-                DetailSectionHeader(
-                    title = "Tracks",
-                    sortBy = sortBy,
-                    sortKeys = listOf(LibrarySortBy.PlaylistOrder, LibrarySortBy.Name, LibrarySortBy.Album, LibrarySortBy.Year, LibrarySortBy.DateAdded),
-                    sortLabel = { key ->
-                        when (key) {
-                            LibrarySortBy.PlaylistOrder -> "Playlist order"
-                            LibrarySortBy.Album -> "Album name"
-                            LibrarySortBy.Year -> "Release date"
-                            LibrarySortBy.DateAdded -> "Date added"
-                            else -> "Song name"
-                        }
-                    },
-                    onSortBy = { sortBy = it },
-                    ascending = ascending,
-                    onAscending = { ascending = it },
-                    columns = libraryUi.columns,
-                    onColumns = onLibraryColumns,
-                    actions = {
-                        if (useTable) {
-                            DownloadActionButton("Download Playlist", tracks) { onDownloadPlaylist(playlist) }
-                            PlaylistExportMenu(playlist = playlist)
-                        }
-                    },
-                )
             }
         }
-        if (visibleTracks.isEmpty()) {
-            item(contentType = "playlist-empty") {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (playlist.id in LocalTracksLoading.current && searchQuery.isBlank()) CatalogLoadingStrip()
-                    Text(
-                        when {
-                            searchQuery.isNotBlank() -> "No tracks / artists in this playlist match \"$searchQuery\"."
-                            playlist.id in LocalTracksLoading.current -> "Fetching songs…"
-                            else -> "No tracks loaded for this playlist yet."
-                        },
-                        color = PhoebeUi.mutedText,
-                        fontSize = 15.sp,
-                    )
-                }
-            }
-        } else if (useTable) {
-            item(contentType = "playlist-track-header") {
-                SongsTableHeader(libraryUi.columns)
-            }
-            itemsIndexed(visibleTracks, key = { _, t -> t.id }, contentType = { _, _ -> "playlist-track" }) { index, track ->
-                SongRow(
-                    track = track,
-                    selected = false,
-                    columns = libraryUi.columns,
-                    onSelect = { playVisibleTrack(index) },
-                    onPlay = { playVisibleTrack(index) },
-                    onAddToUpNext = { onAddToUpNext(track) },
-                    onDownload = { onDownload(track) },
-                    modifier = Modifier.animateItem(),
-                )
-            }
-        } else {
-            itemsIndexed(visibleTracks, key = { _, t -> t.id }, contentType = { _, _ -> "playlist-track" }) { index, track ->
-                MobileSongRow(
-                    track = track,
-                    columns = libraryUi.columns,
-                    isNowPlaying = track.id == nowPlaying.trackId,
-                    nowPlayingIsPlaying = nowPlaying.isPlaying,
-                    nowPlayingIsBuffering = nowPlaying.isBuffering,
-                    onPlay = { playVisibleTrack(index) },
-                    onAddToUpNext = { onAddToUpNext(track) },
-                    onDownload = { onDownload(track) },
-                )
-            }
-        }
-    }
     }
 }

@@ -311,7 +311,7 @@ internal class PhoebeNavigator(
             AppNavigationRequest.SignIn -> replaceRoot(PhoebeRoute.SignIn)
             AppNavigationRequest.ServerPicker -> openSetupRoute(PhoebeRoute.ServerPicker)
             AppNavigationRequest.LibraryPicker -> openSetupRoute(PhoebeRoute.LibraryPicker)
-            AppNavigationRequest.Home -> replaceRoot(PhoebeRoute.Browse())
+            AppNavigationRequest.Home -> openHomeFromAppRequest()
             AppNavigationRequest.Player -> openPlayer()
             is AppNavigationRequest.PlaylistDetail -> {
                 replaceRoot(PhoebeRoute.Browse())
@@ -322,6 +322,12 @@ internal class PhoebeNavigator(
 
     fun openBrowse(section: BrowseSection) {
         replaceRoot(PhoebeRoute.Browse(section))
+    }
+
+    private fun openHomeFromAppRequest() {
+        // Startup/session restore can emit Home after the user has already entered browse.
+        if (routes.firstOrNull() is PhoebeRoute.Browse) return
+        replaceRoot(PhoebeRoute.Browse())
     }
 
     private fun openSetupRoute(route: PhoebeRoute) {
