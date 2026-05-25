@@ -253,11 +253,9 @@ internal fun ContentTrackRow(
     val cols = libraryColumns
     val likeActions = LocalLikeActions.current
     val ratingActions = LocalRatingActions.current
-    val downloads = LocalDownloadStatus.current
     val canLike = likeActions.likesEnabled && track.canTogglePlexLike()
     val liked = likeActions.isLiked(track)
     val rating = ratingActions.ratingFor(track)
-    val downloaded = downloads.isComplete(track)
     val techParts = remember(track.id, cols) {
         buildList {
             if (cols.audioCodec) {
@@ -343,7 +341,7 @@ internal fun ContentTrackRow(
                         )
                         TrackStateBadges(
                             liked = !cols.favorite && canLike && liked,
-                            downloaded = downloaded,
+                            downloaded = false,
                             iconSize = 10.dp,
                         )
                     }
@@ -409,6 +407,11 @@ internal fun ContentTrackRow(
                     onClick = { likeActions.onToggleLiked(track) },
                 )
             }
+            TrackDownloadIndicator(
+                track = track,
+                onDownload = onDownload,
+                showIdle = false,
+            )
             Box(
                 Modifier.size(40.dp).clip(CircleShape).clickable { menuExpanded = true },
                 contentAlignment = Alignment.Center,
@@ -431,6 +434,7 @@ internal fun TrackDownloadIndicator(
     track: Track,
     modifier: Modifier = Modifier,
     onDownload: (() -> Unit)? = null,
+    showIdle: Boolean = true,
 ) {
     val downloads = LocalDownloadStatus.current
     val downloadActions = LocalDownloadActions.current
@@ -440,7 +444,8 @@ internal fun TrackDownloadIndicator(
     val isActive = downloads.isActive(track)
     val isComplete = downloads.isComplete(track)
     val isFailed = downloads.isFailed(track)
-    val clickModifier = if (onDownload != null) {
+    val hasVisibleState = isActive || isComplete || isFailed
+    val clickModifier = if (onDownload != null && (showIdle || hasVisibleState)) {
         Modifier
             .clip(CircleShape)
             .clickable {
@@ -457,6 +462,11 @@ internal fun TrackDownloadIndicator(
     }
     Box(modifier.size(28.dp).then(clickModifier), contentAlignment = Alignment.Center) {
         when {
+            isActive && item?.state == DownloadState.Queued -> CircularProgressIndicator(
+                color = PhoebeUi.accentLight,
+                strokeWidth = 2.dp,
+                modifier = Modifier.size(16.dp),
+            )
             isActive -> CircularProgressIndicator(
                 progress = { item?.progress?.coerceIn(0f, 1f) ?: 0f },
                 color = PhoebeUi.accentLight,
@@ -473,7 +483,7 @@ internal fun TrackDownloadIndicator(
                 tint = PhoebeUi.accentLight,
                 modifier = Modifier.size(14.dp),
             )
-            else -> PhoebeIconView(
+            showIdle -> PhoebeIconView(
                 PhoebeIcon.Download,
                 tint = PhoebeUi.mutedText.copy(alpha = 0.42f),
                 modifier = Modifier.size(14.dp),

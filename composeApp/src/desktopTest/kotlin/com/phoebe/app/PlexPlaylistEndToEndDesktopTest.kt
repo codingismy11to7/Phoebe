@@ -17,12 +17,16 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
@@ -309,6 +313,103 @@ class PlexPlaylistEndToEndDesktopTest {
         assertEquals(0, retryResult.failed)
         assertEquals(1, downloadRequests)
         assertEquals(0, artworkRequests)
+    }
+
+    @Test
+    fun downloadTracksRunsBatchDownloadsInParallel() = runTest {
+        val payload = ByteArray(32 * 1024) { index -> (index % 251).toByte() }
+        val inFlight = AtomicInteger(0)
+        val maxInFlight = AtomicInteger(0)
+        val (db, sqlDriver) = newInMemoryPhoebeDatabase()
+        driver = sqlDriver
+        val engine = MockEngine { request ->
+            when {
+                request.url.encodedPath.startsWith("/downloads/") -> {
+                    val current = inFlight.incrementAndGet()
+                    maxInFlight.updateAndGet { previous -> maxOf(previous, current) }
+                    delay(100)
+                    inFlight.decrementAndGet()
+                    respond(
+                        content = payload,
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(
+                            HttpHeaders.ContentLength to listOf(payload.size.toString()),
+                            HttpHeaders.ContentType to listOf("audio/mpeg"),
+                        ),
+                    )
+                }
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val repo = catalogRepository(db, testHttpClient(engine))
+        PlatformStorage().writeDownloadDirectory(temp.newFolder("parallel-downloads").toURI().toString())
+        val tracks = (1..12).map { index ->
+            Track(
+                id = "plex:t-parallel-$index",
+                title = "Parallel Song $index",
+                artist = "Artist One",
+                album = "Album One",
+                durationMs = 1_000,
+                streamUrl = "https://plex.example/stream/t$index.mp3",
+                downloadUrl = "https://plex.example/downloads/t$index.mp3",
+            )
+        }
+
+        val result = repo.downloadTracks(tracks)
+
+        assertEquals(12, result.total)
+        assertEquals(12, result.completed)
+        assertEquals(0, result.failed)
+        assertTrue(maxInFlight.get() > 4)
+        assertTrue(maxInFlight.get() <= 8)
+    }
+
+    @Test
+    fun downloadProgressDoesNotRewriteCatalogDownloadsUntilBatchSettles() = runTest {
+        val payload = ByteArray(32 * 1024) { index -> (index % 251).toByte() }
+        val requestStarted = CompletableDeferred<Unit>()
+        val allowResponse = CompletableDeferred<Unit>()
+        val (db, sqlDriver) = newInMemoryPhoebeDatabase()
+        driver = sqlDriver
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/downloads/t1.mp3" -> {
+                    requestStarted.complete(Unit)
+                    allowResponse.await()
+                    respond(
+                        content = payload,
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(
+                            HttpHeaders.ContentLength to listOf(payload.size.toString()),
+                            HttpHeaders.ContentType to listOf("audio/mpeg"),
+                        ),
+                    )
+                }
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val repo = catalogRepository(db, testHttpClient(engine))
+        PlatformStorage().writeDownloadDirectory(temp.newFolder("progress-downloads").toURI().toString())
+        val track = Track(
+            id = "plex:t-progress",
+            title = "Progress Song",
+            artist = "Artist One",
+            album = "Album One",
+            durationMs = 1_000,
+            streamUrl = "https://plex.example/stream/t1.mp3",
+            downloadUrl = "https://plex.example/downloads/t1.mp3",
+        )
+
+        val result = async { repo.downloadTracks(listOf(track)) }
+        requestStarted.await()
+
+        assertTrue(repo.downloads.value.any { it.trackId == track.id && it.state == DownloadState.Downloading })
+        assertTrue(repo.catalog.value.downloads.isEmpty())
+
+        allowResponse.complete(Unit)
+        assertEquals(1, result.await().completed)
+        assertEquals(DownloadState.Complete, repo.downloads.value.single().state)
+        assertEquals(DownloadState.Complete, repo.catalog.value.downloads.single().state)
     }
 
     @Test

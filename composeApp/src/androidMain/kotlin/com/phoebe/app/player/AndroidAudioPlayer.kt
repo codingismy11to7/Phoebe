@@ -661,7 +661,16 @@ internal class AndroidAudioPlayer(
         ) {
             return
         }
+        val bufferedPosition = player.bufferedPosition
+            .coerceAtLeast(controllerPosition)
+            .coerceAtLeast(0L)
+        val durationMs = player.duration.coerceAtLeast(0L)
         val buffering = player.playbackState == Player.STATE_BUFFERING
+        val hasReadyBuffer = hasPlaybackReadyBuffer(
+            positionMs = controllerPosition,
+            bufferedPositionMs = bufferedPosition,
+            durationMs = durationMs,
+        )
         val autoplayPending = pendingAutoplayGeneration == generation &&
             playWhenReady &&
             appState.currentTrack != null &&
@@ -673,7 +682,7 @@ internal class AndroidAudioPlayer(
             }
             val autoplayElapsedMs = SystemClock.elapsedRealtime() - pendingAutoplayStartedAtMs
             if (autoplayElapsedMs >= AutoplayStartRetryMs &&
-                player.playbackState == Player.STATE_READY &&
+                (player.playbackState == Player.STATE_READY || hasReadyBuffer) &&
                 player.playbackSuppressionReason == Player.PLAYBACK_SUPPRESSION_REASON_NONE
             ) {
                 schedulePlaybackRetry(null, generation)
@@ -687,15 +696,14 @@ internal class AndroidAudioPlayer(
             )
             applyPlatformPlayback(
                 positionMs = controllerPosition,
-                durationMs = player.duration.coerceAtLeast(0L),
+                durationMs = durationMs,
                 isPlaying = false,
                 isBuffering = true,
-                bufferedPositionMs = player.bufferedPosition
-                    .coerceAtLeast(controllerPosition)
-                    .coerceAtLeast(0L),
+                bufferedPositionMs = bufferedPosition,
                 generation = generation,
             )
             startBufferingTimeout(generation)
+            startPositionSyncLoop(generation)
             return
         }
         if (player.isPlaying && pendingAutoplayGeneration == generation) {
@@ -704,6 +712,7 @@ internal class AndroidAudioPlayer(
         val transientPauseDuringAppLoad = playWhenReady && appState.isBuffering && !player.playWhenReady
         if (transientPauseDuringAppLoad) {
             startBufferingTimeout(generation)
+            startPositionSyncLoop(generation)
             return
         }
         if (!appControllerMutationInProgress) {
@@ -717,10 +726,10 @@ internal class AndroidAudioPlayer(
         )
         applyPlatformPlayback(
             positionMs = controllerPosition,
-            durationMs = player.duration.coerceAtLeast(0L),
+            durationMs = durationMs,
             isPlaying = player.isPlaying && !buffering,
             isBuffering = buffering,
-            bufferedPositionMs = player.bufferedPosition.coerceAtLeast(controllerPosition).coerceAtLeast(0L),
+            bufferedPositionMs = bufferedPosition,
             generation = generation,
         )
         if (player.isPlaying && playWhenReady) {
@@ -728,10 +737,11 @@ internal class AndroidAudioPlayer(
             resetRetries(generation)
             startPositionSyncLoop(generation)
         } else {
-            stopPositionSyncLoop()
             if (buffering && playWhenReady) {
                 startBufferingTimeout(generation)
+                startPositionSyncLoop(generation)
             } else {
+                stopPositionSyncLoop()
                 stopBufferingTimeout()
             }
         }
@@ -774,28 +784,25 @@ internal class AndroidAudioPlayer(
     private fun startPositionSyncLoop(generation: Int) {
         if (positionSyncJob?.isActive == true) return
         positionSyncJob = scope.launch {
-            while (isActive) {
+            while (isActive && isPlayRequestCurrent(generation)) {
                 val player = activeLocalPlayer() ?: break
                 delay(positionSyncIntervalMs(player))
-                if (!player.isPlaying || !controllerMatchesAppState(player, generation)) break
-                reportPlaybackDiagnostics(
-                    engine = PlaybackEnginePath.Media3,
-                    positionMs = player.currentPosition.coerceAtLeast(0L),
-                    durationMs = player.duration.coerceAtLeast(0L),
-                    isPlaying = true,
-                )
-                applyPlatformPlayback(
-                    positionMs = player.currentPosition.coerceAtLeast(0L),
-                    durationMs = player.duration.coerceAtLeast(0L),
-                    isPlaying = true,
-                    isBuffering = false,
-                    bufferedPositionMs = player.bufferedPosition
-                        .coerceAtLeast(player.currentPosition)
-                        .coerceAtLeast(0L),
-                    generation = generation,
-                )
+                if (!controllerMatchesAppState(player, generation)) break
+                syncFromController(generation)
+                if (!shouldKeepPlatformSyncing(player, generation)) break
             }
         }
+    }
+
+    private fun shouldKeepPlatformSyncing(player: Player, generation: Int): Boolean {
+        if (!isPlayRequestCurrent(generation)) return false
+        val pendingAutoplay = pendingAutoplayGeneration == generation &&
+            playWhenReady &&
+            state.value.currentTrack != null &&
+            player.playbackState != Player.STATE_ENDED &&
+            !player.isPlaying
+        return player.isPlaying ||
+            (playWhenReady && (player.playbackState == Player.STATE_BUFFERING || pendingAutoplay || state.value.isBuffering))
     }
 
     private fun positionSyncIntervalMs(player: Player): Long {

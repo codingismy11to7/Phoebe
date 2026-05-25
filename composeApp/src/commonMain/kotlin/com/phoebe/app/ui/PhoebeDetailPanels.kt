@@ -586,7 +586,7 @@ internal fun DownloadActionButton(
         else -> null
     }
     val labelText = when {
-        isActive -> "Downloading"
+        isActive -> activeDownloadActionLabel(label)
         allComplete || allDownloadableComplete -> "Downloaded"
         hasFailures && complete > 0 -> "Partly Downloaded"
         hasFailures -> "Download Failed"
@@ -652,6 +652,9 @@ internal fun DownloadActionButton(
         )
     }
 }
+
+internal fun activeDownloadActionLabel(label: String): String =
+    "Downloading"
 
 internal fun downloadActionProgress(completed: Int, activeItems: List<DownloadItem>, total: Int): Float? {
     if (total <= 0 || activeItems.isEmpty()) return null

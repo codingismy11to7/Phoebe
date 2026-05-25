@@ -270,6 +270,48 @@ class PlayerStateTest {
     }
 
     @Test
+    fun bufferingStateClearsWhenPlayableBufferIsAvailable() {
+        val player = PlatformStateTestPlayer()
+        val tracks = listOf(
+            Track("t1", "One", "Artist", "Album", 60_000, "http://a", ""),
+        )
+
+        player.play(tracks, 0)
+        player.platformPlayback(
+            positionMs = 0L,
+            durationMs = 60_000L,
+            bufferedPositionMs = 20_000L,
+            isPlaying = false,
+            isBuffering = true,
+        )
+
+        assertFalse(player.state.value.isBuffering)
+        assertFalse(player.state.value.isPlaying)
+        assertEquals(20_000L, player.state.value.bufferedPositionMs)
+    }
+
+    @Test
+    fun bufferingStateRemainsWhilePlayableBufferIsUnavailable() {
+        val player = PlatformStateTestPlayer()
+        val tracks = listOf(
+            Track("t1", "One", "Artist", "Album", 60_000, "http://a", ""),
+        )
+
+        player.play(tracks, 0)
+        player.platformPlayback(
+            positionMs = 10_000L,
+            durationMs = 60_000L,
+            bufferedPositionMs = 10_500L,
+            isPlaying = false,
+            isBuffering = true,
+        )
+
+        assertTrue(player.state.value.isBuffering)
+        assertFalse(player.state.value.isPlaying)
+        assertEquals(10_500L, player.state.value.bufferedPositionMs)
+    }
+
+    @Test
     fun playbackFailurePublishesOneShotErrorSignal() {
         val player = PlatformStateTestPlayer()
         val tracks = listOf(
@@ -629,12 +671,13 @@ private class PlatformStateTestPlayer : SimpleAudioPlayer() {
         durationMs: Long,
         bufferedPositionMs: Long,
         isPlaying: Boolean = true,
+        isBuffering: Boolean = false,
     ) {
         applyPlatformPlayback(
             positionMs = positionMs,
             durationMs = durationMs,
             isPlaying = isPlaying,
-            isBuffering = false,
+            isBuffering = isBuffering,
             bufferedPositionMs = bufferedPositionMs,
         )
     }

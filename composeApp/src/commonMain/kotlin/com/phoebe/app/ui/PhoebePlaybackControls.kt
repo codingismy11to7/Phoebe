@@ -500,7 +500,7 @@ internal fun rememberTimelineBufferedPositionMs(
     }
     LaunchedEffect(track?.id, remoteDurationMs, isPlaying, isBuffering) {
         val duration = remoteDurationMs ?: return@LaunchedEffect
-        if (!isPlaying && !isBuffering) return@LaunchedEffect
+        if (!isPlaying) return@LaunchedEffect
         while (estimatedRemoteBufferedPositionMs < duration) {
             delay(TimelineBufferFallbackTickMs)
             val platformFloor = max(latestPositionMs, latestBufferedPositionMs)

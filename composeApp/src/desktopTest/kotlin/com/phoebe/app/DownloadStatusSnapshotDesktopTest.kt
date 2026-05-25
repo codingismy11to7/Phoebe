@@ -5,6 +5,7 @@ import com.phoebe.app.domain.DownloadState
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.mergeDownloadCopiesById
 import com.phoebe.app.ui.DownloadStatusSnapshot
+import com.phoebe.app.ui.activeDownloadActionLabel
 import com.phoebe.app.ui.downloadActionProgress
 import com.phoebe.app.ui.downloadPercentLabel
 import kotlin.test.assertEquals
@@ -148,6 +149,13 @@ class DownloadStatusSnapshotDesktopTest {
     fun downloadPercentLabelShowsStartedSubPercentProgress() {
         assertEquals("1%", downloadPercentLabel(0.005f))
         assertEquals("0%", downloadPercentLabel(0f))
+    }
+
+    @Test
+    fun activeDownloadActionLabelStaysCompact() {
+        assertEquals("Downloading", activeDownloadActionLabel("Download Playlist"))
+        assertEquals("Downloading", activeDownloadActionLabel("Download Album"))
+        assertEquals("Downloading", activeDownloadActionLabel("Download"))
     }
 
     private fun track(
