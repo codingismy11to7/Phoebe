@@ -288,7 +288,6 @@ private fun PhoebeRootStateHolder(
     val radioStartingIds by state.radioStartingIds.collectAsState()
     val artistRadioAvailability by state.artistRadioAvailability.collectAsState()
     val downloadDirectory by state.downloadDirectory.collectAsState()
-    val activeDownloadJobCount by state.activeDownloadJobCount.collectAsState()
     val pin by state.pin.collectAsState()
     val servers by state.servers.collectAsState()
     val jellyfinServers by state.jellyfinServers.collectAsState()
@@ -457,11 +456,18 @@ private fun PhoebeRootStateHolder(
             isBuffering = shellPlayback.isBuffering,
         )
     }
-    val downloadStatus = remember(catalog.downloads, activeDownloadJobCount) {
-        DownloadStatusSnapshot(
-            itemsByTrackId = catalog.downloads.associateBy { it.trackId },
-            hasActiveDownloadJobs = activeDownloadJobCount > 0,
-        )
+    val downloadStatus = remember { DownloadStatusSnapshot() }
+    LaunchedEffect(state, downloadStatus) {
+        launch {
+            state.downloads.collect { downloads ->
+                downloadStatus.replaceItems(downloads)
+            }
+        }
+        launch {
+            state.activeDownloadJobCount.collect { activeDownloadJobCount ->
+                downloadStatus.setActiveDownloadJobs(activeDownloadJobCount > 0)
+            }
+        }
     }
     val playHistory = remember(
         lastPlayedByArtist,

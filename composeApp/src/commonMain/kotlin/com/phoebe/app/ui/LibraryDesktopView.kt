@@ -1200,7 +1200,13 @@ internal fun LibraryToolbarButton(
         }
         Text(label, color = PhoebeUi.primaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         value?.let {
-            Text(it, color = PhoebeUi.mutedText, fontSize = 12.sp)
+            Text(
+                it,
+                color = PhoebeUi.mutedText,
+                fontSize = 12.sp,
+                textAlign = TextAlign.End,
+                modifier = Modifier.widthIn(min = 34.dp),
+            )
         }
     }
 }
@@ -1722,7 +1728,7 @@ internal fun SongsTableHeader(columns: LibraryColumnVisibility) {
         if (columns.filepath) TableHeaderCell("File Path", modifier = Modifier.weight(1.4f))
         if (columns.rating) TableHeaderCell("Rating", modifier = Modifier.width(86.dp))
         if (columns.favorite) TableHeaderCell("Fav", modifier = Modifier.width(44.dp))
-        Spacer(Modifier.width(74.dp))
+        Spacer(Modifier.width(102.dp))
     }
 }
 
@@ -1742,12 +1748,10 @@ internal fun SongRow(
     val nowPlaying = LocalNowPlaying.current
     val likeActions = LocalLikeActions.current
     val ratingActions = LocalRatingActions.current
-    val downloads = LocalDownloadStatus.current
     val isCurrent = nowPlaying.trackId == track.id
     val playlistDragEnabled = LocalPlaylistDragEnabled.current
     val canLike = likeActions.likesEnabled && track.canTogglePlexLike()
     val liked = likeActions.isLiked(track)
-    val downloaded = downloads.isComplete(track)
     Row(
         modifier
             .fillMaxWidth()
@@ -1855,10 +1859,15 @@ internal fun SongRow(
         Box(Modifier.width(30.dp), contentAlignment = Alignment.Center) {
             TrackStateBadges(
                 liked = !columns.favorite && canLike && liked,
-                downloaded = downloaded,
+                downloaded = false,
                 iconSize = 11.dp,
             )
         }
+        TrackDownloadIndicator(
+            track = track,
+            onDownload = onDownload,
+            showIdle = false,
+        )
         Box(Modifier.width(44.dp), contentAlignment = Alignment.Center) {
             Box(
                 Modifier

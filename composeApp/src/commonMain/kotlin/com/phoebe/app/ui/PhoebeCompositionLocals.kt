@@ -205,16 +205,41 @@ internal val LocalMobileChromePadding = compositionLocalOf { MobileChromePadding
 
 internal val LocalTracksLoading = compositionLocalOf { emptySet<String>() }
 
-internal data class DownloadStatusSnapshot(
-    val itemsByTrackId: Map<String, DownloadItem> = emptyMap(),
-    val hasActiveDownloadJobs: Boolean = false,
+internal class DownloadStatusSnapshot(
+    itemsByTrackId: Map<String, DownloadItem> = emptyMap(),
+    hasActiveDownloadJobs: Boolean = false,
 ) {
-    fun itemFor(track: Track): DownloadItem? = itemsByTrackId[track.id]
+    private val itemStateByTrackId = mutableStateMapOf<String, DownloadItem>().apply {
+        putAll(itemsByTrackId)
+    }
+    var hasActiveDownloadJobs by mutableStateOf(hasActiveDownloadJobs)
+        private set
+
+    fun replaceItems(items: List<DownloadItem>) {
+        val nextIds = items.mapTo(mutableSetOf()) { it.trackId }
+        itemStateByTrackId.keys
+            .filterNot { it in nextIds }
+            .forEach { itemStateByTrackId.remove(it) }
+        items.forEach { item ->
+            if (itemStateByTrackId[item.trackId] != item) {
+                itemStateByTrackId[item.trackId] = item
+            }
+        }
+    }
+
+    fun setActiveDownloadJobs(active: Boolean) {
+        hasActiveDownloadJobs = active
+    }
+
+    fun itemFor(track: Track): DownloadItem? = itemStateByTrackId[track.id]
 
     fun isComplete(track: Track): Boolean =
         track.localUri != null ||
             itemFor(track)?.state == DownloadState.Complete ||
             !itemFor(track)?.localUri.isNullOrBlank()
+
+    val count: Int
+        get() = itemStateByTrackId.size
 
     fun isActive(track: Track): Boolean =
         hasActiveDownloadJobs &&

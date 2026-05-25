@@ -12,6 +12,18 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
+internal const val PlaybackReadyBufferedAheadMs = 2_000L
+
+internal fun hasPlaybackReadyBuffer(
+    positionMs: Long,
+    bufferedPositionMs: Long,
+    durationMs: Long,
+): Boolean {
+    if (bufferedPositionMs <= positionMs) return false
+    if (durationMs > 0L && bufferedPositionMs >= durationMs) return true
+    return bufferedPositionMs - positionMs >= PlaybackReadyBufferedAheadMs
+}
+
 abstract class SimpleAudioPlayer : AudioPlayer {
     private val mutableState = MutableStateFlow(PlayerState())
     override val state: StateFlow<PlayerState> = mutableState
@@ -377,7 +389,13 @@ abstract class SimpleAudioPlayer : AudioPlayer {
             .let { buffered ->
                 if (effectiveDurationMs > 0L) buffered.coerceAtMost(effectiveDurationMs) else buffered
             }
-        val effectiveBuffering = isBuffering && playWhenReady
+        val effectiveBuffering = isBuffering &&
+            playWhenReady &&
+            !hasPlaybackReadyBuffer(
+                positionMs = positionMs,
+                bufferedPositionMs = effectiveBufferedPositionMs,
+                durationMs = effectiveDurationMs,
+            )
         if (current.positionMs == positionMs &&
             current.bufferedPositionMs == effectiveBufferedPositionMs &&
             current.durationMs == effectiveDurationMs &&

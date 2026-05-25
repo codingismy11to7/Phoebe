@@ -113,6 +113,7 @@ class AppState(
 ) {
     val session = dependencies.sessionRepository.session
     val catalog = dependencies.catalogRepository.catalog
+    val downloads = dependencies.catalogRepository.downloads
     val catalogRefreshing: StateFlow<Boolean> = dependencies.catalogRepository.catalogRefreshing
     val catalogSyncState = dependencies.catalogRepository.catalogSyncState
     val tracksLoading = dependencies.catalogRepository.tracksLoading
@@ -1664,6 +1665,7 @@ class AppState(
 
     fun cancelDownloads(tracks: List<Track>) = scope.launch {
         val jobs = activeDownloadJobs.toList()
+        dependencies.catalogRepository.cancelDownloadsForTracks(tracks)
         jobs.forEach { it.cancel() }
         jobs.forEach { it.join() }
         val deleted = dependencies.catalogRepository.deleteDownloadsForTracks(tracks)
