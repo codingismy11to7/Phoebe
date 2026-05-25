@@ -248,6 +248,8 @@ actual fun prefersReducedArtworkEffects(): Boolean = false
 
 actual fun catalogTrackIndexParallelism(): Int = 6
 
+actual fun downloadParallelism(): Int = 8
+
 actual fun isDebugBuild(): Boolean =
     System.getProperty("phoebe.debug")?.toBooleanStrictOrNull() ?: false
 

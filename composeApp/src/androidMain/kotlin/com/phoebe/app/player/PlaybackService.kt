@@ -317,25 +317,12 @@ class PlaybackService : MediaLibraryService() {
         super.onDestroy()
     }
 
-    private data class ExpandedItems(
-        val items: List<MediaItem>,
-        val tracks: List<Track>,
-        val startIndex: Int,
-    )
-
     private suspend fun expandMediaItems(
         source: CatalogBrowseSource,
         mediaItems: List<MediaItem>,
         startIndex: Int,
-    ): ExpandedItems? {
-        if (mediaItems.size != 1) return null
-        val item = mediaItems.first()
-        val tracks = source.expandPlayableItem(item)
-        if (tracks.isEmpty()) return null
-        val items = tracks.map { playbackMediaItem(it) }
-        val index = source.startIndexForMediaItem(item, tracks, startIndex)
-        return ExpandedItems(items, tracks, index)
-    }
+    ): ExpandedPlaybackItems? =
+        expandPlaybackMediaItems(source, mediaItems, startIndex)
 
     private suspend fun resolveSearchMediaItems(
         source: CatalogBrowseSource,
@@ -465,3 +452,37 @@ class PlaybackService : MediaLibraryService() {
         }
     }
 }
+
+internal data class ExpandedPlaybackItems(
+    val items: List<MediaItem>,
+    val tracks: List<Track>,
+    val startIndex: Int,
+)
+
+internal suspend fun expandPlaybackMediaItems(
+    source: CatalogBrowseSource,
+    mediaItems: List<MediaItem>,
+    startIndex: Int,
+): ExpandedPlaybackItems? {
+    if (mediaItems.isEmpty()) return null
+    val selectedIndex = startIndex.takeIf { it in mediaItems.indices } ?: 0
+    val item = mediaItems[selectedIndex]
+    val shouldExpand = mediaItems.size == 1 || item.mediaId.shouldExpandFromPagedBrowseSelection()
+    if (!shouldExpand) return null
+
+    val tracks = source.expandPlayableItem(item)
+    if (tracks.isEmpty()) return null
+
+    val fallbackStartIndex = if (mediaItems.size == 1) startIndex else 0
+    return ExpandedPlaybackItems(
+        items = tracks.map { playbackMediaItem(it) },
+        tracks = tracks,
+        startIndex = source.startIndexForMediaItem(item, tracks, fallbackStartIndex),
+    )
+}
+
+private fun String.shouldExpandFromPagedBrowseSelection(): Boolean =
+    BrowseMediaIds.parseTrackId(this) != null ||
+        BrowseMediaIds.parseAlbumPlayId(this) != null ||
+        BrowseMediaIds.parsePlaylistPlayId(this) != null ||
+        BrowseMediaIds.parsePlaylistShuffleId(this) != null

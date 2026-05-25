@@ -127,6 +127,8 @@ actual fun prefersReducedArtworkEffects(): Boolean = true
 
 actual fun catalogTrackIndexParallelism(): Int = 4
 
+actual fun downloadParallelism(): Int = 8
+
 actual fun isDebugBuild(): Boolean = wasmDebugBuildEnabled()
 
 @OptIn(ExperimentalWasmJsInterop::class)
