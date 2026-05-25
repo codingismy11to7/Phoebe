@@ -8,6 +8,7 @@ import com.phoebe.app.data.PlexClient
 import com.phoebe.app.domain.DownloadState
 import com.phoebe.app.domain.Track
 import com.phoebe.app.platform.PlatformStorage
+import com.phoebe.app.platform.downloadParallelism
 import com.phoebe.app.testing.newInMemoryPhoebeDatabase
 import com.phoebe.app.testing.plexCatalogMockEngine
 import com.phoebe.app.testing.testHttpClient
@@ -21,11 +22,15 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.yield
 import org.junit.After
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -361,7 +366,73 @@ class PlexPlaylistEndToEndDesktopTest {
         assertEquals(12, result.completed)
         assertEquals(0, result.failed)
         assertTrue(maxInFlight.get() > 4)
-        assertTrue(maxInFlight.get() <= 8)
+        assertTrue(maxInFlight.get() <= downloadParallelism())
+    }
+
+    @Test
+    fun downloadTracksKeepsWorkersBusyWhenOneTrackIsSlow() = runTest {
+        val payload = ByteArray(32 * 1024) { index -> (index % 251).toByte() }
+        val slowRequestStarted = CountDownLatch(1)
+        val laterRequestStarted = CountDownLatch(1)
+        val slowResponseFinished = AtomicBoolean(false)
+        val parallelism = downloadParallelism()
+        val laterTrackIndex = parallelism + 1
+        val trackCount = parallelism + 2
+        val (db, sqlDriver) = newInMemoryPhoebeDatabase()
+        driver = sqlDriver
+        val engine = MockEngine { request ->
+            when {
+                request.url.encodedPath.startsWith("/downloads/") -> {
+                    val index = request.url.encodedPath
+                        .substringAfterLast("/t")
+                        .substringBefore(".mp3")
+                        .toInt()
+                    when (index) {
+                        1 -> {
+                            slowRequestStarted.countDown()
+                            Thread.sleep(1_500)
+                            slowResponseFinished.set(true)
+                        }
+                        laterTrackIndex -> {
+                            if (!slowResponseFinished.get()) {
+                                laterRequestStarted.countDown()
+                            }
+                        }
+                    }
+                    respond(
+                        content = payload,
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(
+                            HttpHeaders.ContentLength to listOf(payload.size.toString()),
+                            HttpHeaders.ContentType to listOf("audio/mpeg"),
+                        ),
+                    )
+                }
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val repo = catalogRepository(db, testHttpClient(engine))
+        PlatformStorage().writeDownloadDirectory(temp.newFolder("continuous-downloads").toURI().toString())
+        val tracks = (1..trackCount).map { index ->
+            Track(
+                id = "plex:t-continuous-$index",
+                title = "Continuous Song $index",
+                artist = "Artist One",
+                album = "Album One",
+                durationMs = 1_000,
+                streamUrl = "https://plex.example/stream/t$index.mp3",
+                downloadUrl = "https://plex.example/downloads/t$index.mp3",
+            )
+        }
+
+        val result = async { repo.downloadTracks(tracks) }
+        yield()
+        assertTrue(slowRequestStarted.await(5, TimeUnit.SECONDS))
+
+        assertTrue(laterRequestStarted.await(1, TimeUnit.SECONDS))
+        assertFalse(slowResponseFinished.get())
+
+        assertEquals(trackCount, result.await().completed)
     }
 
     @Test

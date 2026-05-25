@@ -43,6 +43,9 @@ expect fun prefersReducedArtworkEffects(): Boolean
 /** Concurrent Plex library track-index page fetches during catalog sync. */
 expect fun catalogTrackIndexParallelism(): Int
 
+/** Concurrent audio downloads during offline download batches. */
+expect fun downloadParallelism(): Int
+
 expect class DownloadNotifier() {
     suspend fun notifyDownloadFinished(title: String, body: String): Boolean
 }

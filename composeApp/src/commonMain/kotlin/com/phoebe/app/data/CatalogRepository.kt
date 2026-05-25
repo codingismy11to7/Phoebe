@@ -63,6 +63,7 @@ import com.phoebe.app.platform.PlatformStorage
 import com.phoebe.app.platform.PhoebeLog
 import com.phoebe.app.platform.catalogTrackIndexParallelism
 import com.phoebe.app.platform.currentTimeMs
+import com.phoebe.app.platform.downloadParallelism
 import com.phoebe.app.sources.CatalogMerge
 import com.phoebe.app.sources.LocalFolderMusicSourcePlugin
 import com.phoebe.app.sources.PlexCatalogBuilder
@@ -104,7 +105,6 @@ private const val DownloadProgressByteInterval = 2 * 1024 * 1024L
 private const val DownloadProgressStep = 0.01f
 private const val DownloadReadIdleTimeoutMs = 60_000L
 private const val DownloadArtworkTimeoutMs = 15_000L
-private const val DownloadParallelism = 8
 
 data class DownloadBatchResult(
     val total: Int = 0,
@@ -5078,19 +5078,10 @@ class CatalogRepository(
             }
 
             var completed = offlineTrackIds.size
-            val downloadedTracks = mutableListOf<Track>()
-            downloadable.chunked(DownloadParallelism).forEach { batch ->
-                currentCoroutineContext().ensureActive()
-                val batchDownloaded = coroutineScope {
-                    batch.map { track ->
-                        async { downloadTrackToOfflineStorage(track) }
-                    }.awaitAll().filterNotNull()
-                }
-                if (batchDownloaded.isNotEmpty()) {
-                    downloadedTracks += batchDownloaded
-                    persistCompletedDownloads(batchDownloaded)
-                }
-            }
+            val downloadedTracks = downloadTracksContinuously(
+                tracks = downloadable,
+                parallelism = downloadParallelism().coerceAtLeast(1),
+            )
             if (downloadedTracks.isNotEmpty()) {
                 updateTracksOfflineInfo(downloadedTracks)
             }
@@ -5099,6 +5090,53 @@ class CatalogRepository(
             val failed = downloadable.size - downloadedTracks.size
             DownloadBatchResult(total = uniqueTracks.size, completed = completed, failed = failed)
         }
+    }
+
+    private suspend fun downloadTracksContinuously(
+        tracks: List<Track>,
+        parallelism: Int,
+    ): List<Track> = coroutineScope {
+        if (tracks.isEmpty()) return@coroutineScope emptyList()
+
+        val workerCount = parallelism.coerceAtLeast(1).coerceAtMost(tracks.size)
+        val pendingTracks = Channel<Track>(capacity = Channel.UNLIMITED)
+        val completedDownloads = Channel<Track>(capacity = Channel.UNLIMITED)
+        val completionCollector = async {
+            val downloadedTracks = mutableListOf<Track>()
+            val persistBatch = mutableListOf<Track>()
+
+            suspend fun flushPersistBatch() {
+                if (persistBatch.isEmpty()) return
+                persistCompletedDownloads(persistBatch.toList())
+                persistBatch.clear()
+            }
+
+            for (track in completedDownloads) {
+                downloadedTracks += track
+                persistBatch += track
+                if (persistBatch.size >= workerCount) {
+                    flushPersistBatch()
+                }
+            }
+            flushPersistBatch()
+            downloadedTracks
+        }
+        val workers = List(workerCount) {
+            launch {
+                for (track in pendingTracks) {
+                    currentCoroutineContext().ensureActive()
+                    downloadTrackToOfflineStorage(track)?.let { downloaded ->
+                        completedDownloads.send(downloaded)
+                    }
+                }
+            }
+        }
+
+        tracks.forEach { track -> pendingTracks.send(track) }
+        pendingTracks.close()
+        workers.joinAll()
+        completedDownloads.close()
+        completionCollector.await()
     }
 
     private suspend fun downloadTrackToOfflineStorage(track: Track): Track? {

@@ -250,6 +250,8 @@ actual fun prefersReducedArtworkEffects(): Boolean = false
 
 actual fun catalogTrackIndexParallelism(): Int = 6
 
+actual fun downloadParallelism(): Int = 8
+
 internal actual fun platformLog(tag: String, message: String) {
     println("[$tag] $message")
 }

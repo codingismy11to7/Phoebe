@@ -431,6 +431,8 @@ actual fun prefersReducedArtworkEffects(): Boolean = false
 
 actual fun catalogTrackIndexParallelism(): Int = 6
 
+actual fun downloadParallelism(): Int = 16
+
 actual fun isDebugBuild(): Boolean = BuildConfig.DEBUG
 
 internal actual fun platformLog(tag: String, message: String) {
