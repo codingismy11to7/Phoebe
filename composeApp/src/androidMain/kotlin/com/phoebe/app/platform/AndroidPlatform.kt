@@ -19,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.documentfile.provider.DocumentFile
+import androidx.work.WorkManager
 import com.phoebe.app.AndroidContextHolder
 import com.phoebe.app.BuildConfig
 import com.phoebe.app.MainActivity
@@ -34,6 +35,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.ConnectionPool
 import okhttp3.Dispatcher
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import java.io.File
 import java.util.concurrent.TimeUnit
 import java.net.DatagramPacket
@@ -61,6 +64,51 @@ actual fun createPlatformHttpClient(): HttpClient = HttpClient(OkHttp) {
     }
     install(ContentNegotiation) {
         json(PlexClient.PlexJson)
+    }
+}
+
+private val AndroidDownloadHttpClient: OkHttpClient by lazy {
+    OkHttpClient.Builder()
+        .connectionPool(ConnectionPool(4, 2, TimeUnit.MINUTES))
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .callTimeout(0, TimeUnit.MILLISECONDS)
+        .build()
+}
+
+actual suspend fun platformStreamHttpDownloadToStorage(
+    url: String,
+    targetPath: String,
+    storage: PlatformStorage,
+    bufferSize: Int,
+    onProgress: suspend (downloadedBytes: Long, totalBytes: Long?) -> Unit,
+): String? = withContext(Dispatchers.IO) {
+    val request = Request.Builder()
+        .url(url)
+        .build()
+    AndroidDownloadHttpClient.newCall(request).execute().use { response ->
+        if (!response.isSuccessful) {
+            error("Server returned HTTP ${response.code}")
+        }
+        val body = response.body
+        val totalBytes = body.contentLength().takeIf { it > 0L }
+        var downloadedBytes = 0L
+        val buffer = ByteArray(bufferSize.coerceAtLeast(8 * 1024))
+        storage.writeByteStream(targetPath) { sink ->
+            body.byteStream().use { input ->
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    if (read == 0) continue
+                    sink.write(buffer, 0, read)
+                    downloadedBytes += read.toLong()
+                    onProgress(downloadedBytes, totalBytes)
+                }
+            }
+            if (totalBytes != null && downloadedBytes != totalBytes) {
+                error("Content-Length mismatch: expected $totalBytes bytes, but received $downloadedBytes bytes")
+            }
+        }
     }
 }
 
@@ -102,8 +150,12 @@ actual class PlatformStorage actual constructor() {
                 val rootTreeUri = readDownloadDirectory()?.let(Uri::parse)
                 val authority = parsed.authority
                 val documentId = runCatching { DocumentsContract.getDocumentId(parsed) }.getOrNull()
-                DocumentFile.fromSingleUri(context, parsed)?.delete()
-                    ?: runCatching { context.contentResolver.delete(parsed, null, null) }.getOrNull()
+                val deleted = DocumentFile.fromSingleUri(context, parsed)?.delete() == true ||
+                    runCatching { DocumentsContract.deleteDocument(context.contentResolver, parsed) }.getOrDefault(false) ||
+                    runCatching { context.contentResolver.delete(parsed, null, null) > 0 }.getOrDefault(false)
+                if (!deleted) {
+                    Log.d("PlatformStorage", "content delete returned false for $uri")
+                }
                 if (rootTreeUri != null && authority != null && documentId != null) {
                     pruneEmptyDocumentParents(context, rootTreeUri, authority, documentId)
                 }
@@ -152,20 +204,24 @@ actual class PlatformStorage actual constructor() {
         }.toURI().toString()
     }
 
-    actual suspend fun writeByteStream(name: String, readChunk: suspend () -> ByteArray?): String = withContext(Dispatchers.IO) {
+    actual suspend fun writeByteStream(name: String, write: suspend (PlatformByteSink) -> Unit): String = withContext(Dispatchers.IO) {
         val downloadTree = readDownloadDirectory()
         if (downloadTree != null) {
-            writeByteStreamToTree(downloadTree, name, readChunk)?.let { return@withContext it }
+            writeByteStreamToTree(downloadTree, name, write)?.let { return@withContext it }
         }
         val file = defaultDownloadDirectory().resolve(name.removePrefix("downloads/")).apply {
             parentFile?.mkdirs()
         }
         try {
             file.outputStream().use { stream ->
-                while (true) {
-                    val chunk = readChunk() ?: break
-                    if (chunk.isNotEmpty()) stream.write(chunk)
-                }
+                write(
+                    object : PlatformByteSink {
+                        override suspend fun write(buffer: ByteArray, offset: Int, length: Int) {
+                            if (length > 0) stream.write(buffer, offset, length)
+                        }
+                    },
+                )
+                stream.flush()
             }
         } catch (error: Throwable) {
             file.takeIf { it.exists() }?.delete()
@@ -274,7 +330,7 @@ actual class PlatformStorage actual constructor() {
     private suspend fun writeByteStreamToTree(
         rootUri: String,
         name: String,
-        readChunk: suspend () -> ByteArray?,
+        write: suspend (PlatformByteSink) -> Unit,
     ): String? {
         val context = AndroidContextHolder.application
         val rootDoc = DocumentFile.fromTreeUri(context, Uri.parse(rootUri)) ?: return null
@@ -296,10 +352,14 @@ actual class PlatformStorage actual constructor() {
         }
         try {
             outputStream.use { stream ->
-                while (true) {
-                    val chunk = readChunk() ?: break
-                    if (chunk.isNotEmpty()) stream.write(chunk)
-                }
+                write(
+                    object : PlatformByteSink {
+                        override suspend fun write(buffer: ByteArray, offset: Int, length: Int) {
+                            if (length > 0) stream.write(buffer, offset, length)
+                        }
+                    },
+                )
+                stream.flush()
             }
         } catch (error: Throwable) {
             doc.delete()
@@ -429,9 +489,18 @@ actual fun currentTimeMs(): Long = System.currentTimeMillis()
 
 actual fun prefersReducedArtworkEffects(): Boolean = false
 
+actual fun remoteArtworkCacheMaxEstimatedBytes(): Long = 10L * 1024L * 1024L
+
 actual fun catalogTrackIndexParallelism(): Int = 6
 
-actual fun downloadParallelism(): Int = 16
+actual fun downloadParallelism(): Int = 2
+
+actual fun schedulePlatformDownloadRunner() = Unit
+
+internal fun cancelPlatformDownloadRunner() {
+    val context = AndroidContextHolder.application
+    WorkManager.getInstance(context).cancelUniqueWork(PhoebeDownloadWorkerName)
+}
 
 actual fun isDebugBuild(): Boolean = BuildConfig.DEBUG
 
@@ -440,3 +509,4 @@ internal actual fun platformLog(tag: String, message: String) {
 }
 
 private const val JellyfinDiscoveryPort = 7359
+internal const val PhoebeDownloadWorkerName = "phoebe-download-runner"

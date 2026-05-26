@@ -52,6 +52,41 @@ class PlaybackClickTargetDesktopTest {
 
     @OptIn(ExperimentalTestApi::class, ExperimentalComposeUiApi::class)
     @Test
+    fun desktopLibrarySongRowInvokesPlaybackRequestForTappedTrack() = runDesktopComposeUiTest(width = 1100, height = 720) {
+        val tracks = playbackTracks()
+        var request: PlaybackRequest? = null
+
+        setContent {
+            PhoebeTheme {
+                Box(Modifier.size(1100.dp, 720.dp)) {
+                    LibraryDesktopView(
+                        catalog = CatalogSnapshot(tracksByParent = mapOf("all" to tracks)),
+                        catalogRefreshing = false,
+                        filter = LibraryFilterTab.Songs,
+                        libraryUi = LibraryUiPreferences(),
+                        onFilter = {},
+                        onLibrarySortBy = {},
+                        onLibraryAscending = {},
+                        onLibraryColumns = {},
+                        onArtist = {},
+                        onAlbum = {},
+                        onPlayTracks = { queue, index -> request = PlaybackRequest(queue, index) },
+                        onAddToUpNext = {},
+                        onDownload = {},
+                    )
+                }
+            }
+        }
+
+        onNodeWithTag(PlaybackTestTags.playTrack(tracks[1].id)).performClick()
+
+        val captured = assertNotNull(request)
+        assertEquals(1, captured.index)
+        assertEquals(tracks, captured.tracks)
+    }
+
+    @OptIn(ExperimentalTestApi::class, ExperimentalComposeUiApi::class)
+    @Test
     fun albumDetailTrackRowInvokesPlaybackRequestForTappedTrack() = runDesktopComposeUiTest(width = 800, height = 620) {
         val tracks = playbackTracks()
         val album = Album(id = "album-1", title = "Regression Album", artist = "Fixture Artist")

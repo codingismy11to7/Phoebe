@@ -9,6 +9,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class RemoteArtworkCacheTest {
     @AfterTest
@@ -57,6 +58,20 @@ class RemoteArtworkCacheTest {
         assertEquals(64, RemoteArtworkCache.cached("art", 64)?.width)
         assertEquals(256, RemoteArtworkCache.cached("art", 256)?.width)
         assertEquals(2, RemoteArtworkCache.stats().imageCount)
+    }
+
+    @Test
+    fun downloadMemoryModeTrimsDecodedArtworkCache() {
+        RemoteArtworkCache.configureLimitsForTest(maxEntries = 100, maxEstimatedBytes = Long.MAX_VALUE)
+
+        repeat(80) { index ->
+            RemoteArtworkCache.putForTest("art-$index", 256, testImageBitmap(256, 256))
+        }
+
+        RemoteArtworkCache.configureDownloadMemoryMode(true)
+
+        assertTrue(RemoteArtworkCache.stats().imageCount <= 32)
+        assertTrue(RemoteArtworkCache.stats().estimatedBytes <= 4L * 1024L * 1024L)
     }
 }
 

@@ -93,9 +93,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateMapOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
@@ -148,7 +146,6 @@ import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryUiPreferences
 import com.phoebe.app.domain.CatalogSnapshot
-import com.phoebe.app.domain.DownloadItem
 import com.phoebe.app.domain.DownloadState
 import com.phoebe.app.domain.LocalFolderMediaSourceConfig
 import com.phoebe.app.domain.MediaSourcesState
@@ -559,29 +556,41 @@ internal fun DownloadActionButton(
     label: String,
     tracks: List<Track>,
     modifier: Modifier = Modifier,
+    onCancel: (() -> Unit)? = null,
+    onDelete: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     val downloads = LocalDownloadStatus.current
     val downloadActions = LocalDownloadActions.current
     val uniqueTracks = remember(tracks) { tracks.mergeDownloadCopiesById() }
-    val complete = uniqueTracks.count { downloads.isComplete(it) }
-    val active = uniqueTracks.mapNotNull { track -> downloads.itemFor(track)?.takeIf { downloads.isActive(track) } }
-    val failed = uniqueTracks.count { downloads.isFailed(it) }
-    val allComplete = uniqueTracks.isNotEmpty() && complete == uniqueTracks.size
-    val unavailable = uniqueTracks.count { track -> !downloads.isComplete(track) && track.downloadUrl.isBlank() }
-    val allDownloadableComplete = complete > 0 && complete + unavailable == uniqueTracks.size
-    var confirmDelete by remember(uniqueTracks.map { it.id }) { mutableStateOf(false) }
-    var confirmCancel by remember(uniqueTracks.map { it.id }) { mutableStateOf(false) }
+    val summary = downloads.summarize(uniqueTracks)
+    val total = summary.total
+    val complete = summary.complete
+    val failed = summary.failed
+    val unavailable = summary.unavailable
+    val allComplete = total > 0 && complete == total
+    val allDownloadableComplete = complete > 0 && complete + unavailable == total
+    val confirmationKey = remember(uniqueTracks) {
+        uniqueTracks.fold(17) { hash, track -> hash * 31 + track.id.hashCode() }
+    }
+    var confirmDelete by remember(confirmationKey) { mutableStateOf(false) }
+    var confirmCancel by remember(confirmationKey) { mutableStateOf(false) }
     val progress = when {
-        active.isNotEmpty() -> downloadActionProgress(complete, active, uniqueTracks.size)
+        summary.active > 0 -> downloadActionProgress(
+            completed = complete,
+            activeCount = summary.active,
+            activeProgress = summary.activeProgress,
+            total = total,
+        )
         allComplete || allDownloadableComplete -> 1f
-        failed > 0 -> (complete.toFloat() / uniqueTracks.size.toFloat()).coerceIn(0f, 1f)
+        failed > 0 && total > 0 -> (complete.toFloat() / total.toFloat()).coerceIn(0f, 1f)
         else -> null
     }
-    val isActive = active.isNotEmpty()
+    val isActive = summary.active > 0
     val hasFailures = failed > 0
     val statusLabel = when {
-        (isActive || hasFailures) && uniqueTracks.size > 1 -> downloadPercentLabel(progress ?: 0f)
+        isActive && total > 1 -> downloadPercentLabel(progress ?: 0f)
+        hasFailures && total > 1 -> downloadFailureStatusLabel(failed)
         allDownloadableComplete && unavailable > 0 -> "$unavailable skipped"
         else -> null
     }
@@ -625,28 +634,28 @@ internal fun DownloadActionButton(
         },
     )
     if (confirmCancel) {
-        val noun = if (uniqueTracks.size == 1) "song" else "songs"
-        val bodyTarget = if (uniqueTracks.size == 1) "this song" else "these ${uniqueTracks.size} $noun"
+        val noun = if (total == 1) "song" else "songs"
+        val bodyTarget = if (total == 1) "this song" else "these $total $noun"
         ConfirmDeleteDownloadsDialog(
             title = "Cancel Download?",
             body = "Stop the current download and remove anything already downloaded for $bodyTarget from this device?",
             confirmLabel = "Cancel Download",
             onDismiss = { confirmCancel = false },
             onConfirm = {
-                downloadActions.onCancelDownloadedTracks(uniqueTracks)
+                if (onCancel != null) onCancel() else downloadActions.onCancelDownloadedTracks(uniqueTracks)
                 confirmCancel = false
             },
         )
     }
     if (confirmDelete) {
-        val noun = if (uniqueTracks.size == 1) "song" else "songs"
+        val noun = if (total == 1) "song" else "songs"
         ConfirmDeleteDownloadsDialog(
             title = "Delete Downloads?",
-            body = "Remove ${uniqueTracks.size} downloaded $noun from this device? Empty folders from the download will be cleaned up too.",
+            body = "Remove $total downloaded $noun from this device? Empty folders from the download will be cleaned up too.",
             confirmLabel = "Delete",
             onDismiss = { confirmDelete = false },
             onConfirm = {
-                downloadActions.onDeleteDownloadedTracks(uniqueTracks)
+                if (onDelete != null) onDelete() else downloadActions.onDeleteDownloadedTracks(uniqueTracks)
                 confirmDelete = false
             },
         )
@@ -656,13 +665,15 @@ internal fun DownloadActionButton(
 internal fun activeDownloadActionLabel(label: String): String =
     "Downloading"
 
-internal fun downloadActionProgress(completed: Int, activeItems: List<DownloadItem>, total: Int): Float? {
-    if (total <= 0 || activeItems.isEmpty()) return null
+internal fun downloadActionProgress(
+    completed: Int,
+    activeCount: Int,
+    activeProgress: Float,
+    total: Int,
+): Float? {
+    if (total <= 0 || activeCount <= 0) return null
     val completedProgress = completed.coerceIn(0, total).toFloat()
-    val activeProgress = activeItems.sumOf { item ->
-        item.progress.coerceIn(0f, 1f).toDouble()
-    }.toFloat()
-    return ((completedProgress + activeProgress) / total.toFloat()).coerceIn(0f, 1f)
+    return ((completedProgress + activeProgress.coerceAtLeast(0f)) / total.toFloat()).coerceIn(0f, 1f)
 }
 
 internal fun downloadPercentLabel(progress: Float): String {
@@ -671,6 +682,9 @@ internal fun downloadPercentLabel(progress: Float): String {
     val visiblePercent = if (normalized > 0f && percent == 0) 1 else percent
     return "${visiblePercent.coerceIn(0, 100)}%"
 }
+
+internal fun downloadFailureStatusLabel(failed: Int): String =
+    if (failed == 1) "1 failed" else "$failed failed"
 
 @Composable
 private fun HomePanelLike(content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
@@ -1818,6 +1832,8 @@ internal fun PlaylistDetailPanel(
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
     onDownloadPlaylist: (Playlist) -> Unit,
+    onCancelDownloadPlaylist: (Playlist) -> Unit = {},
+    onDeleteDownloadPlaylist: (Playlist) -> Unit = {},
     onLibraryColumns: (LibraryColumnVisibility) -> Unit,
 ) {
     val tracks = remember(catalog.tracksByParent, playlist.id) {
@@ -1826,16 +1842,9 @@ internal fun PlaylistDetailPanel(
 
     var sortBy by remember(playlist.id) { mutableStateOf(LibrarySortBy.PlaylistOrder) }
     var ascending by remember(playlist.id) { mutableStateOf(true) }
-    val trackListState by produceState<PlaylistTrackListState?>(
-        initialValue = null,
-        tracks,
-        sortBy,
-        ascending,
-        searchQuery,
-    ) {
-        value = null
-        withFrameNanos { }
-        value = withContext(Dispatchers.Default) {
+    var trackListState by remember(playlist.id) { mutableStateOf<PlaylistTrackListState?>(null) }
+    LaunchedEffect(playlist.id, tracks, sortBy, ascending, searchQuery) {
+        trackListState = withContext(Dispatchers.Default) {
             val sorted = sortTracksForLibrary(tracks, sortBy, ascending)
             PlaylistTrackListState(
                 sortedTracks = sorted,
@@ -1843,10 +1852,12 @@ internal fun PlaylistDetailPanel(
             )
         }
     }
-    val sortedTracks = trackListState?.sortedTracks.orEmpty()
-    val visibleTracks = trackListState?.visibleTracks.orEmpty()
-    val preparingTracks = trackListState == null && (tracks.isNotEmpty() || searchQuery.isNotBlank())
-    val actionTracks = if (preparingTracks) emptyList() else tracks
+    val sortedTracks = trackListState?.sortedTracks ?: tracks
+    val visibleTracks = trackListState?.visibleTracks
+        ?: if (searchQuery.isBlank()) tracks else emptyList()
+    val preparingTracks = trackListState == null && visibleTracks.isEmpty() &&
+        (tracks.isNotEmpty() || searchQuery.isNotBlank())
+    val actionTracks = sortedTracks
     val playVisibleTrack = { visibleIndex: Int ->
         val (queueTracks, queueIndex) = playbackQueueForVisibleTrack(sortedTracks, visibleTracks, visibleIndex)
         onPlayTracks(queueTracks, queueIndex)
@@ -1908,7 +1919,12 @@ internal fun PlaylistDetailPanel(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier.padding(top = 4.dp),
                             ) {
-                                DownloadActionButton("Download Playlist", actionTracks) { onDownloadPlaylist(playlist) }
+                                DownloadActionButton(
+                                    label = "Download Playlist",
+                                    tracks = actionTracks,
+                                    onCancel = { onCancelDownloadPlaylist(playlist) },
+                                    onDelete = { onDeleteDownloadPlaylist(playlist) },
+                                ) { onDownloadPlaylist(playlist) }
                                 PlaylistExportMenu(playlist = playlist)
                             }
                         }
@@ -1933,7 +1949,12 @@ internal fun PlaylistDetailPanel(
                             onColumns = onLibraryColumns,
                             actions = {
                                 if (useTable) {
-                                    DownloadActionButton("Download Playlist", actionTracks) { onDownloadPlaylist(playlist) }
+                                    DownloadActionButton(
+                                        label = "Download Playlist",
+                                        tracks = actionTracks,
+                                        onCancel = { onCancelDownloadPlaylist(playlist) },
+                                        onDelete = { onDeleteDownloadPlaylist(playlist) },
+                                    ) { onDownloadPlaylist(playlist) }
                                     PlaylistExportMenu(playlist = playlist)
                                 }
                             },

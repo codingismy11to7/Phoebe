@@ -64,6 +64,8 @@ import com.phoebe.app.platform.PhoebeLog
 import com.phoebe.app.platform.currentTimeMs
 import com.phoebe.app.platform.discoverJellyfinServers as discoverJellyfinServersOnNetwork
 import com.phoebe.app.platform.openExternalUrl
+import io.ktor.http.Url
+import io.ktor.http.encodeURLParameter
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -114,6 +116,7 @@ class AppState(
     val session = dependencies.sessionRepository.session
     val catalog = dependencies.catalogRepository.catalog
     val downloads = dependencies.catalogRepository.downloads
+    val downloadEvents = dependencies.catalogRepository.downloadEvents
     val catalogRefreshing: StateFlow<Boolean> = dependencies.catalogRepository.catalogRefreshing
     val catalogSyncState = dependencies.catalogRepository.catalogSyncState
     val tracksLoading = dependencies.catalogRepository.tracksLoading
@@ -265,6 +268,7 @@ class AppState(
     private val prefetchedAlbumIds = mutableSetOf<String>()
     private var catalogRefreshJob: Job? = null
     private var playHistorySyncJob: Job? = null
+    private var downloadedArtworkCacheJob: Job? = null
     private val activeDownloadJobs = mutableSetOf<Job>()
 
     private fun publishActiveDownloadJobCount() {
@@ -817,8 +821,11 @@ class AppState(
     }
 
     private fun cacheDownloadedArtworkInBackground() {
-        scope.launch {
+        if (activeDownloadJobs.isNotEmpty()) return
+        downloadedArtworkCacheJob?.cancel()
+        downloadedArtworkCacheJob = scope.launch {
             runCatching {
+                if (activeDownloadJobs.isNotEmpty()) return@runCatching 0
                 dependencies.catalogRepository.cacheDownloadedArtwork()
             }.onSuccess { cached ->
                 if (cached > 0) {
@@ -1267,15 +1274,16 @@ class AppState(
         collectionMixSeed: CollectionMixSeed? = null,
     ) {
         collectionMixGeneration++
-        val track = tracks.getOrNull(index)
+        val playbackTracks = tracks.withFreshPlaybackUrls(session.value)
+        val track = playbackTracks.getOrNull(index)
         if (dependencies.castController.state.value.isConnected) {
             mutableMusicAssistantRemotePlayback.value = null
-            val support = dependencies.castController.canLoadQueue(tracks)
+            val support = dependencies.castController.canLoadQueue(playbackTracks)
             if (!support.isSupported) {
                 mutableMessage.value = support.message ?: "This queue can't be cast to Chromecast."
                 return
             }
-            dependencies.castController.loadQueue(tracks, index)
+            dependencies.castController.loadQueue(playbackTracks, index)
             return
         }
         if (session.value.isMusicAssistant() && track?.localUri.isNullOrBlank() && track?.streamUrl.isNullOrBlank()) {
@@ -1283,13 +1291,13 @@ class AppState(
             scope.launch {
                 mutableMessage.value = "Starting ${musicAssistantTrack.title} in Music Assistant..."
                 runCatching {
-                    dependencies.providerRegistry.adapterFor(session.value)?.playRemote(session.value!!, tracks, index)
+                    dependencies.providerRegistry.adapterFor(session.value)?.playRemote(session.value!!, playbackTracks, index)
                 }.onSuccess { target ->
                     if (target.isNullOrBlank()) {
                         mutableMessage.value = "Couldn't find a Music Assistant player for ${musicAssistantTrack.title}."
                         return@onSuccess
                     }
-                    mutableMusicAssistantRemotePlayback.value = MusicAssistantRemotePlayback(tracks, index, target)
+                    mutableMusicAssistantRemotePlayback.value = MusicAssistantRemotePlayback(playbackTracks, index, target)
                     mutableMessage.value = "Playing ${musicAssistantTrack.title} on Music Assistant: $target."
                 }.onFailure { error ->
                     mutableMessage.value = error.message ?: "Couldn't start Music Assistant playback."
@@ -1302,9 +1310,9 @@ class AppState(
             return
         }
         mutableMusicAssistantRemotePlayback.value = null
-        dependencies.audioPlayer.play(tracks, index)
+        dependencies.audioPlayer.play(playbackTracks, index)
         collectionMixSeed?.toCollectionMix()?.let { mix ->
-            scheduleCollectionMix(mix, tracks.map { it.id }.toSet())
+            scheduleCollectionMix(mix, playbackTracks.map { it.id }.toSet())
         }
     }
 
@@ -1573,6 +1581,7 @@ class AppState(
     }
 
     fun download(track: Track) = launchDownload {
+        mutableMessage.value = "Downloading ${track.title}…"
         val result = dependencies.catalogRepository.download(track)
         mutableMessage.value = downloadMessage(result, singular = "song", plural = "songs")
         result
@@ -1594,6 +1603,7 @@ class AppState(
 
     fun download(playlist: Playlist) = launchDownload {
         mutableMessage.value = "Downloading ${playlist.title}…"
+        dependencies.catalogRepository.previewQueuedDownloadsForPlaylist(playlist)
         val result = dependencies.catalogRepository.downloadPlaylist(session.value, playlist)
         mutableMessage.value = downloadMessage(result, singular = "song from ${playlist.title}", plural = "songs from ${playlist.title}")
         result
@@ -1603,6 +1613,7 @@ class AppState(
         lateinit var downloadJob: Job
         downloadJob = scope.launch {
             try {
+                downloadedArtworkCacheJob?.cancel()
                 val result = block()
                 notifyDownloadFinishedIfNeeded(result)
             } catch (error: CancellationException) {
@@ -1655,6 +1666,25 @@ class AppState(
     }
 
     fun deleteDownloads(tracks: List<Track>) = scope.launch {
+        deleteResolvedDownloads(tracks)
+    }
+
+    fun deleteDownloads(playlist: Playlist) = scope.launch {
+        val tracks = dependencies.catalogRepository.tracksForPlaylist(session.value, playlist)
+        deleteResolvedDownloads(tracks)
+    }
+
+    fun cancelDownloads(tracks: List<Track>) = scope.launch {
+        cancelResolvedDownloads(tracks)
+    }
+
+    fun cancelDownloads(playlist: Playlist) = scope.launch {
+        mutableMessage.value = "Preparing to cancel ${playlist.title}…"
+        val tracks = dependencies.catalogRepository.tracksForPlaylist(session.value, playlist)
+        cancelResolvedDownloads(tracks)
+    }
+
+    private suspend fun deleteResolvedDownloads(tracks: List<Track>) {
         val deleted = dependencies.catalogRepository.deleteDownloadsForTracks(tracks)
         mutableMessage.value = if (deleted == 0) {
             "No downloaded songs to delete."
@@ -1663,12 +1693,13 @@ class AppState(
         }
     }
 
-    fun cancelDownloads(tracks: List<Track>) = scope.launch {
+    private suspend fun cancelResolvedDownloads(tracks: List<Track>) {
+        mutableMessage.value = "Cancelling download…"
         val jobs = activeDownloadJobs.toList()
         dependencies.catalogRepository.cancelDownloadsForTracks(tracks)
         jobs.forEach { it.cancel() }
-        jobs.forEach { it.join() }
         val deleted = dependencies.catalogRepository.deleteDownloadsForTracks(tracks)
+        jobs.forEach { it.join() }
         mutableMessage.value = if (deleted == 0) {
             "Cancelled download."
         } else {
@@ -1691,10 +1722,27 @@ class AppState(
             result.completed > 0 -> {
                 val percent = ((result.completed.toFloat() / result.total.toFloat()) * 100f).toInt().coerceIn(0, 100)
                 val skipped = result.skipped.takeIf { it > 0 }?.let { " $it unavailable." }.orEmpty()
-                "Downloaded ${result.completed} of ${result.total} songs ($percent%). ${result.failed} failed.$skipped"
+                "Downloaded ${result.completed} of ${result.total} songs ($percent%). " +
+                    "${result.failed} failed.$skipped${result.downloadFailureDetailMessage()}"
             }
-            else -> "Couldn't download those songs. 0% downloaded."
+            else -> "Couldn't download those songs. 0% downloaded.${result.downloadFailureDetailMessage()}"
         }
+
+    private fun DownloadBatchResult.downloadFailureDetailMessage(): String {
+        val topReason = failureReasons.firstOrNull() ?: return ""
+        val count = topReason.count.takeIf { it > 1 }?.let { " ($it)" }.orEmpty()
+        val sample = failedSamples.firstOrNull()
+            ?.title
+            ?.takeIf { it.isNotBlank() }
+            ?.let { " Example: ${it.compactDownloadMessageDetail(52)}." }
+            .orEmpty()
+        return " Top reason: ${topReason.reason.compactDownloadMessageDetail(96)}$count.$sample"
+    }
+
+    private fun String.compactDownloadMessageDetail(maxLength: Int): String {
+        val compact = replace(Regex("\\s+"), " ").trim()
+        return if (compact.length <= maxLength) compact else compact.take(maxLength - 1).trimEnd() + "…"
+    }
 
     /**
      * Create a new playlist. Remote playlists require a signed-in provider session with a music library;
@@ -2080,6 +2128,85 @@ private fun PlexSession?.canUsePlexBackgroundFetches(): Boolean {
     return server.connectionUris.isNotEmpty() ||
         server.advertisedConnectionUris.isNotEmpty() ||
         server.localConnectionUris.isNotEmpty()
+}
+
+internal fun List<Track>.withFreshPlaybackUrls(session: PlexSession?): List<Track> {
+    if (session == null || isEmpty()) return this
+    var changed = false
+    val refreshed = map { track ->
+        val next = track.withFreshPlaybackUrls(session)
+        if (next !== track) changed = true
+        next
+    }
+    return if (changed) refreshed else this
+}
+
+internal fun Track.withFreshPlaybackUrls(session: PlexSession): Track {
+    val refreshedStreamUrl = streamUrl.withFreshPlaybackAuth(session)
+    val refreshedDownloadUrl = downloadUrl.withFreshPlaybackAuth(session)
+    if (refreshedStreamUrl == streamUrl && refreshedDownloadUrl == downloadUrl) return this
+    return copy(
+        streamUrl = refreshedStreamUrl,
+        downloadUrl = refreshedDownloadUrl,
+    )
+}
+
+internal fun String.withFreshPlaybackAuth(session: PlexSession): String {
+    if (isBlank() || session.token.isBlank()) return this
+    val parsed = runCatching { Url(this) }.getOrNull() ?: return this
+    if (parsed.protocol.name != "http" && parsed.protocol.name != "https") return this
+    return when (session.providerType) {
+        MediaProviderType.Plex -> withQueryParameter(parsed, "X-Plex-Token", session.token)
+        MediaProviderType.Jellyfin,
+        MediaProviderType.Emby -> withQueryParameter(parsed, "api_key", session.token)
+        MediaProviderType.Navidrome -> withQueryParameters(
+            parsed,
+            "u" to session.userName,
+            "p" to session.token,
+        )
+        MediaProviderType.MusicAssistant -> this
+    }
+}
+
+private fun withQueryParameter(url: Url, name: String, value: String): String =
+    withQueryParameters(url, name to value)
+
+private fun withQueryParameters(url: Url, vararg replacements: Pair<String, String>): String {
+    val original = url.toString()
+    val fragment = original.substringAfter('#', missingDelimiterValue = "")
+    val withoutFragment = original.substringBefore('#')
+    val base = withoutFragment.substringBefore('?')
+    val query = withoutFragment.substringAfter('?', missingDelimiterValue = "")
+    val replacementMap = replacements
+        .filter { (_, value) -> value.isNotBlank() }
+        .associate { (name, value) -> name to value }
+    if (replacementMap.isEmpty()) return original
+    val seen = mutableSetOf<String>()
+    val pairs = query
+        .split('&')
+        .filter { it.isNotBlank() }
+        .mapNotNull { pair ->
+            val name = pair.substringBefore('=')
+            val replacement = replacementMap[name] ?: return@mapNotNull pair
+            seen += name
+            "$name=${replacement.encodeURLParameter()}"
+        }
+        .toMutableList()
+    replacementMap.forEach { (name, value) ->
+        if (name !in seen) pairs += "$name=${value.encodeURLParameter()}"
+    }
+    val rebuilt = buildString {
+        append(base)
+        if (pairs.isNotEmpty()) {
+            append('?')
+            append(pairs.joinToString("&"))
+        }
+        if (fragment.isNotBlank()) {
+            append('#')
+            append(fragment)
+        }
+    }
+    return rebuilt
 }
 
 private const val FavoritePlaylistsExportPath = "exports/favorite-playlists.json"

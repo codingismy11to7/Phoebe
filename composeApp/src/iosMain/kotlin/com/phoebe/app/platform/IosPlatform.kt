@@ -20,6 +20,9 @@ import platform.Foundation.NSUserDefaults
 import platform.Foundation.NSUserDomainMask
 import platform.Foundation.create
 import platform.Foundation.timeIntervalSince1970
+import platform.posix.fclose
+import platform.posix.fopen
+import platform.posix.fwrite
 import platform.SafariServices.SFSafariViewController
 import platform.UIKit.UIApplication
 import platform.UIKit.UIViewController
@@ -54,6 +57,14 @@ actual fun createPlatformHttpClient(): HttpClient = HttpClient(Darwin) {
         json(PlexClient.PlexJson)
     }
 }
+
+actual suspend fun platformStreamHttpDownloadToStorage(
+    url: String,
+    targetPath: String,
+    storage: PlatformStorage,
+    bufferSize: Int,
+    onProgress: suspend (downloadedBytes: Long, totalBytes: Long?) -> Unit,
+): String? = null
 
 actual fun isDesktopPlatform(): Boolean = false
 
@@ -109,22 +120,38 @@ actual class PlatformStorage actual constructor() {
         return NSURL.fileURLWithPath(path).absoluteString ?: "file://$path"
     }
 
-    actual suspend fun writeByteStream(name: String, readChunk: suspend () -> ByteArray?): String {
-        val chunks = mutableListOf<ByteArray>()
-        var totalBytes = 0
-        while (true) {
-            val chunk = readChunk() ?: break
-            if (chunk.isEmpty()) continue
-            chunks += chunk
-            totalBytes += chunk.size
+    @OptIn(ExperimentalForeignApi::class)
+    actual suspend fun writeByteStream(name: String, write: suspend (PlatformByteSink) -> Unit): String {
+        val root = storageRootPath()
+        val path = "$root/$name"
+        val directory = path.substringBeforeLast('/', root)
+        NSFileManager.defaultManager.createDirectoryAtPath(
+            path = directory,
+            withIntermediateDirectories = true,
+            attributes = null,
+            error = null,
+        )
+        NSFileManager.defaultManager.removeItemAtPath(path, error = null)
+        val file = fopen(path, "wb") ?: error("Unable to open download file.")
+        try {
+            write(
+                object : PlatformByteSink {
+                    override suspend fun write(buffer: ByteArray, offset: Int, length: Int) {
+                        if (length <= 0) return
+                        val written = buffer.usePinned { pinned ->
+                            fwrite(pinned.addressOf(offset), 1uL, length.toULong(), file)
+                        }
+                        if (written != length.toULong()) error("Unable to write download bytes.")
+                    }
+                },
+            )
+        } catch (error: Throwable) {
+            NSFileManager.defaultManager.removeItemAtPath(path, error = null)
+            throw error
+        } finally {
+            fclose(file)
         }
-        val bytes = ByteArray(totalBytes)
-        var offset = 0
-        chunks.forEach { chunk ->
-            chunk.copyInto(bytes, destinationOffset = offset)
-            offset += chunk.size
-        }
-        return writeBytes(name, bytes)
+        return NSURL.fileURLWithPath(path).absoluteString ?: "file://$path"
     }
 
     actual suspend fun readDownloadDirectory(): String? =
@@ -248,9 +275,13 @@ actual fun currentTimeMs(): Long = (NSDate().timeIntervalSince1970 * 1000.0).toL
 
 actual fun prefersReducedArtworkEffects(): Boolean = false
 
+actual fun remoteArtworkCacheMaxEstimatedBytes(): Long = 32L * 1024L * 1024L
+
 actual fun catalogTrackIndexParallelism(): Int = 6
 
-actual fun downloadParallelism(): Int = 8
+actual fun downloadParallelism(): Int = 3
+
+actual fun schedulePlatformDownloadRunner() = Unit
 
 internal actual fun platformLog(tag: String, message: String) {
     println("[$tag] $message")

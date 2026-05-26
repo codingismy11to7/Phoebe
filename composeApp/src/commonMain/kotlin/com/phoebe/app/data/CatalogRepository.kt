@@ -4,6 +4,8 @@ import app.cash.sqldelight.async.coroutines.awaitAsList
 import app.cash.sqldelight.async.coroutines.awaitAsOneOrNull
 import com.phoebe.app.data.db.DatabaseWriteGate
 import com.phoebe.app.db.PhoebeDatabase
+import com.phoebe.app.db.DownloadRow
+import com.phoebe.app.db.TrackRow
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.CatalogCollectionValue
@@ -19,6 +21,7 @@ import com.phoebe.app.domain.CollectionFacet
 import com.phoebe.app.domain.CollectionTarget
 import com.phoebe.app.domain.DownloadItem
 import com.phoebe.app.domain.DownloadState
+import com.phoebe.app.domain.DownloadStatusEvent
 import com.phoebe.app.domain.JellyfinLibraryPageKind
 import com.phoebe.app.domain.JellyfinSyncMode
 import com.phoebe.app.domain.MusicLibrary
@@ -64,6 +67,7 @@ import com.phoebe.app.platform.PhoebeLog
 import com.phoebe.app.platform.catalogTrackIndexParallelism
 import com.phoebe.app.platform.currentTimeMs
 import com.phoebe.app.platform.downloadParallelism
+import com.phoebe.app.platform.platformStreamHttpDownloadToStorage
 import com.phoebe.app.sources.CatalogMerge
 import com.phoebe.app.sources.LocalFolderMusicSourcePlugin
 import com.phoebe.app.sources.PlexCatalogBuilder
@@ -83,12 +87,16 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
@@ -100,19 +108,57 @@ import kotlinx.coroutines.yield
 import kotlinx.serialization.Serializable
 import kotlin.random.Random
 
-private const val DownloadChunkSize = 256 * 1024
+private const val DownloadChunkSize = 64 * 1024
 private const val DownloadProgressByteInterval = 2 * 1024 * 1024L
-private const val DownloadProgressStep = 0.01f
+private const val DownloadProgressStep = 0.05f
 private const val DownloadReadIdleTimeoutMs = 60_000L
 private const val DownloadArtworkTimeoutMs = 15_000L
+private const val DownloadUnknownTotalProgressBytes = 16 * 1024 * 1024L
+private const val DownloadCompletionPersistBatchSize = 32
+private const val DownloadCatalogPublishBatchSize = 128
+private const val DownloadImmediateSnapshotLimit = 256
+private const val DownloadFailureSampleLimit = 40
+private const val DownloadFailureLogLimit = 40
 
 data class DownloadBatchResult(
     val total: Int = 0,
     val completed: Int = 0,
     val failed: Int = 0,
+    val failureReasons: List<DownloadFailureReason> = emptyList(),
+    val failedSamples: List<DownloadFailureSample> = emptyList(),
 ) {
     val skipped: Int
         get() = (total - completed - failed).coerceAtLeast(0)
+}
+
+data class DownloadFailureReason(
+    val reason: String,
+    val count: Int,
+)
+
+data class DownloadFailureSample(
+    val trackId: String,
+    val title: String,
+    val artist: String,
+    val error: String,
+    val sourceUrl: String,
+    val targetPath: String,
+)
+
+private data class DownloadDeletePlan(
+    val deletedIds: Set<String>,
+    val localUris: List<String>,
+    val targetPaths: List<String>,
+    val artworkUris: List<String>,
+    val clearedRows: List<Track>,
+)
+
+private data class DownloadFailureDiagnostics(
+    val reasons: List<DownloadFailureReason> = emptyList(),
+    val samples: List<DownloadFailureSample> = emptyList(),
+) {
+    val hasFailures: Boolean
+        get() = reasons.isNotEmpty() || samples.isNotEmpty()
 }
 
 data class RatingSyncResult(
@@ -155,6 +201,11 @@ class CatalogRepository(
     private val json = PlexClient.PlexJson
     private val mutableCatalog = MutableStateFlow(CatalogSnapshot())
     private val mutableDownloads = MutableStateFlow<List<DownloadItem>>(emptyList())
+    private val downloadItemsByTrackId = linkedMapOf<String, DownloadItem>()
+    private val mutableDownloadEvents = MutableSharedFlow<DownloadStatusEvent>(
+        extraBufferCapacity = 32,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
     private val refreshMutex = Mutex()
     private val catalogMergeMutex = Mutex()
     private val downloadMutex = Mutex()
@@ -255,6 +306,22 @@ class CatalogRepository(
     }
     val catalog: StateFlow<CatalogSnapshot> = mutableCatalog
     val downloads: StateFlow<List<DownloadItem>> = mutableDownloads
+    val downloadEvents: SharedFlow<DownloadStatusEvent> = mutableDownloadEvents.asSharedFlow()
+
+    private fun replaceDownloadSnapshot(
+        items: List<DownloadItem>,
+        syncCatalog: Boolean = true,
+    ) {
+        downloadItemsByTrackId.clear()
+        items.forEach { item -> downloadItemsByTrackId[item.trackId] = item }
+        mutableDownloads.value = items
+        if (syncCatalog) {
+            mutableCatalog.value = mutableCatalog.value.copy(downloads = items)
+        }
+    }
+
+    private fun currentDownloadItems(): List<DownloadItem> =
+        downloadItemsByTrackId.values.toList()
 
     private val mutableCatalogRefreshing = MutableStateFlow(false)
     val catalogRefreshing: StateFlow<Boolean> = mutableCatalogRefreshing
@@ -291,7 +358,7 @@ class CatalogRepository(
 
     fun clearInMemoryCatalog() {
         mutableCatalog.value = CatalogSnapshot()
-        mutableDownloads.value = emptyList()
+        replaceDownloadSnapshot(emptyList())
         mutableCatalogRefreshing.value = false
         catalogRefreshingDepth = 0
         publishCatalogSyncState(CatalogSyncState(), force = true)
@@ -346,17 +413,20 @@ class CatalogRepository(
                 readCatalogShellFromDatabase().withoutInactiveLocalFolderCatalog(activeLocalFolderIds())
             }
         }
+        trace.disk("resetStaleDownloads") {
+            withContext(Dispatchers.Default) {
+                runCatching {
+                    runCatalogDbWrite { database.downloadsQueries.resetStaleDownloading() }
+                }.onFailure { error ->
+                    if (error is CancellationException) throw error
+                    PhoebeLog.d("CatalogRepository") { "stale download reset failed: ${error.message}" }
+                }
+            }
+        }
         val downloads = trace.disk("readDownloadsFromDatabase") {
             withContext(Dispatchers.Default) {
                 database.downloadsQueries.selectAll().awaitAsList().map { row ->
-                    DownloadItem(
-                        trackId = row.trackId,
-                        title = row.title,
-                        artist = row.artist,
-                        state = runCatching { DownloadState.valueOf(row.dlState) }.getOrDefault(DownloadState.Failed),
-                        progress = row.progress.toFloat(),
-                        localUri = row.localUri,
-                    )
+                    row.toDownloadItem()
                 }
             }
         }
@@ -364,7 +434,7 @@ class CatalogRepository(
             val restoredShell = trace.memory("applyCachedShellToMemory") {
                 removeMissingLocalArtworkReferences(cachedShell.copy(downloads = downloads))
             }
-            mutableDownloads.value = restoredShell.downloads
+            replaceDownloadSnapshot(restoredShell.downloads, syncCatalog = false)
             mutableCatalog.value = restoredShell
             trace.disk("hydrateCachedTracksFromDatabase") {
                 runCatching { hydrateCachedTracksAfterShellRestore(restoredShell) }
@@ -2412,7 +2482,7 @@ class CatalogRepository(
             val cur = mutableCatalog.value
             if (!cur.hasSameCatalogShell(restoredShell)) return
             val restoredDownloads = tracks.downloads.ifEmpty { cur.downloads }
-            mutableDownloads.value = restoredDownloads
+            replaceDownloadSnapshot(restoredDownloads, syncCatalog = false)
             mutableCatalog.value = cur.copy(
                 tracksByParent = tracks.tracksByParent,
                 downloads = restoredDownloads,
@@ -2444,7 +2514,7 @@ class CatalogRepository(
                 }
             }
             val restoredDownloads = tracks.downloads.ifEmpty { cur.downloads }
-            mutableDownloads.value = restoredDownloads
+            replaceDownloadSnapshot(restoredDownloads, syncCatalog = false)
             mutableCatalog.value = cur.copy(
                 tracksByParent = mergedTracksByParent,
                 downloads = restoredDownloads,
@@ -4931,16 +5001,93 @@ class CatalogRepository(
             }
         }
 
-    suspend fun deleteAllDownloads(): Int = downloadMutex.withLock {
-        val downloads = mutableDownloads.value
-        if (downloads.isEmpty()) return@withLock 0
-        deleteDownloadsForTrackIdsLocked(downloads.map { it.trackId }.toSet())
+    suspend fun previewQueuedDownloadsForPlaylist(playlist: Playlist): Int =
+        previewQueuedDownloadsForTracks(mutableCatalog.value.tracksByParent[playlist.id].orEmpty())
+
+    suspend fun previewQueuedDownloadsForTracks(tracks: List<Track>): Int = withContext(Dispatchers.Default) {
+        val uniqueTracks = tracks.mergeDownloadCopiesById()
+        if (uniqueTracks.isEmpty()) return@withContext 0
+        downloadStatusMutex.withLock {
+            val existingDownloadsByTrackId = currentDownloadItems().associateBy { it.trackId }
+            val items = uniqueTracks
+                .filter { track ->
+                    val existing = existingDownloadsByTrackId[track.id]
+                    existing?.state != DownloadState.Complete &&
+                        existing?.state != DownloadState.Downloading &&
+                        existing?.state != DownloadState.Queued &&
+                        track.localUri.isNullOrBlank()
+                }
+                .map { track -> track.toDownloadItem(DownloadState.Queued, progress = 0f) }
+            if (items.isEmpty()) {
+                0
+            } else {
+                publishDownloadItems(
+                    items = items,
+                    persist = false,
+                    syncCatalog = false,
+                )
+                items.size
+            }
+        }
     }
 
-    suspend fun deleteDownloadsForTracks(tracks: List<Track>): Int = downloadMutex.withLock {
+    suspend fun resumeQueuedDownloads(): DownloadBatchResult = withContext(Dispatchers.Default) {
+        downloadMutex.withLock {
+            val queuedItems = database.downloadsQueries.selectActiveQueue()
+                .awaitAsList()
+                .map { row ->
+                    row.toDownloadItem().copy(
+                        state = DownloadState.Queued,
+                        progress = 0f,
+                        downloadedBytes = 0L,
+                        totalBytes = null,
+                        error = null,
+                        updatedAtMs = currentTimeMs(),
+                    )
+                }
+            if (queuedItems.isEmpty()) return@withLock DownloadBatchResult()
+            publishDownloadItems(queuedItems, persist = true, syncCatalog = false)
+            val tracks = queuedItems.map { item ->
+                Track(
+                    id = item.trackId,
+                    title = item.title,
+                    artist = item.artist,
+                    album = "",
+                    durationMs = 0L,
+                    streamUrl = "",
+                    downloadUrl = item.downloadUrl,
+                    filepath = item.targetPath.takeIf { it.isNotBlank() },
+                )
+            }
+            val completed = downloadTracksContinuously(
+                tracks = tracks,
+                parallelism = downloadParallelism().coerceAtLeast(1),
+            )
+            val reconciledCompleted = reconcileCompletedDownloadRowsForTrackIds(
+                tracks.mapTo(mutableSetOf()) { it.id },
+            )
+            syncCatalogDownloadItems()
+            val completedCount = maxOf(completed, reconciledCompleted)
+            buildDownloadBatchResult(
+                label = "resumeQueuedDownloads",
+                total = tracks.size,
+                completed = completedCount,
+                failed = (tracks.size - completedCount).coerceAtLeast(0),
+                failedTrackIds = tracks.mapTo(mutableSetOf()) { it.id },
+            )
+        }
+    }
+
+    suspend fun deleteAllDownloads(): Int {
+        val downloads = currentDownloadItems()
+        if (downloads.isEmpty()) return 0
+        return deleteDownloadsForTrackIds(downloads.map { it.trackId }.toSet())
+    }
+
+    suspend fun deleteDownloadsForTracks(tracks: List<Track>): Int {
         val trackIds = tracks.map { it.id }.toSet()
-        if (trackIds.isEmpty()) return@withLock 0
-        deleteDownloadsForTrackIdsLocked(trackIds)
+        if (trackIds.isEmpty()) return 0
+        return deleteDownloadsForTrackIds(trackIds, tracks)
     }
 
     suspend fun cancelDownloadsForTracks(tracks: List<Track>) {
@@ -4952,57 +5099,139 @@ class CatalogRepository(
         clearTransientDownloadItemsForTrackIds(trackIds)
     }
 
-    private suspend fun deleteDownloadsForTrackIdsLocked(trackIds: Set<String>): Int {
-        val snapshot = mutableCatalog.value
-        val downloads = mutableDownloads.value
-        if (downloads.isEmpty()) return 0
-        val itemsToDelete = downloads.filter { it.trackId in trackIds }
-        if (itemsToDelete.isEmpty()) return 0
-        val downloadedRemoteIds = itemsToDelete
-            .mapNotNull { item -> item.trackId.takeIf { !item.localUri.isNullOrBlank() } }
-            .toSet()
-        itemsToDelete.forEach { item ->
-            if (!item.localUri.isNullOrBlank()) {
-                runCatching { storage.deleteUri(item.localUri) }
-                    .onFailure { error ->
-                        PhoebeLog.d("CatalogRepository") { "download delete failed for '${item.title}': ${error.message}" }
-                }
-            }
+    private suspend fun deleteDownloadsForTrackIds(
+        trackIds: Set<String>,
+        requestedTracks: List<Track> = emptyList(),
+    ): Int {
+        val plan = buildDownloadDeletePlan(trackIds, requestedTracks)
+        if (plan.deletedIds.isEmpty()) return 0
+        applyDownloadDeletePlanToUi(plan)
+        downloadMutex.withLock {
+            performDownloadDeletePlanCleanup(plan)
         }
-        val deletedIds = itemsToDelete.map { it.trackId }.toSet()
-        snapshot.tracksByParent.values
+        return plan.deletedIds.size
+    }
+
+    private suspend fun buildDownloadDeletePlan(
+        trackIds: Set<String>,
+        requestedTracks: List<Track>,
+    ): DownloadDeletePlan {
+        val snapshot = mutableCatalog.value
+        val downloads = currentDownloadItems()
+        val itemsToDelete = downloads.filter { it.trackId in trackIds }
+        val catalogTracksToDelete = snapshot.tracksByParent.values
             .asSequence()
             .flatten()
-            .distinctBy { it.id }
-            .filter { it.id in deletedIds }
-            .mapNotNull { it.localArtworkUri }
-            .distinct()
-            .forEach { uri ->
-                runCatching { storage.deleteUri(uri) }
-                    .onFailure { error ->
-                        PhoebeLog.d("CatalogRepository") { "artwork delete failed: ${error.message}" }
-                    }
+            .filter { it.id in trackIds }
+            .toList()
+        val databaseTracksToDelete = trackIds
+            .chunked(500)
+            .flatMap { ids ->
+                database.catalogQueries
+                    .selectTracksByIds(ids)
+                    .awaitAsList()
+                    .map { it.toTrack() }
             }
-        val updatedTracks = snapshot.tracksByParent.mapValues { (_, tracks) ->
-            tracks.map { track ->
-                if (track.id in downloadedRemoteIds) track.copy(localUri = null, localArtworkUri = null) else track
+        val localUrisByTrackId = linkedMapOf<String, MutableSet<String>>()
+
+        fun addLocalUri(trackId: String, uri: String?) {
+            val normalized = uri?.takeIf { it.isNotBlank() } ?: return
+            localUrisByTrackId.getOrPut(trackId) { linkedSetOf() } += normalized
+        }
+
+        fun addTrackDownloadUri(track: Track) {
+            if (track.downloadUrl.isNotBlank() || track.isRemoteLibraryTrack()) {
+                addLocalUri(track.id, track.localUri)
             }
         }
-        val remainingDownloads = downloads.filterNot { it.trackId in deletedIds }
-        mutableDownloads.value = remainingDownloads
-        publish(
-            snapshot.copy(
+
+        itemsToDelete.forEach { item -> addLocalUri(item.trackId, item.localUri) }
+        requestedTracks.forEach(::addTrackDownloadUri)
+        catalogTracksToDelete.forEach(::addTrackDownloadUri)
+        databaseTracksToDelete.forEach(::addTrackDownloadUri)
+
+        val deletedIds = (
+            itemsToDelete.map { it.trackId } +
+                localUrisByTrackId.keys
+            )
+            .toSet()
+        val clearedRows = (requestedTracks + catalogTracksToDelete + databaseTracksToDelete)
+            .distinctBy { it.id }
+            .filter { it.id in deletedIds }
+            .map { it.copy(localUri = null, localArtworkUri = null) }
+        return DownloadDeletePlan(
+            deletedIds = deletedIds,
+            localUris = localUrisByTrackId.values.flatten().distinct(),
+            targetPaths = itemsToDelete
+                .mapNotNull { item -> item.targetPath.takeIf { it.isNotBlank() && item.localUri.isNullOrBlank() } }
+                .distinct(),
+            artworkUris = snapshot.tracksByParent.values
+                .asSequence()
+                .flatten()
+                .distinctBy { it.id }
+                .filter { it.id in deletedIds }
+                .mapNotNull { it.localArtworkUri }
+                .distinct()
+                .toList(),
+            clearedRows = clearedRows,
+        )
+    }
+
+    private suspend fun applyDownloadDeletePlanToUi(plan: DownloadDeletePlan) {
+        downloadStatusMutex.withLock {
+            val snapshot = mutableCatalog.value
+            val remainingDownloads = currentDownloadItems().filterNot { it.trackId in plan.deletedIds }
+            val updatedTracks = snapshot.tracksByParent.mapValues { (_, tracks) ->
+                tracks.map { track ->
+                    if (track.id in plan.deletedIds) track.copy(localUri = null, localArtworkUri = null) else track
+                }
+            }
+            replaceDownloadSnapshot(remainingDownloads, syncCatalog = false)
+            mutableCatalog.value = snapshot.copy(
                 tracksByParent = updatedTracks,
                 downloads = remainingDownloads,
-            ),
-            persist = true,
-        )
-        return itemsToDelete.size
+            )
+            mutableDownloadEvents.tryEmit(DownloadStatusEvent(removedTrackIds = plan.deletedIds))
+        }
+    }
+
+    private suspend fun performDownloadDeletePlanCleanup(plan: DownloadDeletePlan) {
+        plan.localUris.forEach { uri ->
+            runCatching { storage.deleteUri(uri) }
+                .onFailure { error ->
+                    PhoebeLog.d("CatalogRepository") { "download delete failed: ${error.message}" }
+                }
+        }
+        plan.targetPaths.forEach { targetPath ->
+            runCatching { storage.delete(targetPath) }
+                .onFailure { error ->
+                    PhoebeLog.d("CatalogRepository") { "partial download delete failed: ${error.message}" }
+                }
+        }
+        plan.artworkUris.forEach { uri ->
+            runCatching { storage.deleteUri(uri) }
+                .onFailure { error ->
+                    PhoebeLog.d("CatalogRepository") { "artwork delete failed: ${error.message}" }
+                }
+        }
+        persistTrackRows(plan.clearedRows)
+        runCatching {
+            withContext(Dispatchers.Default) {
+                runCatalogDbWrite {
+                    database.transaction {
+                        plan.deletedIds.forEach { database.downloadsQueries.delete(it) }
+                    }
+                }
+            }
+        }.onFailure { error ->
+            if (error is CancellationException) throw error
+            PhoebeLog.d("CatalogRepository") { "download row delete failed: ${error.message}" }
+        }
     }
 
     suspend fun cacheDownloadedArtwork(): Int = downloadMutex.withLock {
         val snapshot = mutableCatalog.value
-        val downloadedIds = mutableDownloads.value
+        val downloadedIds = currentDownloadItems()
             .asSequence()
             .filter { it.state == DownloadState.Complete && !it.localUri.isNullOrBlank() }
             .map { it.trackId }
@@ -5043,14 +5272,19 @@ class CatalogRepository(
                 canceledDownloadTrackIds -= uniqueTrackIds
             }
 
-            val existingDownloadsByTrackId = mutableDownloads.value.associateBy { it.trackId }
+            val existingDownloadsByTrackId = currentDownloadItems().associateBy { it.trackId }
+            val downloadedTracksByTrackId = downloadedRemoteTracksForTrackIds(uniqueTrackIds).associateBy { it.id }
             val offlineTracks = uniqueTracks.mapNotNull { track ->
                 val existingDownload = existingDownloadsByTrackId[track.id]
-                val existingLocalUri = track.localUri ?: existingDownload?.localUri?.takeIf { it.isNotBlank() }
+                val downloadedTrack = downloadedTracksByTrackId[track.id]
+                val existingLocalUri = track.localUri
+                    ?: existingDownload?.localUri?.takeIf { it.isNotBlank() }
+                    ?: downloadedTrack?.localUri
                 val isAlreadyDownloaded = existingLocalUri != null || existingDownload?.state == DownloadState.Complete
                 if (!isAlreadyDownloaded) return@mapNotNull null
                 track.copy(
                     localUri = existingLocalUri ?: track.localUri,
+                    localArtworkUri = track.localArtworkUri ?: downloadedTrack?.localArtworkUri,
                 )
             }
             val offlineTrackIds = offlineTracks.mapTo(mutableSetOf()) { it.id }
@@ -5070,7 +5304,7 @@ class CatalogRepository(
                 downloadable.map { track ->
                     track.toDownloadItem(DownloadState.Queued, progress = 0f)
                 },
-                persist = false,
+                persist = true,
                 syncCatalog = false,
             )
             if (downloadable.isNotEmpty()) {
@@ -5078,48 +5312,197 @@ class CatalogRepository(
             }
 
             var completed = offlineTrackIds.size
-            val downloadedTracks = downloadTracksContinuously(
+            val downloadableTrackIds = downloadable.mapTo(mutableSetOf()) { it.id }
+            val downloadedCount = downloadTracksContinuously(
                 tracks = downloadable,
                 parallelism = downloadParallelism().coerceAtLeast(1),
             )
-            if (downloadedTracks.isNotEmpty()) {
-                updateTracksOfflineInfo(downloadedTracks)
-            }
+            val reconciledDownloadedCount = reconcileCompletedDownloadRowsForTrackIds(downloadableTrackIds)
             syncCatalogDownloadItems()
-            completed += downloadedTracks.size
-            val failed = downloadable.size - downloadedTracks.size
-            DownloadBatchResult(total = uniqueTracks.size, completed = completed, failed = failed)
+            val completedDownloadableCount = maxOf(downloadedCount, reconciledDownloadedCount)
+            completed += completedDownloadableCount
+            val failed = (downloadable.size - completedDownloadableCount).coerceAtLeast(0)
+            buildDownloadBatchResult(
+                label = "downloadTracks",
+                total = uniqueTracks.size,
+                completed = completed,
+                failed = failed,
+                failedTrackIds = downloadableTrackIds,
+            )
         }
     }
+
+    private suspend fun buildDownloadBatchResult(
+        label: String,
+        total: Int,
+        completed: Int,
+        failed: Int,
+        failedTrackIds: Set<String>,
+    ): DownloadBatchResult {
+        val diagnostics = if (failed > 0) {
+            downloadStatusMutex.withLock {
+                downloadFailureDiagnosticsForTrackIds(failedTrackIds, expectedFailed = failed)
+            }
+        } else {
+            DownloadFailureDiagnostics()
+        }
+        if (diagnostics.hasFailures) {
+            logDownloadFailureDiagnostics(label, diagnostics)
+        }
+        return DownloadBatchResult(
+            total = total,
+            completed = completed,
+            failed = failed,
+            failureReasons = diagnostics.reasons,
+            failedSamples = diagnostics.samples,
+        )
+    }
+
+    private fun downloadFailureDiagnosticsForTrackIds(
+        trackIds: Set<String>,
+        expectedFailed: Int,
+    ): DownloadFailureDiagnostics {
+        val failedItems = currentDownloadItems()
+            .asSequence()
+            .filter { item -> item.trackId in trackIds && item.state == DownloadState.Failed }
+            .toList()
+        val reasonCounts = failedItems
+            .groupingBy { item -> item.error.normalizedDownloadFailureReason() }
+            .eachCount()
+            .map { (reason, count) -> DownloadFailureReason(reason, count) }
+            .sortedWith(compareByDescending<DownloadFailureReason> { it.count }.thenBy { it.reason })
+            .toMutableList()
+        val missingFailedRows = (expectedFailed - failedItems.size).coerceAtLeast(0)
+        if (missingFailedRows > 0) {
+            reasonCounts += DownloadFailureReason("No failed row persisted", missingFailedRows)
+        }
+        val samples = failedItems
+            .take(DownloadFailureSampleLimit)
+            .map { item ->
+                DownloadFailureSample(
+                    trackId = item.trackId,
+                    title = item.title,
+                    artist = item.artist,
+                    error = item.error.normalizedDownloadFailureReason(),
+                    sourceUrl = item.downloadUrl.redactedDownloadUrlForDiagnostics(),
+                    targetPath = item.targetPath,
+                )
+            }
+        return DownloadFailureDiagnostics(
+            reasons = reasonCounts,
+            samples = samples,
+        )
+    }
+
+    private fun logDownloadFailureDiagnostics(label: String, diagnostics: DownloadFailureDiagnostics) {
+        val reasonSummary = diagnostics.reasons.joinToString("; ") { reason ->
+            "${reason.count} x ${reason.reason}"
+        }
+        PhoebeLog.d("CatalogRepository") { "$label failed downloads: $reasonSummary" }
+        diagnostics.samples.take(DownloadFailureLogLimit).forEach { sample ->
+            PhoebeLog.d("CatalogRepository") {
+                "$label failed track id=${sample.trackId} title='${sample.title}' artist='${sample.artist}' " +
+                    "error='${sample.error}' url='${sample.sourceUrl}' target='${sample.targetPath}'"
+            }
+        }
+    }
+
+    private fun String?.normalizedDownloadFailureReason(): String =
+        this
+            ?.lineSequence()
+            ?.firstOrNull { it.isNotBlank() }
+            ?.trim()
+            ?.replace(Regex("\\s+"), " ")
+            ?.take(180)
+            ?: "Unknown failure"
+
+    private fun String.redactedDownloadUrlForDiagnostics(): String =
+        substringBefore('?')
+            .take(240)
+
+    private suspend fun reconcileCompletedDownloadRowsForTrackIds(trackIds: Set<String>): Int {
+        if (trackIds.isEmpty()) return 0
+        val completedTracks = downloadedRemoteTracksForTrackIds(trackIds)
+        if (completedTracks.isEmpty()) return 0
+        downloadStatusMutex.withLock {
+            publishDownloadItems(
+                items = completedTracks.map { track ->
+                    track.toDownloadItem(DownloadState.Complete, progress = 1f)
+                },
+                persist = true,
+                syncCatalog = false,
+                publishSnapshot = false,
+            )
+        }
+        return completedTracks.size
+    }
+
+    private suspend fun downloadedRemoteTracksForTrackIds(trackIds: Set<String>): List<Track> {
+        if (trackIds.isEmpty()) return emptyList()
+        val snapshotTracks = mutableCatalog.value.tracksByParent.values
+            .asSequence()
+            .flatten()
+            .filter { track -> track.id in trackIds && track.hasDownloadedRemoteMedia() }
+            .toList()
+        val databaseTracks = trackIds
+            .chunked(500)
+            .flatMap { ids ->
+                database.catalogQueries
+                    .selectTracksByIds(ids)
+                    .awaitAsList()
+                    .map { it.toTrack() }
+            }
+            .filter { track -> track.hasDownloadedRemoteMedia() }
+        return (snapshotTracks + databaseTracks)
+            .distinctBy { it.id }
+    }
+
+    private fun Track.hasDownloadedRemoteMedia(): Boolean =
+        !localUri.isNullOrBlank() && (downloadUrl.isNotBlank() || isRemoteLibraryTrack())
 
     private suspend fun downloadTracksContinuously(
         tracks: List<Track>,
         parallelism: Int,
-    ): List<Track> = coroutineScope {
-        if (tracks.isEmpty()) return@coroutineScope emptyList()
+    ): Int = coroutineScope {
+        if (tracks.isEmpty()) return@coroutineScope 0
 
         val workerCount = parallelism.coerceAtLeast(1).coerceAtMost(tracks.size)
-        val pendingTracks = Channel<Track>(capacity = Channel.UNLIMITED)
-        val completedDownloads = Channel<Track>(capacity = Channel.UNLIMITED)
+        val pendingTracks = Channel<Track>(capacity = workerCount * 2)
+        val completedDownloads = Channel<Track>(capacity = workerCount)
         val completionCollector = async {
-            val downloadedTracks = mutableListOf<Track>()
+            var completedCount = 0
             val persistBatch = mutableListOf<Track>()
+            val catalogBatch = mutableListOf<Track>()
 
             suspend fun flushPersistBatch() {
                 if (persistBatch.isEmpty()) return
-                persistCompletedDownloads(persistBatch.toList())
+                val batch = persistBatch.toList()
+                persistTrackRows(batch)
+                persistCompletedDownloads(batch, publishSnapshot = false)
                 persistBatch.clear()
             }
 
+            suspend fun flushCatalogBatch() {
+                if (catalogBatch.isEmpty()) return
+                val batch = catalogBatch.toList()
+                updateTracksOfflineInfo(batch, persistRows = false)
+                catalogBatch.clear()
+            }
+
             for (track in completedDownloads) {
-                downloadedTracks += track
+                completedCount++
                 persistBatch += track
-                if (persistBatch.size >= workerCount) {
+                catalogBatch += track
+                if (persistBatch.size >= DownloadCompletionPersistBatchSize) {
                     flushPersistBatch()
+                }
+                if (catalogBatch.size >= DownloadCatalogPublishBatchSize) {
+                    flushCatalogBatch()
                 }
             }
             flushPersistBatch()
-            downloadedTracks
+            flushCatalogBatch()
+            completedCount
         }
         val workers = List(workerCount) {
             launch {
@@ -5152,12 +5535,26 @@ class CatalogRepository(
             onSuccess = { it },
             onFailure = { error ->
                 if (error is CancellationException) throw error
-                PhoebeLog.d("CatalogRepository") { "download failed for '${track.title}': ${error.message}" }
-                updateDownload(track, DownloadState.Failed, progress = 0f)
+                val failureMessage = error.downloadFailureMessage()
+                PhoebeLog.d("CatalogRepository") {
+                    "download failed trackId=${track.id} title='${track.title}' " +
+                        "url='${track.downloadUrl.redactedDownloadUrlForDiagnostics()}' " +
+                        "target='${downloadPathFor(track)}' error='$failureMessage'"
+                }
+                updateDownload(track, DownloadState.Failed, progress = 0f, errorMessage = failureMessage)
                 null
             },
         )
     }
+
+    private fun Throwable.downloadFailureMessage(): String =
+        message
+            ?.lineSequence()
+            ?.firstOrNull { it.isNotBlank() }
+            ?.trim()
+            ?.replace(Regex("\\s+"), " ")
+            ?.take(180)
+            ?: "Unknown failure"
 
     private suspend fun ensureDownloadNotCancelled(trackId: String) {
         currentCoroutineContext().ensureActive()
@@ -5167,6 +5564,49 @@ class CatalogRepository(
 
     private suspend fun downloadAudioForTrack(track: Track): String {
         ensureDownloadNotCancelled(track.id)
+        var lastProgress = 0.05f
+        var lastProgressBytes = 0L
+        var lastBytesAtMs = currentTimeMs()
+
+        suspend fun publishProgress(downloadedBytes: Long, totalBytes: Long?) {
+            ensureDownloadNotCancelled(track.id)
+            lastBytesAtMs = currentTimeMs()
+            val progress = if (totalBytes != null) {
+                (downloadedBytes.toDouble() / totalBytes.toDouble())
+                    .toFloat()
+                    .coerceIn(0.05f, 0.99f)
+            } else {
+                (downloadedBytes.toDouble() / DownloadUnknownTotalProgressBytes.toDouble())
+                    .toFloat()
+                    .coerceIn(0.05f, 0.95f)
+            }
+            val progressChanged = progress - lastProgress >= DownloadProgressStep
+            val bytesChanged = downloadedBytes - lastProgressBytes >= DownloadProgressByteInterval
+            if (progressChanged || bytesChanged) {
+                lastProgress = progress
+                lastProgressBytes = downloadedBytes
+                updateDownload(
+                    track = track,
+                    state = DownloadState.Downloading,
+                    progress = progress,
+                    persist = false,
+                    downloadedBytes = downloadedBytes,
+                    totalBytes = totalBytes,
+                )
+            }
+        }
+
+        platformStreamHttpDownloadToStorage(
+            url = track.downloadUrl,
+            targetPath = downloadPathFor(track),
+            storage = storage,
+            bufferSize = DownloadChunkSize,
+            onProgress = ::publishProgress,
+        )?.let { localUri ->
+            ensureDownloadNotCancelled(track.id)
+            return localUri
+        }
+
         val response = httpClient.get(track.downloadUrl)
         if (response.status.value !in 200..299) {
             error("Server returned HTTP ${response.status.value}")
@@ -5176,15 +5616,12 @@ class CatalogRepository(
         val totalBytes = response.contentLength()?.takeIf { it > 0L }
         val buffer = ByteArray(DownloadChunkSize)
         var downloadedBytes = 0L
-        var lastProgress = 0.05f
-        var lastProgressBytes = 0L
         var reachedDeclaredLength = false
-        var lastBytesAtMs = currentTimeMs()
         return try {
-            storage.writeByteStream(downloadPathFor(track)) {
+            storage.writeByteStream(downloadPathFor(track)) { sink ->
                 while (true) {
                     ensureDownloadNotCancelled(track.id)
-                    if (reachedDeclaredLength) return@writeByteStream null
+                    if (reachedDeclaredLength) return@writeByteStream
                     val read = withTimeoutOrNull(DownloadReadIdleTimeoutMs) {
                         channel.readAvailable(buffer, 0, buffer.size)
                     } ?: error("Download stalled.")
@@ -5194,7 +5631,7 @@ class CatalogRepository(
                             if (totalBytes != null && downloadedBytes < totalBytes) {
                                 error("Download ended before all bytes were received.")
                             }
-                            return@writeByteStream null
+                            return@writeByteStream
                         }
                         read == 0 -> {
                             if (currentTimeMs() - lastBytesAtMs >= DownloadReadIdleTimeoutMs) {
@@ -5203,28 +5640,17 @@ class CatalogRepository(
                             delay(50)
                         }
                         else -> {
-                            lastBytesAtMs = currentTimeMs()
                             downloadedBytes += read
+                            sink.write(buffer, 0, read)
+                            publishProgress(downloadedBytes, totalBytes)
                             if (totalBytes != null) {
-                                val progress = (downloadedBytes.toDouble() / totalBytes.toDouble())
-                                    .toFloat()
-                                    .coerceIn(0.05f, 0.99f)
-                                val progressChanged = progress - lastProgress >= DownloadProgressStep
-                                val bytesChanged = downloadedBytes - lastProgressBytes >= DownloadProgressByteInterval
-                                if (progressChanged || bytesChanged) {
-                                    lastProgress = progress
-                                    lastProgressBytes = downloadedBytes
-                                    updateDownload(track, DownloadState.Downloading, progress, persist = false)
-                                }
                                 if (downloadedBytes >= totalBytes) {
                                     reachedDeclaredLength = true
                                 }
                             }
-                            return@writeByteStream buffer.copyOf(read)
                         }
                     }
                 }
-                null
             }
         } catch (error: Throwable) {
             channel.cancel(error)
@@ -5237,12 +5663,18 @@ class CatalogRepository(
         state: DownloadState,
         progress: Float,
         persist: Boolean = true,
+        downloadedBytes: Long = 0L,
+        totalBytes: Long? = null,
+        errorMessage: String? = null,
     ) {
         downloadStatusMutex.withLock {
+            val publishSnapshot = state != DownloadState.Downloading ||
+                downloadItemsByTrackId.size <= DownloadImmediateSnapshotLimit
             publishDownloadItems(
-                listOf(track.toDownloadItem(state, progress)),
+                listOf(track.toDownloadItem(state, progress, downloadedBytes, totalBytes, errorMessage)),
                 persist = persist,
                 syncCatalog = false,
+                publishSnapshot = publishSnapshot,
             )
         }
     }
@@ -5253,25 +5685,40 @@ class CatalogRepository(
                 listOf(track.toDownloadItem(DownloadState.Complete, progress = 1f)),
                 persist = false,
                 syncCatalog = false,
+                publishSnapshot = false,
             )
         }
     }
 
-    private suspend fun persistCompletedDownloads(tracks: List<Track>) {
+    private suspend fun persistCompletedDownloads(
+        tracks: List<Track>,
+        publishSnapshot: Boolean,
+    ) {
         if (tracks.isEmpty()) return
         runCatching {
-            persistDownloadItems(
-                tracks.map { track ->
-                    track.toDownloadItem(DownloadState.Complete, progress = 1f)
-                },
-            )
+            downloadStatusMutex.withLock {
+                publishDownloadItems(
+                    items = tracks.map { track ->
+                        track.toDownloadItem(DownloadState.Complete, progress = 1f)
+                    },
+                    persist = true,
+                    syncCatalog = false,
+                    publishSnapshot = publishSnapshot,
+                )
+            }
         }.onFailure { error ->
             if (error is CancellationException) throw error
             PhoebeLog.d("CatalogRepository") { "completed download persist failed: ${error.message}" }
         }
     }
 
-    private fun Track.toDownloadItem(state: DownloadState, progress: Float): DownloadItem =
+    private fun Track.toDownloadItem(
+        state: DownloadState,
+        progress: Float,
+        downloadedBytes: Long = 0L,
+        totalBytes: Long? = null,
+        errorMessage: String? = null,
+    ): DownloadItem =
         DownloadItem(
             trackId = id,
             title = title,
@@ -5279,33 +5726,79 @@ class CatalogRepository(
             state = state,
             progress = progress,
             localUri = localUri,
+            downloadUrl = downloadUrl,
+            targetPath = downloadPathFor(this),
+            downloadedBytes = downloadedBytes,
+            totalBytes = totalBytes,
+            updatedAtMs = currentTimeMs(),
+            error = errorMessage,
+        )
+
+    private fun DownloadRow.toDownloadItem(): DownloadItem =
+        DownloadItem(
+            trackId = trackId,
+            title = title,
+            artist = artist,
+            state = runCatching { DownloadState.valueOf(dlState) }.getOrDefault(DownloadState.Failed),
+            progress = progress.toFloat(),
+            localUri = localUri,
+            downloadUrl = downloadUrl,
+            targetPath = targetPath,
+            downloadedBytes = downloadedBytes,
+            totalBytes = totalBytes,
+            updatedAtMs = updatedAtMs,
+            batchId = batchId,
+            error = error,
         )
 
     private suspend fun publishDownloadItems(
         items: List<DownloadItem>,
         persist: Boolean = true,
         syncCatalog: Boolean = true,
+        publishSnapshot: Boolean = true,
     ) {
         if (items.isEmpty()) return
-        val latestById = items.associateBy { it.trackId }
-        val downloads = mutableDownloads.value.filterNot { it.trackId in latestById } + latestById.values
-        mutableDownloads.value = downloads
-        if (syncCatalog) {
-            mutableCatalog.value = mutableCatalog.value.copy(downloads = downloads)
+        val latestItems = if (items.size == 1) {
+            items
+        } else {
+            items.associateBy { it.trackId }.values.toList()
+        }
+        latestItems.forEach { item ->
+            downloadItemsByTrackId[item.trackId] = item
+        }
+        mutableDownloadEvents.tryEmit(DownloadStatusEvent(items = latestItems.map { it.toUiDownloadEventItem() }))
+        if (publishSnapshot) {
+            val downloads = currentDownloadItems()
+            mutableDownloads.value = downloads
+            if (syncCatalog) {
+                mutableCatalog.value = mutableCatalog.value.copy(downloads = downloads)
+            }
         }
         if (!persist) return
         runCatching {
-            persistDownloadItems(latestById.values.toList())
+            persistDownloadItems(latestItems)
         }.onFailure { error ->
             if (error is CancellationException) throw error
             PhoebeLog.d("CatalogRepository") { "download status persist failed: ${error.message}" }
         }
     }
 
+    private fun DownloadItem.toUiDownloadEventItem(): DownloadItem =
+        DownloadItem(
+            trackId = trackId,
+            title = "",
+            artist = "",
+            state = state,
+            progress = progress,
+            localUri = localUri,
+            updatedAtMs = updatedAtMs,
+        )
+
     private fun syncCatalogDownloadItems() {
-        val downloads = mutableDownloads.value
+        val downloads = currentDownloadItems()
         val snapshot = mutableCatalog.value
         if (snapshot.downloads != downloads) {
+            mutableDownloads.value = downloads
             mutableCatalog.value = snapshot.copy(downloads = downloads)
         }
     }
@@ -5314,10 +5807,12 @@ class CatalogRepository(
         if (trackIds.isEmpty()) return
         downloadStatusMutex.withLock {
             val snapshot = mutableCatalog.value
-            val downloads = mutableDownloads.value.filterNot { it.trackId in trackIds }
-            if (downloads.size != mutableDownloads.value.size) {
-                mutableDownloads.value = downloads
+            val previous = currentDownloadItems()
+            val downloads = previous.filterNot { it.trackId in trackIds }
+            if (downloads.size != previous.size) {
+                replaceDownloadSnapshot(downloads, syncCatalog = false)
                 mutableCatalog.value = snapshot.copy(downloads = downloads)
+                mutableDownloadEvents.tryEmit(DownloadStatusEvent(removedTrackIds = trackIds))
             }
         }
         runCatching {
@@ -5339,7 +5834,7 @@ class CatalogRepository(
         var removedIds = emptySet<String>()
         downloadStatusMutex.withLock {
             val snapshot = mutableCatalog.value
-            val downloads = mutableDownloads.value
+            val downloads = currentDownloadItems()
             val remaining = downloads.filterNot { item ->
                 item.trackId in trackIds &&
                     (item.state != DownloadState.Complete || item.localUri.isNullOrBlank())
@@ -5347,8 +5842,9 @@ class CatalogRepository(
             if (remaining.size != downloads.size) {
                 removedIds = downloads.mapTo(mutableSetOf()) { it.trackId } -
                     remaining.mapTo(mutableSetOf()) { it.trackId }
-                mutableDownloads.value = remaining
+                replaceDownloadSnapshot(remaining, syncCatalog = false)
                 mutableCatalog.value = snapshot.copy(downloads = remaining)
+                mutableDownloadEvents.tryEmit(DownloadStatusEvent(removedTrackIds = removedIds))
             }
         }
         if (removedIds.isEmpty()) return
@@ -5426,7 +5922,10 @@ class CatalogRepository(
         }.getOrNull()
     }
 
-    private suspend fun updateTracksOfflineInfo(offlineTracks: List<Track>) {
+    private suspend fun updateTracksOfflineInfo(
+        offlineTracks: List<Track>,
+        persistRows: Boolean = true,
+    ) {
         if (offlineTracks.isEmpty()) return
         val offlineById = offlineTracks.associateBy { it.id }
         val snapshot = mutableCatalog.value
@@ -5436,6 +5935,7 @@ class CatalogRepository(
             }
         }
         mutableCatalog.value = snapshot.copy(tracksByParent = updatedTracks)
+        if (!persistRows) return
         runCatching {
             persistTrackRows(offlineById.values.toList())
         }.onFailure { error ->
@@ -5459,6 +5959,9 @@ class CatalogRepository(
     }
 
     private fun downloadPathFor(track: Track): String {
+        track.filepath
+            ?.takeIf { it.startsWith("downloads/") }
+            ?.let { return it }
         val plexRelativePath = track.filepath
             ?.takeIf { it.isNotBlank() }
             ?.libraryRelativeDownloadPath(track)
@@ -5568,31 +6071,32 @@ class CatalogRepository(
     private suspend fun readTracksForParentFromDatabase(parentId: String): List<Track>? = withContext(Dispatchers.Default) {
         val rows = database.catalogQueries.selectTracksForParent(parentId).awaitAsList()
         if (rows.isEmpty()) return@withContext null
-        rows.map { row ->
-            Track(
-                id = row.id,
-                title = row.title,
-                artist = row.artist,
-                album = row.album,
-                durationMs = row.durationMs,
-                streamUrl = row.streamUrl,
-                downloadUrl = row.downloadUrl,
-                thumbUrl = row.thumbUrl,
-                localArtworkUri = row.localArtworkUri,
-                localUri = row.localUri,
-                year = row.year?.toInt(),
-                genre = row.genre,
-                mood = row.mood,
-                style = row.style,
-                filepath = row.filepath,
-                audioCodec = row.audioCodec,
-                bitrateKbps = row.bitrateKbps?.toInt(),
-                dateAddedMs = row.dateAddedMs,
-                rating = row.rating?.toFloat(),
-                parentAlbumId = row.parentAlbumId,
-            )
-        }
+        rows.map { row -> row.toTrack() }
     }
+
+    private fun TrackRow.toTrack(): Track =
+        Track(
+            id = id,
+            title = title,
+            artist = artist,
+            album = album,
+            durationMs = durationMs,
+            streamUrl = streamUrl,
+            downloadUrl = downloadUrl,
+            thumbUrl = thumbUrl,
+            localArtworkUri = localArtworkUri,
+            localUri = localUri,
+            year = year?.toInt(),
+            genre = genre,
+            mood = mood,
+            style = style,
+            filepath = filepath,
+            audioCodec = audioCodec,
+            bitrateKbps = bitrateKbps?.toInt(),
+            dateAddedMs = dateAddedMs,
+            rating = rating?.toFloat(),
+            parentAlbumId = parentAlbumId,
+        )
 
     private fun warmLikelyClickedContent(session: PlexSession?, snapshot: CatalogSnapshot) {
         if (session?.isPlex() != true) return
@@ -5836,6 +6340,13 @@ class CatalogRepository(
                     dlState = item.state.name,
                     progress = item.progress.toDouble(),
                     localUri = item.localUri,
+                    downloadUrl = item.downloadUrl,
+                    targetPath = item.targetPath,
+                    downloadedBytes = item.downloadedBytes,
+                    totalBytes = item.totalBytes,
+                    updatedAtMs = item.updatedAtMs,
+                    batchId = item.batchId,
+                    error = item.error,
                 )
             }
         }
@@ -6020,6 +6531,13 @@ class CatalogRepository(
                     dlState = item.state.name,
                     progress = item.progress.toDouble(),
                     localUri = item.localUri,
+                    downloadUrl = item.downloadUrl,
+                    targetPath = item.targetPath,
+                    downloadedBytes = item.downloadedBytes,
+                    totalBytes = item.totalBytes,
+                    updatedAtMs = item.updatedAtMs,
+                    batchId = item.batchId,
+                    error = item.error,
                 )
             }
         }
@@ -6038,6 +6556,13 @@ class CatalogRepository(
                             dlState = item.state.name,
                             progress = item.progress.toDouble(),
                             localUri = item.localUri,
+                            downloadUrl = item.downloadUrl,
+                            targetPath = item.targetPath,
+                            downloadedBytes = item.downloadedBytes,
+                            totalBytes = item.totalBytes,
+                            updatedAtMs = item.updatedAtMs,
+                            batchId = item.batchId,
+                            error = item.error,
                         )
                     }
                 }
@@ -6357,16 +6882,7 @@ class CatalogRepository(
                 entries.sortedBy { it.position }
                     .mapNotNull { tracksById[it.trackId] }
             }
-        val downloads = database.downloadsQueries.selectAll().awaitAsList().map { row ->
-            DownloadItem(
-                trackId = row.trackId,
-                title = row.title,
-                artist = row.artist,
-                state = runCatching { DownloadState.valueOf(row.dlState) }.getOrDefault(DownloadState.Failed),
-                progress = row.progress.toFloat(),
-                localUri = row.localUri,
-            )
-        }
+        val downloads = database.downloadsQueries.selectAll().awaitAsList().map { row -> row.toDownloadItem() }
         return CatalogSnapshot(
             tracksByParent = tracksByParent,
             downloads = downloads,

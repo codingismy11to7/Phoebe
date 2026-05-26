@@ -4,7 +4,9 @@ import com.phoebe.app.domain.Track
 import com.phoebe.app.player.DesktopAudioPlayer
 import com.phoebe.app.player.PlaybackDiagnostics
 import com.phoebe.app.player.PlaybackEnginePath
+import com.sun.net.httpserver.HttpServer
 import java.io.File
+import java.net.InetSocketAddress
 import java.util.Collections
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -13,10 +15,10 @@ import org.junit.Test
 
 class RealAudioPlaybackDesktopTest {
     @Test
-    fun mp3AndM4aStartThroughJavaFxAndReportSpectrum() {
+    fun m4aStartsThroughJavaFxAndAdvancePlaybackState() {
         assumeRealAudioTestsEnabled()
 
-        listOf("wikimedia-example.mp3", "wikimedia-example.m4a").forEach { fixture ->
+        listOf("wikimedia-example.m4a").forEach { fixture ->
             val diagnostics = RecordingPlaybackDiagnostics()
             val player = DesktopAudioPlayer(diagnostics)
             try {
@@ -31,12 +33,54 @@ class RealAudioPlaybackDesktopTest {
                     },
                     "JavaFX media playback did not start for $fixture; engines=${diagnostics.engineEvents()} errors=${diagnostics.errorEvents()}",
                 )
-                assertTrue(waitUntil { diagnostics.hasEnergy(PlaybackEnginePath.JavaFxMediaPlayer) })
-                assertTrue(waitUntil { player.state.value.positionMs > 0L })
+                assertTrue(
+                    waitUntil { player.state.value.positionMs > 0L },
+                    "JavaFX media playback did not advance for $fixture; state=${player.state.value} " +
+                        "progress=${diagnostics.progressEvents(PlaybackEnginePath.JavaFxMediaPlayer)} " +
+                        "errors=${diagnostics.errorEvents()}",
+                )
                 assertTrue(diagnostics.hasPlayingEvent(PlaybackEnginePath.JavaFxMediaPlayer))
             } finally {
                 player.releaseForTests()
             }
+        }
+    }
+
+    @Test
+    fun localMp3StartsThroughSampledPlaybackAndReportsPcmRms() {
+        assumeRealAudioTestsEnabled()
+
+        val diagnostics = RecordingPlaybackDiagnostics()
+        val player = DesktopAudioPlayer(diagnostics)
+        try {
+            val track = fixtureTrack("wikimedia-example.mp3", durationMs = 10_000)
+
+            player.play(listOf(track), 0)
+
+            assertTrue(
+                waitUntil {
+                    diagnostics.hasEngine(PlaybackEnginePath.SampledStream) &&
+                        player.state.value.isPlaying
+                },
+                "Local sampled MP3 playback did not start; engines=${diagnostics.engineEvents()} errors=${diagnostics.errorEvents()}",
+            )
+            assertTrue(
+                waitUntil { diagnostics.hasEnergy(PlaybackEnginePath.SampledStream) },
+                "Local sampled MP3 playback did not report decoded energy; " +
+                    "progress=${diagnostics.progressEvents(PlaybackEnginePath.SampledStream)} " +
+                    "errors=${diagnostics.errorEvents()}",
+            )
+            assertTrue(waitUntil { player.state.value.positionMs > 0L })
+            assertTrue(
+                waitUntil {
+                    val state = player.state.value
+                    state.durationMs > 0L && state.bufferedPositionMs >= state.durationMs
+                },
+                "Local sampled MP3 playback should report the local file as fully buffered; state=${player.state.value}",
+            )
+            assertTrue(diagnostics.hasPlayingEvent(PlaybackEnginePath.SampledStream))
+        } finally {
+            player.releaseForTests()
         }
     }
 
@@ -65,6 +109,106 @@ class RealAudioPlaybackDesktopTest {
             } finally {
                 player.releaseForTests()
             }
+        }
+    }
+
+    @Test
+    fun remoteMp3StreamsThroughSampledPlayback() {
+        assumeRealAudioTestsEnabled()
+
+        val fixture = File(
+            javaClass.classLoader.getResource("test-audio/wikimedia-example.mp3")?.toURI()
+                ?: error("Missing test audio fixture"),
+        )
+        val bytes = fixture.readBytes()
+        val requestEvents = Collections.synchronizedList(mutableListOf<String>())
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/library/track.mp3") { exchange ->
+            requestEvents += "${exchange.requestMethod}:${exchange.requestHeaders.getFirst("Range") ?: "full"}"
+            val headers = exchange.responseHeaders
+            headers.add("Accept-Ranges", "bytes")
+            headers.add("Content-Type", "audio/mpeg")
+            val range = exchange.requestHeaders.getFirst("Range")
+            if (range != null && range.startsWith("bytes=")) {
+                val requested = range.removePrefix("bytes=").substringBefore(",")
+                val start = requested.substringBefore("-").toIntOrNull()?.coerceIn(0, bytes.lastIndex) ?: 0
+                val requestedEnd = requested.substringAfter("-", missingDelimiterValue = "")
+                    .toIntOrNull()
+                    ?.coerceIn(start, bytes.lastIndex)
+                    ?: bytes.lastIndex
+                val length = requestedEnd - start + 1
+                headers.add("Content-Range", "bytes $start-$requestedEnd/${bytes.size}")
+                headers.add("Content-Length", length.toString())
+                exchange.sendResponseHeaders(206, if (exchange.requestMethod == "HEAD") -1L else length.toLong())
+                if (exchange.requestMethod != "HEAD") {
+                    exchange.responseBody.use { it.write(bytes, start, length) }
+                } else {
+                    exchange.close()
+                }
+            } else {
+                headers.add("Content-Length", bytes.size.toString())
+                exchange.sendResponseHeaders(200, if (exchange.requestMethod == "HEAD") -1L else bytes.size.toLong())
+                if (exchange.requestMethod != "HEAD") {
+                    exchange.responseBody.use { it.write(bytes) }
+                } else {
+                    exchange.close()
+                }
+            }
+        }
+        server.start()
+        val diagnostics = RecordingPlaybackDiagnostics()
+        val player = DesktopAudioPlayer(diagnostics)
+        try {
+            val uri = "http://127.0.0.1:${server.address.port}/library/track.mp3?X-Plex-Token=test"
+            val track = Track(
+                id = "remote-mp3",
+                title = "Remote MP3",
+                artist = "Fixture",
+                album = "Real Audio Tests",
+                durationMs = 10_000,
+                streamUrl = uri,
+                downloadUrl = "$uri&download=1",
+                audioCodec = "mp3",
+            )
+
+            player.play(listOf(track), 0)
+
+            assertTrue(
+                waitUntil {
+                    diagnostics.hasEngine(PlaybackEnginePath.SampledStream) &&
+                        player.state.value.isPlaying
+                },
+                "Remote sampled MP3 stream did not start; engines=${diagnostics.engineEvents()} errors=${diagnostics.errorEvents()}",
+            )
+            assertTrue(
+                waitUntil { player.state.value.positionMs > 0L },
+                "Remote sampled MP3 stream did not advance; state=${player.state.value} " +
+                    "progress=${diagnostics.progressEvents(PlaybackEnginePath.SampledStream)} " +
+                    "requests=${requestEvents.toList()} " +
+                    "errors=${diagnostics.errorEvents()}",
+            )
+            assertTrue(
+                waitUntil { diagnostics.hasEnergy(PlaybackEnginePath.SampledStream) },
+                "Remote sampled MP3 stream did not report decoded energy; " +
+                    "progress=${diagnostics.progressEvents(PlaybackEnginePath.SampledStream)} " +
+                    "requests=${requestEvents.toList()} " +
+                    "errors=${diagnostics.errorEvents()}",
+            )
+            assertTrue(diagnostics.hasPlayingEvent(PlaybackEnginePath.SampledStream))
+            assertTrue(
+                waitUntil {
+                    val state = player.state.value
+                    state.bufferedPositionMs > state.positionMs
+                },
+                "Remote sampled MP3 stream did not report buffered audio ahead of playback; " +
+                    "state=${player.state.value} " +
+                    "progress=${diagnostics.progressEvents(PlaybackEnginePath.SampledStream)} " +
+                    "requests=${requestEvents.toList()} " +
+                    "errors=${diagnostics.errorEvents()}",
+            )
+        } finally {
+            player.releaseForTests()
+            server.stop(0)
         }
     }
 
@@ -151,6 +295,7 @@ class RealAudioPlaybackDesktopTest {
         private val playingEngines = Collections.synchronizedSet(mutableSetOf<PlaybackEnginePath>())
         private val committed = Collections.synchronizedList(mutableListOf<Pair<PlaybackEnginePath, String>>())
         private val volumes = Collections.synchronizedList(mutableListOf<Pair<PlaybackEnginePath, VolumeSample>>())
+        private val progress = Collections.synchronizedList(mutableListOf<Pair<PlaybackEnginePath, Long>>())
         private val errors = Collections.synchronizedList(mutableListOf<Pair<PlaybackEnginePath, String?>>())
 
         override fun engineSelected(engine: PlaybackEnginePath) {
@@ -159,6 +304,10 @@ class RealAudioPlaybackDesktopTest {
 
         override fun platformPlaying(engine: PlaybackEnginePath, positionMs: Long, durationMs: Long) {
             playingEngines += engine
+        }
+
+        override fun playbackProgress(engine: PlaybackEnginePath, positionMs: Long, durationMs: Long) {
+            progress += engine to positionMs
         }
 
         override fun decodedAudioEnergy(engine: PlaybackEnginePath, rms: Double) {
@@ -193,6 +342,9 @@ class RealAudioPlaybackDesktopTest {
         fun engineEvents(): List<PlaybackEnginePath> = engines.toList()
 
         fun errorEvents(): List<Pair<PlaybackEnginePath, String?>> = errors.toList()
+
+        fun progressEvents(engine: PlaybackEnginePath): List<Long> =
+            progress.filter { it.first == engine }.map { it.second }.takeLast(12)
 
         fun volumeSteps(engine: PlaybackEnginePath): List<VolumeSample> =
             volumes.filter { it.first == engine }.map { it.second }

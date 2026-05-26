@@ -92,9 +92,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateMapOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
@@ -535,19 +533,17 @@ internal fun DesktopContent(
                 val playlistActions = LocalPlaylistActions.current
                 val catalogSyncInProgress = LocalCatalogSyncInProgress.current
                 val sourcePlaylists = playlistActions.playlists
-                val visiblePlaylists by produceState<List<Playlist>?>(
-                    initialValue = null,
-                    sourcePlaylists,
-                    searchQuery,
-                ) {
-                    value = null
-                    withFrameNanos { }
-                    value = withContext(Dispatchers.Default) {
+                var visiblePlaylists by remember { mutableStateOf<List<Playlist>?>(null) }
+                LaunchedEffect(sourcePlaylists, searchQuery) {
+                    visiblePlaylists = withContext(Dispatchers.Default) {
                         filterPlaylistsByQuery(sourcePlaylists, searchQuery)
                     }
                 }
-                val preparedVisiblePlaylists = visiblePlaylists.orEmpty()
-                val preparingPlaylists = visiblePlaylists == null && sourcePlaylists.isNotEmpty()
+                val preparedVisiblePlaylists = visiblePlaylists
+                    ?: if (searchQuery.isBlank()) sourcePlaylists else emptyList()
+                val preparingPlaylists = visiblePlaylists == null &&
+                    preparedVisiblePlaylists.isEmpty() &&
+                    sourcePlaylists.isNotEmpty()
                 val showPlaylistSyncProgress = catalogSyncInProgress && searchQuery.isBlank()
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (!playlistActions.playlistsEnabled) {

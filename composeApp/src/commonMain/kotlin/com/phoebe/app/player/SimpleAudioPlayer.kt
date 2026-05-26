@@ -36,6 +36,8 @@ abstract class SimpleAudioPlayer : AudioPlayer {
     private var crossfadeRequestKey: String? = null
     protected var equalizerProfile: EqualizerProfile = EqualizerProfile.Default.normalized()
         private set
+    protected val isCrossfadeConfigured: Boolean
+        get() = crossfadeDurationMs > 0L
 
     /** When false, a superseded or user-paused load must not start audible playback. */
     protected var playWhenReady = false

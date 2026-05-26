@@ -92,6 +92,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateMapOf
@@ -147,6 +148,7 @@ import com.phoebe.app.domain.LibraryUiPreferences
 import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.DownloadItem
 import com.phoebe.app.domain.DownloadState
+import com.phoebe.app.domain.DownloadStatusEvent
 import com.phoebe.app.domain.LocalFolderMediaSourceConfig
 import com.phoebe.app.domain.MediaProviderType
 import com.phoebe.app.domain.MediaSourcesState
@@ -205,49 +207,227 @@ internal val LocalMobileChromePadding = compositionLocalOf { MobileChromePadding
 
 internal val LocalTracksLoading = compositionLocalOf { emptySet<String>() }
 
+internal data class DownloadStatusSummary(
+    val total: Int,
+    val complete: Int,
+    val active: Int,
+    val activeProgress: Float,
+    val failed: Int,
+    val unavailable: Int,
+)
+
 internal class DownloadStatusSnapshot(
     itemsByTrackId: Map<String, DownloadItem> = emptyMap(),
     hasActiveDownloadJobs: Boolean = false,
 ) {
-    private val itemStateByTrackId = mutableStateMapOf<String, DownloadItem>().apply {
-        putAll(itemsByTrackId)
+    private data class DownloadUiItem(
+        val state: DownloadState,
+        val progress: Float,
+        val localUri: String?,
+        val updatedAtMs: Long,
+    )
+
+    private val itemStateByTrackId = linkedMapOf<String, DownloadUiItem>().apply {
+        putAll(itemsByTrackId.mapValues { (_, item) -> item.toDownloadUiItem() })
     }
+    private val progressStateByTrackId = linkedMapOf<String, Float>().apply {
+        itemsByTrackId.forEach { (trackId, item) ->
+            if (item.state == DownloadState.Downloading) {
+                put(trackId, item.progress.coerceIn(0f, 1f))
+            }
+        }
+    }
+    private var stateVersion by mutableIntStateOf(0)
     var hasActiveDownloadJobs by mutableStateOf(hasActiveDownloadJobs)
         private set
 
     fun replaceItems(items: List<DownloadItem>) {
+        var changed = false
         val nextIds = items.mapTo(mutableSetOf()) { it.trackId }
-        itemStateByTrackId.keys
-            .filterNot { it in nextIds }
-            .forEach { itemStateByTrackId.remove(it) }
-        items.forEach { item ->
-            if (itemStateByTrackId[item.trackId] != item) {
-                itemStateByTrackId[item.trackId] = item
+        val itemIterator = itemStateByTrackId.keys.iterator()
+        while (itemIterator.hasNext()) {
+            if (itemIterator.next() !in nextIds) {
+                itemIterator.remove()
+                changed = true
             }
         }
+        val progressIterator = progressStateByTrackId.keys.iterator()
+        while (progressIterator.hasNext()) {
+            if (progressIterator.next() !in nextIds) {
+                progressIterator.remove()
+                changed = true
+            }
+        }
+        items.forEach { item ->
+            changed = updateDownloadItem(item) || changed
+        }
+        if (changed) bumpStateVersion()
+    }
+
+    private fun updateDownloadItem(item: DownloadItem): Boolean {
+        val existing = itemStateByTrackId[item.trackId]
+        if (existing != null && shouldKeepExistingDownloadItem(existing, item)) return false
+        var changed = false
+        if (item.state == DownloadState.Downloading) {
+            val progress = item.progress.coerceIn(0f, 1f)
+            if (progressStateByTrackId[item.trackId] != progress) {
+                progressStateByTrackId[item.trackId] = progress
+                changed = true
+            }
+        } else {
+            if (progressStateByTrackId.remove(item.trackId) != null) {
+                changed = true
+            }
+        }
+        val coarseItem = item.toDownloadUiItem()
+        if (itemStateByTrackId[item.trackId] != coarseItem) {
+            itemStateByTrackId[item.trackId] = coarseItem
+            changed = true
+        }
+        return changed
+    }
+
+    private fun shouldKeepExistingDownloadItem(existing: DownloadUiItem, incoming: DownloadItem): Boolean {
+        val existingComplete = existing.state == DownloadState.Complete || !existing.localUri.isNullOrBlank()
+        val incomingIncomplete = incoming.state != DownloadState.Complete && incoming.localUri.isNullOrBlank()
+        if (existingComplete && incomingIncomplete) return true
+        return existing.updatedAtMs > 0L &&
+            incoming.updatedAtMs > 0L &&
+            incoming.updatedAtMs < existing.updatedAtMs
+    }
+
+    fun apply(event: DownloadStatusEvent) {
+        var changed = false
+        event.removedTrackIds.forEach { trackId ->
+            if (itemStateByTrackId.remove(trackId) != null) changed = true
+            if (progressStateByTrackId.remove(trackId) != null) changed = true
+        }
+        event.items.forEach { item ->
+            changed = updateDownloadItem(item) || changed
+        }
+        if (changed) bumpStateVersion()
     }
 
     fun setActiveDownloadJobs(active: Boolean) {
         hasActiveDownloadJobs = active
     }
 
-    fun itemFor(track: Track): DownloadItem? = itemStateByTrackId[track.id]
+    fun itemFor(track: Track): DownloadItem? {
+        observeDownloadState()
+        val item = itemStateByTrackId[track.id] ?: return null
+        val progress = if (item.state == DownloadState.Downloading) {
+            progressStateByTrackId[track.id] ?: item.progress
+        } else {
+            item.progress
+        }
+        return DownloadItem(
+            trackId = track.id,
+            title = track.title,
+            artist = track.artist,
+            state = item.state,
+            progress = progress,
+            localUri = item.localUri,
+            downloadUrl = track.downloadUrl,
+            updatedAtMs = item.updatedAtMs,
+        )
+    }
 
-    fun isComplete(track: Track): Boolean =
-        track.localUri != null ||
-            itemFor(track)?.state == DownloadState.Complete ||
-            !itemFor(track)?.localUri.isNullOrBlank()
+    fun isComplete(track: Track): Boolean {
+        observeDownloadState()
+        val item = itemStateByTrackId[track.id]
+        return isComplete(track, item)
+    }
 
     val count: Int
-        get() = itemStateByTrackId.size
+        get() {
+            observeDownloadState()
+            return itemStateByTrackId.size
+        }
 
-    fun isActive(track: Track): Boolean =
-        hasActiveDownloadJobs &&
-            !isComplete(track) &&
-            itemFor(track)?.state in setOf(DownloadState.Queued, DownloadState.Downloading)
+    fun isActive(track: Track): Boolean {
+        observeDownloadState()
+        val item = itemStateByTrackId[track.id]
+        return isActive(item, isComplete(track, item))
+    }
 
-    fun isFailed(track: Track): Boolean =
-        track.downloadUrl.isNotBlank() && !isComplete(track) && itemFor(track)?.state == DownloadState.Failed
+    fun isFailed(track: Track): Boolean {
+        observeDownloadState()
+        val item = itemStateByTrackId[track.id]
+        return isFailed(track, item, isComplete(track, item))
+    }
+
+    fun summarize(tracks: List<Track>): DownloadStatusSummary {
+        observeDownloadState()
+        var complete = 0
+        var active = 0
+        var activeProgress = 0f
+        var failed = 0
+        var unavailable = 0
+        tracks.forEach { track ->
+            val item = itemStateByTrackId[track.id]
+            val isComplete = isComplete(track, item)
+            if (isComplete) {
+                complete++
+            } else {
+                if (isActive(item, isComplete)) {
+                    active++
+                    activeProgress += item?.progress?.coerceIn(0f, 1f) ?: 0f
+                }
+                if (isFailed(track, item, isComplete)) {
+                    failed++
+                }
+                if (track.downloadUrl.isBlank()) {
+                    unavailable++
+                }
+            }
+        }
+        return DownloadStatusSummary(
+            total = tracks.size,
+            complete = complete,
+            active = active,
+            activeProgress = activeProgress,
+            failed = failed,
+            unavailable = unavailable,
+        )
+    }
+
+    private fun observeDownloadState() {
+        stateVersion
+    }
+
+    private fun bumpStateVersion() {
+        stateVersion++
+    }
+
+    private fun isComplete(track: Track, item: DownloadUiItem?): Boolean =
+        item?.state == DownloadState.Complete ||
+            !item?.localUri.isNullOrBlank() ||
+            (!track.localUri.isNullOrBlank() && (track.downloadUrl.isNotBlank() || track.isRemoteLibraryTrack()))
+
+    private fun isActive(item: DownloadUiItem?, complete: Boolean): Boolean {
+        if (complete || item == null) return false
+        val activeState = item.state == DownloadState.Queued || item.state == DownloadState.Downloading
+        return activeState && (hasActiveDownloadJobs || item.updatedAtMs > 0L)
+    }
+
+    private fun isFailed(track: Track, item: DownloadUiItem?, complete: Boolean): Boolean =
+        track.downloadUrl.isNotBlank() && !complete && item?.state == DownloadState.Failed
+
+    private fun DownloadItem.toDownloadUiItem(): DownloadUiItem {
+        val coarseProgress = if (state == DownloadState.Downloading) {
+            val normalized = progress.coerceIn(0f, 1f)
+            val coarseProgress = (normalized * 20f).roundToInt() / 20f
+            if (normalized > 0f) max(0.05f, coarseProgress) else 0f
+        } else {
+            progress.coerceIn(0f, 1f)
+        }
+        return DownloadUiItem(
+            state = state,
+            progress = coarseProgress,
+            localUri = localUri,
+            updatedAtMs = updatedAtMs,
+        )
+    }
 }
 
 internal val LocalDownloadStatus = compositionLocalOf { DownloadStatusSnapshot() }

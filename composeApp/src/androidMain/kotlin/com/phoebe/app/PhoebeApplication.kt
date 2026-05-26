@@ -2,6 +2,7 @@ package com.phoebe.app
 
 import android.app.Application
 import com.google.android.gms.cast.framework.CastContext
+import com.phoebe.app.platform.cancelPlatformDownloadRunner
 import com.phoebe.app.player.AndroidPlaybackRuntime
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -15,6 +16,7 @@ class PhoebeApplication : Application() {
         super.onCreate()
         AndroidContextHolder.application = this
         runCatching { CastContext.getSharedInstance(this) }
+        cancelPlatformDownloadRunner()
         appScope.launch {
             AndroidPlaybackRuntime.ensureInstalled()
         }
