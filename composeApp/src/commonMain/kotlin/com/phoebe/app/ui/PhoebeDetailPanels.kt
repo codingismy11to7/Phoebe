@@ -315,6 +315,7 @@ private fun SongDetailHero(
                     Modifier.fillMaxSize(),
                     artworkModifier = Modifier.sharedArtworkTransition("song:${track.id}"),
                     radius = 14.dp,
+                    maxDecodeDimension = HeroArtworkMaxDecodeDimension,
                 )
                 AudioQualityBadge(
                     track = track,
@@ -416,6 +417,7 @@ internal fun FlippableSongArtwork(
     modifier: Modifier = Modifier,
     artworkModifier: Modifier = Modifier,
     radius: Dp = 10.dp,
+    maxDecodeDimension: Int = ListArtworkMaxDecodeDimension,
 ) {
     var showingDetails by remember(track.id) { mutableStateOf(false) }
     val rotation by animateFloatAsState(
@@ -446,6 +448,7 @@ internal fun FlippableSongArtwork(
                         onLongClick = { showingDetails = true },
                     ),
                 radius = radius,
+                maxDecodeDimension = maxDecodeDimension,
             )
         } else {
             SongArtworkDetailBack(

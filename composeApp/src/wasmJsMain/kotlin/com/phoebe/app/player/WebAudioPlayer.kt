@@ -5,6 +5,7 @@ import com.phoebe.app.domain.Track
 import com.phoebe.app.platform.resolveWebDownloadObjectUrl
 import com.phoebe.app.sources.resolveWebLocalAudioUri
 import kotlinx.browser.document
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -40,11 +41,15 @@ private class WebAudioPlayer(
     private var prefetchGeneration = -1
     private var prefetchStartedGeneration = -1
     private var prefetchedBufferFraction = 0.0
+    private var webCrossfadeGeneration = -1
+    private var webCrossfadeJob: Job? = null
+    private var webCrossfadeIncoming: HTMLAudioElement? = null
 
     private var audio = createAudioElement(useCors = true)
 
     override fun stopCurrentPlaybackImmediately() {
         retryJob?.cancel()
+        stopWebCrossfade()
         cancelWebAudioPrefetch()
         resetWebAudioPrefetch()
         clearPendingReloadRestore()
@@ -94,6 +99,7 @@ private class WebAudioPlayer(
         currentUri = playbackUri
         retryGeneration = generation
         retryCount = 0
+        stopWebCrossfade()
         corsFallbackAttempted = false
         equalizerUnavailableForCurrentStream = false
         equalizerUnavailableNoticeShown = false
@@ -115,26 +121,42 @@ private class WebAudioPlayer(
         audio.load()
         applyCurrentEqualizer()
         if (playWhenReady) {
-            playWebAudio(audio)
+            playWebAudio(generation)
         }
     }
 
     override fun pause() {
         retryJob?.cancel()
         pendingPlayAfterLoad = false
+        stopWebCrossfade()
         audio.pause()
     }
 
     override fun resume() {
-        playWebAudio(audio)
+        playWebAudio(activePlayGeneration)
     }
 
     override fun seek(positionMs: Long) {
+        stopWebCrossfade()
         setWebAudioCurrentTime(audio, positionMs / 1000.0)
     }
 
     override fun setOutputVolume(volume: Float) {
-        audio.volume = volume.toDouble().coerceIn(0.0, 1.0)
+        val v = volume.coerceIn(0f, 1f)
+        if (setWebAudioOutputGain(audio, v.toDouble(), create = false)) {
+            audio.volume = 1.0
+        } else {
+            audio.volume = v.toDouble()
+        }
+        webCrossfadeIncoming?.let { incoming ->
+            if (webCrossfadeJob == null) {
+                if (setWebAudioOutputGain(incoming, v.toDouble(), create = false)) {
+                    incoming.volume = 1.0
+                } else {
+                    incoming.volume = v.toDouble()
+                }
+            }
+        }
     }
 
     override fun applyEqualizer(profile: EqualizerProfile) {
@@ -143,6 +165,310 @@ private class WebAudioPlayer(
             prepareAudioElementForCurrentEqualizer()
         }
         applyCurrentEqualizer()
+    }
+
+    override fun startCrossfadeOnPlatform(
+        queue: List<Track>,
+        targetIndex: Int,
+        track: Track,
+        durationMs: Long,
+        baseVolume: Float,
+        generation: Int,
+    ): Boolean {
+        if (webCrossfadeGeneration == generation) return true
+        if (targetIndex !in queue.indices || audio.paused) return false
+        val outgoing = audio
+        webCrossfadeGeneration = generation
+        val accepted = resolveWebCrossfadeUri(track, generation) { playbackUri ->
+            startWebCrossfade(
+                outgoing = outgoing,
+                playbackUri = playbackUri,
+                queue = queue,
+                targetIndex = targetIndex,
+                track = track,
+                durationMs = durationMs,
+                baseVolume = baseVolume,
+                generation = generation,
+                useCors = audioUsesCors,
+                allowCorsFallback = true,
+            )
+        }
+        if (!accepted) {
+            webCrossfadeGeneration = -1
+            return false
+        }
+        return true
+    }
+
+    private fun resolveWebCrossfadeUri(
+        track: Track,
+        generation: Int,
+        onResolved: (String) -> Unit,
+    ): Boolean {
+        val localUri = track.localUri?.takeIf { it.isNotBlank() }
+        val streamUri = track.streamUrl.takeIf { it.isNotBlank() }
+        val uri = localUri ?: streamUri.orEmpty()
+        if (uri.isBlank()) return false
+        if (uri.startsWith("web-download://")) {
+            resolveWebDownloadObjectUrl(uri) { resolved ->
+                if (!isPlayRequestCurrent(generation) || webCrossfadeGeneration != generation) return@resolveWebDownloadObjectUrl
+                val playbackUri = if (resolved.isBlank()) {
+                    streamUri
+                        ?.takeIf { localUri?.startsWith("web-download://") == true }
+                        ?.let { resolveWebLocalAudioUri(it) }
+                } else {
+                    resolved
+                }
+                if (playbackUri.isNullOrBlank()) {
+                    webCrossfadeGeneration = -1
+                    return@resolveWebDownloadObjectUrl
+                }
+                onResolved(playbackUri)
+            }
+            return true
+        }
+        onResolved(resolveWebLocalAudioUri(uri))
+        return true
+    }
+
+    private fun startWebCrossfade(
+        outgoing: HTMLAudioElement,
+        playbackUri: String,
+        queue: List<Track>,
+        targetIndex: Int,
+        track: Track,
+        durationMs: Long,
+        baseVolume: Float,
+        generation: Int,
+        useCors: Boolean,
+        allowCorsFallback: Boolean,
+    ) {
+        if (!isWebCrossfadeCurrent(generation, outgoing)) return
+        val incoming = createAudioElement(useCors = useCors)
+        webCrossfadeIncoming?.let { previous ->
+            if (previous !== incoming) disposeWebAudioElement(previous)
+        }
+        webCrossfadeIncoming = incoming
+        val outgoingOnEnded = outgoing.onended
+
+        fun fail(message: String?) {
+            if (!isPlayRequestCurrent(generation) || webCrossfadeIncoming !== incoming) return
+            if (allowCorsFallback && useCors && playbackUri.isRemoteWebAudioUri()) {
+                disposeWebAudioElement(incoming)
+                webCrossfadeIncoming = null
+                startWebCrossfade(
+                    outgoing = outgoing,
+                    playbackUri = playbackUri,
+                    queue = queue,
+                    targetIndex = targetIndex,
+                    track = track,
+                    durationMs = durationMs,
+                    baseVolume = baseVolume,
+                    generation = generation,
+                    useCors = false,
+                    allowCorsFallback = false,
+                )
+                return
+            }
+            if (audio === outgoing) {
+                outgoing.onended = outgoingOnEnded
+            }
+            diagnostics.playbackError(PlaybackEnginePath.WebAudioElement, message)
+            failWebCrossfade(incoming, generation)
+        }
+
+        var started = false
+        val incomingCanUseWebAudioGain = useCors || !playbackUri.isRemoteWebAudioUri()
+        val incomingUsesWebAudioGain = incomingCanUseWebAudioGain &&
+            setWebAudioOutputGain(incoming, 0.0, create = true)
+        if (incomingUsesWebAudioGain) {
+            incoming.volume = 1.0
+        } else {
+            incoming.volume = 0.0
+        }
+        incoming.onplaying = {
+            if (!started && isWebCrossfadeCurrent(generation, outgoing, incoming)) {
+                started = true
+                outgoing.onended = {}
+                val outgoingCanUseWebAudioGain = audioUsesCors || currentUri?.isRemoteWebAudioUri() != true
+                val outgoingUsesWebAudioGain = outgoingCanUseWebAudioGain &&
+                    setWebAudioOutputGain(outgoing, baseVolume.toDouble(), create = true)
+                if (outgoingUsesWebAudioGain) {
+                    outgoing.volume = 1.0
+                }
+                diagnostics.crossfadeStarted(
+                    engine = PlaybackEnginePath.WebAudioElement,
+                    outgoingTrackId = state.value.currentTrack?.id,
+                    incomingTrackId = track.id,
+                    durationMs = durationMs,
+                )
+                runWebCrossfade(
+                    outgoing = outgoing,
+                    incoming = incoming,
+                    playbackUri = playbackUri,
+                    queue = queue,
+                    targetIndex = targetIndex,
+                    durationMs = durationMs,
+                    baseVolume = baseVolume,
+                    generation = generation,
+                    useCors = useCors,
+                    outgoingUsesWebAudioGain = outgoingUsesWebAudioGain,
+                    incomingUsesWebAudioGain = incomingUsesWebAudioGain,
+                )
+            }
+        }
+        incoming.onerror = { _, _, _, _, _ ->
+            fail(webAudioErrorMessage(incoming))
+            null
+        }
+        incoming.src = playbackUri
+        incoming.load()
+        playWebAudio(incoming) { message -> fail(message) }
+    }
+
+    private fun runWebCrossfade(
+        outgoing: HTMLAudioElement,
+        incoming: HTMLAudioElement,
+        playbackUri: String,
+        queue: List<Track>,
+        targetIndex: Int,
+        durationMs: Long,
+        baseVolume: Float,
+        generation: Int,
+        useCors: Boolean,
+        outgoingUsesWebAudioGain: Boolean,
+        incomingUsesWebAudioGain: Boolean,
+    ) {
+        webCrossfadeJob?.cancel()
+        webCrossfadeJob = scope.launch {
+            try {
+                val fadeDurationMs = webCrossfadeFadeDurationMs(outgoing, durationMs)
+                val stepDelay = (fadeDurationMs / WebCrossfadeSteps).coerceAtLeast(16L)
+                repeat(WebCrossfadeSteps) { index ->
+                    if (!isWebCrossfadeCurrent(generation, outgoing, incoming)) return@launch
+                    val progress = (index + 1).toFloat() / WebCrossfadeSteps.toFloat()
+                    val outgoingVolume = (baseVolume * (1f - progress)).coerceIn(0f, 1f)
+                    val incomingVolume = (baseVolume * progress).coerceIn(0f, 1f)
+                    diagnostics.crossfadeVolume(
+                        engine = PlaybackEnginePath.WebAudioElement,
+                        step = index + 1,
+                        outgoingVolume = outgoingVolume,
+                        incomingVolume = incomingVolume,
+                    )
+                    if (outgoingUsesWebAudioGain) {
+                        setWebAudioOutputGain(outgoing, outgoingVolume.toDouble(), create = false)
+                    } else {
+                        outgoing.volume = outgoingVolume.toDouble()
+                    }
+                    if (incomingUsesWebAudioGain) {
+                        setWebAudioOutputGain(incoming, incomingVolume.toDouble(), create = false)
+                    } else {
+                        incoming.volume = incomingVolume.toDouble()
+                    }
+                    delay(stepDelay)
+                }
+                commitWebCrossfade(
+                    outgoing = outgoing,
+                    incoming = incoming,
+                    playbackUri = playbackUri,
+                    queue = queue,
+                    targetIndex = targetIndex,
+                    generation = generation,
+                    useCors = useCors,
+                )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                diagnostics.playbackError(PlaybackEnginePath.WebAudioElement, error.message)
+                failWebCrossfade(incoming, generation)
+            }
+        }
+    }
+
+    private fun commitWebCrossfade(
+        outgoing: HTMLAudioElement,
+        incoming: HTMLAudioElement,
+        playbackUri: String,
+        queue: List<Track>,
+        targetIndex: Int,
+        generation: Int,
+        useCors: Boolean,
+    ) {
+        if (!isWebCrossfadeCurrent(generation, outgoing, incoming)) return
+        val positionMs = (incoming.currentTime * 1000.0).toLong().coerceAtLeast(0L)
+        disposeWebAudioElement(outgoing)
+        audio = incoming
+        audioUsesCors = useCors
+        currentUri = playbackUri
+        retryGeneration = generation
+        retryCount = 0
+        corsFallbackAttempted = !useCors
+        equalizerUnavailableForCurrentStream = !useCors && playbackUri.isRemoteWebAudioUri()
+        equalizerUnavailableNoticeShown = false
+        sourcePreparedForWebEqualizer = false
+        webCrossfadeIncoming = null
+        webCrossfadeGeneration = -1
+        webCrossfadeJob = null
+        cancelWebAudioPrefetch()
+        resetWebAudioPrefetch(generation)
+        installAudioEventHandlers(generation)
+        prepareAudioElementForCurrentEqualizer()
+        applyCurrentEqualizer()
+        setOutputVolume(effectiveOutputVolume())
+        adoptCrossfadeTarget(
+            queue = queue,
+            targetIndex = targetIndex,
+            positionMs = positionMs,
+            generation = generation,
+        )
+        diagnostics.crossfadeCommitted(
+            engine = PlaybackEnginePath.WebAudioElement,
+            incomingTrackId = queue[targetIndex].id,
+        )
+        syncFromAudio(generation, isBuffering = false)
+        startWebAudioPrefetchIfNeeded(currentUri, generation)
+    }
+
+    private fun failWebCrossfade(incoming: HTMLAudioElement, generation: Int) {
+        if (webCrossfadeIncoming !== incoming || webCrossfadeGeneration != generation) return
+        webCrossfadeJob?.cancel()
+        webCrossfadeJob = null
+        disposeWebAudioElement(incoming)
+        webCrossfadeIncoming = null
+        webCrossfadeGeneration = -1
+        setOutputVolume(effectiveOutputVolume())
+    }
+
+    private fun stopWebCrossfade() {
+        webCrossfadeJob?.cancel()
+        webCrossfadeJob = null
+        webCrossfadeIncoming?.let { disposeWebAudioElement(it) }
+        webCrossfadeIncoming = null
+        webCrossfadeGeneration = -1
+        setOutputVolume(effectiveOutputVolume())
+    }
+
+    private fun isWebCrossfadeCurrent(
+        generation: Int,
+        outgoing: HTMLAudioElement,
+        incoming: HTMLAudioElement? = webCrossfadeIncoming,
+    ): Boolean =
+        isPlayRequestCurrent(generation) &&
+            webCrossfadeGeneration == generation &&
+            audio === outgoing &&
+            (incoming == null || webCrossfadeIncoming === incoming) &&
+            playWhenReady
+
+    private fun webCrossfadeFadeDurationMs(outgoing: HTMLAudioElement, configuredDurationMs: Long): Long {
+        val durationSeconds = outgoing.duration
+        val remainingMs = if (durationSeconds.isFinite() && durationSeconds > 0.0) {
+            ((durationSeconds - outgoing.currentTime).coerceAtLeast(0.0) * 1000.0).toLong()
+        } else {
+            configuredDurationMs
+        }
+        return remainingMs
+            .coerceAtMost(configuredDurationMs)
+            .coerceAtLeast(WebCrossfadeMinimumFadeMs)
     }
 
     private fun prepareAudioElementForCurrentEqualizer() {
@@ -245,7 +571,7 @@ private class WebAudioPlayer(
         pendingSeekAfterLoadSeconds = null
         if (pendingPlayAfterLoad && playWhenReady) {
             pendingPlayAfterLoad = false
-            playWebAudio(audio)
+            playWebAudio(generation)
         } else {
             pendingPlayAfterLoad = false
         }
@@ -280,7 +606,7 @@ private class WebAudioPlayer(
         applyCurrentEqualizer()
         disposeWebAudioElement(previousAudio)
         if (playWhenReady) {
-            playWebAudio(audio)
+            playWebAudio(generation)
         }
         return true
     }
@@ -411,18 +737,31 @@ private class WebAudioPlayer(
                 audio.load()
                 applyCurrentEqualizer()
                 if (playWhenReady) {
-                    playWebAudio(audio)
+                    playWebAudio(generation)
                 }
             }
             if (!reload) {
-                playWebAudio(audio)
+                playWebAudio(generation)
             }
+        }
+    }
+
+    private fun playWebAudio(generation: Int) {
+        playWebAudio(audio) { message ->
+            if (!isPlayRequestCurrent(generation) || !playWhenReady) return@playWebAudio
+            if (audioUsesCors && currentUri?.isRemoteWebAudioUri() == true && retryWithoutCors(generation)) {
+                return@playWebAudio
+            }
+            diagnostics.playbackError(PlaybackEnginePath.WebAudioElement, message)
+            markPlaybackFailed(generation = generation, message = message)
         }
     }
 
     private companion object {
         const val MaxStreamRetryCount = 5
         const val StreamRetryBaseDelayMs = 1_000L
+        const val WebCrossfadeSteps = 24
+        const val WebCrossfadeMinimumFadeMs = 500L
     }
 }
 
@@ -596,32 +935,29 @@ private external fun cancelWebAudioPrefetch()
     """(audio, payload) => {
         const profile = JSON.parse(payload);
         if (!audio) return;
-        const active = profile.enabled && profile.gains?.some((gain) => Math.abs(gain) > 0.001);
-        let eq = globalThis.__phoebeEqualizer;
-        if (!active) {
-            if (eq && eq.audio === audio) {
-                try { eq.source.disconnect(); } catch (_) {}
-                for (const node of eq.nodes || []) {
-                    try { node.disconnect(); } catch (_) {}
-                }
-                eq.nodes = [];
-                try { eq.source.connect(eq.context.destination); } catch (_) {}
-            }
-            return;
-        }
         const Ctx = globalThis.AudioContext || globalThis.webkitAudioContext;
         if (!Ctx) return;
+        const active = profile.enabled && profile.gains?.some((gain) => Math.abs(gain) > 0.001);
+        const crossfadeGains = globalThis.__phoebeCrossfadeGains;
+        const crossfade = crossfadeGains?.get(audio);
+        let eq = globalThis.__phoebeEqualizer;
+        if (!active && (!eq || eq.audio !== audio) && !crossfade) return;
         if (!eq || eq.audio !== audio) {
-            const context = eq?.context || new Ctx();
+            const context = crossfade?.context || eq?.context || new Ctx();
             let source;
             try {
-                source = context.createMediaElementSource(audio);
+                source = crossfade?.source || context.createMediaElementSource(audio);
             } catch (error) {
                 // A media element can only have one source node. Reuse the previous one if it exists.
                 if (!eq || eq.audio !== audio || !eq.source) return;
                 source = eq.source;
             }
-            eq = { audio, context, source, nodes: [] };
+            const gainValue = Number(crossfade?.gain?.gain?.value ?? eq?.gainValue ?? 1);
+            if (crossfade) {
+                try { crossfade.gain.disconnect(); } catch (_) {}
+                crossfadeGains?.delete(audio);
+            }
+            eq = { audio, context, source, nodes: [], gain: null, gainValue: Number.isFinite(gainValue) ? gainValue : 1 };
             globalThis.__phoebeEqualizer = eq;
         }
         eq.context.resume?.();
@@ -629,22 +965,34 @@ private external fun cancelWebAudioPrefetch()
         for (const node of eq.nodes || []) {
             try { node.disconnect(); } catch (_) {}
         }
+        if (eq.gain) {
+            try { eq.gain.disconnect(); } catch (_) {}
+        } else {
+            eq.gain = eq.context.createGain();
+        }
+        const gainValue = Number.isFinite(Number(eq.gainValue)) ? Number(eq.gainValue) : 1;
+        try { eq.gain.gain.setValueAtTime(gainValue, eq.context.currentTime || 0); } catch (_) {
+            eq.gain.gain.value = gainValue;
+        }
         eq.nodes = [];
         let current = eq.source;
         const q = profile.bandCount === 31 ? 4.2 : profile.bandCount === 15 ? 2.1 : profile.bandCount === 5 ? 0.9 : 1.35;
-        for (let i = 0; i < profile.bands.length; i++) {
-            const gain = profile.gains[i] || 0;
-            if (Math.abs(gain) <= 0.001) continue;
-            const filter = eq.context.createBiquadFilter();
-            filter.type = "peaking";
-            filter.frequency.value = profile.bands[i];
-            filter.Q.value = q;
-            filter.gain.value = gain;
-            current.connect(filter);
-            current = filter;
-            eq.nodes.push(filter);
+        if (active) {
+            for (let i = 0; i < profile.bands.length; i++) {
+                const gain = profile.gains[i] || 0;
+                if (Math.abs(gain) <= 0.001) continue;
+                const filter = eq.context.createBiquadFilter();
+                filter.type = "peaking";
+                filter.frequency.value = profile.bands[i];
+                filter.Q.value = q;
+                filter.gain.value = gain;
+                current.connect(filter);
+                current = filter;
+                eq.nodes.push(filter);
+            }
         }
-        current.connect(eq.context.destination);
+        current.connect(eq.gain);
+        eq.gain.connect(eq.context.destination);
     }""",
 )
 private external fun applyWebEqualizer(audio: HTMLAudioElement, payload: String)
@@ -671,6 +1019,55 @@ private external fun isWebEqualizerAttached(audio: HTMLAudioElement): Boolean
 
 @OptIn(ExperimentalWasmJsInterop::class)
 @JsFun(
+    """(audio, gainValue, create) => {
+        if (!audio) return false;
+        const gain = Math.max(0, Math.min(1, Number(gainValue) || 0));
+        const eq = globalThis.__phoebeEqualizer;
+        if (eq && eq.audio === audio && eq.source) {
+            if (!eq.gain) {
+                eq.gain = eq.context.createGain();
+            }
+            eq.gainValue = gain;
+            try { eq.context.resume?.(); } catch (_) {}
+            try { eq.gain.gain.setValueAtTime(gain, eq.context.currentTime || 0); } catch (_) {
+                eq.gain.gain.value = gain;
+            }
+            return true;
+        }
+        let gains = globalThis.__phoebeCrossfadeGains;
+        if (!gains) {
+            gains = new Map();
+            globalThis.__phoebeCrossfadeGains = gains;
+        }
+        let entry = gains.get(audio);
+        if (!entry && create) {
+            const Ctx = globalThis.AudioContext || globalThis.webkitAudioContext;
+            if (!Ctx) return false;
+            const context = eq?.context || new Ctx();
+            let source;
+            try {
+                source = context.createMediaElementSource(audio);
+            } catch (error) {
+                return false;
+            }
+            const gainNode = context.createGain();
+            source.connect(gainNode);
+            gainNode.connect(context.destination);
+            entry = { context, source, gain: gainNode };
+            gains.set(audio, entry);
+        }
+        if (!entry) return false;
+        try { entry.context.resume?.(); } catch (_) {}
+        try { entry.gain.gain.setValueAtTime(gain, entry.context.currentTime || 0); } catch (_) {
+            entry.gain.gain.value = gain;
+        }
+        return true;
+    }""",
+)
+private external fun setWebAudioOutputGain(audio: HTMLAudioElement, gain: Double, create: Boolean): Boolean
+
+@OptIn(ExperimentalWasmJsInterop::class)
+@JsFun(
     """(audio) => {
         if (!audio) return;
         try { audio.pause(); } catch (_) {}
@@ -694,7 +1091,17 @@ private external fun isWebEqualizerAttached(audio: HTMLAudioElement): Boolean
             for (const node of eq.nodes || []) {
                 try { node.disconnect(); } catch (_) {}
             }
-            globalThis.__phoebeEqualizer = { context: eq.context, audio: null, source: null, nodes: [] };
+            if (eq.gain) {
+                try { eq.gain.disconnect(); } catch (_) {}
+            }
+            globalThis.__phoebeEqualizer = { context: eq.context, audio: null, source: null, nodes: [], gain: null, gainValue: 1 };
+        }
+        const gains = globalThis.__phoebeCrossfadeGains;
+        const entry = gains?.get(audio);
+        if (entry) {
+            try { entry.source.disconnect(); } catch (_) {}
+            try { entry.gain.disconnect(); } catch (_) {}
+            gains.delete(audio);
         }
     }""",
 )
@@ -734,7 +1141,7 @@ private external fun setWebAudioCurrentTime(audio: HTMLAudioElement, seconds: Do
 
 @OptIn(ExperimentalWasmJsInterop::class)
 @JsFun(
-    """(audio) => {
+    """(audio, onFailure) => {
         try {
             const Ctx = globalThis.AudioContext || globalThis.webkitAudioContext;
             if (Ctx) {
@@ -752,12 +1159,16 @@ private external fun setWebAudioCurrentTime(audio: HTMLAudioElement, seconds: Do
             const playResult = audio.play();
             if (playResult && typeof playResult.catch === "function") {
                 playResult.catch((error) => {
+                    const message = error?.message || error?.name || "Web audio playback failed.";
                     console.warn("Phoebe web audio playback was blocked or failed.", error);
+                    try { onFailure(String(message)); } catch (_) {}
                 });
             }
         } catch (error) {
             console.warn("Phoebe web audio playback failed.", error);
+            const message = error?.message || error?.name || "Web audio playback failed.";
+            try { onFailure(String(message)); } catch (_) {}
         }
     }""",
 )
-private external fun playWebAudio(audio: HTMLAudioElement)
+private external fun playWebAudio(audio: HTMLAudioElement, onFailure: (String) -> Unit)
