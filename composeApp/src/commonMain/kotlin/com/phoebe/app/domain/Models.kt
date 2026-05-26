@@ -753,6 +753,18 @@ data class DownloadItem(
     val state: DownloadState,
     val progress: Float = 0f,
     val localUri: String? = null,
+    val downloadUrl: String = "",
+    val targetPath: String = "",
+    val downloadedBytes: Long = 0L,
+    val totalBytes: Long? = null,
+    val updatedAtMs: Long = 0L,
+    val batchId: String? = null,
+    val error: String? = null,
+)
+
+data class DownloadStatusEvent(
+    val items: List<DownloadItem> = emptyList(),
+    val removedTrackIds: Set<String> = emptySet(),
 )
 
 @Serializable

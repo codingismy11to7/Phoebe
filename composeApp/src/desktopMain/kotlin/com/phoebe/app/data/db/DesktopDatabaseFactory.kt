@@ -25,7 +25,7 @@ actual suspend fun createSqlDriver(schema: SqlSchema<QueryResult.AsyncValue<Unit
     val driver = openDriver(dbFile, properties, schema)
 
     // Guard against a revision marker that was written even though the wipe failed.
-    if (dbFile.exists() && !appSettingsSchemaCompatible(dbFile)) {
+    if (dbFile.exists() && !schemaCompatible(dbFile)) {
         driver.close()
         deleteDatabaseFiles(dbFile)
         val rebuilt = openDriver(dbFile, properties, schema)
@@ -59,7 +59,7 @@ private fun wipeIfRevisionChanged(dbFile: File, revFile: File) {
     if (!dbFile.exists()) return
     val onDiskRev = revFile.takeIf { it.exists() }?.runCatching { readText().trim().toLong() }?.getOrNull()
     val revisionStale = onDiskRev != null && onDiskRev != LocalDbRevision
-    val schemaStale = !appSettingsSchemaCompatible(dbFile)
+    val schemaStale = !schemaCompatible(dbFile)
     if (revisionStale || schemaStale) {
         deleteDatabaseFiles(dbFile)
     }
@@ -74,17 +74,20 @@ internal fun deleteDatabaseFiles(dbFile: File) {
     File(dbFile.parentFile, "${dbFile.name}-shm").delete()
 }
 
-internal fun appSettingsSchemaCompatible(dbFile: File): Boolean =
+internal fun schemaCompatible(dbFile: File): Boolean =
     runCatching {
         DriverManager.getConnection("jdbc:sqlite:${dbFile.absolutePath}").use { connection ->
             connection.createStatement().use { statement ->
-                statement.executeQuery("PRAGMA table_info(AppSettingsRow)").use { rows ->
+                statement.executeQuery("PRAGMA table_info($LocalDbRevisionCompatTable)").use { rows ->
                     generateSequence { if (rows.next()) rows.getString("name") else null }
-                        .any { it == LocalDbRevision19Column }
+                        .any { it == LocalDbRevisionCompatColumn }
                 }
             }
         }
     }.getOrDefault(false)
+
+internal fun appSettingsSchemaCompatible(dbFile: File): Boolean =
+    schemaCompatible(dbFile)
 
 internal fun desktopDatabaseRoot(): File =
     System.getProperty("phoebe.storage.root")?.let(::File)

@@ -36,10 +36,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -882,6 +880,14 @@ internal fun MobileSongRow(
                 modifier = Modifier.size(34.dp),
             )
         }
+        TrackDownloadIndicator(
+            track = track,
+            onDownload = null,
+            showIdle = false,
+            touchTargetSize = 34.dp,
+            showComplete = false,
+            showFailed = false,
+        )
         Box {
             Box(
                 Modifier
@@ -896,15 +902,13 @@ internal fun MobileSongRow(
                     modifier = Modifier.size(17.dp),
                 )
             }
-            if (menuExpanded) {
-                TrackActionMenu(
-                    expanded = true,
-                    onDismiss = { menuExpanded = false },
-                    onAddToUpNext = onAddToUpNext,
-                    onDownload = onDownload,
-                    track = track,
-                )
-            }
+            TrackActionMenu(
+                expanded = menuExpanded,
+                onDismiss = { menuExpanded = false },
+                onAddToUpNext = onAddToUpNext,
+                onDownload = onDownload,
+                track = track,
+            )
         }
     }
 }
@@ -941,28 +945,25 @@ internal fun FavoritePlaylistsMobileView(
 ) {
     val playlistActions = LocalPlaylistActions.current
     val sourcePlaylists = playlistActions.playlists
-    val favoritePlaylists by produceState<List<Playlist>?>(initialValue = null, sourcePlaylists) {
-        value = null
-        withFrameNanos { }
-        value = withContext(Dispatchers.Default) {
+    var favoritePlaylists by remember { mutableStateOf<List<Playlist>?>(null) }
+    var visiblePlaylists by remember { mutableStateOf<List<Playlist>?>(null) }
+    LaunchedEffect(sourcePlaylists) {
+        favoritePlaylists = withContext(Dispatchers.Default) {
             sourcePlaylists.filter { it.favorite }.sortedBy { it.title.lowercase() }
         }
     }
-    val visiblePlaylists by produceState<List<Playlist>?>(initialValue = null, favoritePlaylists, searchQuery) {
+    LaunchedEffect(favoritePlaylists, searchQuery) {
         val playlists = favoritePlaylists
-        if (playlists == null) {
-            value = null
-            return@produceState
-        }
-        value = null
-        withFrameNanos { }
-        value = withContext(Dispatchers.Default) {
+        if (playlists == null) return@LaunchedEffect
+        visiblePlaylists = withContext(Dispatchers.Default) {
             filterPlaylistsByQuery(playlists, searchQuery)
         }
     }
     val preparedFavoritePlaylists = favoritePlaylists.orEmpty()
-    val preparedVisiblePlaylists = visiblePlaylists.orEmpty()
-    val preparingPlaylists = favoritePlaylists == null || visiblePlaylists == null
+    val preparedVisiblePlaylists = visiblePlaylists
+        ?: if (searchQuery.isBlank()) preparedFavoritePlaylists else emptyList()
+    val preparingPlaylists = favoritePlaylists == null ||
+        (visiblePlaylists == null && preparedVisiblePlaylists.isEmpty() && preparedFavoritePlaylists.isNotEmpty())
 
     Column(modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 18.dp)) {
         Row(
@@ -1057,15 +1058,15 @@ internal fun PlaylistsMobileView(
 ) {
     val playlistActions = LocalPlaylistActions.current
     val playlists = playlistActions.playlists
-    val visiblePlaylists by produceState<List<Playlist>?>(initialValue = null, playlists, searchQuery) {
-        value = null
-        withFrameNanos { }
-        value = withContext(Dispatchers.Default) {
+    var visiblePlaylists by remember { mutableStateOf<List<Playlist>?>(null) }
+    LaunchedEffect(playlists, searchQuery) {
+        visiblePlaylists = withContext(Dispatchers.Default) {
             filterPlaylistsByQuery(playlists, searchQuery)
         }
     }
-    val preparedVisiblePlaylists = visiblePlaylists.orEmpty()
-    val preparingPlaylists = visiblePlaylists == null && playlists.isNotEmpty()
+    val preparedVisiblePlaylists = visiblePlaylists
+        ?: if (searchQuery.isBlank()) playlists else emptyList()
+    val preparingPlaylists = visiblePlaylists == null && preparedVisiblePlaylists.isEmpty() && playlists.isNotEmpty()
 
     Column(modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp)) {
         SearchPill(

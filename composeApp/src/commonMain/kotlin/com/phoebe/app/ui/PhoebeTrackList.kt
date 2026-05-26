@@ -253,8 +253,10 @@ internal fun ContentTrackRow(
     val cols = libraryColumns
     val likeActions = LocalLikeActions.current
     val ratingActions = LocalRatingActions.current
+    val downloads = LocalDownloadStatus.current
     val canLike = likeActions.likesEnabled && track.canTogglePlexLike()
     val liked = likeActions.isLiked(track)
+    val downloaded = downloads.isComplete(track)
     val rating = ratingActions.ratingFor(track)
     val techParts = remember(track.id, cols) {
         buildList {
@@ -341,7 +343,7 @@ internal fun ContentTrackRow(
                         )
                         TrackStateBadges(
                             liked = !cols.favorite && canLike && liked,
-                            downloaded = false,
+                            downloaded = downloaded,
                             iconSize = 10.dp,
                         )
                     }
@@ -409,8 +411,11 @@ internal fun ContentTrackRow(
             }
             TrackDownloadIndicator(
                 track = track,
-                onDownload = onDownload,
+                onDownload = null,
                 showIdle = false,
+                showComplete = false,
+                showFailed = false,
+                touchTargetSize = 40.dp,
             )
             Box(
                 Modifier.size(40.dp).clip(CircleShape).clickable { menuExpanded = true },
@@ -435,6 +440,9 @@ internal fun TrackDownloadIndicator(
     modifier: Modifier = Modifier,
     onDownload: (() -> Unit)? = null,
     showIdle: Boolean = true,
+    touchTargetSize: Dp = 28.dp,
+    showComplete: Boolean = true,
+    showFailed: Boolean = true,
 ) {
     val downloads = LocalDownloadStatus.current
     val downloadActions = LocalDownloadActions.current
@@ -444,8 +452,12 @@ internal fun TrackDownloadIndicator(
     val isActive = downloads.isActive(track)
     val isComplete = downloads.isComplete(track)
     val isFailed = downloads.isFailed(track)
-    val hasVisibleState = isActive || isComplete || isFailed
-    val clickModifier = if (onDownload != null && (showIdle || hasVisibleState)) {
+    val showCompleteState = showComplete && isComplete
+    val showFailedState = showFailed && isFailed
+    val hasVisibleState = isActive || showCompleteState || showFailedState
+    val showIdleAction = showIdle && onDownload != null
+    if (!hasVisibleState && !showIdleAction) return
+    val clickModifier = if (onDownload != null && (showIdleAction || hasVisibleState)) {
         Modifier
             .clip(CircleShape)
             .clickable {
@@ -460,7 +472,7 @@ internal fun TrackDownloadIndicator(
     } else {
         Modifier
     }
-    Box(modifier.size(28.dp).then(clickModifier), contentAlignment = Alignment.Center) {
+    Box(modifier.size(touchTargetSize).then(clickModifier), contentAlignment = Alignment.Center) {
         when {
             isActive && item?.state == DownloadState.Queued -> CircularProgressIndicator(
                 color = PhoebeUi.accentLight,
@@ -473,17 +485,17 @@ internal fun TrackDownloadIndicator(
                 strokeWidth = 2.dp,
                 modifier = Modifier.size(16.dp),
             )
-            isComplete -> PhoebeIconView(
+            showCompleteState -> PhoebeIconView(
                 PhoebeIcon.Check,
                 tint = PhoebeUi.accentLight,
                 modifier = Modifier.size(15.dp),
             )
-            isFailed -> PhoebeIconView(
+            showFailedState -> PhoebeIconView(
                 PhoebeIcon.Close,
                 tint = PhoebeUi.accentLight,
                 modifier = Modifier.size(14.dp),
             )
-            showIdle -> PhoebeIconView(
+            showIdleAction -> PhoebeIconView(
                 PhoebeIcon.Download,
                 tint = PhoebeUi.mutedText.copy(alpha = 0.42f),
                 modifier = Modifier.size(14.dp),
@@ -653,14 +665,14 @@ internal fun TrackActionMenu(
                     }
                 },
                 onClick = {
-                    if (downloadActive) {
-                        confirmCancelDownload = true
-                    } else if (downloadComplete) {
-                        confirmDeleteDownload = true
-                    } else {
-                        onDownload()
+                    when {
+                        downloadActive -> confirmCancelDownload = true
+                        downloadComplete -> confirmDeleteDownload = true
+                        else -> {
+                            onDownload()
+                            onDismiss()
+                        }
                     }
-                    onDismiss()
                 },
             )
         }
@@ -670,10 +682,14 @@ internal fun TrackActionMenu(
             title = "Cancel Download?",
             body = "Stop the current download and remove anything already downloaded for \"${track.title}\" from this device?",
             confirmLabel = "Cancel Download",
-            onDismiss = { confirmCancelDownload = false },
+            onDismiss = {
+                confirmCancelDownload = false
+                onDismiss()
+            },
             onConfirm = {
                 downloadActions.onCancelDownloadedTracks(listOf(track))
                 confirmCancelDownload = false
+                onDismiss()
             },
         )
     }
@@ -682,10 +698,14 @@ internal fun TrackActionMenu(
             title = "Delete Download?",
             body = "Remove the downloaded file for \"${track.title}\" from this device?",
             confirmLabel = "Delete",
-            onDismiss = { confirmDeleteDownload = false },
+            onDismiss = {
+                confirmDeleteDownload = false
+                onDismiss()
+            },
             onConfirm = {
                 downloadActions.onDeleteDownloadedTracks(listOf(track))
                 confirmDeleteDownload = false
+                onDismiss()
             },
         )
     }

@@ -44,7 +44,7 @@ class RevisionMigrationDesktopTest {
         AppSettingsRepository(database).restore()
 
         assertTrue(appSettingsSchemaCompatible(dbFile))
-        assertEquals("19", revFile.readText().trim())
+        assertEquals("20", revFile.readText().trim())
     }
 
     @Test

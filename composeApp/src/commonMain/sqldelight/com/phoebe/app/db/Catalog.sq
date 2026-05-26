@@ -136,6 +136,9 @@ SELECT * FROM TrackRow;
 selectTrackById:
 SELECT * FROM TrackRow WHERE id = ? LIMIT 1;
 
+selectTracksByIds:
+SELECT * FROM TrackRow WHERE id IN :ids;
+
 selectTrackDateAddedForIds:
 SELECT id, dateAddedMs FROM TrackRow WHERE id IN :ids;
 

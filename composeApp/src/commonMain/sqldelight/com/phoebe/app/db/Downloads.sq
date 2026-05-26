@@ -6,15 +6,51 @@ CREATE TABLE DownloadRow (
     artist TEXT NOT NULL,
     dlState TEXT NOT NULL,
     progress REAL NOT NULL,
-    localUri TEXT
+    localUri TEXT,
+    downloadUrl TEXT NOT NULL DEFAULT '',
+    targetPath TEXT NOT NULL DEFAULT '',
+    downloadedBytes INTEGER NOT NULL DEFAULT 0,
+    totalBytes INTEGER,
+    updatedAtMs INTEGER NOT NULL DEFAULT 0,
+    batchId TEXT,
+    error TEXT
 );
 
 selectAll:
 SELECT * FROM DownloadRow;
 
+selectActiveQueue:
+SELECT * FROM DownloadRow
+WHERE dlState IN ('Queued', 'Downloading')
+AND downloadUrl != ''
+ORDER BY updatedAtMs ASC;
+
+resetStaleDownloading:
+UPDATE DownloadRow
+SET dlState = 'Queued',
+    progress = 0,
+    downloadedBytes = 0,
+    totalBytes = NULL,
+    error = NULL
+WHERE dlState = 'Downloading';
+
 upsert:
-INSERT OR REPLACE INTO DownloadRow(trackId, title, artist, dlState, progress, localUri)
-VALUES (?, ?, ?, ?, ?, ?);
+INSERT OR REPLACE INTO DownloadRow(
+    trackId,
+    title,
+    artist,
+    dlState,
+    progress,
+    localUri,
+    downloadUrl,
+    targetPath,
+    downloadedBytes,
+    totalBytes,
+    updatedAtMs,
+    batchId,
+    error
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 delete:
 DELETE FROM DownloadRow WHERE trackId = ?;

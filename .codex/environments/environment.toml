@@ -6,9 +6,14 @@ name = "Phoebe"
 script = ""
 
 [[actions]]
-name = "Run"
+name = "Desktop"
 icon = "run"
 command = "./gradlew :composeApp:run"
+
+[[actions]]
+name = "Android"
+icon = "run"
+command = "ADB=\"${ANDROID_HOME:-$HOME/Library/Android/sdk}/platform-tools/adb\"; [ -x \"$ADB\" ] || ADB=adb; ./gradlew :composeApp:installDebug && \"$ADB\" shell monkey -p com.phoebe.app.debug -c android.intent.category.LAUNCHER 1"
 
 [[actions]]
 name = "Web"

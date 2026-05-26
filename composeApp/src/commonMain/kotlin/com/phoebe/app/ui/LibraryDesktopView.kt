@@ -575,7 +575,12 @@ internal fun LibraryDesktopView(
                         tracks = trackPage.items,
                         selectedTrackId = selectedTrackId,
                         columns = libraryUi.columns,
-                        onSelect = { selectedTrackId = it.id },
+                        onSelect = { track ->
+                            selectedTrackId = track.id
+                            trackPage.items.indexOfFirst { it.id == track.id }
+                                .takeIf { it >= 0 }
+                                ?.let { index -> onPlayTracks(trackPage.items, index) }
+                        },
                         onPlay = { index -> onPlayTracks(trackPage.items, index) },
                         onAddToUpNext = onAddToUpNext,
                         onDownload = onDownload,
@@ -602,7 +607,12 @@ internal fun LibraryDesktopView(
                             tracks = trackPage.items,
                             selectedTrackId = selectedTrackId,
                             columns = libraryUi.columns,
-                            onSelect = { selectedTrackId = it.id },
+                            onSelect = { track ->
+                                selectedTrackId = track.id
+                                trackPage.items.indexOfFirst { it.id == track.id }
+                                    .takeIf { it >= 0 }
+                                    ?.let { index -> onPlayTracks(trackPage.items, index) }
+                            },
                             onPlay = { index -> onPlayTracks(trackPage.items, index) },
                             onAddToUpNext = onAddToUpNext,
                             onDownload = onDownload,
@@ -1748,10 +1758,12 @@ internal fun SongRow(
     val nowPlaying = LocalNowPlaying.current
     val likeActions = LocalLikeActions.current
     val ratingActions = LocalRatingActions.current
+    val downloads = LocalDownloadStatus.current
     val isCurrent = nowPlaying.trackId == track.id
     val playlistDragEnabled = LocalPlaylistDragEnabled.current
     val canLike = likeActions.likesEnabled && track.canTogglePlexLike()
     val liked = likeActions.isLiked(track)
+    val downloaded = downloads.isComplete(track)
     Row(
         modifier
             .fillMaxWidth()
@@ -1824,6 +1836,7 @@ internal fun SongRow(
         TableCellText(track.artist, modifier = Modifier.weight(1.4f), color = PhoebeUi.secondaryText)
         TableAlbumCell(
             album = track.album,
+            downloaded = downloaded,
             modifier = Modifier.weight(1.6f),
         )
         if (columns.duration) TableCellText(formatMinutesSeconds(track.durationMs), modifier = Modifier.width(70.dp), color = PhoebeUi.secondaryText)
@@ -1865,8 +1878,10 @@ internal fun SongRow(
         }
         TrackDownloadIndicator(
             track = track,
-            onDownload = onDownload,
+            onDownload = null,
             showIdle = false,
+            showComplete = false,
+            showFailed = false,
         )
         Box(Modifier.width(44.dp), contentAlignment = Alignment.Center) {
             Box(
@@ -2118,16 +2133,28 @@ internal fun TableCellText(text: String, modifier: Modifier = Modifier, color: C
 @Composable
 private fun TableAlbumCell(
     album: String,
+    downloaded: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    Text(
-        album,
-        color = PhoebeUi.secondaryText,
-        fontSize = 12.sp,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-        modifier = modifier,
-    )
+    Row(
+        modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            album,
+            color = PhoebeUi.secondaryText,
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        TrackStateBadges(
+            liked = false,
+            downloaded = downloaded,
+            iconSize = 11.dp,
+        )
+    }
 }
 
 internal fun formatHoursMinutes(ms: Long): String {

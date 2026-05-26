@@ -34,6 +34,14 @@ actual fun createPlatformHttpClient(): HttpClient = HttpClient(CIO) {
     }
 }
 
+actual suspend fun platformStreamHttpDownloadToStorage(
+    url: String,
+    targetPath: String,
+    storage: PlatformStorage,
+    bufferSize: Int,
+    onProgress: suspend (downloadedBytes: Long, totalBytes: Long?) -> Unit,
+): String? = null
+
 actual fun isDesktopPlatform(): Boolean = true
 
 actual fun supportsPredictiveBack(): Boolean = false
@@ -97,7 +105,7 @@ actual class PlatformStorage actual constructor() {
         }.toURI().toString()
     }
 
-    actual suspend fun writeByteStream(name: String, readChunk: suspend () -> ByteArray?): String = withContext(Dispatchers.IO) {
+    actual suspend fun writeByteStream(name: String, write: suspend (PlatformByteSink) -> Unit): String = withContext(Dispatchers.IO) {
         val targetRoot = readDownloadDirectory()
             ?.let { runCatching { Paths.get(URI(it)).toFile() }.getOrNull() }
             ?: defaultDownloadDirectory()
@@ -107,10 +115,14 @@ actual class PlatformStorage actual constructor() {
         }
         try {
             file.outputStream().use { stream ->
-                while (true) {
-                    val chunk = readChunk() ?: break
-                    if (chunk.isNotEmpty()) stream.write(chunk)
-                }
+                write(
+                    object : PlatformByteSink {
+                        override suspend fun write(buffer: ByteArray, offset: Int, length: Int) {
+                            if (length > 0) stream.write(buffer, offset, length)
+                        }
+                    },
+                )
+                stream.flush()
             }
         } catch (error: Throwable) {
             file.takeIf { it.exists() }?.delete()
@@ -246,9 +258,13 @@ actual fun currentTimeMs(): Long = System.currentTimeMillis()
 
 actual fun prefersReducedArtworkEffects(): Boolean = false
 
+actual fun remoteArtworkCacheMaxEstimatedBytes(): Long = 96L * 1024L * 1024L
+
 actual fun catalogTrackIndexParallelism(): Int = 6
 
-actual fun downloadParallelism(): Int = 8
+actual fun downloadParallelism(): Int = 6
+
+actual fun schedulePlatformDownloadRunner() = Unit
 
 actual fun isDebugBuild(): Boolean =
     System.getProperty("phoebe.debug")?.toBooleanStrictOrNull() ?: false

@@ -464,8 +464,15 @@ private fun PhoebeRootStateHolder(
             }
         }
         launch {
+            state.downloadEvents.collect { event ->
+                downloadStatus.apply(event)
+            }
+        }
+        launch {
             state.activeDownloadJobCount.collect { activeDownloadJobCount ->
-                downloadStatus.setActiveDownloadJobs(activeDownloadJobCount > 0)
+                val active = activeDownloadJobCount > 0
+                downloadStatus.setActiveDownloadJobs(active)
+                RemoteArtworkCache.configureDownloadMemoryMode(active)
             }
         }
     }
@@ -1092,6 +1099,8 @@ private fun PhoebeRootStateHolder(
                         onAddToUpNext = state::addToUpNext,
                         onDownload = state::download,
                         onDownloadPlaylist = state::download,
+                        onCancelDownloadPlaylist = state::cancelDownloads,
+                        onDeleteDownloadPlaylist = state::deleteDownloads,
                         onLibraryColumns = state::setLibraryColumns,
                     )
                     AppScreen.Player -> MobilePlayerHost(

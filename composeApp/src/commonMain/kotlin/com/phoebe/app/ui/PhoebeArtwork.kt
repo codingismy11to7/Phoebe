@@ -153,6 +153,7 @@ import com.phoebe.app.platform.createPlatformHttpClient
 import com.phoebe.app.platform.currentTimeMs
 import com.phoebe.app.platform.PlatformStorage
 import com.phoebe.app.platform.prefersReducedArtworkEffects
+import com.phoebe.app.platform.remoteArtworkCacheMaxEstimatedBytes
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlin.concurrent.Volatile
@@ -280,11 +281,12 @@ internal data class ArtworkCacheStats(
 
 internal object RemoteArtworkCache {
     private const val DefaultMaxEntries = 300
-    private const val DefaultMaxEstimatedBytes = 96L * 1024L * 1024L
     private const val FailedLoadRetryMs = 10L * 60L * 1000L
     private const val DefaultLoadPermits = 2
     private const val PacedMinIntervalMs = 72L
     private const val BurstMinIntervalMs = 24L
+    private const val DownloadModeMaxEntries = 32
+    private const val DownloadModeMaxEstimatedBytes = 4L * 1024L * 1024L
 
     @Volatile
     private var pacingEnabled: Boolean = false
@@ -308,8 +310,9 @@ internal object RemoteArtworkCache {
     private val estimatedBytesByKey = mutableMapOf<CacheKey, Long>()
     private val accessOrder = LinkedHashMap<CacheKey, Unit>()
     private val recentFailures = mutableMapOf<CacheKey, Long>()
+    private val platformMaxEstimatedBytes = remoteArtworkCacheMaxEstimatedBytes().coerceAtLeast(4L * 1024L * 1024L)
     private var maxEntries = DefaultMaxEntries
-    private var maxEstimatedBytes = DefaultMaxEstimatedBytes
+    private var maxEstimatedBytes = platformMaxEstimatedBytes
     private var estimatedBytes = 0L
 
     fun cached(url: String, maxDecodeDimension: Int = ListArtworkMaxDecodeDimension): ImageBitmap? {
@@ -324,6 +327,17 @@ internal object RemoteArtworkCache {
     /** Spreads decode/network work across frames — use after a large catalog snapshot lands in the UI. */
     fun configurePacingEnabled(enabled: Boolean) {
         pacingEnabled = enabled
+    }
+
+    fun configureDownloadMemoryMode(enabled: Boolean) {
+        if (enabled) {
+            maxEntries = DownloadModeMaxEntries
+            maxEstimatedBytes = minOf(platformMaxEstimatedBytes, DownloadModeMaxEstimatedBytes)
+        } else {
+            maxEntries = DefaultMaxEntries
+            maxEstimatedBytes = platformMaxEstimatedBytes
+        }
+        trimToLimits()
     }
 
     private suspend fun paceBeforeLoad() {
@@ -444,10 +458,10 @@ internal object RemoteArtworkCache {
         recentFailures.clear()
         estimatedBytes = 0L
         maxEntries = DefaultMaxEntries
-        maxEstimatedBytes = DefaultMaxEstimatedBytes
+        maxEstimatedBytes = platformMaxEstimatedBytes
     }
 
-    internal fun configureLimitsForTest(maxEntries: Int = DefaultMaxEntries, maxEstimatedBytes: Long = DefaultMaxEstimatedBytes) {
+    internal fun configureLimitsForTest(maxEntries: Int = DefaultMaxEntries, maxEstimatedBytes: Long = platformMaxEstimatedBytes) {
         this.maxEntries = max(1, maxEntries)
         this.maxEstimatedBytes = max(1L, maxEstimatedBytes)
         trimToLimits()

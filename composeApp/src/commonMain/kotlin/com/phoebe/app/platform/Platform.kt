@@ -19,11 +19,27 @@ expect class PlatformStorage() {
     suspend fun readBytes(name: String): ByteArray?
     suspend fun readUriBytes(uri: String): ByteArray?
     suspend fun writeBytes(name: String, bytes: ByteArray): String
-    suspend fun writeByteStream(name: String, readChunk: suspend () -> ByteArray?): String
+    suspend fun writeByteStream(name: String, write: suspend (PlatformByteSink) -> Unit): String
     suspend fun readDownloadDirectory(): String?
     suspend fun writeDownloadDirectory(uri: String?)
     fun defaultDownloadDirectoryLabel(): String
 }
+
+interface PlatformByteSink {
+    suspend fun write(buffer: ByteArray, offset: Int, length: Int)
+}
+
+/**
+ * Platform-specific direct HTTP streaming for large audio downloads. Return null to use
+ * the common Ktor fallback.
+ */
+expect suspend fun platformStreamHttpDownloadToStorage(
+    url: String,
+    targetPath: String,
+    storage: PlatformStorage,
+    bufferSize: Int,
+    onProgress: suspend (downloadedBytes: Long, totalBytes: Long?) -> Unit,
+): String?
 
 @Composable
 expect fun rememberPickDownloadDirectory(onPicked: (String?) -> Unit): () -> Unit
@@ -40,11 +56,17 @@ expect fun currentTimeMs(): Long
 /** Browser canvas rendering is much more sensitive to repeated shadows / custom draws. */
 expect fun prefersReducedArtworkEffects(): Boolean
 
+/** Platform-specific decoded artwork cache budget. Android heaps are much smaller than desktop. */
+expect fun remoteArtworkCacheMaxEstimatedBytes(): Long
+
 /** Concurrent Plex library track-index page fetches during catalog sync. */
 expect fun catalogTrackIndexParallelism(): Int
 
 /** Concurrent audio downloads during offline download batches. */
 expect fun downloadParallelism(): Int
+
+/** Ask the platform to continue queued downloads outside the foreground Compose UI when supported. */
+expect fun schedulePlatformDownloadRunner()
 
 expect class DownloadNotifier() {
     suspend fun notifyDownloadFinished(title: String, body: String): Boolean

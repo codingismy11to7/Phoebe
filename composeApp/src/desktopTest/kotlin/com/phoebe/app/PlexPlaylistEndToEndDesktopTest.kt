@@ -1,6 +1,7 @@
 package com.phoebe.app
 
 import app.cash.sqldelight.async.coroutines.awaitAsList
+import app.cash.sqldelight.async.coroutines.awaitAsOneOrNull
 import app.cash.sqldelight.db.SqlDriver
 import com.phoebe.app.data.CatalogRepository
 import com.phoebe.app.data.MediaSourcesRepository
@@ -234,6 +235,13 @@ class PlexPlaylistEndToEndDesktopTest {
                 dlState = DownloadState.Failed.name,
                 progress = 0.0,
                 localUri = null,
+                downloadUrl = "",
+                targetPath = "",
+                downloadedBytes = 0L,
+                totalBytes = null,
+                updatedAtMs = 0L,
+                batchId = null,
+                error = null,
             )
         }
 
@@ -370,6 +378,54 @@ class PlexPlaylistEndToEndDesktopTest {
     }
 
     @Test
+    fun downloadTracksHandlesThousandSongQueueWithBoundedParallelism() = runTest {
+        val payload = byteArrayOf(42)
+        val inFlight = AtomicInteger(0)
+        val maxInFlight = AtomicInteger(0)
+        val (db, sqlDriver) = newInMemoryPhoebeDatabase()
+        driver = sqlDriver
+        val engine = MockEngine { request ->
+            when {
+                request.url.encodedPath.startsWith("/downloads/") -> {
+                    val current = inFlight.incrementAndGet()
+                    maxInFlight.updateAndGet { previous -> maxOf(previous, current) }
+                    inFlight.decrementAndGet()
+                    respond(
+                        content = payload,
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(
+                            HttpHeaders.ContentLength to listOf(payload.size.toString()),
+                            HttpHeaders.ContentType to listOf("audio/mpeg"),
+                        ),
+                    )
+                }
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val repo = catalogRepository(db, testHttpClient(engine))
+        PlatformStorage().writeDownloadDirectory(temp.newFolder("thousand-downloads").toURI().toString())
+        val tracks = (1..1_000).map { index ->
+            Track(
+                id = "plex:t-large-$index",
+                title = "Large Queue Song $index",
+                artist = "Artist One",
+                album = "Album One",
+                durationMs = 1_000,
+                streamUrl = "https://plex.example/stream/t$index.mp3",
+                downloadUrl = "https://plex.example/downloads/t$index.mp3",
+            )
+        }
+
+        val result = repo.downloadTracks(tracks)
+
+        assertEquals(1_000, result.total)
+        assertEquals(1_000, result.completed)
+        assertEquals(0, result.failed)
+        assertEquals(1_000, repo.downloads.value.size)
+        assertTrue(maxInFlight.get() <= downloadParallelism())
+    }
+
+    @Test
     fun downloadTracksKeepsWorkersBusyWhenOneTrackIsSlow() = runTest {
         val payload = ByteArray(32 * 1024) { index -> (index % 251).toByte() }
         val slowRequestStarted = CountDownLatch(1)
@@ -484,6 +540,212 @@ class PlexPlaylistEndToEndDesktopTest {
     }
 
     @Test
+    fun persistedLocalUriReconcilesStaleFailedDownloadRow() = runTest {
+        var downloadRequests = 0
+        val (db, sqlDriver) = newInMemoryPhoebeDatabase()
+        driver = sqlDriver
+        val localUri = temp.newFile("reconciled-download.mp3").apply {
+            writeBytes(byteArrayOf(1, 2, 3))
+        }.toURI().toString()
+        val track = Track(
+            id = "plex:t-reconciled-download",
+            title = "Reconciled Download",
+            artist = "Artist One",
+            album = "Album One",
+            durationMs = 1_000,
+            streamUrl = "https://plex.example/stream/reconciled.mp3",
+            downloadUrl = "https://plex.example/downloads/reconciled.mp3",
+            localUri = localUri,
+        )
+        db.catalogQueries.upsertTrack(
+            id = track.id,
+            title = track.title,
+            artist = track.artist,
+            album = track.album,
+            durationMs = track.durationMs,
+            streamUrl = track.streamUrl,
+            downloadUrl = track.downloadUrl,
+            thumbUrl = null,
+            localArtworkUri = null,
+            localUri = track.localUri,
+            year = null,
+            genre = null,
+            mood = null,
+            style = null,
+            filepath = null,
+            audioCodec = null,
+            bitrateKbps = null,
+            dateAddedMs = null,
+            rating = null,
+            parentAlbumId = null,
+        )
+        db.downloadsQueries.upsert(
+            trackId = track.id,
+            title = track.title,
+            artist = track.artist,
+            dlState = DownloadState.Failed.name,
+            progress = 0.0,
+            localUri = null,
+            downloadUrl = track.downloadUrl,
+            targetPath = "downloads/${track.id}.mp3",
+            downloadedBytes = 0L,
+            totalBytes = null,
+            updatedAtMs = 0L,
+            batchId = null,
+            error = "previous stale failure",
+        )
+        val repo = catalogRepository(
+            db,
+            testHttpClient(
+                MockEngine {
+                    downloadRequests++
+                    respond("", HttpStatusCode.NotFound)
+                },
+            ),
+        )
+        repo.restoreCachedCatalog()
+
+        val result = repo.downloadTracks(listOf(track.copy(localUri = null)))
+
+        assertEquals(1, result.total)
+        assertEquals(1, result.completed)
+        assertEquals(0, result.failed)
+        assertEquals(0, downloadRequests)
+        val download = repo.downloads.value.single()
+        assertEquals(DownloadState.Complete, download.state)
+        assertEquals(localUri, download.localUri)
+        val persisted = db.downloadsQueries.selectAll().awaitAsList().single()
+        assertEquals(DownloadState.Complete.name, persisted.dlState)
+        assertEquals(localUri, persisted.localUri)
+    }
+
+    @Test
+    fun deleteDownloadsForTracksRemovesRequestedOfflineDownloadUriWithoutDownloadRow() = runTest {
+        val (db, sqlDriver) = newInMemoryPhoebeDatabase()
+        driver = sqlDriver
+        val repo = catalogRepository(db, testHttpClient(MockEngine { respond("", HttpStatusCode.NotFound) }))
+        val downloadedFile = temp.newFile("orphan-downloaded-song.mp3").apply {
+            writeBytes(byteArrayOf(1, 2, 3))
+        }
+        val track = Track(
+            id = "plex:t-orphan-download",
+            title = "Orphan Download",
+            artist = "Artist One",
+            album = "Album One",
+            durationMs = 1_000,
+            streamUrl = "https://plex.example/stream/orphan.mp3",
+            downloadUrl = "https://plex.example/downloads/orphan.mp3",
+            localUri = downloadedFile.toURI().toString(),
+        )
+
+        val deleted = repo.deleteDownloadsForTracks(listOf(track))
+
+        assertEquals(1, deleted)
+        assertFalse(downloadedFile.exists())
+        assertTrue(repo.downloads.value.isEmpty())
+    }
+
+    @Test
+    fun deleteDownloadsForTracksDoesNotDeleteLocalSourceFilesWithoutDownloadUrl() = runTest {
+        val (db, sqlDriver) = newInMemoryPhoebeDatabase()
+        driver = sqlDriver
+        val repo = catalogRepository(db, testHttpClient(MockEngine { respond("", HttpStatusCode.NotFound) }))
+        val localFile = temp.newFile("local-source-song.mp3").apply {
+            writeBytes(byteArrayOf(4, 5, 6))
+        }
+        val track = Track(
+            id = "local:t-source",
+            title = "Local Source",
+            artist = "Artist One",
+            album = "Album One",
+            durationMs = 1_000,
+            streamUrl = localFile.toURI().toString(),
+            downloadUrl = "",
+            localUri = localFile.toURI().toString(),
+        )
+
+        val deleted = repo.deleteDownloadsForTracks(listOf(track))
+
+        assertEquals(0, deleted)
+        assertTrue(localFile.exists())
+        assertTrue(repo.downloads.value.isEmpty())
+    }
+
+    @Test
+    fun deleteDownloadsForTracksRemovesRemoteOfflineUriWithoutDownloadUrl() = runTest {
+        val (db, sqlDriver) = newInMemoryPhoebeDatabase()
+        driver = sqlDriver
+        val repo = catalogRepository(db, testHttpClient(MockEngine { respond("", HttpStatusCode.NotFound) }))
+        val downloadedFile = temp.newFile("remote-stale-download-url.mp3").apply {
+            writeBytes(byteArrayOf(10, 11, 12))
+        }
+        val track = Track(
+            id = "plex:t-stale-url",
+            title = "Stale URL Download",
+            artist = "Artist One",
+            album = "Album One",
+            durationMs = 1_000,
+            streamUrl = "https://plex.example/stream/stale.mp3",
+            downloadUrl = "",
+            localUri = downloadedFile.toURI().toString(),
+        )
+
+        val deleted = repo.deleteDownloadsForTracks(listOf(track))
+
+        assertEquals(1, deleted)
+        assertFalse(downloadedFile.exists())
+        assertTrue(repo.downloads.value.isEmpty())
+    }
+
+    @Test
+    fun deleteDownloadsForTracksRemovesPersistedOfflineUriWhenMemoryTrackIsStale() = runTest {
+        val (db, sqlDriver) = newInMemoryPhoebeDatabase()
+        driver = sqlDriver
+        val repo = catalogRepository(db, testHttpClient(MockEngine { respond("", HttpStatusCode.NotFound) }))
+        val downloadedFile = temp.newFile("persisted-downloaded-song.mp3").apply {
+            writeBytes(byteArrayOf(7, 8, 9))
+        }
+        db.catalogQueries.upsertTrack(
+            id = "plex:t-persisted-download",
+            title = "Persisted Download",
+            artist = "Artist One",
+            album = "Album One",
+            durationMs = 1_000,
+            streamUrl = "https://plex.example/stream/persisted.mp3",
+            downloadUrl = "https://plex.example/downloads/persisted.mp3",
+            thumbUrl = null,
+            localArtworkUri = null,
+            localUri = downloadedFile.toURI().toString(),
+            year = null,
+            genre = null,
+            mood = null,
+            style = null,
+            filepath = null,
+            audioCodec = null,
+            bitrateKbps = null,
+            dateAddedMs = null,
+            rating = null,
+            parentAlbumId = null,
+        )
+        val staleTrack = Track(
+            id = "plex:t-persisted-download",
+            title = "Persisted Download",
+            artist = "Artist One",
+            album = "Album One",
+            durationMs = 1_000,
+            streamUrl = "https://plex.example/stream/persisted.mp3",
+            downloadUrl = "https://plex.example/downloads/persisted.mp3",
+        )
+
+        val deleted = repo.deleteDownloadsForTracks(listOf(staleTrack))
+
+        assertEquals(1, deleted)
+        assertFalse(downloadedFile.exists())
+        assertEquals(null, db.catalogQueries.selectTrackById(staleTrack.id).awaitAsOneOrNull()?.localUri)
+        assertTrue(repo.downloads.value.isEmpty())
+    }
+
+    @Test
     fun downloadFailsWhenResponseEndsBeforeDeclaredContentLength() = runTest {
         val payload = ByteArray(96 * 1024) { index -> (index % 199).toByte() }
         val (db, sqlDriver) = newInMemoryPhoebeDatabase()
@@ -519,8 +781,15 @@ class PlexPlaylistEndToEndDesktopTest {
         assertEquals(1, result.total)
         assertEquals(0, result.completed)
         assertEquals(1, result.failed)
+        val failureReason = "Content-Length mismatch: expected 98305 bytes, but received 98304 bytes"
+        assertEquals(failureReason, result.failureReasons.single().reason)
+        assertEquals(1, result.failureReasons.single().count)
+        assertEquals(track.id, result.failedSamples.single().trackId)
+        assertEquals(track.title, result.failedSamples.single().title)
+        assertEquals("https://plex.example/downloads/t1.mp3", result.failedSamples.single().sourceUrl)
         val downloaded = repo.catalog.value.downloads.single()
         assertEquals(DownloadState.Failed, downloaded.state)
+        assertEquals(failureReason, downloaded.error)
         assertEquals(null, downloaded.localUri)
     }
 

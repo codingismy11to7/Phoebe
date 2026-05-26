@@ -42,10 +42,11 @@ fun phoebeDatabaseFromDriver(driver: SqlDriver): PhoebeDatabase = PhoebeDatabase
  * is cheap. Replace this with proper SQLDelight migration files (and a `verifyMigrations`
  * task) before any public release.
  */
-internal const val LocalDbRevision: Long = 19L
+internal const val LocalDbRevision: Long = 20L
 
 /**
- * Column introduced in revision 19. If the revision marker was persisted without a successful
+ * Column introduced in revision 20. If the revision marker was persisted without a successful
  * database wipe, probing for this column detects the mismatch.
  */
-internal const val LocalDbRevision19Column = "persistEqualizerSettings"
+internal const val LocalDbRevisionCompatTable = "DownloadRow"
+internal const val LocalDbRevisionCompatColumn = "downloadUrl"

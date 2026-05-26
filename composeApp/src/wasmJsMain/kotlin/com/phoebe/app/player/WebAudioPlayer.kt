@@ -1,6 +1,8 @@
 package com.phoebe.app.player
 
 import com.phoebe.app.domain.EqualizerProfile
+import com.phoebe.app.domain.Track
+import com.phoebe.app.platform.resolveWebDownloadObjectUrl
 import com.phoebe.app.sources.resolveWebLocalAudioUri
 import kotlinx.browser.document
 import kotlinx.coroutines.CoroutineScope
@@ -49,12 +51,44 @@ private class WebAudioPlayer(
         audio.pause()
     }
 
+    override fun playTrack(track: Track) {
+        val localUri = track.localUri?.takeIf { it.isNotBlank() }
+        val streamUri = track.streamUrl.takeIf { it.isNotBlank() }
+        playUri(
+            uri = localUri ?: streamUri.orEmpty(),
+            fallbackUri = streamUri?.takeIf { localUri?.startsWith("web-download://") == true },
+        )
+    }
+
     override fun playUri(uri: String) {
+        playUri(uri, fallbackUri = null)
+    }
+
+    private fun playUri(uri: String, fallbackUri: String?) {
         if (uri.isBlank()) {
             markPlaybackFailed()
             return
         }
-        val playbackUri = resolveWebLocalAudioUri(uri)
+        if (uri.startsWith("web-download://")) {
+            val generation = activePlayGeneration
+            resolveWebDownloadObjectUrl(uri) { resolved ->
+                if (generation != activePlayGeneration) return@resolveWebDownloadObjectUrl
+                if (resolved.isBlank()) {
+                    if (!fallbackUri.isNullOrBlank()) {
+                        playResolvedUri(resolveWebLocalAudioUri(fallbackUri))
+                    } else {
+                        markPlaybackFailed(generation)
+                    }
+                } else {
+                    playResolvedUri(resolved)
+                }
+            }
+            return
+        }
+        playResolvedUri(resolveWebLocalAudioUri(uri))
+    }
+
+    private fun playResolvedUri(playbackUri: String) {
         val generation = activePlayGeneration
         diagnostics.engineSelected(PlaybackEnginePath.WebAudioElement)
         currentUri = playbackUri
