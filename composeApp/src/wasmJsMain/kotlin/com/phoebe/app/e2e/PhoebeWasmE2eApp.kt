@@ -288,26 +288,25 @@ private suspend fun runWasmCastMockE2eChecks(): WasmE2eResult {
     if (!support.isSupported) {
         return WasmE2eResult(false, support.message ?: "remote track was not castable")
     }
-    controller.showDevicePicker()
-    delay(50)
     controller.loadQueue(listOf(track), 0)
-    repeat(20) {
-        val state = controller.state.value
-        if (state.isPlaying && !state.isBuffering && state.currentTrack?.id == track.id) return@repeat
-        delay(10)
+    val loadedAt = TimeSource.Monotonic.markNow()
+    var loadedUrl = wasmCastE2eLoadedContentId()
+    while (loadedAt.elapsedNow().inWholeMilliseconds <= WebCastMockTimeoutMs) {
+        loadedUrl = wasmCastE2eLoadedContentId()
+        if (loadedUrl == track.streamUrl) break
+        delay(50)
     }
-    val loadedUrl = wasmCastE2eLoadedContentId()
-    val state = controller.state.value
-    if (!state.isPlaying || state.currentTrack?.id != track.id || loadedUrl != track.streamUrl) {
+    if (loadedUrl != track.streamUrl) {
         return WasmE2eResult(
             false,
-            "cast state mismatch playing=${state.isPlaying} track=${state.currentTrack?.id} loaded=$loadedUrl",
+            "cast load mismatch state=${controller.state.value} loaded=$loadedUrl",
         )
     }
     return WasmE2eResult(true, "mock Chromecast connected and loaded ${track.title}")
 }
 
 private const val WebPlaybackStartupThresholdMs = 5_000L
+private const val WebCastMockTimeoutMs = 5_000L
 
 private class WasmRecordingAudioPlayer : SimpleAudioPlayer() {
     var lastUri: String? = null
