@@ -1,10 +1,11 @@
 package com.phoebe.app.player
 
-import javazoom.spi.vorbis.sampled.file.VorbisAudioFileReader
 import com.phoebe.app.data.PlexClient
 import com.phoebe.app.domain.EqualizerProfile
 import com.phoebe.app.domain.Track
 import com.phoebe.app.platform.PhoebeLog
+import javazoom.spi.mpeg.sampled.file.MpegAudioFileReader
+import javazoom.spi.vorbis.sampled.file.VorbisAudioFileReader
 import javafx.application.Platform
 import javafx.scene.media.AudioSpectrumListener
 import javafx.scene.media.Media
@@ -975,6 +976,7 @@ internal class DesktopAudioPlayer(
     private fun openStreamingRawAudioInputStream(input: InputStream, extension: String): AudioInputStream {
         val buffered = BufferedInputStream(input, RemoteAudioProbeBufferBytes)
         return when (extension.lowercase()) {
+            "mp3", "mpeg", "mpga" -> MpegAudioFileReader().getAudioInputStream(buffered)
             "flac" -> FlacAudioFileReader().getAudioInputStream(buffered)
             "ogg" -> VorbisAudioFileReader().getAudioInputStream(buffered)
             "opus" -> runCatching { VorbisAudioFileReader().getAudioInputStream(buffered) }

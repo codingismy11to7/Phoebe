@@ -3,17 +3,23 @@ import ComposeApp
 
 @main
 struct iOSApp: App {
+    private let isPlaybackSmoke: Bool
+
     init() {
-        if IosPlaybackSmokeKt.runIosPlaybackSmokeIfRequested() {
-            RunLoop.main.run()
+        isPlaybackSmoke = IosPlaybackSmokeKt.runIosPlaybackSmokeIfRequested()
+        if !isPlaybackSmoke {
+            PlatformPlayback_iosKt.ensureIosPlaybackRuntime()
+            IosCastCoordinator.shared.initialize()
         }
-        PlatformPlayback_iosKt.ensureIosPlaybackRuntime()
-        IosCastCoordinator.shared.initialize()
     }
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            if isPlaybackSmoke {
+                Color.clear
+            } else {
+                ContentView()
+            }
         }
     }
 }
