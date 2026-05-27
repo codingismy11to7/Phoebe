@@ -91,6 +91,9 @@ import kotlin.concurrent.Volatile
 
 actual fun createAudioPlayer(): AudioPlayer = IosAudioPlayer()
 
+internal fun createIosAudioPlayerForSmoke(diagnostics: PlaybackDiagnostics): AudioPlayer =
+    IosAudioPlayer(diagnostics)
+
 @OptIn(ExperimentalForeignApi::class)
 private class IosAudioPlayer(
     private val diagnostics: PlaybackDiagnostics = PlaybackDiagnostics.None,
@@ -520,6 +523,7 @@ private class IosAudioPlayer(
                 currentAsset?.let { asset -> installEqualizerTap(item, asset, allowTrackLoad = false) }
             }
             if (playing && playWhenReady) {
+                diagnostics.platformPlaying(PlaybackEnginePath.AvPlayer, positionMs, durationMs)
                 retryCount = 0
                 retryJob?.cancel()
                 retryJob = null

@@ -36,8 +36,10 @@ import java.awt.event.WindowEvent
 import javax.imageio.ImageIO
 import javax.swing.RootPaneContainer
 
-fun main() {
+fun main(args: Array<String>) {
     configureSandboxedNativeLibraries()
+    if (runDesktopPlaybackSmokeIfRequested(args)) return
+
     applyMacDockIcon(isDebugBuild())
     application {
         PhoebeLog.d("Phoebe") { "desktop launched (debug=${isDebugBuild()})" }

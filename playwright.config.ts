@@ -1,5 +1,13 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const webPort = process.env.PHOEBE_WEB_PORT ?? '8099';
+const webBaseURL = process.env.PHOEBE_WEB_BASE_URL ?? `http://127.0.0.1:${webPort}`;
+const webServerCommand = process.env.PHOEBE_WEB_SERVER_COMMAND ?? (
+  process.env.CI
+    ? `PHOEBE_WEB_PORT=${webPort} ./gradlew :composeApp:wasmJsBrowserDevelopmentRun`
+    : `PHOEBE_WEB_PORT=${webPort} ./gradlew :composeApp:wasmJsBrowserDevelopmentRun --no-daemon`
+);
+
 export default defineConfig({
   testDir: './web-screenshot-tests',
   snapshotPathTemplate: '{testDir}/{testFilePath}-snapshots/{arg}{ext}',
@@ -16,17 +24,15 @@ export default defineConfig({
   },
   use: {
     ...devices['Desktop Chrome'],
-    baseURL: 'http://127.0.0.1:8099',
+    baseURL: webBaseURL,
     browserName: 'chromium',
     viewport: { width: 1365, height: 900 },
     deviceScaleFactor: 1,
     colorScheme: 'dark',
   },
   webServer: {
-    command: process.env.CI
-      ? 'PHOEBE_WEB_PORT=8099 ./gradlew :composeApp:wasmJsBrowserDevelopmentRun'
-      : 'PHOEBE_WEB_PORT=8099 ./gradlew :composeApp:wasmJsBrowserDevelopmentRun --no-daemon',
-    url: 'http://127.0.0.1:8099',
+    command: webServerCommand,
+    url: webBaseURL,
     reuseExistingServer: false,
     timeout: process.env.CI ? 600_000 : 180_000,
   },

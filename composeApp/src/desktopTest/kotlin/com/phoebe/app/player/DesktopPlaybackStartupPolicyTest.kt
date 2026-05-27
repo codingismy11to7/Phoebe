@@ -62,6 +62,18 @@ class DesktopPlaybackStartupPolicyTest {
                 ),
             )
             assertEquals("mp3", DesktopSandboxPlayback.sampledPlaybackExtensionFromSuffix("mp3"))
+            assertEquals("mp3", DesktopSandboxPlayback.streamingSampledExtensionFromSuffix("mp3"))
+        } finally {
+            DesktopSandboxPlayback.flatpakSandboxOverride = null
+        }
+    }
+
+    @Test
+    fun nonSandboxMp3StillAvoidsJavaSoundStartupPaths() {
+        DesktopSandboxPlayback.flatpakSandboxOverride = { false }
+        try {
+            assertEquals(null, DesktopSandboxPlayback.sampledPlaybackExtensionFromSuffix("mp3"))
+            assertEquals(null, DesktopSandboxPlayback.streamingSampledExtensionFromSuffix("mp3"))
         } finally {
             DesktopSandboxPlayback.flatpakSandboxOverride = null
         }

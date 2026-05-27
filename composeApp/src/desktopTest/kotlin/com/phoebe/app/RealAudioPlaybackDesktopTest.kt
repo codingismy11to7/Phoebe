@@ -2,6 +2,7 @@ package com.phoebe.app
 
 import com.phoebe.app.domain.Track
 import com.phoebe.app.player.DesktopAudioPlayer
+import com.phoebe.app.player.DesktopSandboxPlayback
 import com.phoebe.app.player.PlaybackDiagnostics
 import com.phoebe.app.player.PlaybackEnginePath
 import com.sun.net.httpserver.HttpServer
@@ -94,6 +95,38 @@ class RealAudioPlaybackDesktopTest {
             )
         } finally {
             player.releaseForTests()
+        }
+    }
+
+    @Test
+    fun flatpakLocalMp3UsesSampledStreamInsteadOfJavaFx() {
+        assumeRealAudioTestsEnabled()
+        DesktopSandboxPlayback.flatpakSandboxOverride = { true }
+
+        val diagnostics = RecordingPlaybackDiagnostics()
+        val player = DesktopAudioPlayer(diagnostics)
+        try {
+            val track = fixtureTrack("wikimedia-example.mp3", durationMs = 10_000)
+
+            player.play(listOf(track), 0)
+
+            assertTrue(
+                waitUntil {
+                    diagnostics.hasEngine(PlaybackEnginePath.SampledStream) &&
+                        player.state.value.isPlaying
+                },
+                "Flatpak MP3 should route to sampled stream; engines=${diagnostics.engineEvents()} " +
+                    "errors=${diagnostics.errorEvents()}",
+            )
+            assertFalse(
+                diagnostics.hasEngine(PlaybackEnginePath.JavaFxMediaPlayer),
+                "Flatpak MP3 must not fall through to JavaFX media; engines=${diagnostics.engineEvents()}",
+            )
+            assertTrue(diagnostics.hasEnergy(PlaybackEnginePath.SampledStream))
+            assertTrue(diagnostics.hasPlayingEvent(PlaybackEnginePath.SampledStream))
+        } finally {
+            player.releaseForTests()
+            DesktopSandboxPlayback.flatpakSandboxOverride = null
         }
     }
 

@@ -6,7 +6,8 @@
     "web:install-browsers": "playwright install --with-deps chromium",
     "web:screenshots": "playwright test phoebe.spec.ts",
     "web:screenshots:update": "playwright test phoebe.spec.ts --update-snapshots",
-    "web:e2e": "playwright test phoebe-e2e.spec.ts"
+    "web:e2e": "playwright test phoebe-e2e.spec.ts",
+    "web:e2e:production": "playwright test phoebe-e2e.spec.ts"
   },
   "devDependencies": {
     "@playwright/test": "1.60.0",

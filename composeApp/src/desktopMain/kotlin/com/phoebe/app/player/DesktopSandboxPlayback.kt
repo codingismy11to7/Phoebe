@@ -24,6 +24,16 @@ internal object DesktopSandboxPlayback {
         return DesktopPlaybackStartupPolicy.sampledPlaybackExtensionFromSuffix(extension)
     }
 
+    fun streamingSampledExtensionFromSuffix(extension: String): String? {
+        if (isFlatpakSandbox()) {
+            return when (extension.lowercase()) {
+                "mp3", "mpeg", "mpga" -> "mp3"
+                else -> DesktopPlaybackStartupPolicy.streamingSampledExtensionFromSuffix(extension)
+            }
+        }
+        return DesktopPlaybackStartupPolicy.streamingSampledExtensionFromSuffix(extension)
+    }
+
     fun shouldEagerlyBufferRemotePlayback(uri: String, preferredSampledExtension: String?): Boolean {
         if (!DesktopPlaybackStartupPolicy.isRemoteUri(uri)) return false
         if (isFlatpakSandbox()) {
