@@ -113,7 +113,9 @@ class RealAudioPlaybackDesktopTest {
             assertTrue(
                 waitUntil {
                     diagnostics.hasEngine(PlaybackEnginePath.SampledStream) &&
-                        player.state.value.isPlaying
+                        player.state.value.isPlaying &&
+                        diagnostics.hasEnergy(PlaybackEnginePath.SampledStream) &&
+                        diagnostics.hasPlayingEvent(PlaybackEnginePath.SampledStream)
                 },
                 "Flatpak MP3 should route to sampled stream; engines=${diagnostics.engineEvents()} " +
                     "errors=${diagnostics.errorEvents()}",
@@ -122,8 +124,6 @@ class RealAudioPlaybackDesktopTest {
                 diagnostics.hasEngine(PlaybackEnginePath.JavaFxMediaPlayer),
                 "Flatpak MP3 must not fall through to JavaFX media; engines=${diagnostics.engineEvents()}",
             )
-            assertTrue(diagnostics.hasEnergy(PlaybackEnginePath.SampledStream))
-            assertTrue(diagnostics.hasPlayingEvent(PlaybackEnginePath.SampledStream))
         } finally {
             player.releaseForTests()
             DesktopSandboxPlayback.flatpakSandboxOverride = null
