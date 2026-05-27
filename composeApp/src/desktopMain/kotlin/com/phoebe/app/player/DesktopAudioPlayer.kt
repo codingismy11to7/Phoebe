@@ -266,6 +266,19 @@ internal class DesktopAudioPlayer(
                     remoteSampledFile = downloaded
                     file = downloaded
                 }
+                var sampledFileStreamAttempted = false
+                if (file != null) {
+                    val localStreamingExtension = streamingSampledExtensionFromUri(file.toURI().toString())
+                    if (localStreamingExtension != null &&
+                        !preferJavaFxForLocalStreaming &&
+                        preferSampledStreamInSandbox(localStreamingExtension)
+                    ) {
+                        sampledFileStreamAttempted = true
+                        if (tryStartSampledFileStream(file, localStreamingExtension, generation)) {
+                            return@execute
+                        }
+                    }
+                }
                 if (file != null && preferSampledPlayback(file)) {
                     val clip = openAndStartSampledClip(file)
                     if (clip != null) {
@@ -286,7 +299,8 @@ internal class DesktopAudioPlayer(
                     val localStreamingExtension = streamingSampledExtensionFromUri(file.toURI().toString())
                     if (localStreamingExtension != null &&
                         !preferJavaFxForLocalStreaming &&
-                        !preferSampledPlayback(file) &&
+                        (!preferSampledPlayback(file) || preferSampledStreamInSandbox(localStreamingExtension)) &&
+                        !sampledFileStreamAttempted &&
                         tryStartSampledFileStream(file, localStreamingExtension, generation)
                     ) {
                         return@execute
@@ -746,6 +760,9 @@ internal class DesktopAudioPlayer(
     private fun preferSampledPlayback(file: File): Boolean =
         DesktopSandboxPlayback.sampledPlaybackExtensionFromSuffix(file.extension) != null
 
+    private fun preferSampledStreamInSandbox(extension: String): Boolean =
+        DesktopSandboxPlayback.isFlatpakSandbox() && extension.lowercase() == "mp3"
+
     private fun preferSampledFallbackAfterJavaFxFailure(file: File): Boolean {
         return DesktopSandboxPlayback.isFlatpakSandbox()
     }
@@ -1146,13 +1163,17 @@ internal class DesktopAudioPlayer(
     }
 
     private fun streamingSampledExtensionFromUri(uri: String): String? {
-        return DesktopPlaybackStartupPolicy.streamingSampledExtensionFromUri(uri)
+        val path = runCatching { URI(uri).path }.getOrNull()
+            ?: uri.substringBefore('?').substringBefore('#')
+        return DesktopSandboxPlayback.streamingSampledExtensionFromSuffix(
+            path.substringAfterLast('.', missingDelimiterValue = ""),
+        )
     }
 
     private fun streamingSampledExtensionFromTrack(track: Track, playbackUri: String): String? {
-        DesktopPlaybackStartupPolicy.streamingSampledExtensionFromSuffix(track.audioCodec.orEmpty())?.let { return it }
+        DesktopSandboxPlayback.streamingSampledExtensionFromSuffix(track.audioCodec.orEmpty())?.let { return it }
         streamingSampledExtensionFromUri(playbackUri)?.let { return it }
-        return DesktopPlaybackStartupPolicy.streamingSampledExtensionFromSuffix(
+        return DesktopSandboxPlayback.streamingSampledExtensionFromSuffix(
             track.filepath.orEmpty().substringAfterLast('.', missingDelimiterValue = ""),
         )
     }

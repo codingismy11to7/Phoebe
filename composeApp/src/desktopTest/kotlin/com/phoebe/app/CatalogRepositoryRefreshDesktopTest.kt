@@ -29,7 +29,6 @@ import io.ktor.http.headersOf
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.async
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.yield
@@ -1190,6 +1189,8 @@ class CatalogRepositoryRefreshDesktopTest {
         val (db, d) = newInMemoryPhoebeDatabase()
         driver = d
         val requestKinds = java.util.Collections.synchronizedList(mutableListOf<String>())
+        val playlistsStarted = CompletableDeferred<Unit>()
+        val releasePlaylists = CompletableDeferred<Unit>()
         val engine = MockEngine { request ->
             when (request.url.encodedPath) {
                 "/Artists/AlbumArtists" -> {
@@ -1207,6 +1208,8 @@ class CatalogRepositoryRefreshDesktopTest {
                     }
                     request.url.parameters["includeItemTypes"] == "Playlist" -> {
                         requestKinds += "playlists"
+                        playlistsStarted.complete(Unit)
+                        releasePlaylists.await()
                         respondJson(jellyfinPlaylistsJson())
                     }
                     request.url.parameters["isFavorite"] == "true" -> respondJson("""{ "TotalRecordCount": 0, "Items": [] }""")
@@ -1219,7 +1222,14 @@ class CatalogRepositoryRefreshDesktopTest {
         val media = MediaSourcesRepository(db, PlatformStorage())
         val repo = jellyfinCatalogRepository(db, media, http)
 
-        repo.refreshAggregated(jellyfinSession())
+        val refresh = async { repo.refreshAggregated(jellyfinSession()) }
+        playlistsStarted.await()
+        waitForCatalogState {
+            repo.catalog.value.remotePageInfo.loadedTrackPages == setOf(0) &&
+                repo.catalog.value.tracksByParent["jellyfin:album-1"].orEmpty().map { it.id } == listOf("jellyfin:track-1") &&
+                repo.catalogSyncState.value.phase == CatalogSyncPhase.Idle &&
+                !repo.catalogRefreshing.value
+        }
 
         assertTrue("artists" in requestKinds)
         assertTrue("albums" in requestKinds)
@@ -1228,14 +1238,16 @@ class CatalogRepositoryRefreshDesktopTest {
         assertEquals(listOf("jellyfin:artist-1"), repo.catalog.value.artists.map { it.id })
         assertEquals(listOf("jellyfin:album-1"), repo.catalog.value.albums.map { it.id })
         assertEquals(listOf("jellyfin:track-1"), repo.catalog.value.tracksByParent["jellyfin:album-1"].orEmpty().map { it.id })
-        assertEquals(
-            listOf(JellyfinClient.JellyfinLikedSongsPlaylistId, "jellyfin:playlist-1"),
-            repo.catalog.value.playlists.map { it.id },
-        )
+        assertFalse(repo.catalog.value.playlists.any { it.id == "jellyfin:playlist-1" })
         assertEquals(600, repo.catalog.value.remotePageInfo.trackTotal)
         assertEquals(setOf(0), repo.catalog.value.remotePageInfo.loadedTrackPages)
         assertEquals(CatalogSyncPhase.Idle, repo.catalogSyncState.value.phase)
         assertFalse(repo.catalogRefreshing.value)
+
+        releasePlaylists.complete(Unit)
+        refresh.await()
+        assertEquals(listOf("jellyfin:album-1"), repo.catalog.value.albums.map { it.id })
+        assertEquals(listOf("jellyfin:track-1"), repo.catalog.value.tracksByParent["jellyfin:album-1"].orEmpty().map { it.id })
     }
 
     @Test
@@ -1252,7 +1264,7 @@ class CatalogRepositoryRefreshDesktopTest {
                     request.url.parameters["includeItemTypes"] == "Audio" -> {
                         tracksStarted.complete(Unit)
                         val start = request.url.parameters["startIndex"]?.toIntOrNull() ?: 0
-                        if (start > 0) releaseTracks.await()
+                        releaseTracks.await()
                         respondJson(jellyfinMultiTrackPageJson(start = start))
                     }
                     request.url.parameters["includeItemTypes"] == "Playlist" -> respondJson(jellyfinPlaylistsJson())
@@ -1268,11 +1280,8 @@ class CatalogRepositoryRefreshDesktopTest {
 
         val refresh = async { repo.refreshAggregated(jellyfinSession(JellyfinSyncMode.Full)) }
         tracksStarted.await()
-        var attempts = 0
-        while (repo.catalog.value.albums.isEmpty() && attempts < 100) {
-            yield()
-            delay(10)
-            attempts++
+        waitForCatalogState {
+            repo.catalog.value.albums.map { it.id } == listOf("jellyfin:album-1")
         }
 
         assertFalse(repo.catalogSyncState.value.showGlobalProgress)
@@ -1383,6 +1392,14 @@ class CatalogRepositoryRefreshDesktopTest {
         status = HttpStatusCode.OK,
         headers = headersOf(HttpHeaders.ContentType, "application/json"),
     )
+
+    private suspend fun waitForCatalogState(condition: () -> Boolean) {
+        repeat(1_000) {
+            if (condition()) return
+            yield()
+        }
+        assertTrue(condition())
+    }
 
     @Suppress("UNCHECKED_CAST")
     private fun CatalogRepository.dropInMemoryCollectionMetadataForTest() {

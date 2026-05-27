@@ -14,9 +14,19 @@ permissions:
 
 jobs:
   desktop-test:
-    name: Desktop tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    name: Desktop tests (${{ matrix.os }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            runner: ubuntu-latest
+          - os: macos
+            runner: macos-26
+          - os: windows
+            runner: windows-latest
 
     steps:
       - name: Checkout
@@ -31,11 +41,13 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Install ffmpeg and audio dependencies
+      - name: Install Linux audio dependencies
+        if: matrix.os == 'linux'
         run: >
           sudo apt-get update &&
           sudo apt-get install -y
           ffmpeg
+          xauth
           xvfb
           libgtk-3-0
           pulseaudio
@@ -50,62 +62,40 @@ jobs:
           gstreamer1.0-libav
 
       - name: Start Linux virtual audio sink
+        if: matrix.os == 'linux'
         run: bash ./scripts/setup-linux-audio-ci.sh
 
-      - name: Fetch test audio fixtures
-        run: ./scripts/fetch-test-audio.sh
-
-      - name: Run desktop tests
-        run: xvfb-run -a ./gradlew :composeApp:desktopTest -Pphoebe.realAudioTests=true
-
-      - name: Upload desktop screenshot artifacts
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: desktop-screenshot-artifacts
-          if-no-files-found: ignore
-          path: |
-            composeApp/build/reports/roborazzi/**
-            composeApp/build/outputs/roborazzi/**
-            composeApp/build/test-results/desktopTest/**
-
-  desktop-playback-macos:
-    name: Desktop playback regression (macOS)
-    runs-on: macos-26
-    timeout-minutes: 25
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up JDK
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: Install ffmpeg
+      - name: Install macOS ffmpeg
+        if: matrix.os == 'macos'
         run: brew install ffmpeg
 
       - name: Fetch test audio fixtures
+        if: matrix.os != 'windows'
         run: ./scripts/fetch-test-audio.sh
 
-      - name: Run macOS desktop playback regression
-        run: >
-          ./gradlew :composeApp:desktopTest
-          -Pphoebe.realAudioTests=true
-          --tests com.phoebe.app.ui.PlaybackStartupRegressionDesktopTest
+      - name: Run Linux desktop tests
+        if: matrix.os == 'linux'
+        run: xvfb-run -a ./gradlew :composeApp:desktopTest -Pphoebe.realAudioTests=true
 
-      - name: Upload macOS desktop playback artifacts
+      - name: Run macOS desktop tests
+        if: matrix.os == 'macos'
+        run: ./gradlew :composeApp:desktopTest -Pphoebe.realAudioTests=true
+
+      - name: Run Windows desktop tests
+        if: matrix.os == 'windows'
+        shell: pwsh
+        run: ./gradlew.bat :composeApp:desktopTest
+
+      - name: Upload desktop test artifacts
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: desktop-playback-macos-artifacts
+          name: desktop-test-${{ matrix.os }}-artifacts
           if-no-files-found: ignore
           path: |
+            composeApp/build/reports/tests/desktopTest/**
+            composeApp/build/reports/roborazzi/**
+            composeApp/build/outputs/roborazzi/**
             composeApp/build/test-results/desktopTest/**
 
   android-screenshots:

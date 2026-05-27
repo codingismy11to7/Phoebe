@@ -4,8 +4,7 @@
 
 Pull requests targeting `main` run:
 
-- `xvfb-run -a ./gradlew :composeApp:desktopTest -Pphoebe.realAudioTests=true` on Ubuntu with a PulseAudio null sink
-- `./gradlew :composeApp:desktopTest -Pphoebe.realAudioTests=true --tests com.phoebe.app.ui.PlaybackStartupRegressionDesktopTest` on macOS
+- `./gradlew :composeApp:desktopTest` across Linux, macOS, and Windows. Linux and macOS enable `-Pphoebe.realAudioTests=true`; Linux runs under `xvfb-run` with a PulseAudio null sink, while Windows keeps real-audio tests skipped.
 - `./gradlew :composeApp:wasmJsTest`
 - `./gradlew :composeApp:verifyRoborazziDebug`
 - `npm run web:screenshots`
@@ -16,6 +15,8 @@ Pull requests targeting `main` run:
 Screenshot failures upload Roborazzi and Playwright reports as workflow artifacts so the expected, actual, and diff images can be reviewed from the failed check.
 
 The PR web preview deploy runs only for pull requests from this repository, because GitHub does not expose repository secrets to forked pull requests. `phoebe-test.joetr.com` is a shared preview URL; the newest successful same-repository PR deploy wins.
+
+After pull requests merge, pushes to `main` run the separate **Package Smoke** workflow asynchronously. It builds and smoke-tests packaged playback on desktop, Android, iOS, and the production web bundle. Desktop covers Linux, macOS, Windows, and the Linux Flatpak sandbox; Android installs the release APK on an emulator; iOS installs the simulator app; web serves the production Wasm distribution before running playback E2E.
 
 Update screenshot baselines locally with:
 
@@ -32,6 +33,14 @@ Verify screenshot baselines locally with:
 ./gradlew :composeApp:desktopTest
 npm run web:screenshots
 ```
+
+The packaged playback smoke checks use internal test-only hooks. Desktop and
+iOS accept `--phoebe-playback-smoke=<path-or-file-uri>`, Android launches
+`AndroidPlaybackSmokeActivity` with the same fixture path, and web runs the
+existing Playwright playback E2E suite against the production Wasm bundle.
+Native smoke paths print `PHOEBE_PLAYBACK_SMOKE_OK ...` after the platform
+player reports playback and `PHOEBE_PLAYBACK_SMOKE_FAILED ...` on invalid
+input or timeout.
 
 ## Releases
 
