@@ -743,12 +743,11 @@ internal class DesktopAudioPlayer(
     private fun uriToLocalFile(uri: String): File? =
         desktopPlaybackLocalFile(uri)?.takeIf { it.isFile }
 
-    private fun preferSampledPlayback(file: File): Boolean {
-        return sampledPlaybackExtensionFromSuffix(file.extension) != null
-    }
+    private fun preferSampledPlayback(file: File): Boolean =
+        DesktopSandboxPlayback.sampledPlaybackExtensionFromSuffix(file.extension) != null
 
     private fun preferSampledFallbackAfterJavaFxFailure(file: File): Boolean {
-        return false
+        return DesktopSandboxPlayback.isFlatpakSandbox()
     }
 
     private fun trySampledFallbackAfterJavaFxFailure(file: File, generation: Int): Boolean {
@@ -1158,16 +1157,15 @@ internal class DesktopAudioPlayer(
         )
     }
 
-    private fun sampledPlaybackExtensionFromSuffix(extension: String): String? {
-        return DesktopPlaybackStartupPolicy.sampledPlaybackExtensionFromSuffix(extension)
-    }
+    private fun sampledPlaybackExtensionFromSuffix(extension: String): String? =
+        DesktopSandboxPlayback.sampledPlaybackExtensionFromSuffix(extension)
 
     /**
      * JavaFX cannot decode every format Phoebe supports. For sampled-only formats,
      * buffer the remote file first so startup reaches the Clip path directly.
      */
     private fun shouldEagerlyBufferRemotePlayback(uri: String, preferredSampledExtension: String?): Boolean =
-        DesktopPlaybackStartupPolicy.shouldEagerlyBufferRemotePlayback(uri, preferredSampledExtension)
+        DesktopSandboxPlayback.shouldEagerlyBufferRemotePlayback(uri, preferredSampledExtension)
 
     private fun shouldPrefetchRemoteForCrossfade(uri: String): Boolean =
         DesktopPlaybackStartupPolicy.shouldPrefetchRemoteForCrossfade(uri)
