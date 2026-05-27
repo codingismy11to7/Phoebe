@@ -95,9 +95,13 @@ jobs:
           smoke_dir="${HOME}/Downloads/phoebe-smoke"
           mkdir -p "${smoke_dir}"
           cp composeApp/src/commonTest/resources/test-audio/wikimedia-example.mp3 "${smoke_dir}/wikimedia-example.mp3"
+          if [[ -f composeApp/src/commonTest/resources/test-audio/wikimedia-example.wav ]]; then
+            cp composeApp/src/commonTest/resources/test-audio/wikimedia-example.wav "${smoke_dir}/wikimedia-example.wav"
+          fi
           {
             echo "PHOEBE_SMOKE_DIR=${smoke_dir}"
             echo "PHOEBE_SMOKE_FIXTURE=${smoke_dir}/wikimedia-example.mp3"
+            echo "PHOEBE_FLATPAK_SMOKE_FIXTURE=${smoke_dir}/wikimedia-example.wav"
           } >> "${GITHUB_ENV}"
 
       - name: Prepare Windows smoke fixture
@@ -179,7 +183,7 @@ jobs:
             flatpak run \
             --filesystem="${PHOEBE_SMOKE_DIR}:ro" \
             com.phoebe.app \
-            "--phoebe-playback-smoke=${PHOEBE_SMOKE_FIXTURE}" \
+            "--phoebe-playback-smoke=${PHOEBE_FLATPAK_SMOKE_FIXTURE}" \
             --phoebe-playback-smoke-timeout-ms=20000 \
             2>&1 | tee smoke-logs/flatpak.log
 
@@ -326,11 +330,13 @@ jobs:
           mkdir -p "${smoke_dir}"
           cp composeApp/src/commonTest/resources/test-audio/wikimedia-example.mp3 "${smoke_dir}/wikimedia-example.mp3"
           fixture="${smoke_dir}/wikimedia-example.mp3"
+          stdout_log="${PWD}/smoke-logs/ios.stdout.log"
+          stderr_log="${PWD}/smoke-logs/ios.stderr.log"
 
           xcrun simctl launch \
             --terminate-running-process \
-            --stdout=smoke-logs/ios.stdout.log \
-            --stderr=smoke-logs/ios.stderr.log \
+            --stdout="${stdout_log}" \
+            --stderr="${stderr_log}" \
             "${SIM_UDID}" \
             "${bundle_id}" \
             "--phoebe-playback-smoke=${fixture}" \

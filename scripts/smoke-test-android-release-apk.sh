@@ -9,15 +9,10 @@ if [[ -z "${apk}" ]]; then
   exit 1
 fi
 
-fixture=/sdcard/Android/data/com.phoebe.app/files/Music/wikimedia-example.mp3
-
 adb install -r "${apk}"
-adb shell mkdir -p /sdcard/Android/data/com.phoebe.app/files/Music
-adb push composeApp/src/commonTest/resources/test-audio/wikimedia-example.mp3 "${fixture}"
 adb logcat -c
 adb shell am start \
   -n com.phoebe.app/.AndroidPlaybackSmokeActivity \
-  --es phoebe.playbackSmoke.path "${fixture}" \
   --el phoebe.playbackSmoke.timeoutMs 30000
 
 deadline=$((SECONDS + 60))

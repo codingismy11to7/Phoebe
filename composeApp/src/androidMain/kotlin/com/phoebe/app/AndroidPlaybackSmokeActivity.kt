@@ -9,6 +9,8 @@ import com.phoebe.app.player.AndroidAudioPlayer
 import com.phoebe.app.player.PlaybackDiagnostics
 import com.phoebe.app.player.PlaybackEnginePath
 import java.io.File
+import kotlin.math.PI
+import kotlin.math.sin
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -26,7 +28,15 @@ class AndroidPlaybackSmokeActivity : Activity() {
 
         val path = intent.getStringExtra(ExtraPath).orEmpty()
         val timeoutMs = intent.getLongExtra(ExtraTimeoutMs, DefaultTimeoutMs).takeIf { it > 0L } ?: DefaultTimeoutMs
-        val file = File(path)
+        val file = runCatching { resolveSmokeFile(path) }
+            .getOrElse { error ->
+                logSmoke(
+                    "PHOEBE_PLAYBACK_SMOKE_FAILED reason=fixture-error " +
+                        "message=${(error.message ?: error::class.simpleName.orEmpty()).asSmokeValue()} timeoutMs=$timeoutMs",
+                )
+                finishAndRemoveTask()
+                return
+            }
         if (!file.isFile) {
             logSmoke("PHOEBE_PLAYBACK_SMOKE_FAILED reason=missing-file file=${path.asSmokeValue()} timeoutMs=$timeoutMs")
             finishAndRemoveTask()
@@ -94,6 +104,14 @@ class AndroidPlaybackSmokeActivity : Activity() {
 
     private fun logSmoke(message: String) {
         Log.i(LogTag, message)
+    }
+
+    private fun resolveSmokeFile(path: String): File {
+        if (path.isNotBlank()) return File(path)
+        return File(cacheDir, "phoebe-playback-smoke.wav").also { file ->
+            file.parentFile?.mkdirs()
+            file.writeSmokeWavFixture()
+        }
     }
 
     private companion object {
@@ -174,3 +192,48 @@ private fun List<Any>.asSmokeValue(): String =
 
 private fun String.asSmokeValue(): String =
     replace(Regex("\\s+"), "_")
+
+private fun File.writeSmokeWavFixture() {
+    val sampleRate = 44_100
+    val seconds = 1
+    val sampleCount = sampleRate * seconds
+    val dataBytes = sampleCount * 2
+
+    outputStream().use { output ->
+        fun ascii(value: String) {
+            output.write(value.toByteArray(Charsets.US_ASCII))
+        }
+
+        fun intLe(value: Int) {
+            output.write(value and 0xff)
+            output.write(value shr 8 and 0xff)
+            output.write(value shr 16 and 0xff)
+            output.write(value shr 24 and 0xff)
+        }
+
+        fun shortLe(value: Int) {
+            output.write(value and 0xff)
+            output.write(value shr 8 and 0xff)
+        }
+
+        ascii("RIFF")
+        intLe(36 + dataBytes)
+        ascii("WAVE")
+        ascii("fmt ")
+        intLe(16)
+        shortLe(1)
+        shortLe(1)
+        intLe(sampleRate)
+        intLe(sampleRate * 2)
+        shortLe(2)
+        shortLe(16)
+        ascii("data")
+        intLe(dataBytes)
+
+        repeat(sampleCount) { index ->
+            val envelope = minOf(1.0, index / 400.0) * minOf(1.0, (sampleCount - index) / 400.0)
+            val sample = (sin(2.0 * PI * 440.0 * index / sampleRate) * 0.28 * envelope * Short.MAX_VALUE).toInt()
+            shortLe(sample)
+        }
+    }
+}

@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 import ComposeApp
 
@@ -6,7 +7,9 @@ struct iOSApp: App {
     private let isPlaybackSmoke: Bool
 
     init() {
-        isPlaybackSmoke = IosPlaybackSmokeKt.runIosPlaybackSmokeIfRequested()
+        isPlaybackSmoke = ProcessInfo.processInfo.arguments.contains { argument in
+            argument.hasPrefix("--phoebe-playback-smoke=")
+        }
         if !isPlaybackSmoke {
             PlatformPlayback_iosKt.ensureIosPlaybackRuntime()
             IosCastCoordinator.shared.initialize()
@@ -16,10 +19,23 @@ struct iOSApp: App {
     var body: some Scene {
         WindowGroup {
             if isPlaybackSmoke {
-                Color.clear
+                IosPlaybackSmokeView()
             } else {
                 ContentView()
             }
         }
+    }
+}
+
+private struct IosPlaybackSmokeView: View {
+    @State private var started = false
+
+    var body: some View {
+        Color.clear
+            .task {
+                guard !started else { return }
+                started = true
+                _ = IosPlaybackSmokeKt.runIosPlaybackSmokeIfRequested()
+            }
     }
 }

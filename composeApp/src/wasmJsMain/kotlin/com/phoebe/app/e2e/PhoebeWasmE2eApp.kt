@@ -288,13 +288,12 @@ private suspend fun runWasmCastMockE2eChecks(): WasmE2eResult {
     if (!support.isSupported) {
         return WasmE2eResult(false, support.message ?: "remote track was not castable")
     }
-    controller.showDevicePicker()
-    delay(50)
     controller.loadQueue(listOf(track), 0)
-    repeat(20) {
+    val loadedAt = TimeSource.Monotonic.markNow()
+    while (loadedAt.elapsedNow().inWholeMilliseconds <= WebCastMockTimeoutMs) {
         val state = controller.state.value
-        if (state.isPlaying && !state.isBuffering && state.currentTrack?.id == track.id) return@repeat
-        delay(10)
+        if (state.isPlaying && !state.isBuffering && state.currentTrack?.id == track.id) break
+        delay(50)
     }
     val loadedUrl = wasmCastE2eLoadedContentId()
     val state = controller.state.value
@@ -308,6 +307,7 @@ private suspend fun runWasmCastMockE2eChecks(): WasmE2eResult {
 }
 
 private const val WebPlaybackStartupThresholdMs = 5_000L
+private const val WebCastMockTimeoutMs = 5_000L
 
 private class WasmRecordingAudioPlayer : SimpleAudioPlayer() {
     var lastUri: String? = null
