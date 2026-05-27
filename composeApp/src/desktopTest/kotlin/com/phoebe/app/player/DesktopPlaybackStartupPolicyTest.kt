@@ -52,6 +52,22 @@ class DesktopPlaybackStartupPolicyTest {
     }
 
     @Test
+    fun flatpakSandboxBuffersRemoteMp3WithSampledPlayback() {
+        DesktopSandboxPlayback.flatpakSandboxOverride = { true }
+        try {
+            assertTrue(
+                DesktopSandboxPlayback.shouldEagerlyBufferRemotePlayback(
+                    uri = "https://music.example.test/library/track.mp3?token=abc",
+                    preferredSampledExtension = null,
+                ),
+            )
+            assertEquals("mp3", DesktopSandboxPlayback.sampledPlaybackExtensionFromSuffix("mp3"))
+        } finally {
+            DesktopSandboxPlayback.flatpakSandboxOverride = null
+        }
+    }
+
+    @Test
     fun remoteNonJavaFxStreamsCanUseSampledStreamingWhenJavaSoundCanDecodeTheCodec() {
         assertEquals("flac", DesktopPlaybackStartupPolicy.streamingSampledExtensionFromSuffix("flac"))
     }
