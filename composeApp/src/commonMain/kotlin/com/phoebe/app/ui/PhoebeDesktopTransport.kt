@@ -217,7 +217,7 @@ internal fun DesktopTransport(
     val trackNavigationActions = LocalTrackNavigationActions.current
     val canLike = track != null && likeActions.likesEnabled && track.canTogglePlexLike()
     val liked = track != null && likeActions.isLiked(track)
-    val showCastControls = !isDesktopPlatform()
+    val showCastControls = !isDesktopPlatform() || castState.isAvailable || castState.isConnected
     var equalizerOpen by remember { mutableStateOf(false) }
     var transportOptionsOpen by remember { mutableStateOf(false) }
     if (equalizerOpen) {

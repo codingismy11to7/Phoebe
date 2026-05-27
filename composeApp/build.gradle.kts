@@ -239,6 +239,7 @@ kotlin {
             implementation(libs.soundlibs.mp3spi)
             implementation(libs.soundlibs.vorbisspi)
             implementation(libs.jflac.codec)
+            implementation(libs.chromecast.java.api.v2)
         }
         wasmJsMain.dependencies {
             implementation(libs.ktor.client.js)

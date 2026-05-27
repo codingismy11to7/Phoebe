@@ -39,6 +39,14 @@
     *;
 }
 
+# Desktop Chromecast uses a Java CastV2 sender library with protobuf/Jackson
+# payloads and JmDNS service discovery.
+-keep class su.litvak.chromecast.** { *; }
+-keep class su.litvak.justdlna.** { *; }
+-keep class javax.jmdns.** { *; }
+-keep class com.google.protobuf.** { *; }
+-keep class com.fasterxml.jackson.** { *; }
+
 # Navigation routes are persisted via rememberSerializable + kotlinx.serialization.
 # Without these rules, release builds crash when opening routes such as Recently Added.
 -keepattributes *Annotation*, InnerClasses

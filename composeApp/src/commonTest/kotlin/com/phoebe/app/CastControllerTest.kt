@@ -9,6 +9,9 @@ import com.phoebe.app.player.isChromecastPlayableQueue
 import com.phoebe.app.player.matchesCastMedia
 import com.phoebe.app.player.plexChromecastQueueSupport
 import com.phoebe.app.player.castTrackFromMediaFields
+import com.phoebe.app.player.isCastReceiverLoadableUrl
+import com.phoebe.app.player.isRemoteChromecastPlayable
+import com.phoebe.app.player.remoteChromecastQueueSupport
 import com.phoebe.app.player.toCastMediaDescriptor
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -75,6 +78,71 @@ class CastControllerTest {
 
         assertFalse(support.isSupported)
         assertEquals("Chromecast can play Plex streaming songs only.", support.message)
+    }
+
+    @Test
+    fun remoteChromecastQueueSupportAcceptsRemoteHttpStreams() {
+        val plex = Track(
+            id = "plex:track:1",
+            title = "One",
+            artist = "Artist",
+            album = "Album",
+            durationMs = 60_000,
+            streamUrl = "https://plex.example/library/parts/1.mp3",
+            downloadUrl = "",
+        )
+        val jellyfin = Track(
+            id = "jellyfin:track:1",
+            title = "Two",
+            artist = "Artist",
+            album = "Album",
+            durationMs = 60_000,
+            streamUrl = "http://jellyfin.example/Audio/1/stream",
+            downloadUrl = "",
+        )
+
+        assertTrue(plex.isRemoteChromecastPlayable())
+        assertTrue(jellyfin.isRemoteChromecastPlayable())
+        assertTrue(listOf(plex, jellyfin).remoteChromecastQueueSupport().isSupported)
+    }
+
+    @Test
+    fun remoteChromecastQueueSupportRejectsLocalAndNonReceiverUrls() {
+        val local = Track(
+            id = "local:track:1",
+            title = "Local",
+            artist = "Artist",
+            album = "Album",
+            durationMs = 60_000,
+            streamUrl = "https://example.test/local.mp3",
+            downloadUrl = "",
+            localUri = "file:///music/local.mp3",
+        )
+        val fileUrl = Track(
+            id = "plex:track:2",
+            title = "File",
+            artist = "Artist",
+            album = "Album",
+            durationMs = 60_000,
+            streamUrl = "file:///music/file.mp3",
+            downloadUrl = "",
+        )
+        val webBlob = Track(
+            id = "plex:track:3",
+            title = "Blob",
+            artist = "Artist",
+            album = "Album",
+            durationMs = 60_000,
+            streamUrl = "phoebe-web-picked-file",
+            downloadUrl = "",
+        )
+
+        assertFalse("".isCastReceiverLoadableUrl())
+        assertFalse(fileUrl.streamUrl.isCastReceiverLoadableUrl())
+        assertFalse(webBlob.streamUrl.isCastReceiverLoadableUrl())
+        assertFalse(local.isRemoteChromecastPlayable())
+        assertFalse(listOf(fileUrl).remoteChromecastQueueSupport().isSupported)
+        assertFalse(listOf(local, webBlob).remoteChromecastQueueSupport().isSupported)
     }
 
     @Test

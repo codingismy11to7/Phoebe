@@ -4,6 +4,7 @@ import com.phoebe.app.domain.PlayerState
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.isLocalMediaPlayback
 import com.phoebe.app.domain.isPlexLibraryTrack
+import com.phoebe.app.domain.isRemoteLibraryTrack
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -17,6 +18,7 @@ data class CastState(
     val isBuffering: Boolean = false,
     val positionMs: Long = 0L,
     val durationMs: Long = 0L,
+    val volume: Float? = null,
     val message: String? = null,
 ) {
     val currentTrack: Track? get() = queue.getOrNull(currentIndex)
@@ -46,6 +48,8 @@ interface CastController {
     fun next()
     fun previous()
     fun seekTo(positionMs: Long)
+    fun readVolume(): Float? = state.value.volume
+    fun setVolume(volume: Float): Boolean = false
 }
 
 open class UnavailableCastController(
@@ -83,6 +87,31 @@ fun List<Track>.plexChromecastQueueSupport(): CastQueueSupport =
         CastQueueSupport.unsupported("Chromecast can play Plex streaming songs only.")
     }
 
+fun Track.isRemoteChromecastPlayable(): Boolean =
+    isRemoteLibraryTrack() &&
+        !isLocalMediaPlayback() &&
+        streamUrl.isCastReceiverLoadableUrl()
+
+fun List<Track>.remoteChromecastQueueSupport(): CastQueueSupport {
+    if (isEmpty()) {
+        return CastQueueSupport.unsupported("Choose songs before casting to Chromecast.")
+    }
+    return if (all { it.isRemoteChromecastPlayable() }) {
+        CastQueueSupport.supported()
+    } else {
+        CastQueueSupport.unsupported(RemoteChromecastQueueMessage)
+    }
+}
+
+fun String.isCastReceiverLoadableUrl(): Boolean {
+    val value = trim()
+    if (value.isBlank()) return false
+    if (value.startsWith("phoebe-web-", ignoreCase = true)) return false
+    return value.startsWith("https://", ignoreCase = true) || value.startsWith("http://", ignoreCase = true)
+}
+
+const val RemoteChromecastQueueMessage = "Chromecast can play remote streaming songs only."
+
 fun CastState.asPlayerState(fallback: PlayerState): PlayerState =
     fallback.copy(
         queue = queue,
@@ -92,6 +121,7 @@ fun CastState.asPlayerState(fallback: PlayerState): PlayerState =
         positionMs = positionMs,
         bufferedPositionMs = fallback.bufferedPositionMs,
         durationMs = durationMs.takeIf { it > 0L } ?: currentTrack?.durationMs ?: fallback.durationMs,
+        volume = volume ?: fallback.volume,
     )
 
 expect fun createCastController(audioPlayer: AudioPlayer): CastController
