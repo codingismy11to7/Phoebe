@@ -1371,7 +1371,7 @@ internal fun MobilePlayer(
                     Row(Modifier.width(132.dp), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
                         TransportIcon(PhoebeIcon.Lyrics, "Lyrics", onLyrics)
                         TransportIcon(PhoebeIcon.Equalizer, "Equalizer", { equalizerOpen = true }, active = equalizerProfile.enabled)
-                        if (!isDesktopPlatform()) {
+                        if (!isDesktopPlatform() || castState.isAvailable || castState.isConnected) {
                             CastIcon(
                                 active = castState.isConnected,
                                 loading = castState.isBuffering,

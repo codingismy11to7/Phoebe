@@ -98,7 +98,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -106,6 +105,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.composed
@@ -125,7 +125,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.zIndex
-import kotlin.math.roundToInt
 import com.phoebe.app.AppState
 import com.phoebe.app.data.catalogAlbumsForArtist
 import com.phoebe.app.data.catalogTracksForArtist
@@ -172,7 +171,10 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.yield
+import kotlin.math.PI
+import kotlin.math.cos
 import kotlin.math.max
+import kotlin.math.sin
 
 internal const val ThumbnailArtworkMaxDecodeDimension = 160
 
@@ -702,7 +704,9 @@ private fun ArtworkLoadingSlot(
             val bottom = size.height - inset
             if (right <= left || bottom <= top) return@Canvas
 
-            val cornerRadius = radius.toPx().coerceIn(0f, size.minDimension / 2f)
+            val pathWidth = right - left
+            val pathHeight = bottom - top
+            val cornerRadius = radius.toPx().coerceIn(0f, minOf(pathWidth, pathHeight) / 2f)
             drawRoundRect(
                 color = borderTrackColor,
                 topLeft = Offset(inset, inset),
@@ -711,49 +715,140 @@ private fun ArtworkLoadingSlot(
                 style = Stroke(width = strokePx),
             )
 
-            val horizontal = right - left
-            val vertical = bottom - top
-            val perimeter = (horizontal + vertical) * 2f
+            val perimeter = roundedRectPerimeter(pathWidth, pathHeight, cornerRadius)
+            if (perimeter <= 0f) return@Canvas
+
             val segmentLength = perimeter * 0.28f
             val start = borderProgress * perimeter
+            val segmentPath = Path()
+            val sampleStep = 2.dp.toPx().coerceAtLeast(1f)
+            var traveled = 0f
+            val firstPoint = roundedRectPointAt(
+                distance = start,
+                perimeter = perimeter,
+                left = left,
+                top = top,
+                right = right,
+                bottom = bottom,
+                cornerRadius = cornerRadius,
+            )
 
-            fun pointAt(distance: Float): Offset {
-                val d = ((distance % perimeter) + perimeter) % perimeter
-                return when {
-                    d <= horizontal -> Offset(left + d, top)
-                    d <= horizontal + vertical -> Offset(right, top + d - horizontal)
-                    d <= horizontal * 2f + vertical -> Offset(right - (d - horizontal - vertical), bottom)
-                    else -> Offset(left, bottom - (d - horizontal * 2f - vertical))
-                }
-            }
-
-            fun nextCorner(distance: Float): Float {
-                val d = ((distance % perimeter) + perimeter) % perimeter
-                val edgeEnd = when {
-                    d < horizontal -> horizontal
-                    d < horizontal + vertical -> horizontal + vertical
-                    d < horizontal * 2f + vertical -> horizontal * 2f + vertical
-                    else -> perimeter
-                }
-                return distance + (edgeEnd - d).coerceAtLeast(0.5f)
-            }
-
-            var cursor = start
-            var remaining = segmentLength
-            while (remaining > 0.5f) {
-                val end = minOf(cursor + remaining, nextCorner(cursor))
-                drawLine(
-                    color = borderProgressColor,
-                    start = pointAt(cursor),
-                    end = pointAt(end),
-                    strokeWidth = strokePx,
-                    cap = StrokeCap.Round,
+            segmentPath.moveTo(firstPoint.x, firstPoint.y)
+            while (traveled < segmentLength) {
+                traveled = minOf(segmentLength, traveled + sampleStep)
+                val nextPoint = roundedRectPointAt(
+                    distance = start + traveled,
+                    perimeter = perimeter,
+                    left = left,
+                    top = top,
+                    right = right,
+                    bottom = bottom,
+                    cornerRadius = cornerRadius,
                 )
-                remaining -= end - cursor
-                cursor = end
+                segmentPath.lineTo(nextPoint.x, nextPoint.y)
             }
+            drawPath(
+                path = segmentPath,
+                color = borderProgressColor,
+                style = Stroke(width = strokePx, cap = StrokeCap.Round, join = StrokeJoin.Round),
+            )
         }
     }
+}
+
+private fun roundedRectPerimeter(width: Float, height: Float, cornerRadius: Float): Float {
+    val horizontal = (width - cornerRadius * 2f).coerceAtLeast(0f)
+    val vertical = (height - cornerRadius * 2f).coerceAtLeast(0f)
+    return (horizontal + vertical) * 2f + (PI.toFloat() * cornerRadius * 2f)
+}
+
+private fun roundedRectPointAt(
+    distance: Float,
+    perimeter: Float,
+    left: Float,
+    top: Float,
+    right: Float,
+    bottom: Float,
+    cornerRadius: Float,
+): Offset {
+    val width = right - left
+    val height = bottom - top
+    val radius = cornerRadius.coerceIn(0f, minOf(width, height) / 2f)
+    val horizontal = (width - radius * 2f).coerceAtLeast(0f)
+    val vertical = (height - radius * 2f).coerceAtLeast(0f)
+    val arcLength = PI.toFloat() * radius / 2f
+    val d = ((distance % perimeter) + perimeter) % perimeter
+    var cursor = horizontal
+
+    if (d <= cursor) return Offset(left + radius + d, top)
+    if (arcLength > 0f && d <= cursor + arcLength) {
+        return roundedRectArcPoint(
+            center = Offset(right - radius, top + radius),
+            radius = radius,
+            startRadians = -PI / 2.0,
+            sweepRadians = PI / 2.0,
+            distance = d - cursor,
+            arcLength = arcLength,
+        )
+    }
+    cursor += arcLength
+
+    if (d <= cursor + vertical) return Offset(right, top + radius + d - cursor)
+    cursor += vertical
+    if (arcLength > 0f && d <= cursor + arcLength) {
+        return roundedRectArcPoint(
+            center = Offset(right - radius, bottom - radius),
+            radius = radius,
+            startRadians = 0.0,
+            sweepRadians = PI / 2.0,
+            distance = d - cursor,
+            arcLength = arcLength,
+        )
+    }
+    cursor += arcLength
+
+    if (d <= cursor + horizontal) return Offset(right - radius - (d - cursor), bottom)
+    cursor += horizontal
+    if (arcLength > 0f && d <= cursor + arcLength) {
+        return roundedRectArcPoint(
+            center = Offset(left + radius, bottom - radius),
+            radius = radius,
+            startRadians = PI / 2.0,
+            sweepRadians = PI / 2.0,
+            distance = d - cursor,
+            arcLength = arcLength,
+        )
+    }
+    cursor += arcLength
+
+    if (d <= cursor + vertical) return Offset(left, bottom - radius - (d - cursor))
+    cursor += vertical
+    if (arcLength > 0f) {
+        return roundedRectArcPoint(
+            center = Offset(left + radius, top + radius),
+            radius = radius,
+            startRadians = PI,
+            sweepRadians = PI / 2.0,
+            distance = d - cursor,
+            arcLength = arcLength,
+        )
+    }
+    return Offset(left, top)
+}
+
+private fun roundedRectArcPoint(
+    center: Offset,
+    radius: Float,
+    startRadians: Double,
+    sweepRadians: Double,
+    distance: Float,
+    arcLength: Float,
+): Offset {
+    val angle = startRadians + sweepRadians * (distance / arcLength).toDouble()
+    return Offset(
+        x = center.x + cos(angle).toFloat() * radius,
+        y = center.y + sin(angle).toFloat() * radius,
+    )
 }
 
 

@@ -1466,6 +1466,9 @@ class AppState(
         dependencies.audioPlayer.setRepeat(next)
     }
     fun setVolume(volume: Float) {
+        if (dependencies.castController.state.value.isConnected && dependencies.castController.setVolume(volume)) {
+            return
+        }
         val controller = dependencies.systemVolume
         if (controller.controlsPlayerOutput) {
             controller.setVolume(volume)
@@ -1479,7 +1482,7 @@ class AppState(
             dependencies.castController.showDevicePicker()
         } else {
             mutableMessage.value = dependencies.castController.state.value.message
-                ?: "Chromecast is available on Android, iOS, and Chrome web."
+                ?: "Chromecast is available on Android, iOS, desktop, and Chrome web."
         }
     }
 

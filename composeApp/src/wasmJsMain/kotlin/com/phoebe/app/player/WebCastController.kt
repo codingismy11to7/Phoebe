@@ -3,8 +3,6 @@
 package com.phoebe.app.player
 
 import com.phoebe.app.domain.Track
-import com.phoebe.app.domain.isLocalMediaPlayback
-import com.phoebe.app.domain.isRemoteLibraryTrack
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -520,14 +518,7 @@ private data class WebCastStatus(
 )
 
 internal fun webCastQueueSupport(queue: List<Track>): CastQueueSupport {
-    if (queue.isEmpty()) {
-        return CastQueueSupport.unsupported("Choose songs before casting to Chromecast.")
-    }
-    return if (queue.all { it.isWebChromecastPlayable() }) {
-        CastQueueSupport.supported()
-    } else {
-        CastQueueSupport.unsupported(WebCastRemoteQueueMessage)
-    }
+    return queue.remoteChromecastQueueSupport()
 }
 
 internal fun webCastLoadRequest(
@@ -538,7 +529,7 @@ internal fun webCastLoadRequest(
     if (!webCastQueueSupport(queue).isSupported) return null
     val items = queue.map { track ->
         val descriptor = track.toCastMediaDescriptor()
-        if (!descriptor.castUrl.isWebCastReceiverLoadableUrl()) return null
+        if (!descriptor.castUrl.isCastReceiverLoadableUrl()) return null
         descriptor.toWebCastMedia()
     }
     return WebCastLoadRequest(
@@ -546,18 +537,6 @@ internal fun webCastLoadRequest(
         startIndex = startIndex.coerceIn(queue.indices),
         startPositionMs = startPositionMs.coerceAtLeast(0L),
     )
-}
-
-internal fun Track.isWebChromecastPlayable(): Boolean =
-    isRemoteLibraryTrack() &&
-        !isLocalMediaPlayback() &&
-        streamUrl.isWebCastReceiverLoadableUrl()
-
-internal fun String.isWebCastReceiverLoadableUrl(): Boolean {
-    val value = trim()
-    if (value.isBlank()) return false
-    if (value.startsWith("phoebe-web-", ignoreCase = true)) return false
-    return value.startsWith("https://", ignoreCase = true) || value.startsWith("http://", ignoreCase = true)
 }
 
 private fun CastMediaDescriptor.toWebCastMedia(): WebCastMedia =
@@ -583,7 +562,7 @@ private val WebCastJson = Json {
 }
 
 private const val WebCastUnavailableMessage = "Chromecast requires Chrome with Cast support."
-private const val WebCastRemoteQueueMessage = "Chromecast can play remote streaming songs only."
+private const val WebCastRemoteQueueMessage = RemoteChromecastQueueMessage
 
 @JsFun(
 	    """(callback) => {

@@ -20,6 +20,7 @@ jna = "5.18.1"
 soundlibs-mp3spi = "1.9.5.4"
 soundlibs-vorbisspi = "1.0.3.3"
 jflac-codec = "1.5.2"
+chromecast-java-api-v2 = "0.12.20"
 sqldelight = "2.2.1"
 androidx-test-core = "1.6.1"
 androidx-test-runner = "1.6.2"
@@ -75,6 +76,7 @@ jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
 soundlibs-mp3spi = { module = "com.googlecode.soundlibs:mp3spi", version.ref = "soundlibs-mp3spi" }
 soundlibs-vorbisspi = { module = "com.googlecode.soundlibs:vorbisspi", version.ref = "soundlibs-vorbisspi" }
 jflac-codec = { module = "org.jflac:jflac-codec", version.ref = "jflac-codec" }
+chromecast-java-api-v2 = { module = "de.sfuhrm:chromecast-java-api-v2", version.ref = "chromecast-java-api-v2" }
 sqldelight-runtime = { module = "app.cash.sqldelight:runtime", version.ref = "sqldelight" }
 sqldelight-async-extensions = { module = "app.cash.sqldelight:async-extensions", version.ref = "sqldelight" }
 sqldelight-coroutines-extensions = { module = "app.cash.sqldelight:coroutines-extensions", version.ref = "sqldelight" }
