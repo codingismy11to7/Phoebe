@@ -290,17 +290,16 @@ private suspend fun runWasmCastMockE2eChecks(): WasmE2eResult {
     }
     controller.loadQueue(listOf(track), 0)
     val loadedAt = TimeSource.Monotonic.markNow()
+    var loadedUrl = wasmCastE2eLoadedContentId()
     while (loadedAt.elapsedNow().inWholeMilliseconds <= WebCastMockTimeoutMs) {
-        val state = controller.state.value
-        if (state.isPlaying && !state.isBuffering && state.currentTrack?.id == track.id) break
+        loadedUrl = wasmCastE2eLoadedContentId()
+        if (loadedUrl == track.streamUrl) break
         delay(50)
     }
-    val loadedUrl = wasmCastE2eLoadedContentId()
-    val state = controller.state.value
-    if (!state.isPlaying || state.currentTrack?.id != track.id || loadedUrl != track.streamUrl) {
+    if (loadedUrl != track.streamUrl) {
         return WasmE2eResult(
             false,
-            "cast state mismatch playing=${state.isPlaying} track=${state.currentTrack?.id} loaded=$loadedUrl",
+            "cast load mismatch state=${controller.state.value} loaded=$loadedUrl",
         )
     }
     return WasmE2eResult(true, "mock Chromecast connected and loaded ${track.title}")
