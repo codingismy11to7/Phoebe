@@ -7,6 +7,7 @@ internal enum class PlaybackEnginePath {
     SampledClip,
     SampledStream,
     WebAudioElement,
+    AvPlayer,
 }
 
 internal interface PlaybackDiagnostics {

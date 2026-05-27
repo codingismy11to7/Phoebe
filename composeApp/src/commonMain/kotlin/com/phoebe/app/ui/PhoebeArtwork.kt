@@ -1,10 +1,12 @@
 package com.phoebe.app.ui
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -70,7 +72,6 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
@@ -178,6 +179,9 @@ internal const val ThumbnailArtworkMaxDecodeDimension = 160
 /** Default decode cap for list/grid tiles (~48–92dp). Hero art should pass a larger value explicitly. */
 internal const val ListArtworkMaxDecodeDimension = 256
 
+/** Decode cap for single, large artwork surfaces such as the mobile full-screen player. */
+internal const val HeroArtworkMaxDecodeDimension = 1024
+
 @Composable
 internal fun SectionLabel(label: String, color: Color) {
     Text(label.uppercase(), color = color, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.08.em)
@@ -194,7 +198,7 @@ internal fun ArtworkImage(
     fallbackThumbUrl: String? = null,
     artworkStaggerMs: Long = 0L,
 ) {
-    val image = rememberRemoteImage(thumbUrl, maxDecodeDimension, fallbackThumbUrl, artworkStaggerMs)
+    val imageState = rememberRemoteImageState(thumbUrl, maxDecodeDimension, fallbackThumbUrl, artworkStaggerMs)
     val shape = RoundedCornerShape(radius)
     val imageModifier = when {
         !elevated || prefersReducedArtworkEffects() -> modifier.clip(shape)
@@ -202,15 +206,32 @@ internal fun ArtworkImage(
             .shadow(18.dp, shape, ambientColor = Color.Black.copy(alpha = 0.38f))
             .clip(shape)
     }
-    if (image != null) {
-        Image(
-            bitmap = image,
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            modifier = imageModifier,
-        )
-    } else {
-        AlbumArtwork(seed, modifier, radius, elevated = elevated)
+
+    Crossfade(targetState = imageState, label = "artwork-load-state") { state ->
+        when (state) {
+            is RemoteImageLoadState.Ready -> {
+                Image(
+                    bitmap = state.image,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = imageModifier,
+                )
+            }
+            is RemoteImageLoadState.Preview -> {
+                Image(
+                    bitmap = state.image,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = imageModifier,
+                )
+            }
+            RemoteImageLoadState.Loading -> {
+                ArtworkLoadingSlot(modifier, radius, elevated = elevated)
+            }
+            RemoteImageLoadState.Missing -> {
+                AlbumArtwork(seed, modifier, radius, elevated = elevated)
+            }
+        }
     }
 }
 
@@ -241,36 +262,101 @@ internal fun rememberRemoteImage(
     maxDecodeDimension: Int = ListArtworkMaxDecodeDimension,
     fallbackUrl: String? = null,
     artworkStaggerMs: Long = 0L,
-): ImageBitmap? {
+): ImageBitmap? = rememberRemoteImageState(url, maxDecodeDimension, fallbackUrl, artworkStaggerMs).image
+
+private sealed interface RemoteImageLoadState {
+    val image: ImageBitmap?
+
+    data object Loading : RemoteImageLoadState {
+        override val image: ImageBitmap? = null
+    }
+
+    data object Missing : RemoteImageLoadState {
+        override val image: ImageBitmap? = null
+    }
+
+    data class Preview(override val image: ImageBitmap) : RemoteImageLoadState
+    data class Ready(override val image: ImageBitmap) : RemoteImageLoadState
+}
+
+@Composable
+private fun rememberRemoteImageState(
+    url: String?,
+    maxDecodeDimension: Int = ListArtworkMaxDecodeDimension,
+    fallbackUrl: String? = null,
+    artworkStaggerMs: Long = 0L,
+): RemoteImageLoadState {
     val primary = url?.takeIf { it.isNotBlank() }
     val fallbackSource = fallbackUrl?.takeIf { it.isNotBlank() }
-    val target = primary ?: fallbackSource ?: return null
+    val target = primary ?: fallbackSource ?: return RemoteImageLoadState.Missing
     val fallback = fallbackSource?.takeIf { it != target }
     val artworkLoadsEnabled = LocalArtworkLoadingEnabled.current
+    val previewDecodeDimensions = progressivePreviewDecodeDimensions(maxDecodeDimension)
     return produceState(
-        initialValue = RemoteArtworkCache.cached(target, maxDecodeDimension)
-            ?: fallback?.let { RemoteArtworkCache.cached(it, maxDecodeDimension) },
+        initialValue = cachedStateForDisplay(target, maxDecodeDimension, fallback),
         target,
         fallback,
         maxDecodeDimension,
         artworkLoadsEnabled,
         artworkStaggerMs,
     ) {
-        value = RemoteArtworkCache.cached(target, maxDecodeDimension)
-            ?: fallback?.let { RemoteArtworkCache.cached(it, maxDecodeDimension) }
-        while (isActive && value == null) {
+        value = cachedStateForDisplay(target, maxDecodeDimension, fallback)
+        while (isActive) {
+            RemoteArtworkCache.cachedRequested(target, maxDecodeDimension, fallback)?.let {
+                value = RemoteImageLoadState.Ready(it)
+                return@produceState
+            }
             if (!artworkLoadsEnabled) {
                 delay(250L)
                 continue
             }
-            delay(RemoteArtworkCache.staggerDelayMs(target) + artworkStaggerMs)
-            value = RemoteArtworkCache.awaitLoad(target, maxDecodeDimension)
+            val delayMs = if (previewDecodeDimensions.isEmpty()) {
+                RemoteArtworkCache.staggerDelayMs(target) + artworkStaggerMs
+            } else {
+                artworkStaggerMs
+            }
+            if (delayMs > 0) delay(delayMs)
+            if (value == RemoteImageLoadState.Loading) {
+                value = RemoteArtworkCache.awaitPreview(target, fallback, previewDecodeDimensions)?.let {
+                    RemoteImageLoadState.Preview(it)
+                } ?: cachedStateForDisplay(target, maxDecodeDimension, fallback)
+            }
+            val requested = RemoteArtworkCache.awaitLoad(target, maxDecodeDimension)
                 ?: fallback?.let { RemoteArtworkCache.awaitLoad(it, maxDecodeDimension) }
-                ?: RemoteArtworkCache.cached(target, maxDecodeDimension)
-                ?: fallback?.let { RemoteArtworkCache.cached(it, maxDecodeDimension) }
-            if (value == null) delay(10_000L)
+                ?: RemoteArtworkCache.cachedRequested(target, maxDecodeDimension, fallback)
+            if (requested != null) {
+                value = RemoteImageLoadState.Ready(requested)
+                return@produceState
+            }
+            val displayState = cachedStateForDisplay(target, maxDecodeDimension, fallback)
+            value = when {
+                displayState !is RemoteImageLoadState.Loading -> displayState
+                value == RemoteImageLoadState.Loading -> RemoteImageLoadState.Missing
+                else -> value
+            }
+            delay(if (value == RemoteImageLoadState.Missing) 10_000L else 10L * 60L * 1000L)
         }
     }.value
+}
+
+private fun cachedStateForDisplay(url: String, maxDecodeDimension: Int, fallbackUrl: String? = null): RemoteImageLoadState {
+    RemoteArtworkCache.cachedRequested(url, maxDecodeDimension, fallbackUrl)?.let {
+        return RemoteImageLoadState.Ready(it)
+    }
+    progressivePreviewDecodeDimensions(maxDecodeDimension).forEach { previewDimension ->
+        RemoteArtworkCache.cachedRequested(url, previewDimension, fallbackUrl)?.let {
+            return RemoteImageLoadState.Preview(it)
+        }
+    }
+    return RemoteImageLoadState.Loading
+}
+
+private fun progressivePreviewDecodeDimensions(maxDecodeDimension: Int): List<Int> {
+    val requested = maxDecodeDimension.takeIf { it > 0 } ?: Int.MAX_VALUE
+    if (requested <= ListArtworkMaxDecodeDimension) return emptyList()
+    return listOf(ListArtworkMaxDecodeDimension, ThumbnailArtworkMaxDecodeDimension)
+        .filter { it < requested }
+        .distinct()
 }
 
 internal data class ArtworkCacheStats(
@@ -322,6 +408,18 @@ internal object RemoteArtworkCache {
         return image
     }
 
+    fun cachedRequested(url: String, maxDecodeDimension: Int, fallbackUrl: String? = null): ImageBitmap? =
+        cached(url, maxDecodeDimension)
+            ?: fallbackUrl?.let { cached(it, maxDecodeDimension) }
+
+    fun cachedForDisplay(url: String, maxDecodeDimension: Int, fallbackUrl: String? = null): ImageBitmap? {
+        cachedRequested(url, maxDecodeDimension, fallbackUrl)?.let { return it }
+        progressivePreviewDecodeDimensions(maxDecodeDimension).forEach { previewDimension ->
+            cachedRequested(url, previewDimension, fallbackUrl)?.let { return it }
+        }
+        return null
+    }
+
     fun staggerDelayMs(url: String): Long = (url.hashCode() and 0x3F).toLong() * 12L
 
     /** Spreads decode/network work across frames — use after a large catalog snapshot lands in the UI. */
@@ -365,6 +463,17 @@ internal object RemoteArtworkCache {
             }.also { inFlight[key] = it }
         }
         return job.await()
+    }
+
+    suspend fun awaitPreview(url: String, fallbackUrl: String?, previewDecodeDimensions: List<Int>): ImageBitmap? {
+        previewDecodeDimensions.forEach { previewDimension ->
+            cachedRequested(url, previewDimension, fallbackUrl)?.let { return it }
+        }
+        previewDecodeDimensions.forEach { previewDimension ->
+            awaitLoad(url, previewDimension)?.let { return it }
+            fallbackUrl?.let { awaitLoad(it, previewDimension) }?.let { return it }
+        }
+        return null
     }
 
     private suspend fun fetchAndDecode(key: CacheKey): ImageBitmap? {
@@ -477,7 +586,7 @@ internal object RemoteArtworkCache {
 /** Ask remote servers for a smaller JPEG when the URL supports sizing query params. */
 private fun String.withRequestImageSize(maxDecodeDimension: Int): String {
     if (!startsWith("http://") && !startsWith("https://")) return this
-    val pixels = maxDecodeDimension.coerceIn(64, 512)
+    val pixels = maxDecodeDimension.coerceIn(64, HeroArtworkMaxDecodeDimension)
     val separator = if (contains('?')) "&" else "?"
     return when {
         contains("maxWidth=", ignoreCase = true) || contains("maxHeight=", ignoreCase = true) -> this
@@ -544,6 +653,105 @@ internal fun AlbumArtwork(
                 topLeft = Offset.Zero,
                 size = size,
             )
+        }
+    }
+}
+
+@Composable
+private fun ArtworkLoadingSlot(
+    modifier: Modifier = Modifier,
+    radius: Dp = 10.dp,
+    elevated: Boolean = true,
+) {
+    val borderProgress by rememberInfiniteTransition(label = "artwork-loading-border")
+        .animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 1500, easing = LinearEasing),
+            ),
+            label = "artwork-loading-border-progress",
+        )
+    val shape = RoundedCornerShape(radius)
+    val borderTrackColor = Color.White.copy(alpha = 0.05f)
+    val borderProgressColor = PhoebeUi.accentLight.copy(alpha = 0.86f)
+    val slotModifier = when {
+        !elevated || prefersReducedArtworkEffects() -> modifier.clip(shape)
+        else -> modifier
+            .shadow(18.dp, shape, ambientColor = Color.Black.copy(alpha = 0.24f))
+            .clip(shape)
+    }
+    Box(
+        slotModifier
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        PhoebeUi.panel.copy(alpha = 0.82f),
+                        PhoebeUi.canvasBackground.copy(alpha = 0.72f),
+                    ),
+                ),
+            )
+            .border(BorderStroke(1.dp, PhoebeUi.border.copy(alpha = 0.42f)), shape),
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            val strokePx = 2.dp.toPx()
+            val inset = strokePx / 2f
+            val left = inset
+            val top = inset
+            val right = size.width - inset
+            val bottom = size.height - inset
+            if (right <= left || bottom <= top) return@Canvas
+
+            val cornerRadius = radius.toPx().coerceIn(0f, size.minDimension / 2f)
+            drawRoundRect(
+                color = borderTrackColor,
+                topLeft = Offset(inset, inset),
+                size = Size(size.width - strokePx, size.height - strokePx),
+                cornerRadius = CornerRadius(cornerRadius, cornerRadius),
+                style = Stroke(width = strokePx),
+            )
+
+            val horizontal = right - left
+            val vertical = bottom - top
+            val perimeter = (horizontal + vertical) * 2f
+            val segmentLength = perimeter * 0.28f
+            val start = borderProgress * perimeter
+
+            fun pointAt(distance: Float): Offset {
+                val d = ((distance % perimeter) + perimeter) % perimeter
+                return when {
+                    d <= horizontal -> Offset(left + d, top)
+                    d <= horizontal + vertical -> Offset(right, top + d - horizontal)
+                    d <= horizontal * 2f + vertical -> Offset(right - (d - horizontal - vertical), bottom)
+                    else -> Offset(left, bottom - (d - horizontal * 2f - vertical))
+                }
+            }
+
+            fun nextCorner(distance: Float): Float {
+                val d = ((distance % perimeter) + perimeter) % perimeter
+                val edgeEnd = when {
+                    d < horizontal -> horizontal
+                    d < horizontal + vertical -> horizontal + vertical
+                    d < horizontal * 2f + vertical -> horizontal * 2f + vertical
+                    else -> perimeter
+                }
+                return distance + (edgeEnd - d).coerceAtLeast(0.5f)
+            }
+
+            var cursor = start
+            var remaining = segmentLength
+            while (remaining > 0.5f) {
+                val end = minOf(cursor + remaining, nextCorner(cursor))
+                drawLine(
+                    color = borderProgressColor,
+                    start = pointAt(cursor),
+                    end = pointAt(end),
+                    strokeWidth = strokePx,
+                    cap = StrokeCap.Round,
+                )
+                remaining -= end - cursor
+                cursor = end
+            }
         }
     }
 }

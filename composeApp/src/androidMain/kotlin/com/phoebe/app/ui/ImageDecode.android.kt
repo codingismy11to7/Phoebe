@@ -14,7 +14,11 @@ actual fun decodeImageBitmap(bytes: ByteArray, maxDimension: Int): ImageBitmap? 
     val sampleSize = decodeSampleSize(bounds.outWidth, bounds.outHeight, maxDimension)
     val decode = BitmapFactory.Options().apply {
         inSampleSize = sampleSize
-        inPreferredConfig = android.graphics.Bitmap.Config.RGB_565
+        inPreferredConfig = if (maxDimension > ListArtworkMaxDecodeDimension) {
+            android.graphics.Bitmap.Config.ARGB_8888
+        } else {
+            android.graphics.Bitmap.Config.RGB_565
+        }
     }
     return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decode)?.asImageBitmap()
 }

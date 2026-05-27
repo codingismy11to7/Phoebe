@@ -12,12 +12,6 @@ class DesktopPlaybackStartupPolicyTest {
     fun remoteJavaFxHttpFormatsStreamDirectly() {
         assertFalse(
             DesktopPlaybackStartupPolicy.shouldEagerlyBufferRemotePlayback(
-                uri = "https://music.example.test/library/track.mp3?token=abc",
-                preferredSampledExtension = null,
-            ),
-        )
-        assertFalse(
-            DesktopPlaybackStartupPolicy.shouldEagerlyBufferRemotePlayback(
                 uri = "https://music.example.test/library/track.m4a",
                 preferredSampledExtension = null,
             ),
@@ -41,9 +35,16 @@ class DesktopPlaybackStartupPolicyTest {
     }
 
     @Test
-    fun remoteMp3StreamsUseSampledStreamingInsteadOfJavaFxHttp() {
+    fun remoteMp3UsesJavaFxInsteadOfSampledPlayback() {
+        assertFalse(
+            DesktopPlaybackStartupPolicy.shouldEagerlyBufferRemotePlayback(
+                uri = "https://music.example.test/library/track.mp3?token=abc",
+                preferredSampledExtension = null,
+            ),
+        )
+        assertEquals(null, DesktopPlaybackStartupPolicy.sampledPlaybackExtensionFromSuffix("mp3"))
         assertEquals(
-            "mp3",
+            null,
             DesktopPlaybackStartupPolicy.streamingSampledExtensionFromUri(
                 "https://music.example.test/library/track.mp3?token=abc",
             ),

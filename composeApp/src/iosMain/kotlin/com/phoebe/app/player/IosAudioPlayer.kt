@@ -1,6 +1,7 @@
 package com.phoebe.app.player
 
 import com.phoebe.app.domain.EqualizerProfile
+import com.phoebe.app.domain.Track
 import com.phoebe.app.platform.PhoebeLog
 import kotlinx.cinterop.COpaquePointer
 import kotlinx.cinterop.COpaquePointerVar
@@ -41,6 +42,7 @@ import platform.AVFoundation.AVURLAsset
 import platform.AVFoundation.automaticallyWaitsToMinimizeStalling
 import platform.AVFoundation.addPeriodicTimeObserverForInterval
 import platform.AVFoundation.currentItem
+import platform.AVFoundation.currentTime
 import platform.AVFoundation.duration
 import platform.AVFoundation.isPlaybackLikelyToKeepUp
 import platform.AVFoundation.loadValuesAsynchronouslyForKeys
@@ -56,6 +58,7 @@ import platform.AVFoundation.setAudioMix
 import platform.AVFoundation.statusOfValueForKey
 import platform.AVFoundation.timeControlStatus
 import platform.AVFoundation.tracks
+import platform.AVFoundation.volume
 import platform.CoreAudioTypes.AudioBufferList
 import platform.CoreAudioTypes.AudioStreamBasicDescription
 import platform.CoreAudioTypes.kAudioFormatFlagIsFloat
@@ -77,6 +80,7 @@ import platform.MediaToolbox.MTAudioProcessingTapRefVar
 import platform.MediaToolbox.kMTAudioProcessingTapCallbacksVersion_0
 import platform.MediaToolbox.kMTAudioProcessingTapCreationFlag_PostEffects
 import platform.darwin.NSEC_PER_SEC
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -88,7 +92,9 @@ import kotlin.concurrent.Volatile
 actual fun createAudioPlayer(): AudioPlayer = IosAudioPlayer()
 
 @OptIn(ExperimentalForeignApi::class)
-private class IosAudioPlayer : SimpleAudioPlayer() {
+private class IosAudioPlayer(
+    private val diagnostics: PlaybackDiagnostics = PlaybackDiagnostics.None,
+) : SimpleAudioPlayer() {
     private var player: AVPlayer? = null
     private var timeObserver: Any? = null
     private var endObserver: Any? = null
@@ -101,8 +107,13 @@ private class IosAudioPlayer : SimpleAudioPlayer() {
     private var retryGeneration = -1
     private var retryCount = 0
     private var retryJob: Job? = null
+    private var crossfadePlayer: AVPlayer? = null
+    private var crossfadeJob: Job? = null
+    private var crossfadeGeneration = -1
+    private var crossfadeEqualizerTap: IosEqualizerTap? = null
     private var equalizerTap: IosEqualizerTap? = null
     private var equalizerTapTrackLoadRequested = false
+    private var equalizerInstallSuppressedForCurrentItem = false
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     override val useProgressTicker: Boolean = false
@@ -113,6 +124,7 @@ private class IosAudioPlayer : SimpleAudioPlayer() {
 
     override fun stopCurrentPlaybackImmediately() {
         retryJob?.cancel()
+        stopIosCrossfade()
         player?.pause()
     }
 
@@ -132,9 +144,11 @@ private class IosAudioPlayer : SimpleAudioPlayer() {
         retryGeneration = generation
         retryCount = 0
         retryJob?.cancel()
+        stopIosCrossfade()
         clearObservers()
         equalizerTap = null
         equalizerTapTrackLoadRequested = false
+        equalizerInstallSuppressedForCurrentItem = false
         val asset = AVURLAsset.URLAssetWithURL(url, options = null)
         currentAsset = asset
         val item = AVPlayerItem(asset = asset, automaticallyLoadedAssetKeys = listOf(IosAssetTracksKey))
@@ -142,6 +156,7 @@ private class IosAudioPlayer : SimpleAudioPlayer() {
         installEqualizerTap(item, asset, allowTrackLoad = true)
         val avPlayer = player ?: AVPlayer().also { player = it }
         avPlayer.automaticallyWaitsToMinimizeStalling = true
+        avPlayer.volume = effectiveOutputVolume()
         avPlayer.replaceCurrentItemWithPlayerItem(item)
         observePlayback(avPlayer, item, generation)
         if (playWhenReady) {
@@ -151,6 +166,7 @@ private class IosAudioPlayer : SimpleAudioPlayer() {
 
     override fun pause() {
         retryJob?.cancel()
+        stopIosCrossfade()
         player?.pause()
     }
 
@@ -159,22 +175,250 @@ private class IosAudioPlayer : SimpleAudioPlayer() {
     }
 
     override fun seek(positionMs: Long) {
+        stopIosCrossfade()
         val avPlayer = player ?: return
         val seconds = positionMs.coerceAtLeast(0L) / 1000.0
         val time = CMTimeMakeWithSeconds(seconds, NSEC_PER_SEC.toInt())
         avPlayer.seekToTime(time)
     }
 
-    override fun setOutputVolume(volume: Float) = Unit
+    override fun setOutputVolume(volume: Float) {
+        val v = volume.coerceIn(0f, 1f)
+        player?.volume = v
+        crossfadePlayer?.volume = v
+    }
 
     override fun applyEqualizer(profile: EqualizerProfile) {
         val normalized = profile.normalized()
         equalizerTap?.updateProfile(normalized)
+        crossfadeEqualizerTap?.updateProfile(normalized)
         val item = player?.currentItem
         val asset = currentAsset
-        if (item != null && asset != null && equalizerTap == null) {
+        if (item != null && asset != null && equalizerTap == null && !equalizerInstallSuppressedForCurrentItem) {
             installEqualizerTap(item, asset, allowTrackLoad = true)
         }
+    }
+
+    override fun startCrossfadeOnPlatform(
+        queue: List<Track>,
+        targetIndex: Int,
+        track: Track,
+        durationMs: Long,
+        baseVolume: Float,
+        generation: Int,
+    ): Boolean {
+        if (crossfadeGeneration == generation) return true
+        if (targetIndex !in queue.indices) return false
+        val outgoing = player ?: return false
+        val uri = track.localUri?.takeIf { it.isNotBlank() } ?: track.streamUrl.takeIf { it.isNotBlank() } ?: return false
+        val url = NSURL.URLWithString(uri) ?: return false
+        crossfadeGeneration = generation
+        crossfadeJob?.cancel()
+        crossfadeJob = scope.launch {
+            var incoming: AVPlayer? = null
+            var incomingEqualizerTap: IosEqualizerTap? = null
+            var adopted = false
+            try {
+                val asset = AVURLAsset.URLAssetWithURL(url, options = null)
+                val item = AVPlayerItem(asset = asset, automaticallyLoadedAssetKeys = listOf(IosAssetTracksKey))
+                item.preferredForwardBufferDuration = PreferredForwardBufferSeconds
+                incomingEqualizerTap = attachEqualizerTapIfReady(item, asset, equalizerProfile)
+                crossfadeEqualizerTap = incomingEqualizerTap
+                incoming = AVPlayer().also { avPlayer ->
+                    avPlayer.automaticallyWaitsToMinimizeStalling = true
+                    avPlayer.volume = 0f
+                    avPlayer.replaceCurrentItemWithPlayerItem(item)
+                }
+                crossfadePlayer = incoming
+                incoming.play()
+                if (!waitForIosCrossfadePlayback(incoming, generation)) return@launch
+                if (!isIosCrossfadeCurrent(generation, outgoing, incoming)) return@launch
+
+                clearEndObserver()
+                diagnostics.crossfadeStarted(
+                    engine = PlaybackEnginePath.AvPlayer,
+                    outgoingTrackId = state.value.currentTrack?.id,
+                    incomingTrackId = track.id,
+                    durationMs = durationMs,
+                )
+                fadeIosCrossfadeVolumes(
+                    outgoing = outgoing,
+                    incoming = incoming,
+                    durationMs = iosCrossfadeFadeDurationMs(outgoing, durationMs),
+                    baseVolume = baseVolume,
+                    generation = generation,
+                )
+                if (!isIosCrossfadeCurrent(generation, outgoing, incoming)) return@launch
+                adopted = commitIosCrossfade(
+                    outgoing = outgoing,
+                    incoming = incoming,
+                    item = item,
+                    asset = asset,
+                    uri = uri,
+                    queue = queue,
+                    targetIndex = targetIndex,
+                    generation = generation,
+                    incomingEqualizerTap = incomingEqualizerTap,
+                )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                PhoebeLog.d("IosAudioPlayer") { "ios crossfade failed: ${error.message}" }
+                diagnostics.playbackError(PlaybackEnginePath.AvPlayer, error.message)
+            } finally {
+                if (!adopted) {
+                    incoming?.pause()
+                    incoming?.replaceCurrentItemWithPlayerItem(null)
+                    if (crossfadePlayer === incoming) crossfadePlayer = null
+                }
+                if (!adopted && crossfadeEqualizerTap === incomingEqualizerTap) {
+                    crossfadeEqualizerTap = null
+                }
+                if (crossfadeGeneration == generation) crossfadeGeneration = -1
+                if (!adopted) {
+                    player?.volume = effectiveOutputVolume()
+                }
+            }
+        }
+        return true
+    }
+
+    private suspend fun waitForIosCrossfadePlayback(avPlayer: AVPlayer, generation: Int): Boolean {
+        var waitedMs = 0L
+        while (waitedMs < CrossfadePrepareTimeoutMs && isPlayRequestCurrent(generation)) {
+            if (avPlayer.timeControlStatus == AVPlayerTimeControlStatusPlaying) return true
+            if (avPlayer.rate > 0f) return true
+            delay(50)
+            waitedMs += 50
+        }
+        return false
+    }
+
+    private suspend fun fadeIosCrossfadeVolumes(
+        outgoing: AVPlayer,
+        incoming: AVPlayer,
+        durationMs: Long,
+        baseVolume: Float,
+        generation: Int,
+    ) {
+        val stepDelayMs = (durationMs / CrossfadeSteps).coerceAtLeast(16L)
+        repeat(CrossfadeSteps) { index ->
+            if (!isPlayRequestCurrent(generation) || crossfadePlayer !== incoming || player !== outgoing || !playWhenReady) {
+                return
+            }
+            val progress = (index + 1).toFloat() / CrossfadeSteps.toFloat()
+            val outgoingVolume = (baseVolume * (1f - progress)).coerceIn(0f, 1f)
+            val incomingVolume = (baseVolume * progress).coerceIn(0f, 1f)
+            diagnostics.crossfadeVolume(
+                engine = PlaybackEnginePath.AvPlayer,
+                step = index + 1,
+                outgoingVolume = outgoingVolume,
+                incomingVolume = incomingVolume,
+            )
+            outgoing.volume = outgoingVolume
+            incoming.volume = incomingVolume
+            delay(stepDelayMs)
+        }
+    }
+
+    private fun commitIosCrossfade(
+        outgoing: AVPlayer,
+        incoming: AVPlayer,
+        item: AVPlayerItem,
+        asset: AVURLAsset,
+        uri: String,
+        queue: List<Track>,
+        targetIndex: Int,
+        generation: Int,
+        incomingEqualizerTap: IosEqualizerTap?,
+    ): Boolean {
+        if (!isIosCrossfadeCurrent(generation, outgoing, incoming)) return false
+        val positionMs = cmTimeToMs(incoming.currentTime())
+        clearObservers()
+        outgoing.pause()
+        outgoing.replaceCurrentItemWithPlayerItem(null)
+        player = incoming
+        crossfadePlayer = null
+        crossfadeJob = null
+        crossfadeGeneration = -1
+        currentUri = uri
+        currentAsset = asset
+        lastKnownPositionMs = positionMs
+        retryGeneration = generation
+        retryCount = 0
+        retryJob?.cancel()
+        equalizerTap = incomingEqualizerTap
+        crossfadeEqualizerTap = null
+        equalizerTapTrackLoadRequested = false
+        equalizerInstallSuppressedForCurrentItem = incomingEqualizerTap == null
+        incoming.volume = effectiveOutputVolume()
+        observePlayback(incoming, item, generation)
+        adoptCrossfadeTarget(
+            queue = queue,
+            targetIndex = targetIndex,
+            positionMs = positionMs,
+            generation = generation,
+        )
+        diagnostics.crossfadeCommitted(
+            engine = PlaybackEnginePath.AvPlayer,
+            incomingTrackId = queue[targetIndex].id,
+        )
+        applyPlatformPlayback(
+            positionMs = positionMs,
+            durationMs = cmTimeToMs(CMTimeGetSeconds(item.duration)),
+            isPlaying = incoming.timeControlStatus == AVPlayerTimeControlStatusPlaying,
+            isBuffering = false,
+            bufferedPositionMs = estimatedBufferedPositionMs(
+                positionMs = positionMs,
+                durationMs = queue[targetIndex].durationMs,
+                likelyReady = item.isPlaybackLikelyToKeepUp(),
+            ),
+            generation = generation,
+        )
+        return true
+    }
+
+    private fun stopIosCrossfade() {
+        crossfadeJob?.cancel()
+        crossfadeJob = null
+        crossfadePlayer?.pause()
+        crossfadePlayer?.replaceCurrentItemWithPlayerItem(null)
+        crossfadePlayer = null
+        crossfadeEqualizerTap = null
+        crossfadeGeneration = -1
+        player?.volume = effectiveOutputVolume()
+    }
+
+    private fun clearEndObserver() {
+        endObserver?.let { token -> NSNotificationCenter.defaultCenter.removeObserver(token) }
+        endObserver = null
+    }
+
+    private fun isIosCrossfadeCurrent(
+        generation: Int,
+        outgoing: AVPlayer,
+        incoming: AVPlayer,
+    ): Boolean =
+        isPlayRequestCurrent(generation) &&
+            crossfadeGeneration == generation &&
+            player === outgoing &&
+            crossfadePlayer === incoming &&
+            playWhenReady
+
+    private fun iosCrossfadeFadeDurationMs(outgoing: AVPlayer, configuredDurationMs: Long): Long {
+        val durationMs = outgoing.currentItem
+            ?.let { cmTimeToMs(CMTimeGetSeconds(it.duration)) }
+            ?.takeIf { it > 0L }
+            ?: state.value.durationMs
+        val positionMs = cmTimeToMs(outgoing.currentTime())
+        val remainingMs = if (durationMs > 0L) {
+            (durationMs - positionMs).coerceAtLeast(0L)
+        } else {
+            configuredDurationMs
+        }
+        return remainingMs
+            .coerceAtMost(configuredDurationMs)
+            .coerceAtLeast(CrossfadeMinimumFadeMs)
     }
 
     private fun installEqualizerTap(
@@ -183,38 +427,51 @@ private class IosAudioPlayer : SimpleAudioPlayer() {
         allowTrackLoad: Boolean,
     ) {
         if (equalizerTap != null) return
-        val audioTrack = findAudioTrack(item, asset)
-        if (audioTrack == null) {
-            if (allowTrackLoad && !equalizerTapTrackLoadRequested) {
-                equalizerTapTrackLoadRequested = true
-                asset.loadValuesAsynchronouslyForKeys(listOf(IosAssetTracksKey)) {
-                    scope.launch {
-                        if (player?.currentItem != item || equalizerTap != null) return@launch
-                        val loaded = asset.statusOfValueForKey(IosAssetTracksKey, error = null) == AVKeyValueStatusLoaded
-                        if (!loaded) {
-                            PhoebeLog.d("IosAudioPlayer") { "equalizer audio track loading failed" }
-                            return@launch
-                        }
-                        installEqualizerTap(item, asset, allowTrackLoad = false)
-                    }
-                }
-            }
+        val tap = attachEqualizerTapIfReady(item, asset, equalizerProfile)
+        if (tap != null) {
+            equalizerTap = tap
             return
         }
-        attachEqualizerTap(item, audioTrack, equalizerProfile)
+        if (allowTrackLoad && !equalizerTapTrackLoadRequested) {
+            equalizerTapTrackLoadRequested = true
+            asset.loadValuesAsynchronouslyForKeys(listOf(IosAssetTracksKey)) {
+                scope.launch {
+                    if (player?.currentItem != item || equalizerTap != null || equalizerInstallSuppressedForCurrentItem) {
+                        return@launch
+                    }
+                    val loaded = asset.statusOfValueForKey(IosAssetTracksKey, error = null) == AVKeyValueStatusLoaded
+                    if (!loaded) {
+                        PhoebeLog.d("IosAudioPlayer") { "equalizer audio track loading failed" }
+                        return@launch
+                    }
+                    installEqualizerTap(item, asset, allowTrackLoad = false)
+                }
+            }
+        }
+    }
+
+    private fun attachEqualizerTapIfReady(
+        item: AVPlayerItem,
+        asset: AVURLAsset,
+        profile: EqualizerProfile,
+    ): IosEqualizerTap? {
+        val audioTrack = findAudioTrack(item, asset)
+        if (audioTrack == null) {
+            return null
+        }
+        return attachEqualizerTap(item, audioTrack, profile)
     }
 
     private fun attachEqualizerTap(
         item: AVPlayerItem,
         audioTrack: AVAssetTrack,
         profile: EqualizerProfile,
-    ) {
+    ): IosEqualizerTap? {
         val tap = IosEqualizerTap(profile.normalized())
         val tapRef = createEqualizerProcessingTap(tap)
         if (tapRef == null) {
-            equalizerTap = null
             PhoebeLog.d("IosAudioPlayer") { "equalizer audio tap creation failed" }
-            return
+            return null
         }
         val inputParameters = AVMutableAudioMixInputParameters.audioMixInputParametersWithTrack(audioTrack)
         inputParameters.setAudioTapProcessor(tapRef)
@@ -222,7 +479,7 @@ private class IosAudioPlayer : SimpleAudioPlayer() {
         audioMix.setInputParameters(listOf(inputParameters))
         item.setAudioMix(audioMix)
         CFRelease(tapRef)
-        equalizerTap = tap
+        return tap
     }
 
     private fun findAudioTrack(item: AVPlayerItem, asset: AVURLAsset): AVAssetTrack? =
@@ -259,7 +516,7 @@ private class IosAudioPlayer : SimpleAudioPlayer() {
             val playing = avPlayer.timeControlStatus == AVPlayerTimeControlStatusPlaying
             val likelyReady = avPlayer.currentItem?.isPlaybackLikelyToKeepUp() == true
             val isBuffering = playWhenReady && waiting && !likelyReady
-            if (equalizerTap == null) {
+            if (equalizerTap == null && !equalizerInstallSuppressedForCurrentItem) {
                 currentAsset?.let { asset -> installEqualizerTap(item, asset, allowTrackLoad = false) }
             }
             if (playing && playWhenReady) {
@@ -343,6 +600,7 @@ private class IosAudioPlayer : SimpleAudioPlayer() {
             clearObservers()
             equalizerTap = null
             equalizerTapTrackLoadRequested = false
+            equalizerInstallSuppressedForCurrentItem = false
             val asset = AVURLAsset.URLAssetWithURL(url, options = null)
             currentAsset = asset
             val item = AVPlayerItem(asset = asset, automaticallyLoadedAssetKeys = listOf(IosAssetTracksKey))
@@ -374,6 +632,9 @@ private class IosAudioPlayer : SimpleAudioPlayer() {
         const val MaxStreamRetryCount = 5
         const val StreamRetryBaseDelayMs = 1_000L
         const val IosAssetTracksKey = "tracks"
+        const val CrossfadeSteps = 24
+        const val CrossfadePrepareTimeoutMs = 5_000L
+        const val CrossfadeMinimumFadeMs = 500L
     }
 }
 

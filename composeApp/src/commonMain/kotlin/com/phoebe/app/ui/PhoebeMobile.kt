@@ -935,6 +935,7 @@ internal fun SwipeableMobileArtwork(
     previousTrack: Track?,
     onSkipQueueBy: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    maxDecodeDimension: Int = ListArtworkMaxDecodeDimension,
 ) {
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
@@ -1075,6 +1076,7 @@ internal fun SwipeableMobileArtwork(
                         .fillMaxSize()
                         .offset { IntOffset((widthPx + artworkOffsetPx()).roundToInt(), 0) },
                     radius = 10.dp,
+                    maxDecodeDimension = maxDecodeDimension,
                 )
             }
             if (previousTrack != null && swipePreviewDirection > 0) {
@@ -1084,6 +1086,7 @@ internal fun SwipeableMobileArtwork(
                         .fillMaxSize()
                         .offset { IntOffset((artworkOffsetPx() - widthPx).roundToInt(), 0) },
                     radius = 10.dp,
+                    maxDecodeDimension = maxDecodeDimension,
                 )
             }
             Box(
@@ -1098,7 +1101,12 @@ internal fun SwipeableMobileArtwork(
                     },
             ) {
                 key(track.id) {
-                    FlippableSongArtwork(track = track, modifier = Modifier.fillMaxSize(), radius = 10.dp)
+                    FlippableSongArtwork(
+                        track = track,
+                        modifier = Modifier.fillMaxSize(),
+                        radius = 10.dp,
+                        maxDecodeDimension = maxDecodeDimension,
+                    )
                 }
             }
         }
@@ -1446,6 +1454,7 @@ internal fun MobilePlayer(
                                             previousTrack = previousTrack,
                                             onSkipQueueBy = onSkipQueueBy,
                                             modifier = Modifier.fillMaxSize(),
+                                            maxDecodeDimension = HeroArtworkMaxDecodeDimension,
                                         )
                                     }
                                     AudioQualityBadge(

@@ -61,6 +61,25 @@ class RemoteArtworkCacheTest {
     }
 
     @Test
+    fun displayCacheFallsBackToLowerResolutionPreviewForHeroRequests() {
+        RemoteArtworkCache.configureLimitsForTest(maxEntries = 10, maxEstimatedBytes = Long.MAX_VALUE)
+
+        RemoteArtworkCache.putForTest("art", ThumbnailArtworkMaxDecodeDimension, testImageBitmap(160, 160))
+
+        assertEquals(
+            160,
+            RemoteArtworkCache.cachedForDisplay("art", HeroArtworkMaxDecodeDimension)?.width,
+        )
+
+        RemoteArtworkCache.putForTest("art", HeroArtworkMaxDecodeDimension, testImageBitmap(1024, 1024))
+
+        assertEquals(
+            1024,
+            RemoteArtworkCache.cachedForDisplay("art", HeroArtworkMaxDecodeDimension)?.width,
+        )
+    }
+
+    @Test
     fun downloadMemoryModeTrimsDecodedArtworkCache() {
         RemoteArtworkCache.configureLimitsForTest(maxEntries = 100, maxEstimatedBytes = Long.MAX_VALUE)
 
