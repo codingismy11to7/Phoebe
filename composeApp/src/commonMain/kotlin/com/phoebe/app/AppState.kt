@@ -1872,6 +1872,13 @@ class AppState(
         dependencies.catalogRepository.addTracksToPlaylist(session.value, playlist, listOf(track))
     }
 
+    fun movePlaylistTrack(playlist: Playlist, fromIndex: Int, toIndex: Int) = scope.launch {
+        val moved = dependencies.catalogRepository.movePlaylistTrack(session.value, playlist, fromIndex, toIndex)
+        if (!moved && fromIndex != toIndex) {
+            mutableMessage.value = "Couldn't reorder ${playlist.title}."
+        }
+    }
+
     fun toggleLikedTrack(track: Track) = scope.launch {
         if (!track.canTogglePlexLike()) {
             mutableMessage.value = "Liked Songs syncs streaming library songs only."

@@ -550,7 +550,7 @@ private fun MobileArtistRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        PhoebeIconView(PhoebeIcon.Forward, tint = PhoebeUi.mutedText, modifier = Modifier.size(18.dp))
+        PhoebeIconView(PhoebeIcon.Forward, tint = PhoebeUi.mutedText, modifier = Modifier.size(12.dp))
     }
 }
 
@@ -720,7 +720,7 @@ private fun MobileAlbumListRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        PhoebeIconView(PhoebeIcon.Forward, tint = PhoebeUi.mutedText, modifier = Modifier.size(16.dp))
+        PhoebeIconView(PhoebeIcon.Forward, tint = PhoebeUi.mutedText, modifier = Modifier.size(12.dp))
     }
 }
 
@@ -782,6 +782,8 @@ internal fun MobileSongRow(
     onPlay: () -> Unit,
     onAddToUpNext: () -> Unit,
     onDownload: () -> Unit,
+    modifier: Modifier = Modifier,
+    leadingHandle: (@Composable () -> Unit)? = null,
 ) {
     var menuExpanded by remember(track.id) { mutableStateOf(false) }
     val likeActions = LocalLikeActions.current
@@ -792,7 +794,7 @@ internal fun MobileSongRow(
     val liked = likeActions.isLiked(track)
     val downloaded = downloads.isComplete(track)
     Row(
-        Modifier
+        modifier
             .fillMaxWidth()
             .playTrackTarget(track)
             .clip(RoundedCornerShape(12.dp))
@@ -807,6 +809,9 @@ internal fun MobileSongRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        if (leadingHandle != null) {
+            leadingHandle()
+        }
         Box(Modifier.size(50.dp), contentAlignment = Alignment.Center) {
             TrackArtworkImage(
                 track,
@@ -1238,6 +1243,6 @@ internal fun MobilePlaylistRow(
                 Text(subtitle, color = PhoebeUi.mutedText, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
-        PhoebeIconView(PhoebeIcon.Forward, tint = PhoebeUi.mutedText, modifier = Modifier.size(16.dp))
+        PhoebeIconView(PhoebeIcon.Forward, tint = PhoebeUi.mutedText, modifier = Modifier.size(12.dp))
     }
 }

@@ -42,6 +42,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.phoebe.app.domain.Track
 import com.phoebe.app.platform.PhoebeLog
+import com.phoebe.app.ui.PhoebeIcon
+import com.phoebe.app.ui.PhoebeIconView
 import com.phoebe.app.ui.PhoebeTheme
 import com.phoebe.app.ui.PhoebeUi
 import kotlinx.coroutines.CancellationException
@@ -1452,35 +1454,7 @@ private fun CastDeviceGlyph() {
 
 @Composable
 private fun MiniCastGlyph(tint: Color) {
-    androidx.compose.foundation.Canvas(Modifier.size(18.dp)) {
-        val stroke = size.height * 0.11f
-        val rectHeight = size.height * 0.68f
-        val rectTop = (size.height - rectHeight) / 2f
-        val rectBottom = rectTop + rectHeight
-        drawRoundRect(
-            color = tint,
-            topLeft = androidx.compose.ui.geometry.Offset(0f, rectTop),
-            size = androidx.compose.ui.geometry.Size(size.width, rectHeight),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.height * 0.12f),
-            style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke),
-        )
-        val origin = androidx.compose.ui.geometry.Offset(stroke * 1.5f, rectBottom - stroke * 1.5f)
-        drawCircle(color = tint, radius = stroke * 0.9f, center = origin)
-        listOf(rectHeight * 0.28f, rectHeight * 0.5f).forEach { radius ->
-            drawArc(
-                color = tint,
-                startAngle = -90f,
-                sweepAngle = 90f,
-                useCenter = false,
-                topLeft = androidx.compose.ui.geometry.Offset(origin.x - radius, origin.y - radius),
-                size = androidx.compose.ui.geometry.Size(radius * 2, radius * 2),
-                style = androidx.compose.ui.graphics.drawscope.Stroke(
-                    width = stroke,
-                    cap = androidx.compose.ui.graphics.StrokeCap.Round,
-                ),
-            )
-        }
-    }
+    PhoebeIconView(PhoebeIcon.Cast, tint = tint, modifier = Modifier.size(18.dp))
 }
 
 internal fun desktopCastIsFinishedIdleReason(idleReasonName: String?): Boolean =

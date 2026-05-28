@@ -101,17 +101,12 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.composed
 import androidx.compose.ui.platform.LocalDensity
@@ -332,6 +327,13 @@ internal fun DesktopTransport(
                     track?.let { trackNavigationActions.onOpenAlbumForTrack(it) }
                 },
             )
+            if (!overflowSecondaryControls) {
+                AudioQualityText(
+                    track = track,
+                    compact = true,
+                    modifier = Modifier.padding(top = 1.dp),
+                )
+            }
         }
         LikeButton(
             liked = liked,
@@ -346,9 +348,6 @@ internal fun DesktopTransport(
                 onFeedback = onListenBrainzFeedback,
                 stackedVotes = true,
             )
-        }
-        if (!overflowSecondaryControls) {
-            AudioQualityBadge(track = track, compact = true, modifier = Modifier.padding(start = 8.dp))
         }
         Spacer(Modifier.width(if (overflowSecondaryControls || compact) 10.dp else 24.dp))
         BoxWithConstraints(
@@ -368,9 +367,9 @@ internal fun DesktopTransport(
                     modifier = Modifier.height(48.dp),
                 ) {
                     ShuffleIcon(active = shuffle, onClick = onShuffle)
-                    TransportIcon(PhoebeIcon.Previous, "Previous Track", onPrevious)
+                    TransportIcon(PhoebeIcon.Previous, "Previous Track", onPrevious, iconSize = 16.dp)
                     PlayButton(isPlaying, isBuffering, 48.dp, onToggle, enabled = hasTrack)
-                    TransportIcon(PhoebeIcon.Next, "Next Track", onNext)
+                    TransportIcon(PhoebeIcon.Next, "Next Track", onNext, iconSize = 16.dp)
                     RepeatIcon(mode = repeat, onClick = onRepeat)
                 }
                 ProgressLine(
@@ -559,9 +558,9 @@ private fun ListenBrainzFeedbackVoteStack(
     val hateActive = target.score == ListenBrainzFeedbackScore.Hate
     Column(
         modifier = Modifier
-            .width(38.dp)
-            .height(48.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
+            .width(42.dp)
+            .height(60.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         ListenBrainzFeedbackVoteButton(
             icon = PhoebeIcon.ThumbsUp,
@@ -571,6 +570,8 @@ private fun ListenBrainzFeedbackVoteStack(
             enabled = canSubmitFeedback,
             onClick = { onFeedback(if (loveActive) ListenBrainzFeedbackScore.Clear else ListenBrainzFeedbackScore.Love) },
             modifier = Modifier.weight(1f).fillMaxWidth(),
+            iconSize = 20.dp,
+            contentPadding = 2.dp,
         )
         ListenBrainzFeedbackVoteButton(
             icon = PhoebeIcon.ThumbsDown,
@@ -580,6 +581,8 @@ private fun ListenBrainzFeedbackVoteStack(
             enabled = canSubmitFeedback,
             onClick = { onFeedback(if (hateActive) ListenBrainzFeedbackScore.Clear else ListenBrainzFeedbackScore.Hate) },
             modifier = Modifier.weight(1f).fillMaxWidth(),
+            iconSize = 20.dp,
+            contentPadding = 2.dp,
         )
     }
 }
@@ -594,6 +597,7 @@ private fun ListenBrainzFeedbackVoteButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     iconSize: Dp = 18.dp,
+    contentPadding: Dp = 0.dp,
 ) {
     Box(
         modifier
@@ -618,7 +622,7 @@ private fun ListenBrainzFeedbackVoteButton(
         PhoebeIconView(
             icon,
             tint = if (active) PhoebeUi.accentLight else PhoebeUi.secondaryText,
-            modifier = Modifier.size(iconSize),
+            modifier = Modifier.size(iconSize).padding(contentPadding),
         )
     }
 }
@@ -844,22 +848,7 @@ internal fun ShuffleIcon(active: Boolean, onClick: () -> Unit) {
         contentAlignment = Alignment.Center,
     ) {
         val tint = if (active) PhoebeUi.accentLight else PhoebeUi.primaryText
-        Canvas(Modifier.size(20.dp)) {
-            val s = size.minDimension
-            val arrowHeadLen = s * 0.18f
-            val stroke = androidx.compose.ui.graphics.drawscope.Stroke(width = s * 0.085f, cap = StrokeCap.Round)
-            val p1Start = Offset(s * 0.10f, s * 0.22f)
-            val p1End = Offset(s * 0.85f, s * 0.78f)
-            val p2Start = Offset(s * 0.10f, s * 0.78f)
-            val p2End = Offset(s * 0.85f, s * 0.22f)
-            drawLine(tint, p1Start, p1End, strokeWidth = stroke.width, cap = StrokeCap.Round)
-            drawLine(tint, p2Start, p2End, strokeWidth = stroke.width, cap = StrokeCap.Round)
-            // Arrowheads
-            drawLine(tint, p1End, p1End + Offset(-arrowHeadLen, 0f), strokeWidth = stroke.width, cap = StrokeCap.Round)
-            drawLine(tint, p1End, p1End + Offset(0f, -arrowHeadLen), strokeWidth = stroke.width, cap = StrokeCap.Round)
-            drawLine(tint, p2End, p2End + Offset(-arrowHeadLen, 0f), strokeWidth = stroke.width, cap = StrokeCap.Round)
-            drawLine(tint, p2End, p2End + Offset(0f, arrowHeadLen), strokeWidth = stroke.width, cap = StrokeCap.Round)
-        }
+        PhoebeIconView(PhoebeIcon.InterwovenArrows, tint = tint, modifier = Modifier.size(20.dp))
     }
 }
 
@@ -979,47 +968,6 @@ internal fun CastIcon(active: Boolean, loading: Boolean, enabled: Boolean, onCli
             )
             return@Box
         }
-        // Match the Up Next toggle's 20.dp canvas. Inside that canvas, draw the cast
-        // glyph in a 14.dp-tall band that is vertically centred — this keeps the icon's
-        // optical centre on the same baseline as the music note, slider, and up-next bars.
-        Canvas(Modifier.size(20.dp)) {
-            val w = size.width
-            val h = size.height
-            val rectH = h * 0.70f
-            val rectTop = (h - rectH) / 2f
-            val rectBottom = rectTop + rectH
-            val stroke = h * 0.10f
-            val cornerRadius = h * 0.12f
-            drawRoundRect(
-                color = strokeColor,
-                topLeft = Offset(0f, rectTop),
-                size = androidx.compose.ui.geometry.Size(w, rectH),
-                cornerRadius = CornerRadius(cornerRadius, cornerRadius),
-                style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke),
-            )
-            // Wifi-style arcs anchored at the bottom-left interior of the screen.
-            val arcOrigin = Offset(stroke * 1.5f, rectBottom - stroke * 1.5f)
-            drawCircle(color = strokeColor, radius = stroke * 0.9f, center = arcOrigin)
-            val midRadius = rectH * 0.28f
-            drawArc(
-                color = strokeColor,
-                startAngle = -90f,
-                sweepAngle = 90f,
-                useCenter = false,
-                topLeft = Offset(arcOrigin.x - midRadius, arcOrigin.y - midRadius),
-                size = androidx.compose.ui.geometry.Size(midRadius * 2, midRadius * 2),
-                style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke, cap = StrokeCap.Round),
-            )
-            val outRadius = rectH * 0.5f
-            drawArc(
-                color = strokeColor,
-                startAngle = -90f,
-                sweepAngle = 90f,
-                useCenter = false,
-                topLeft = Offset(arcOrigin.x - outRadius, arcOrigin.y - outRadius),
-                size = androidx.compose.ui.geometry.Size(outRadius * 2, outRadius * 2),
-                style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke, cap = StrokeCap.Round),
-            )
-        }
+        PhoebeIconView(PhoebeIcon.Cast, tint = strokeColor, modifier = Modifier.size(20.dp))
     }
 }

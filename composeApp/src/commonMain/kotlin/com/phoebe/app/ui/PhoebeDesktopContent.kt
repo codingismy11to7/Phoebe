@@ -411,6 +411,7 @@ internal fun DesktopContent(
 
         when {
             selectedPlaylist != null -> {
+                val playlistActions = LocalPlaylistActions.current
                 var playlistSortBy by remember(selectedPlaylist.id) { mutableStateOf(LibrarySortBy.PlaylistOrder) }
                 var playlistAscending by remember(selectedPlaylist.id) { mutableStateOf(true) }
                 val sortedPlaylistTracks = remember(playlistTracks, playlistSortBy, playlistAscending) {
@@ -419,10 +420,19 @@ internal fun DesktopContent(
                 val filteredPlaylistTracks = remember(sortedPlaylistTracks, searchQuery) {
                     filterTracksByQuery(sortedPlaylistTracks, searchQuery)
                 }
-                val playFilteredPlaylistTracks: (List<Track>, Int) -> Unit = { _, visibleIndex ->
+                val playFilteredPlaylistTracks: (List<Track>, Int) -> Unit = { visible, visibleIndex ->
+                    val sourceTracks = if (
+                        playlistSortBy == LibrarySortBy.PlaylistOrder &&
+                        playlistAscending &&
+                        searchQuery.isBlank()
+                    ) {
+                        visible
+                    } else {
+                        sortedPlaylistTracks
+                    }
                     val (queueTracks, queueIndex) = playbackQueueForVisibleTrack(
-                        sortedPlaylistTracks,
-                        filteredPlaylistTracks,
+                        sourceTracks,
+                        visible,
                         visibleIndex,
                     )
                     onPlayTracks(queueTracks, queueIndex)
@@ -472,6 +482,15 @@ internal fun DesktopContent(
                         onAddToUpNext = onAddToUpNext,
                         onDownload = onDownload,
                         libraryColumns = libraryUi.columns,
+                        onMoveTrack = if (
+                            playlistSortBy == LibrarySortBy.PlaylistOrder &&
+                            playlistAscending &&
+                            searchQuery.isBlank()
+                        ) {
+                            { from, to -> playlistActions.onMovePlaylistTrack(selectedPlaylist, from, to) }
+                        } else {
+                            null
+                        },
                     )
                 }
             }

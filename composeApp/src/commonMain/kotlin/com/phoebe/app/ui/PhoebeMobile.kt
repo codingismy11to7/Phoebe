@@ -1587,9 +1587,9 @@ internal fun MobilePlayer(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         ShuffleIcon(active = shuffle, onClick = onShuffle)
-                        TransportIcon(PhoebeIcon.Previous, "Previous Track", onPrevious)
+                        TransportIcon(PhoebeIcon.Previous, "Previous Track", onPrevious, iconSize = 16.dp)
                         PlayButton(isPlaying, isBuffering, 58.dp, onToggle, enabled = hasTrack)
-                        TransportIcon(PhoebeIcon.Next, "Next Track", onNext)
+                        TransportIcon(PhoebeIcon.Next, "Next Track", onNext, iconSize = 16.dp)
                         RepeatIcon(mode = repeat, onClick = onRepeat)
                     }
                 }

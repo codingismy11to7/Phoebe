@@ -27,7 +27,40 @@ import phoebe.composeapp.generated.resources.Res
 import phoebe.composeapp.generated.resources.drama_masks
 import phoebe.composeapp.generated.resources.mood_very_good
 import phoebe.composeapp.generated.resources.phoebe_bird
+import phoebe.composeapp.generated.resources.phoebe_icon_back
+import phoebe.composeapp.generated.resources.phoebe_icon_bell
+import phoebe.composeapp.generated.resources.phoebe_icon_book
+import phoebe.composeapp.generated.resources.phoebe_icon_calendar
+import phoebe.composeapp.generated.resources.phoebe_icon_cast
+import phoebe.composeapp.generated.resources.phoebe_icon_chevron_down
+import phoebe.composeapp.generated.resources.phoebe_icon_chevron_right
+import phoebe.composeapp.generated.resources.phoebe_icon_chevron_up
+import phoebe.composeapp.generated.resources.phoebe_icon_download
+import phoebe.composeapp.generated.resources.phoebe_icon_drag
+import phoebe.composeapp.generated.resources.phoebe_icon_equalizer
+import phoebe.composeapp.generated.resources.phoebe_icon_forward
+import phoebe.composeapp.generated.resources.phoebe_icon_heart_filled
+import phoebe.composeapp.generated.resources.phoebe_icon_heart_outline
+import phoebe.composeapp.generated.resources.phoebe_icon_home
+import phoebe.composeapp.generated.resources.phoebe_icon_interwoven_arrows
+import phoebe.composeapp.generated.resources.phoebe_icon_knife
+import phoebe.composeapp.generated.resources.phoebe_icon_library
+import phoebe.composeapp.generated.resources.phoebe_icon_lyrics
+import phoebe.composeapp.generated.resources.phoebe_icon_music
+import phoebe.composeapp.generated.resources.phoebe_icon_next
+import phoebe.composeapp.generated.resources.phoebe_icon_person
+import phoebe.composeapp.generated.resources.phoebe_icon_plus
+import phoebe.composeapp.generated.resources.phoebe_icon_previous
+import phoebe.composeapp.generated.resources.phoebe_icon_queue
+import phoebe.composeapp.generated.resources.phoebe_icon_repeat
 import phoebe.composeapp.generated.resources.phoebe_icon_rounded
+import phoebe.composeapp.generated.resources.phoebe_icon_search
+import phoebe.composeapp.generated.resources.phoebe_icon_settings
+import phoebe.composeapp.generated.resources.phoebe_icon_sunglasses_face
+import phoebe.composeapp.generated.resources.phoebe_icon_thumbs_down
+import phoebe.composeapp.generated.resources.phoebe_icon_thumbs_up
+import phoebe.composeapp.generated.resources.phoebe_icon_volume
+import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.painterResource
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.background
@@ -178,27 +211,17 @@ internal fun PhoebeIconView(
     modifier: Modifier = Modifier,
     filled: Boolean = false,
 ) {
-    when (icon) {
-        PhoebeIcon.MoodFace -> {
-            Image(
-                painter = painterResource(Res.drawable.mood_very_good),
-                contentDescription = null,
-                modifier = modifier,
-                colorFilter = ColorFilter.tint(tint),
-            )
-            return
-        }
-        PhoebeIcon.GenreMasks -> {
-            Image(
-                painter = painterResource(Res.drawable.drama_masks),
-                contentDescription = null,
-                modifier = modifier,
-                colorFilter = ColorFilter.tint(tint),
-            )
-            return
-        }
-        else -> Unit
+    icon.drawableResource(filled)?.let { resource ->
+        Image(
+            painter = painterResource(resource),
+            contentDescription = null,
+            modifier = modifier,
+            colorFilter = ColorFilter.tint(tint),
+            contentScale = ContentScale.Fit,
+        )
+        return
     }
+
     Canvas(modifier) {
         val s = size.minDimension
         val strokeWidth = (s * 0.073f).coerceAtLeast(1.35f)
@@ -208,225 +231,6 @@ internal fun PhoebeIconView(
             drawLine(tint, p(x1, y1), p(x2, y2), strokeWidth = strokeWidth, cap = StrokeCap.Round)
 
         when (icon) {
-            PhoebeIcon.Home -> {
-                val roof = Path().apply {
-                    moveTo(s * 0.18f, s * 0.50f)
-                    lineTo(s * 0.50f, s * 0.22f)
-                    lineTo(s * 0.82f, s * 0.50f)
-                }
-                drawPath(roof, tint, style = stroke)
-                line(0.23f, 0.48f, 0.23f, 0.78f)
-                line(0.77f, 0.48f, 0.77f, 0.78f)
-                line(0.23f, 0.78f, 0.42f, 0.78f)
-                line(0.58f, 0.78f, 0.77f, 0.78f)
-                line(0.42f, 0.78f, 0.42f, 0.62f)
-                line(0.58f, 0.78f, 0.58f, 0.62f)
-                line(0.42f, 0.62f, 0.58f, 0.62f)
-            }
-            PhoebeIcon.Search -> {
-                drawCircle(tint, radius = s * 0.25f, center = p(0.43f, 0.41f), style = stroke)
-                line(0.61f, 0.60f, 0.80f, 0.79f)
-            }
-            PhoebeIcon.Library -> {
-                line(0.30f, 0.22f, 0.30f, 0.78f)
-                line(0.50f, 0.22f, 0.50f, 0.78f)
-                line(0.68f, 0.26f, 0.82f, 0.76f)
-            }
-            PhoebeIcon.Person -> {
-                drawCircle(tint, radius = s * 0.15f, center = p(0.50f, 0.33f), style = stroke)
-                val shoulders = Path().apply {
-                    moveTo(s * 0.23f, s * 0.80f)
-                    cubicTo(s * 0.28f, s * 0.58f, s * 0.72f, s * 0.58f, s * 0.77f, s * 0.80f)
-                }
-                drawPath(shoulders, tint, style = stroke)
-            }
-            PhoebeIcon.Calendar -> {
-                val heavyStroke = Stroke(width = strokeWidth * 1.35f, cap = StrokeCap.Round, join = StrokeJoin.Round)
-                drawRoundRect(
-                    tint,
-                    topLeft = Offset(s * 0.19f, s * 0.25f),
-                    size = Size(s * 0.62f, s * 0.58f),
-                    cornerRadius = CornerRadius(s * 0.11f, s * 0.11f),
-                    style = heavyStroke,
-                )
-                drawLine(tint, p(0.20f, 0.42f), p(0.80f, 0.42f), strokeWidth = strokeWidth * 1.55f, cap = StrokeCap.Butt)
-                listOf(0.32f, 0.44f, 0.56f, 0.68f).forEach { x ->
-                    drawLine(tint, p(x, 0.17f), p(x, 0.30f), strokeWidth = strokeWidth * 1.55f, cap = StrokeCap.Round)
-                }
-                listOf(0.37f to 0.56f, 0.50f to 0.56f, 0.63f to 0.56f, 0.37f to 0.69f, 0.50f to 0.69f, 0.63f to 0.69f).forEach { (x, y) ->
-                    drawRoundRect(
-                        tint,
-                        topLeft = Offset(s * (x - 0.032f), s * (y - 0.032f)),
-                        size = Size(s * 0.064f, s * 0.064f),
-                        cornerRadius = CornerRadius(s * 0.006f, s * 0.006f),
-                    )
-                }
-            }
-            PhoebeIcon.Book -> {
-                val left = Path().apply {
-                    moveTo(s * 0.18f, s * 0.25f)
-                    cubicTo(s * 0.30f, s * 0.20f, s * 0.42f, s * 0.24f, s * 0.50f, s * 0.32f)
-                    lineTo(s * 0.50f, s * 0.78f)
-                    cubicTo(s * 0.40f, s * 0.70f, s * 0.29f, s * 0.67f, s * 0.18f, s * 0.72f)
-                    close()
-                }
-                val right = Path().apply {
-                    moveTo(s * 0.82f, s * 0.25f)
-                    cubicTo(s * 0.70f, s * 0.20f, s * 0.58f, s * 0.24f, s * 0.50f, s * 0.32f)
-                    lineTo(s * 0.50f, s * 0.78f)
-                    cubicTo(s * 0.60f, s * 0.70f, s * 0.71f, s * 0.67f, s * 0.82f, s * 0.72f)
-                    close()
-                }
-                drawPath(left, tint, style = stroke)
-                drawPath(right, tint, style = stroke)
-                line(0.50f, 0.32f, 0.50f, 0.78f)
-            }
-            PhoebeIcon.Knife -> {
-                val heavyStroke = Stroke(width = strokeWidth * 1.35f, cap = StrokeCap.Round, join = StrokeJoin.Round)
-                val handle = Path().apply {
-                    moveTo(s * 0.28f, s * 0.13f)
-                    lineTo(s * 0.55f, s * 0.40f)
-                    lineTo(s * 0.47f, s * 0.48f)
-                    lineTo(s * 0.18f, s * 0.20f)
-                    lineTo(s * 0.25f, s * 0.13f)
-                    close()
-                }
-                val blade = Path().apply {
-                    moveTo(s * 0.53f, s * 0.42f)
-                    cubicTo(s * 0.66f, s * 0.52f, s * 0.82f, s * 0.71f, s * 0.90f, s * 0.90f)
-                    cubicTo(s * 0.65f, s * 0.85f, s * 0.45f, s * 0.72f, s * 0.34f, s * 0.58f)
-                    lineTo(s * 0.46f, s * 0.46f)
-                    close()
-                }
-                drawPath(handle, tint)
-                drawPath(blade, tint, style = heavyStroke)
-                line(0.50f, 0.43f, 0.87f, 0.86f)
-            }
-            PhoebeIcon.InterwovenArrows -> {
-                val shuffleStroke = Stroke(width = strokeWidth * 1.55f, cap = StrokeCap.Round, join = StrokeJoin.Round)
-                val upper = Path().apply {
-                    moveTo(s * 0.15f, s * 0.32f)
-                    lineTo(s * 0.26f, s * 0.32f)
-                    cubicTo(s * 0.42f, s * 0.32f, s * 0.44f, s * 0.68f, s * 0.61f, s * 0.68f)
-                    lineTo(s * 0.77f, s * 0.68f)
-                }
-                val lower = Path().apply {
-                    moveTo(s * 0.15f, s * 0.68f)
-                    lineTo(s * 0.26f, s * 0.68f)
-                    cubicTo(s * 0.42f, s * 0.68f, s * 0.44f, s * 0.32f, s * 0.61f, s * 0.32f)
-                    lineTo(s * 0.77f, s * 0.32f)
-                }
-                val upperArrow = Path().apply {
-                    moveTo(s * 0.77f, s * 0.56f)
-                    lineTo(s * 0.91f, s * 0.68f)
-                    lineTo(s * 0.77f, s * 0.80f)
-                    close()
-                }
-                val lowerArrow = Path().apply {
-                    moveTo(s * 0.77f, s * 0.20f)
-                    lineTo(s * 0.91f, s * 0.32f)
-                    lineTo(s * 0.77f, s * 0.44f)
-                    close()
-                }
-                drawPath(upper, tint, style = shuffleStroke)
-                drawPath(lower, tint, style = shuffleStroke)
-                drawPath(upperArrow, tint)
-                drawPath(lowerArrow, tint)
-            }
-            PhoebeIcon.MoodFace -> {
-                val faceStroke = Stroke(width = strokeWidth * 1.05f, cap = StrokeCap.Round, join = StrokeJoin.Round)
-                drawCircle(tint, radius = s * 0.23f, center = p(0.32f, 0.66f), style = faceStroke)
-                drawCircle(tint, radius = s * 0.23f, center = p(0.70f, 0.30f), style = faceStroke)
-                drawArc(tint, startAngle = 20f, sweepAngle = 140f, useCenter = false, topLeft = Offset(s * 0.62f, s * 0.26f), size = Size(s * 0.08f, s * 0.07f), style = faceStroke)
-                drawArc(tint, startAngle = 20f, sweepAngle = 140f, useCenter = false, topLeft = Offset(s * 0.78f, s * 0.26f), size = Size(s * 0.08f, s * 0.07f), style = faceStroke)
-                drawArc(tint, startAngle = 25f, sweepAngle = 130f, useCenter = false, topLeft = Offset(s * 0.61f, s * 0.33f), size = Size(s * 0.19f, s * 0.15f), style = faceStroke)
-                drawArc(tint, startAngle = 20f, sweepAngle = 140f, useCenter = false, topLeft = Offset(s * 0.22f, s * 0.61f), size = Size(s * 0.08f, s * 0.07f), style = faceStroke)
-                drawArc(tint, startAngle = 20f, sweepAngle = 140f, useCenter = false, topLeft = Offset(s * 0.38f, s * 0.61f), size = Size(s * 0.08f, s * 0.07f), style = faceStroke)
-                drawArc(tint, startAngle = 205f, sweepAngle = 130f, useCenter = false, topLeft = Offset(s * 0.23f, s * 0.72f), size = Size(s * 0.19f, s * 0.15f), style = faceStroke)
-                val upperArrow = Path().apply {
-                    moveTo(s * 0.27f, s * 0.36f)
-                    cubicTo(s * 0.27f, s * 0.24f, s * 0.38f, s * 0.20f, s * 0.48f, s * 0.20f)
-                    lineTo(s * 0.52f, s * 0.20f)
-                }
-                val lowerArrow = Path().apply {
-                    moveTo(s * 0.74f, s * 0.57f)
-                    cubicTo(s * 0.74f, s * 0.70f, s * 0.61f, s * 0.75f, s * 0.50f, s * 0.75f)
-                    lineTo(s * 0.47f, s * 0.75f)
-                }
-                drawPath(upperArrow, tint, style = faceStroke)
-                drawPath(lowerArrow, tint, style = faceStroke)
-                line(0.52f, 0.20f, 0.46f, 0.14f)
-                line(0.52f, 0.20f, 0.46f, 0.26f)
-                line(0.47f, 0.75f, 0.53f, 0.69f)
-                line(0.47f, 0.75f, 0.53f, 0.81f)
-            }
-            PhoebeIcon.SunglassesFace -> {
-                drawCircle(tint, radius = s * 0.34f, center = p(0.50f, 0.50f), style = stroke)
-                drawRoundRect(
-                    tint,
-                    topLeft = Offset(s * 0.23f, s * 0.36f),
-                    size = Size(s * 0.24f, s * 0.15f),
-                    cornerRadius = CornerRadius(s * 0.035f, s * 0.035f),
-                )
-                drawRoundRect(
-                    tint,
-                    topLeft = Offset(s * 0.53f, s * 0.36f),
-                    size = Size(s * 0.24f, s * 0.15f),
-                    cornerRadius = CornerRadius(s * 0.035f, s * 0.035f),
-                )
-                drawLine(tint, p(0.18f, 0.36f), p(0.82f, 0.36f), strokeWidth = strokeWidth * 1.45f, cap = StrokeCap.Round)
-                drawArc(tint, startAngle = 20f, sweepAngle = 140f, useCenter = false, topLeft = Offset(s * 0.35f, s * 0.48f), size = Size(s * 0.30f, s * 0.22f), style = Stroke(width = strokeWidth * 1.15f, cap = StrokeCap.Round))
-            }
-            PhoebeIcon.GenreMasks -> {
-                val sad = Path().apply {
-                    moveTo(s * 0.23f, s * 0.17f)
-                    lineTo(s * 0.56f, s * 0.10f)
-                    cubicTo(s * 0.62f, s * 0.27f, s * 0.60f, s * 0.49f, s * 0.46f, s * 0.65f)
-                    cubicTo(s * 0.34f, s * 0.59f, s * 0.22f, s * 0.45f, s * 0.16f, s * 0.26f)
-                    cubicTo(s * 0.14f, s * 0.21f, s * 0.17f, s * 0.18f, s * 0.23f, s * 0.17f)
-                    close()
-                }
-                val happy = Path().apply {
-                    moveTo(s * 0.54f, s * 0.40f)
-                    lineTo(s * 0.86f, s * 0.52f)
-                    cubicTo(s * 0.80f, s * 0.75f, s * 0.63f, s * 0.90f, s * 0.45f, s * 0.86f)
-                    cubicTo(s * 0.38f, s * 0.70f, s * 0.42f, s * 0.52f, s * 0.48f, s * 0.42f)
-                    cubicTo(s * 0.50f, s * 0.39f, s * 0.52f, s * 0.39f, s * 0.54f, s * 0.40f)
-                    close()
-                }
-                drawPath(sad, tint, style = stroke)
-                drawPath(happy, tint, style = stroke)
-                val leftEye = Path().apply {
-                    moveTo(s * 0.28f, s * 0.35f)
-                    cubicTo(s * 0.35f, s * 0.30f, s * 0.40f, s * 0.30f, s * 0.45f, s * 0.34f)
-                    cubicTo(s * 0.40f, s * 0.39f, s * 0.34f, s * 0.40f, s * 0.28f, s * 0.35f)
-                    close()
-                }
-                val rightEye = Path().apply {
-                    moveTo(s * 0.52f, s * 0.29f)
-                    cubicTo(s * 0.58f, s * 0.24f, s * 0.65f, s * 0.25f, s * 0.70f, s * 0.31f)
-                    cubicTo(s * 0.64f, s * 0.36f, s * 0.58f, s * 0.36f, s * 0.52f, s * 0.29f)
-                    close()
-                }
-                val happyLeftEye = Path().apply {
-                    moveTo(s * 0.55f, s * 0.59f)
-                    cubicTo(s * 0.62f, s * 0.56f, s * 0.68f, s * 0.59f, s * 0.71f, s * 0.65f)
-                    cubicTo(s * 0.64f, s * 0.67f, s * 0.59f, s * 0.65f, s * 0.55f, s * 0.59f)
-                    close()
-                }
-                val happyRightEye = Path().apply {
-                    moveTo(s * 0.72f, s * 0.64f)
-                    cubicTo(s * 0.78f, s * 0.62f, s * 0.84f, s * 0.66f, s * 0.86f, s * 0.72f)
-                    cubicTo(s * 0.79f, s * 0.72f, s * 0.75f, s * 0.69f, s * 0.72f, s * 0.64f)
-                    close()
-                }
-                drawPath(leftEye, tint)
-                drawPath(rightEye, tint)
-                drawPath(happyLeftEye, tint)
-                drawPath(happyRightEye, tint)
-                drawArc(tint, startAngle = 205f, sweepAngle = 115f, useCenter = false, topLeft = Offset(s * 0.30f, s * 0.48f), size = Size(s * 0.18f, s * 0.17f), style = stroke)
-                drawArc(tint, startAngle = 25f, sweepAngle = 125f, useCenter = false, topLeft = Offset(s * 0.52f, s * 0.67f), size = Size(s * 0.27f, s * 0.15f), style = stroke)
-            }
             PhoebeIcon.PlaylistPlay -> {
                 line(0.18f, 0.26f, 0.82f, 0.26f)
                 line(0.18f, 0.44f, 0.48f, 0.44f)
@@ -440,144 +244,6 @@ internal fun PhoebeIconView(
                 }
                 drawPath(play, tint, style = stroke)
             }
-            PhoebeIcon.Queue -> {
-                val play = Path().apply {
-                    moveTo(s * 0.24f, s * 0.54f)
-                    lineTo(s * 0.24f, s * 0.72f)
-                    lineTo(s * 0.38f, s * 0.63f)
-                    close()
-                }
-                drawPath(play, tint, style = androidx.compose.ui.graphics.drawscope.Fill)
-                drawCircle(tint, radius = s * 0.035f, center = p(0.25f, 0.31f))
-                line(0.42f, 0.30f, 0.78f, 0.30f)
-                line(0.42f, 0.47f, 0.78f, 0.47f)
-                line(0.42f, 0.64f, 0.78f, 0.64f)
-            }
-            PhoebeIcon.Plus -> {
-                line(0.50f, 0.20f, 0.50f, 0.80f)
-                line(0.20f, 0.50f, 0.80f, 0.50f)
-            }
-            PhoebeIcon.Heart -> {
-                val path = Path().apply {
-                    moveTo(s * 0.50f, s * 0.82f)
-                    cubicTo(s * 0.18f, s * 0.58f, s * 0.12f, s * 0.38f, s * 0.28f, s * 0.27f)
-                    cubicTo(s * 0.39f, s * 0.19f, s * 0.48f, s * 0.25f, s * 0.50f, s * 0.35f)
-                    cubicTo(s * 0.52f, s * 0.25f, s * 0.61f, s * 0.19f, s * 0.72f, s * 0.27f)
-                    cubicTo(s * 0.88f, s * 0.38f, s * 0.82f, s * 0.58f, s * 0.50f, s * 0.82f)
-                }
-                drawPath(path, tint, style = if (filled) androidx.compose.ui.graphics.drawscope.Fill else stroke)
-            }
-            PhoebeIcon.ThumbsUp -> {
-                drawRoundRect(
-                    tint,
-                    topLeft = Offset(s * 0.16f, s * 0.48f),
-                    size = Size(s * 0.16f, s * 0.34f),
-                    cornerRadius = CornerRadius(s * 0.04f, s * 0.04f),
-                    style = stroke,
-                )
-                val thumb = Path().apply {
-                    moveTo(s * 0.34f, s * 0.80f)
-                    lineTo(s * 0.64f, s * 0.80f)
-                    cubicTo(s * 0.72f, s * 0.80f, s * 0.76f, s * 0.75f, s * 0.78f, s * 0.68f)
-                    lineTo(s * 0.84f, s * 0.50f)
-                    cubicTo(s * 0.86f, s * 0.44f, s * 0.82f, s * 0.40f, s * 0.76f, s * 0.40f)
-                    lineTo(s * 0.60f, s * 0.40f)
-                    lineTo(s * 0.63f, s * 0.28f)
-                    cubicTo(s * 0.65f, s * 0.20f, s * 0.62f, s * 0.14f, s * 0.56f, s * 0.12f)
-                    cubicTo(s * 0.52f, s * 0.11f, s * 0.50f, s * 0.13f, s * 0.49f, s * 0.17f)
-                    cubicTo(s * 0.47f, s * 0.28f, s * 0.43f, s * 0.38f, s * 0.35f, s * 0.48f)
-                }
-                drawPath(thumb, tint, style = stroke)
-            }
-            PhoebeIcon.ThumbsDown -> {
-                drawRoundRect(
-                    tint,
-                    topLeft = Offset(s * 0.16f, s * 0.18f),
-                    size = Size(s * 0.16f, s * 0.34f),
-                    cornerRadius = CornerRadius(s * 0.04f, s * 0.04f),
-                    style = stroke,
-                )
-                val thumb = Path().apply {
-                    moveTo(s * 0.34f, s * 0.20f)
-                    lineTo(s * 0.64f, s * 0.20f)
-                    cubicTo(s * 0.72f, s * 0.20f, s * 0.76f, s * 0.25f, s * 0.78f, s * 0.32f)
-                    lineTo(s * 0.84f, s * 0.50f)
-                    cubicTo(s * 0.86f, s * 0.56f, s * 0.82f, s * 0.60f, s * 0.76f, s * 0.60f)
-                    lineTo(s * 0.60f, s * 0.60f)
-                    lineTo(s * 0.63f, s * 0.72f)
-                    cubicTo(s * 0.65f, s * 0.80f, s * 0.62f, s * 0.86f, s * 0.56f, s * 0.88f)
-                    cubicTo(s * 0.52f, s * 0.89f, s * 0.50f, s * 0.87f, s * 0.49f, s * 0.83f)
-                    cubicTo(s * 0.47f, s * 0.72f, s * 0.43f, s * 0.62f, s * 0.35f, s * 0.52f)
-                }
-                drawPath(thumb, tint, style = stroke)
-            }
-            PhoebeIcon.ChevronUp -> {
-                line(0.25f, 0.62f, 0.50f, 0.38f)
-                line(0.50f, 0.38f, 0.75f, 0.62f)
-            }
-            PhoebeIcon.ChevronDown -> {
-                line(0.25f, 0.38f, 0.50f, 0.62f)
-                line(0.50f, 0.62f, 0.75f, 0.38f)
-            }
-            PhoebeIcon.ChevronRight -> {
-                line(0.38f, 0.25f, 0.62f, 0.50f)
-                line(0.62f, 0.50f, 0.38f, 0.75f)
-            }
-            PhoebeIcon.Bell -> {
-                val body = Path().apply {
-                    moveTo(s * 0.30f, s * 0.68f)
-                    cubicTo(s * 0.36f, s * 0.62f, s * 0.35f, s * 0.50f, s * 0.35f, s * 0.42f)
-                    cubicTo(s * 0.35f, s * 0.25f, s * 0.45f, s * 0.20f, s * 0.50f, s * 0.20f)
-                    cubicTo(s * 0.55f, s * 0.20f, s * 0.65f, s * 0.25f, s * 0.65f, s * 0.42f)
-                    cubicTo(s * 0.65f, s * 0.50f, s * 0.64f, s * 0.62f, s * 0.70f, s * 0.68f)
-                    lineTo(s * 0.30f, s * 0.68f)
-                }
-                drawPath(body, tint, style = stroke)
-                line(0.46f, 0.78f, 0.54f, 0.78f)
-            }
-            PhoebeIcon.Back -> {
-                line(0.62f, 0.22f, 0.34f, 0.50f)
-                line(0.34f, 0.50f, 0.62f, 0.78f)
-            }
-            PhoebeIcon.Forward -> {
-                line(0.38f, 0.22f, 0.66f, 0.50f)
-                line(0.66f, 0.50f, 0.38f, 0.78f)
-            }
-            PhoebeIcon.Music -> {
-                line(0.48f, 0.30f, 0.48f, 0.72f)
-                line(0.76f, 0.22f, 0.76f, 0.64f)
-                line(0.48f, 0.30f, 0.76f, 0.22f)
-                line(0.48f, 0.42f, 0.76f, 0.34f)
-                drawCircle(tint, radius = s * 0.095f, center = p(0.36f, 0.75f), style = stroke)
-                drawCircle(tint, radius = s * 0.095f, center = p(0.64f, 0.67f), style = stroke)
-            }
-            PhoebeIcon.Lyrics -> {
-                line(0.25f, 0.28f, 0.75f, 0.28f)
-                line(0.20f, 0.45f, 0.80f, 0.45f)
-                line(0.28f, 0.62f, 0.72f, 0.62f)
-                drawCircle(tint, radius = s * 0.035f, center = p(0.18f, 0.28f))
-                drawCircle(tint, radius = s * 0.035f, center = p(0.82f, 0.62f))
-            }
-            PhoebeIcon.Previous -> {
-                line(0.22f, 0.24f, 0.22f, 0.76f)
-                val path = Path().apply {
-                    moveTo(s * 0.78f, s * 0.24f)
-                    lineTo(s * 0.34f, s * 0.50f)
-                    lineTo(s * 0.78f, s * 0.76f)
-                    close()
-                }
-                drawPath(path, tint)
-            }
-            PhoebeIcon.Next -> {
-                line(0.78f, 0.24f, 0.78f, 0.76f)
-                val path = Path().apply {
-                    moveTo(s * 0.22f, s * 0.24f)
-                    lineTo(s * 0.66f, s * 0.50f)
-                    lineTo(s * 0.22f, s * 0.76f)
-                    close()
-                }
-                drawPath(path, tint)
-            }
             PhoebeIcon.Play -> {
                 val path = Path().apply {
                     moveTo(s * 0.34f, s * 0.22f)
@@ -590,55 +256,6 @@ internal fun PhoebeIconView(
             PhoebeIcon.Pause -> {
                 drawRoundRect(tint, topLeft = Offset(s * 0.32f, s * 0.22f), size = Size(s * 0.12f, s * 0.56f), cornerRadius = CornerRadius(s * 0.04f, s * 0.04f))
                 drawRoundRect(tint, topLeft = Offset(s * 0.56f, s * 0.22f), size = Size(s * 0.12f, s * 0.56f), cornerRadius = CornerRadius(s * 0.04f, s * 0.04f))
-            }
-            PhoebeIcon.Volume -> {
-                val speaker = Path().apply {
-                    moveTo(s * 0.18f, s * 0.42f)
-                    lineTo(s * 0.33f, s * 0.42f)
-                    lineTo(s * 0.53f, s * 0.27f)
-                    lineTo(s * 0.53f, s * 0.73f)
-                    lineTo(s * 0.33f, s * 0.58f)
-                    lineTo(s * 0.18f, s * 0.58f)
-                    close()
-                }
-                drawPath(speaker, tint, style = stroke)
-                drawArc(tint, startAngle = -38f, sweepAngle = 76f, useCenter = false, topLeft = Offset(s * 0.54f, s * 0.38f), size = Size(s * 0.20f, s * 0.24f), style = stroke)
-                drawArc(tint, startAngle = -43f, sweepAngle = 86f, useCenter = false, topLeft = Offset(s * 0.58f, s * 0.28f), size = Size(s * 0.30f, s * 0.44f), style = stroke)
-            }
-            PhoebeIcon.Equalizer -> {
-                val centers = listOf(0.22f to 0.64f, 0.40f to 0.36f, 0.58f to 0.54f, 0.76f to 0.25f)
-                centers.forEach { (x, knobY) ->
-                    line(x, 0.18f, x, 0.82f)
-                    drawCircle(tint, radius = s * 0.065f, center = p(x, knobY), style = stroke)
-                }
-            }
-            PhoebeIcon.Cast -> {
-                line(0.20f, 0.28f, 0.80f, 0.28f)
-                line(0.80f, 0.28f, 0.80f, 0.70f)
-                line(0.20f, 0.70f, 0.80f, 0.70f)
-                drawCircle(tint, radius = s * 0.025f, center = p(0.22f, 0.78f))
-                drawArc(tint, startAngle = -90f, sweepAngle = 90f, useCenter = false, topLeft = Offset(s * 0.12f, s * 0.58f), size = Size(s * 0.28f, s * 0.28f), style = stroke)
-                drawArc(tint, startAngle = -90f, sweepAngle = 90f, useCenter = false, topLeft = Offset(s * 0.02f, s * 0.48f), size = Size(s * 0.48f, s * 0.48f), style = stroke)
-            }
-            PhoebeIcon.Download -> {
-                line(0.50f, 0.18f, 0.50f, 0.62f)
-                line(0.32f, 0.46f, 0.50f, 0.64f)
-                line(0.68f, 0.46f, 0.50f, 0.64f)
-                line(0.24f, 0.78f, 0.76f, 0.78f)
-            }
-            PhoebeIcon.Repeat -> {
-                line(0.28f, 0.34f, 0.72f, 0.34f)
-                line(0.72f, 0.34f, 0.62f, 0.24f)
-                line(0.72f, 0.34f, 0.62f, 0.44f)
-                line(0.72f, 0.66f, 0.28f, 0.66f)
-                line(0.28f, 0.66f, 0.38f, 0.56f)
-                line(0.28f, 0.66f, 0.38f, 0.76f)
-            }
-            PhoebeIcon.Drag -> {
-                repeat(3) { row ->
-                    drawCircle(tint, radius = s * 0.035f, center = p(0.42f, 0.32f + row * 0.18f))
-                    drawCircle(tint, radius = s * 0.035f, center = p(0.58f, 0.32f + row * 0.18f))
-                }
             }
             PhoebeIcon.More -> {
                 drawCircle(tint, radius = s * 0.045f, center = p(0.28f, 0.50f))
@@ -668,26 +285,53 @@ internal fun PhoebeIconView(
                 line(0.22f, 0.52f, 0.42f, 0.72f)
                 line(0.42f, 0.72f, 0.80f, 0.30f)
             }
-            PhoebeIcon.Settings -> {
-                val center = p(0.5f, 0.5f)
-                val gear = Path()
-                repeat(16) { i ->
-                    val radius = if (i % 2 == 0) s * 0.36f else s * 0.27f
-                    val angle = -kotlin.math.PI.toFloat() / 2f + i * kotlin.math.PI.toFloat() / 8f
-                    val point = Offset(
-                        center.x + radius * kotlin.math.cos(angle.toDouble()).toFloat(),
-                        center.y + radius * kotlin.math.sin(angle.toDouble()).toFloat(),
-                    )
-                    if (i == 0) {
-                        gear.moveTo(point.x, point.y)
-                    } else {
-                        gear.lineTo(point.x, point.y)
-                    }
-                }
-                gear.close()
-                drawPath(gear, tint, style = stroke)
-                drawCircle(tint, radius = s * 0.12f, center = center, style = stroke)
-            }
+            else -> Unit
         }
     }
 }
+
+private fun PhoebeIcon.drawableResource(filled: Boolean): DrawableResource? =
+    when (this) {
+        PhoebeIcon.Home -> Res.drawable.phoebe_icon_home
+        PhoebeIcon.Search -> Res.drawable.phoebe_icon_search
+        PhoebeIcon.Library -> Res.drawable.phoebe_icon_library
+        PhoebeIcon.Person -> Res.drawable.phoebe_icon_person
+        PhoebeIcon.Calendar -> Res.drawable.phoebe_icon_calendar
+        PhoebeIcon.Book -> Res.drawable.phoebe_icon_book
+        PhoebeIcon.Knife -> Res.drawable.phoebe_icon_knife
+        PhoebeIcon.InterwovenArrows -> Res.drawable.phoebe_icon_interwoven_arrows
+        PhoebeIcon.MoodFace -> Res.drawable.mood_very_good
+        PhoebeIcon.SunglassesFace -> Res.drawable.phoebe_icon_sunglasses_face
+        PhoebeIcon.GenreMasks -> Res.drawable.drama_masks
+        PhoebeIcon.Settings -> Res.drawable.phoebe_icon_settings
+        PhoebeIcon.Plus -> Res.drawable.phoebe_icon_plus
+        PhoebeIcon.Heart -> if (filled) Res.drawable.phoebe_icon_heart_filled else Res.drawable.phoebe_icon_heart_outline
+        PhoebeIcon.ThumbsUp -> Res.drawable.phoebe_icon_thumbs_up
+        PhoebeIcon.ThumbsDown -> Res.drawable.phoebe_icon_thumbs_down
+        PhoebeIcon.ChevronUp -> Res.drawable.phoebe_icon_chevron_up
+        PhoebeIcon.ChevronDown -> Res.drawable.phoebe_icon_chevron_down
+        PhoebeIcon.ChevronRight -> Res.drawable.phoebe_icon_chevron_right
+        PhoebeIcon.Bell -> Res.drawable.phoebe_icon_bell
+        PhoebeIcon.Back -> Res.drawable.phoebe_icon_back
+        PhoebeIcon.Forward -> Res.drawable.phoebe_icon_forward
+        PhoebeIcon.Music -> Res.drawable.phoebe_icon_music
+        PhoebeIcon.Lyrics -> Res.drawable.phoebe_icon_lyrics
+        PhoebeIcon.Previous -> Res.drawable.phoebe_icon_previous
+        PhoebeIcon.Next -> Res.drawable.phoebe_icon_next
+        PhoebeIcon.Volume -> Res.drawable.phoebe_icon_volume
+        PhoebeIcon.Equalizer -> Res.drawable.phoebe_icon_equalizer
+        PhoebeIcon.Queue -> Res.drawable.phoebe_icon_queue
+        PhoebeIcon.Cast -> Res.drawable.phoebe_icon_cast
+        PhoebeIcon.Download -> Res.drawable.phoebe_icon_download
+        PhoebeIcon.Repeat -> Res.drawable.phoebe_icon_repeat
+        PhoebeIcon.Drag -> Res.drawable.phoebe_icon_drag
+        PhoebeIcon.PlaylistPlay,
+        PhoebeIcon.Play,
+        PhoebeIcon.Pause,
+        PhoebeIcon.More,
+        PhoebeIcon.ActiveDot,
+        PhoebeIcon.Grid,
+        PhoebeIcon.Close,
+        PhoebeIcon.Check,
+        -> null
+    }

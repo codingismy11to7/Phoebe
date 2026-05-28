@@ -131,6 +131,39 @@ class PlexClientPlaylistEndToEndTest {
     }
 
     @Test
+    fun movePlaylistItemCanMoveAfterAnotherItem() = runTest {
+        var capturedMethod: String? = null
+        var capturedAfter: String? = null
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/playlists/p1/items/103/move" -> {
+                    capturedMethod = request.method.value
+                    capturedAfter = request.url.parameters["after"]
+                    respond(
+                        content = playlistAddResponseJson(leafCount = 3),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val client = PlexClient(testHttpClient(engine))
+        val server = PlexServer("server", "Plex", "https://plex.example:32400", owned = true)
+
+        client.movePlaylistItem(
+            server = server,
+            token = "token",
+            playlistRatingKey = "p1",
+            playlistItemId = 103,
+            afterPlaylistItemId = 101,
+        )
+
+        assertEquals(HttpMethod.Put.value, capturedMethod)
+        assertEquals("101", capturedAfter)
+    }
+
+    @Test
     fun playlistTracksParsesItemsFromMockPlex() = runTest {
         val engine = MockEngine { request ->
             when (request.url.encodedPath) {

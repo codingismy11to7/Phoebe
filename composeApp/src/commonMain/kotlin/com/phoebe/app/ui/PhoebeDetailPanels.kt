@@ -191,7 +191,7 @@ internal fun DetailBackButton(
             .clickable(enabled = enabled, onClick = onBack),
         contentAlignment = Alignment.Center,
     ) {
-        PhoebeIconView(PhoebeIcon.Back, tint = PhoebeUi.primaryText, modifier = Modifier.size(24.dp))
+        PhoebeIconView(PhoebeIcon.Back, tint = PhoebeUi.primaryText, modifier = Modifier.size(18.dp))
     }
 }
 
@@ -1837,6 +1837,7 @@ internal fun PlaylistDetailPanel(
     onDownloadPlaylist: (Playlist) -> Unit,
     onCancelDownloadPlaylist: (Playlist) -> Unit = {},
     onDeleteDownloadPlaylist: (Playlist) -> Unit = {},
+    onMovePlaylistTrack: (Playlist, Int, Int) -> Unit = { _, _, _ -> },
     onLibraryColumns: (LibraryColumnVisibility) -> Unit,
 ) {
     val tracks = remember(catalog.tracksByParent, playlist.id) {
@@ -1861,10 +1862,6 @@ internal fun PlaylistDetailPanel(
     val preparingTracks = trackListState == null && visibleTracks.isEmpty() &&
         (tracks.isNotEmpty() || searchQuery.isNotBlank())
     val actionTracks = sortedTracks
-    val playVisibleTrack = { visibleIndex: Int ->
-        val (queueTracks, queueIndex) = playbackQueueForVisibleTrack(sortedTracks, visibleTracks, visibleIndex)
-        onPlayTracks(queueTracks, queueIndex)
-    }
     val ratingActions = LocalRatingActions.current
     val favoriteActions = LocalFavoriteActions.current
     val nowPlaying = LocalNowPlaying.current
@@ -1874,11 +1871,34 @@ internal fun PlaylistDetailPanel(
         val listState = RetainedLazyListStates.remember("playlist-detail:${playlist.id}")
         val scrolling by remember(listState) { derivedStateOf { listState.isScrollInProgress } }
         val artworkLoadingEnabled = LocalArtworkLoadingEnabled.current && (useTable || !scrolling)
+        val reorderEnabled = sortBy == LibrarySortBy.PlaylistOrder &&
+            ascending &&
+            searchQuery.isBlank() &&
+            visibleTracks.size > 1
+        val reorderState = rememberPlaylistTrackReorderState(
+            tracks = visibleTracks,
+            enabled = reorderEnabled,
+            listState = listState,
+            rowStep = if (useTable) 64.dp else 72.dp,
+            onMove = { from, to -> onMovePlaylistTrack(playlist, from, to) },
+        )
+        val displayTracks = if (reorderEnabled || reorderState.isDragging) reorderState.tracks else visibleTracks
+        val playDisplayTrack = { visibleIndex: Int ->
+            if (reorderEnabled || reorderState.isDragging) {
+                onPlayTracks(displayTracks, visibleIndex)
+            } else {
+                val (queueTracks, queueIndex) = playbackQueueForVisibleTrack(sortedTracks, visibleTracks, visibleIndex)
+                onPlayTracks(queueTracks, queueIndex)
+            }
+        }
 
         CompositionLocalProvider(LocalArtworkLoadingEnabled provides artworkLoadingEnabled) {
             LazyColumn(
                 state = listState,
-                modifier = Modifier.fillMaxSize().padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 24.dp),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 24.dp)
+                    .then(if (reorderEnabled) reorderState.listModifier() else Modifier),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 item(contentType = "playlist-header") {
@@ -1994,29 +2014,40 @@ internal fun PlaylistDetailPanel(
                     item(contentType = "playlist-track-header") {
                         SongsTableHeader(libraryUi.columns)
                     }
-                    itemsIndexed(visibleTracks, key = { _, t -> t.id }, contentType = { _, _ -> "playlist-track" }) { index, track ->
+                    itemsIndexed(displayTracks, key = { _, t -> t.id }, contentType = { _, _ -> "playlist-track" }) { index, track ->
                         SongRow(
                             track = track,
                             selected = false,
                             columns = libraryUi.columns,
-                            onSelect = { playVisibleTrack(index) },
-                            onPlay = { playVisibleTrack(index) },
+                            onSelect = { playDisplayTrack(index) },
+                            onPlay = { playDisplayTrack(index) },
                             onAddToUpNext = { onAddToUpNext(track) },
                             onDownload = { onDownload(track) },
-                            modifier = Modifier.animateItem(),
+                            modifier = if (reorderEnabled) reorderState.itemModifier(track) else Modifier.animateItem(),
+                            leadingHandle = if (reorderEnabled) {
+                                { PlaylistTrackReorderHandle(reorderState, track, index) }
+                            } else {
+                                null
+                            },
                         )
                     }
                 } else {
-                    itemsIndexed(visibleTracks, key = { _, t -> t.id }, contentType = { _, _ -> "playlist-track" }) { index, track ->
+                    itemsIndexed(displayTracks, key = { _, t -> t.id }, contentType = { _, _ -> "playlist-track" }) { index, track ->
                         MobileSongRow(
                             track = track,
                             columns = libraryUi.columns,
                             isNowPlaying = track.id == nowPlaying.trackId,
                             nowPlayingIsPlaying = nowPlaying.isPlaying,
                             nowPlayingIsBuffering = nowPlaying.isBuffering,
-                            onPlay = { playVisibleTrack(index) },
+                            onPlay = { playDisplayTrack(index) },
                             onAddToUpNext = { onAddToUpNext(track) },
                             onDownload = { onDownload(track) },
+                            modifier = if (reorderEnabled) reorderState.itemModifier(track) else Modifier,
+                            leadingHandle = if (reorderEnabled) {
+                                { PlaylistTrackReorderHandle(reorderState, track, index) }
+                            } else {
+                                null
+                            },
                         )
                     }
                 }

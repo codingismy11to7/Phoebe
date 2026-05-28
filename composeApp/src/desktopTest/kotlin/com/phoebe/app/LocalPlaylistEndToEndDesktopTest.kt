@@ -81,7 +81,18 @@ class LocalPlaylistEndToEndDesktopTest {
         val playlistTracks = catalog.tracksForPlaylist(null, playlist)
         assertEquals(listOf("beta", "alpha"), playlistTracks.map { it.title })
 
-        val m3u8 = PlaylistExporter.export(playlistTracks, PlaylistExportFormat.M3U8)
+        assertTrue(catalog.movePlaylistTrack(null, playlist, fromIndex = 1, toIndex = 0))
+        assertEquals(
+            listOf("alpha", "beta"),
+            catalog.tracksForPlaylist(null, playlist).map { it.title },
+        )
+        catalog.refreshAggregated(session = null)
+        assertEquals(
+            listOf("alpha", "beta"),
+            catalog.tracksForPlaylist(null, playlist).map { it.title },
+        )
+
+        val m3u8 = PlaylistExporter.export(catalog.tracksForPlaylist(null, playlist), PlaylistExportFormat.M3U8)
         val m3u8File = storageRoot.resolve("exports/Road Mix.m3u8")
         m3u8File.parentFile?.mkdirs()
         m3u8File.writeText(m3u8)

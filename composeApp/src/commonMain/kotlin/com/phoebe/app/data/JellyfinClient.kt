@@ -634,6 +634,23 @@ open class JellyfinClient(
         if (!response.status.isSuccess()) error("Jellyfin playlist add failed (${response.status.value}): ${response.bodyAsText().take(200)}")
     }
 
+    suspend fun movePlaylistItem(
+        server: PlexServer,
+        token: String,
+        userId: String,
+        playlistId: String,
+        itemId: String,
+        newIndex: Int,
+    ) {
+        val response = httpClient.post("${server.uri}/Playlists/$playlistId/Items/$itemId/Move/$newIndex") {
+            jellyfinAuth(token)
+            q("userId", userId)
+        }
+        if (!response.status.isSuccess()) {
+            error("${family.displayName} playlist move failed (${response.status.value}): ${response.bodyAsText().take(200)}")
+        }
+    }
+
     suspend fun setFavorite(server: PlexServer, token: String, itemId: String, favorite: Boolean) {
         val path = if (family == EmbyFamily.Emby) {
             error("Emby favorites require a user id.")

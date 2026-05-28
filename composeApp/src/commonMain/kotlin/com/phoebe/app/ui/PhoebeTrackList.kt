@@ -62,6 +62,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -185,6 +186,7 @@ internal fun TrackList(
     onDownload: (Track) -> Unit,
     libraryColumns: LibraryColumnVisibility = FullTrackMetadataColumns,
     showLoadingWhenEmpty: Boolean = true,
+    onMoveTrack: ((Int, Int) -> Unit)? = null,
 ) {
     if (tracks.isEmpty()) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -197,7 +199,21 @@ internal fun TrackList(
     }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val useTable = maxWidth >= 640.dp
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(if (useTable) 2.dp else 10.dp)) {
+        val listState = rememberLazyListState()
+        val reorderEnabled = onMoveTrack != null && tracks.size > 1
+        val reorderState = rememberPlaylistTrackReorderState(
+            tracks = tracks,
+            enabled = reorderEnabled,
+            listState = listState,
+            rowStep = if (useTable) 56.dp else 72.dp,
+            onMove = { from, to -> onMoveTrack?.invoke(from, to) },
+        )
+        val displayTracks = if (reorderEnabled || reorderState.isDragging) reorderState.tracks else tracks
+        LazyColumn(
+            state = listState,
+            modifier = if (reorderEnabled) reorderState.listModifier() else Modifier,
+            verticalArrangement = Arrangement.spacedBy(if (useTable) 2.dp else 10.dp),
+        ) {
             if (catalogRefreshing) {
                 item(contentType = "loading") { CatalogLoadingStrip(Modifier.padding(bottom = 4.dp)) }
             }
@@ -205,27 +221,37 @@ internal fun TrackList(
                 item(contentType = "track-header") {
                     SongsTableHeader(libraryColumns)
                 }
-                itemsIndexed(tracks, key = { _, track -> track.id }, contentType = { _, _ -> "track" }) { index, track ->
+                itemsIndexed(displayTracks, key = { _, track -> track.id }, contentType = { _, _ -> "track" }) { index, track ->
                     SongRow(
                         track = track,
                         selected = false,
                         columns = libraryColumns,
-                        onSelect = { onPlayTracks(tracks, index) },
-                        onPlay = { onPlayTracks(tracks, index) },
+                        onSelect = { onPlayTracks(displayTracks, index) },
+                        onPlay = { onPlayTracks(displayTracks, index) },
                         onAddToUpNext = { onAddToUpNext(track) },
                         onDownload = { onDownload(track) },
-                        modifier = Modifier.animateItem(),
+                        modifier = if (reorderEnabled) reorderState.itemModifier(track) else Modifier.animateItem(),
+                        leadingHandle = if (reorderEnabled) {
+                            { PlaylistTrackReorderHandle(reorderState, track, index) }
+                        } else {
+                            null
+                        },
                     )
                 }
             } else {
-                itemsIndexed(tracks, key = { _, track -> track.id }, contentType = { _, _ -> "track" }) { index, track ->
+                itemsIndexed(displayTracks, key = { _, track -> track.id }, contentType = { _, _ -> "track" }) { index, track ->
                     ContentTrackRow(
                         track = track,
                         libraryColumns = libraryColumns,
-                        onPlay = { onPlayTracks(tracks, index) },
+                        onPlay = { onPlayTracks(displayTracks, index) },
                         onAddToUpNext = { onAddToUpNext(track) },
                         onDownload = { onDownload(track) },
-                        modifier = Modifier.animateItem(),
+                        modifier = if (reorderEnabled) reorderState.itemModifier(track) else Modifier.animateItem(),
+                        leadingHandle = if (reorderEnabled) {
+                            { PlaylistTrackReorderHandle(reorderState, track, index) }
+                        } else {
+                            null
+                        },
                     )
                 }
             }
@@ -248,6 +274,7 @@ internal fun ContentTrackRow(
     nowPlayingIsBuffering: Boolean = false,
     playCount: Long? = null,
     sharedKey: String? = null,
+    leadingHandle: (@Composable () -> Unit)? = null,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     val cols = libraryColumns
@@ -275,7 +302,8 @@ internal fun ContentTrackRow(
         }
     }
     val playlistDragEnabled = LocalPlaylistDragEnabled.current
-    Box(if (playlistDragEnabled) modifier.draggableSong(track) else modifier) {
+    val showPlaylistDragHandle = playlistDragEnabled && leadingHandle == null
+    Box(if (showPlaylistDragHandle) modifier.draggableSong(track) else modifier) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -289,7 +317,9 @@ internal fun ContentTrackRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (playlistDragEnabled) {
+            if (leadingHandle != null) {
+                leadingHandle()
+            } else if (showPlaylistDragHandle) {
                 Box(
                     Modifier
                         .draggableSong(track, immediate = true)

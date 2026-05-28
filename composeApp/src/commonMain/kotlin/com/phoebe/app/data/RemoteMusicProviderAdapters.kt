@@ -223,6 +223,17 @@ class NavidromeProviderAdapter(
         )
     }
 
+    override suspend fun replacePlaylistTracks(session: PlexSession, playlist: Playlist, tracks: List<Track>): Boolean =
+        runCatching {
+            client.replacePlaylistTracks(
+                server = session.selectedServer ?: return false,
+                username = session.userName,
+                password = session.token,
+                playlistId = playlist.id.removePrefix("navidrome:"),
+                itemIds = tracks.map { it.id.removePrefix("navidrome:") },
+            )
+        }.isSuccess
+
     override suspend fun setFavorite(session: PlexSession, itemId: String, favorite: Boolean, kind: ProviderItemKind): Boolean =
         runCatching {
             client.setFavorite(session.selectedServer ?: return false, session.userName, session.token, itemId.removePrefix("navidrome:"), favorite, kind)

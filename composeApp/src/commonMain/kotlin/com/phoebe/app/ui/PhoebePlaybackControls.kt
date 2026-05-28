@@ -274,7 +274,13 @@ internal fun GlassIcon(icon: PhoebeIcon, description: String) {
 }
 
 @Composable
-internal fun TransportIcon(icon: PhoebeIcon, description: String, onClick: () -> Unit = {}, active: Boolean = false) {
+internal fun TransportIcon(
+    icon: PhoebeIcon,
+    description: String,
+    onClick: () -> Unit = {},
+    active: Boolean = false,
+    iconSize: Dp = 20.dp,
+) {
     Box(
         Modifier
             .size(44.dp)
@@ -284,7 +290,7 @@ internal fun TransportIcon(icon: PhoebeIcon, description: String, onClick: () ->
             .semantics { contentDescription = description },
         contentAlignment = Alignment.Center,
     ) {
-        PhoebeIconView(icon, tint = if (active) PhoebeUi.accentLight else PhoebeUi.primaryText, modifier = Modifier.size(20.dp))
+        PhoebeIconView(icon, tint = if (active) PhoebeUi.accentLight else PhoebeUi.primaryText, modifier = Modifier.size(iconSize))
     }
 }
 

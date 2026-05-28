@@ -1752,6 +1752,7 @@ internal fun SongRow(
     onAddToUpNext: (() -> Unit)? = null,
     onDownload: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
+    leadingHandle: (@Composable () -> Unit)? = null,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     val hasMenu = true
@@ -1764,11 +1765,12 @@ internal fun SongRow(
     val canLike = likeActions.likesEnabled && track.canTogglePlexLike()
     val liked = likeActions.isLiked(track)
     val downloaded = downloads.isComplete(track)
+    val showPlaylistDragHandle = playlistDragEnabled && leadingHandle == null
     Row(
         modifier
             .fillMaxWidth()
             .playTrackTarget(track)
-            .then(if (playlistDragEnabled) Modifier.draggableSong(track) else Modifier)
+            .then(if (showPlaylistDragHandle) Modifier.draggableSong(track) else Modifier)
             .openContextMenuOnSecondaryClick(enabled = hasMenu) { menuExpanded = true }
             .clip(RoundedCornerShape(10.dp))
             .clickable(onClick = onSelect)
@@ -1784,7 +1786,9 @@ internal fun SongRow(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(modifier = Modifier.weight(2.2f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            if (playlistDragEnabled) {
+            if (leadingHandle != null) {
+                leadingHandle()
+            } else if (showPlaylistDragHandle) {
                 // Immediate-drag handle. Visible target so users discover that songs can be
                 // dragged onto sidebar playlists without having to long-press the row.
                 Box(
@@ -1796,7 +1800,13 @@ internal fun SongRow(
                     PhoebeIconView(PhoebeIcon.Drag, tint = PhoebeUi.mutedText, modifier = Modifier.size(15.dp))
                 }
             }
-            Box(Modifier.size(42.dp).sharedArtworkTransition("song:${track.id}").clickable(onClick = onPlay), contentAlignment = Alignment.Center) {
+            Box(
+                Modifier
+                    .size(42.dp)
+                    .sharedArtworkTransition("song:${track.id}")
+                    .clickable(onClick = onPlay),
+                contentAlignment = Alignment.Center,
+            ) {
                 TrackArtworkImage(
                     track,
                     Modifier.fillMaxSize(),

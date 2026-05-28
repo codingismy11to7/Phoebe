@@ -2183,6 +2183,14 @@ class CatalogRepository(
         return front + tracks.filterNot { it.id in frontIds }
     }
 
+    private fun <T> List<T>.moved(from: Int, to: Int): List<T> {
+        if (from !in indices || to !in indices) return this
+        val copy = toMutableList()
+        val item = copy.removeAt(from)
+        copy.add(to, item)
+        return copy
+    }
+
     private fun mergeTrackLists(existing: List<Track>, incoming: List<Track>): List<Track> {
         if (existing.isEmpty()) return incoming.distinctBy { it.id }
         if (incoming.isEmpty()) return existing
@@ -4565,6 +4573,104 @@ class CatalogRepository(
             snapshot.copy(playlists = updatedPlaylists)
         }
         publish(nextSnapshot, persist = true)
+    }
+
+    suspend fun movePlaylistTrack(
+        session: PlexSession?,
+        playlist: Playlist,
+        fromIndex: Int,
+        toIndex: Int,
+    ): Boolean {
+        if (fromIndex == toIndex) return true
+        var snapshot = mutableCatalog.value
+        val playlistId = playlist.id
+        var existing = snapshot.tracksByParent[playlistId].orEmpty()
+        if (playlistId.startsWith("plex:") && existing.any { it.playlistItemId == null }) {
+            runCatching {
+                refetchPlaylistTracksFromPlex(session, playlist, showRefreshing = false)
+            }.onFailure { error ->
+                PhoebeLog.d("CatalogRepository") { "movePlaylistTrack Plex refetch failed for '${playlist.title}': ${error.message}" }
+            }
+            snapshot = mutableCatalog.value
+            existing = snapshot.tracksByParent[playlistId].orEmpty()
+        }
+        if (fromIndex !in existing.indices || toIndex !in existing.indices) return false
+
+        val movedTrackId = existing[fromIndex].id
+        val updated = existing.moved(fromIndex, toIndex)
+        pendingPlaylistPrependedTrackIds.remove(playlistId)
+        publish(
+            snapshot.copy(
+                playlists = snapshot.playlists.map {
+                    if (it.id == playlistId) it.copy(trackCount = updated.size) else it
+                },
+                tracksByParent = snapshot.tracksByParent + (playlistId to updated),
+            ),
+            persist = true,
+        )
+        syncMovedPlaylistTrack(
+            session = session,
+            playlist = playlist,
+            movedTrackId = movedTrackId,
+            updatedTracks = updated,
+        )
+        return true
+    }
+
+    private suspend fun syncMovedPlaylistTrack(
+        session: PlexSession?,
+        playlist: Playlist,
+        movedTrackId: String,
+        updatedTracks: List<Track>,
+    ): Boolean {
+        if (playlist.isLocalPlaylist()) return true
+        val remotePrefix = playlist.remoteProviderPrefix() ?: return false
+        if (remotePrefix == "plex") {
+            if (session?.supportsPlexPlaylists() != true) return false
+            val server = session.selectedServer ?: return false
+            val token = session.serverAuthToken() ?: return false
+            val playlistRating = plexRatingKey(playlist.id) ?: return false
+            val movedIndex = updatedTracks.indexOfFirst { it.id == movedTrackId }
+            if (movedIndex < 0) return false
+            val movedItemId = updatedTracks[movedIndex].playlistItemId ?: return false
+            val afterItemId = updatedTracks.getOrNull(movedIndex - 1)?.playlistItemId
+            return runCatching {
+                plexClient.movePlaylistItem(
+                    server = server,
+                    token = token,
+                    playlistRatingKey = playlistRating,
+                    playlistItemId = movedItemId,
+                    afterPlaylistItemId = afterItemId,
+                )
+            }.onFailure { error ->
+                PhoebeLog.d("CatalogRepository") { "movePlaylistTrack Plex sync failed for '${playlist.title}': ${error.message}" }
+            }.isSuccess
+        }
+        if (session?.providerType?.catalogPrefix != remotePrefix || session.supportsRemotePlaylists() != true) return false
+        if (session.isEmbyFamily()) {
+            val server = session.selectedServer ?: return false
+            val userId = session.userId ?: return false
+            val movedIndex = updatedTracks.indexOfFirst { it.id == movedTrackId }
+            if (movedIndex < 0) return false
+            val remoteClient = if (remotePrefix == "emby") embyClient else jellyfinClient
+            return runCatching {
+                remoteClient.movePlaylistItem(
+                    server = server,
+                    token = session.token,
+                    userId = userId,
+                    playlistId = playlist.id.removePrefix("$remotePrefix:"),
+                    itemId = movedTrackId.removePrefix("$remotePrefix:"),
+                    newIndex = movedIndex,
+                )
+            }.onFailure { error ->
+                PhoebeLog.d("CatalogRepository") { "movePlaylistTrack $remotePrefix sync failed for '${playlist.title}': ${error.message}" }
+            }.isSuccess
+        }
+        return runCatching {
+            providerRegistry.adapterFor(session)?.replacePlaylistTracks(session, playlist, updatedTracks) == true
+        }.onFailure { error ->
+            PhoebeLog.d("CatalogRepository") { "movePlaylistTrack $remotePrefix sync failed for '${playlist.title}': ${error.message}" }
+        }.getOrDefault(false)
     }
 
     private suspend fun syncAddedPlexTracksToTop(
