@@ -12,6 +12,9 @@ import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.TrackMetadataUpdate
+import com.phoebe.app.platform.currentTimeMs
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 class JellyfinProviderAdapter(
     private val client: JellyfinClient,
@@ -153,6 +156,10 @@ class EmbyProviderAdapter(
 class NavidromeProviderAdapter(
     private val client: SubsonicClient,
 ) : MusicProviderAdapter {
+    private val scrobbleMutex = Mutex()
+    private var activeScrobbleKey: NavidromeScrobbleKey? = null
+    private var submittedScrobbleKey: NavidromeScrobbleKey? = null
+
     override val providerType = MediaProviderType.Navidrome
     override val capabilities = ProviderCapabilities(
         pagedCatalog = true,
@@ -227,10 +234,52 @@ class NavidromeProviderAdapter(
         }.isSuccess
 
     override suspend fun reportPlayback(session: PlexSession, track: Track, positionMs: Long, isPaused: Boolean, event: JellyfinPlaybackEvent) {
-        if (event != JellyfinPlaybackEvent.Stop) return
-        client.scrobble(session.selectedServer ?: return, session.userName, session.token, track.id.removePrefix("navidrome:"), submission = true)
+        val server = session.selectedServer ?: return
+        val itemId = track.id.removePrefix("navidrome:").takeIf { it.isNotBlank() } ?: return
+        val scrobbleKey = NavidromeScrobbleKey(server.uri, session.userName, itemId)
+        scrobbleMutex.withLock {
+            if (activeScrobbleKey != scrobbleKey || event == JellyfinPlaybackEvent.Start) {
+                activeScrobbleKey = scrobbleKey
+                submittedScrobbleKey = null
+            }
+
+            val reachedPlayedThreshold = track.hasReachedSubsonicScrobbleThreshold(positionMs)
+            if (event != JellyfinPlaybackEvent.Stop && !reachedPlayedThreshold) return@withLock
+            if (submittedScrobbleKey == scrobbleKey) return@withLock
+
+            client.scrobble(
+                server = server,
+                username = session.userName,
+                password = session.token,
+                itemId = itemId,
+                submission = true,
+                timeMs = estimatedPlaybackStartMs(positionMs),
+            )
+            submittedScrobbleKey = scrobbleKey
+        }
     }
 }
+
+private data class NavidromeScrobbleKey(
+    val serverUri: String,
+    val username: String,
+    val itemId: String,
+)
+
+private fun Track.hasReachedSubsonicScrobbleThreshold(positionMs: Long): Boolean {
+    val duration = durationMs.takeIf { it > 0L }
+    val played = positionMs.coerceAtLeast(0L)
+    val threshold = duration
+        ?.let { (it * SubsonicScrobblePlayedFraction).toLong().coerceAtMost(SubsonicScrobbleMaxThresholdMs) }
+        ?: SubsonicScrobbleMaxThresholdMs
+    return played >= threshold
+}
+
+private fun estimatedPlaybackStartMs(positionMs: Long): Long =
+    (currentTimeMs() - positionMs.coerceAtLeast(0L)).coerceAtLeast(0L)
+
+private const val SubsonicScrobblePlayedFraction = 0.5
+private const val SubsonicScrobbleMaxThresholdMs = 4L * 60L * 1000L
 
 class MusicAssistantProviderAdapter(
     private val client: MusicAssistantClient,

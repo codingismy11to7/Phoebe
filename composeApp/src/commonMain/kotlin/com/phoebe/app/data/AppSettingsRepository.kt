@@ -4,6 +4,7 @@ import app.cash.sqldelight.async.coroutines.awaitAsOneOrNull
 import com.phoebe.app.db.PhoebeDatabase
 import com.phoebe.app.domain.AppSettings
 import com.phoebe.app.domain.EqualizerProfile
+import com.phoebe.app.domain.ListenBrainzSettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -69,6 +70,18 @@ class AppSettingsRepository(
         }
     }
 
+    suspend fun setListenBrainzSettings(settings: ListenBrainzSettings) {
+        updateAndSave { current ->
+            current.copy(listenBrainz = settings.normalized())
+        }
+    }
+
+    suspend fun updateListenBrainzSettings(transform: (ListenBrainzSettings) -> ListenBrainzSettings) {
+        updateAndSave { current ->
+            current.copy(listenBrainz = transform(current.listenBrainz).normalized())
+        }
+    }
+
     fun resetInMemoryState() {
         mutableState.value = AppSettings.Default
     }
@@ -83,6 +96,7 @@ class AppSettingsRepository(
                     notifyWhenDownloadFinishes = normalized.notifyWhenDownloadFinishes.toDb(),
                     persistEqualizerSettings = normalized.persistEqualizerSettings.toDb(),
                     equalizerProfile = json.encodeToString(normalized.equalizerProfile),
+                    listenBrainzSettings = json.encodeToString(normalized.listenBrainz),
                 )
                 mutableState.value = normalized
             }
@@ -96,6 +110,7 @@ class AppSettingsRepository(
             notifyWhenDownloadFinishes = notifyWhenDownloadFinishes.toBool(),
             persistEqualizerSettings = persistEqualizerSettings.toBool(),
             equalizerProfile = decodeEqualizerProfile(equalizerProfile),
+            listenBrainz = decodeListenBrainzSettings(listenBrainzSettings),
         ).normalized()
 
     private fun decodeEqualizerProfile(value: String): EqualizerProfile =
@@ -105,6 +120,15 @@ class AppSettingsRepository(
             EqualizerProfile.Default
         } catch (_: IllegalArgumentException) {
             EqualizerProfile.Default
+        }
+
+    private fun decodeListenBrainzSettings(value: String): ListenBrainzSettings =
+        try {
+            json.decodeFromString<ListenBrainzSettings>(value).normalized()
+        } catch (_: SerializationException) {
+            ListenBrainzSettings.Disconnected
+        } catch (_: IllegalArgumentException) {
+            ListenBrainzSettings.Disconnected
         }
 }
 

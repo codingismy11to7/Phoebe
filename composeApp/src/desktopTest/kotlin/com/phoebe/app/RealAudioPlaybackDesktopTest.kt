@@ -1,17 +1,37 @@
 package com.phoebe.app
 
+import com.phoebe.app.data.ListenBrainzClient
+import com.phoebe.app.data.ListenBrainzPlaybackReporter
+import com.phoebe.app.domain.AppSettings
+import com.phoebe.app.domain.ListenBrainzSettings
 import com.phoebe.app.domain.Track
 import com.phoebe.app.player.DesktopAudioPlayer
 import com.phoebe.app.player.DesktopSandboxPlayback
 import com.phoebe.app.player.PlaybackDiagnostics
 import com.phoebe.app.player.PlaybackEnginePath
+import com.phoebe.app.platform.SecureCredentialKey
+import com.phoebe.app.testing.FakeListenBrainzAccountActions
+import com.phoebe.app.testing.FakeSecureCredentialStore
+import com.phoebe.app.testing.testHttpClient
 import com.sun.net.httpserver.HttpServer
+import io.ktor.client.engine.mock.MockEngine
+import io.ktor.client.engine.mock.respond
+import io.ktor.client.request.HttpRequestData
+import io.ktor.http.HttpHeaders
+import io.ktor.http.content.OutgoingContent
+import io.ktor.http.headersOf
 import java.io.File
 import java.net.InetSocketAddress
 import java.util.Collections
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.runBlocking
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 
@@ -384,6 +404,72 @@ class RealAudioPlaybackDesktopTest {
         }
     }
 
+    @Test
+    fun desktopPlaybackFeedsListenBrainzReporterAfterAudibleThreshold() = runBlocking {
+        assumeRealAudioTestsEnabled()
+        val diagnostics = RecordingPlaybackDiagnostics()
+        val player = DesktopAudioPlayer(diagnostics)
+        val reporterScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val submittedBodies = Collections.synchronizedList(mutableListOf<String>())
+        try {
+            val track = fixtureTrack("mdn-t-rex-roar-cc0.mp3", durationMs = 2_500, id = "listenbrainz-real-desktop")
+            val credentialStore = FakeSecureCredentialStore()
+            credentialStore.write(SecureCredentialKey.ListenBrainzUserToken, "token")
+            val settings = MutableStateFlow(
+                AppSettings(
+                    listenBrainz = ListenBrainzSettings(
+                        enabled = true,
+                        username = "ada",
+                        submitNowPlaying = false,
+                        submitCurrentTrackFeedback = false,
+                    ),
+                ),
+            )
+            val nowMs = { 1_700_000_000_000L + player.state.value.positionMs.coerceAtLeast(0L) }
+            val client = ListenBrainzClient(
+                testHttpClient(
+                    MockEngine { request ->
+                        val body = request.bodyText()
+                        submittedBodies += body
+                        respond(
+                            content = """{"status":"ok"}""",
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    },
+                ),
+                baseUrl = "https://listenbrainz.example",
+            )
+            val account = FakeListenBrainzAccountActions(
+                settings = settings,
+                credentialStore = credentialStore,
+                nowMs = nowMs,
+            )
+            ListenBrainzPlaybackReporter(
+                client = client,
+                credentialStore = credentialStore,
+                accountRepository = account,
+                audioPlayer = player,
+                appSettings = settings,
+                nowMs = nowMs,
+            ).start(reporterScope)
+
+            player.play(listOf(track), 0)
+
+            assertTrue(
+                waitUntil(timeoutMs = 30_000L) {
+                    submittedBodies.any { it.contains(""""listen_type":"single"""") }
+                },
+                "Expected real desktop playback to submit a ListenBrainz listen; " +
+                    "state=${player.state.value} engines=${diagnostics.engineEvents()} errors=${diagnostics.errorEvents()}",
+            )
+            assertTrue(submittedBodies.any { it.contains("listenbrainz-real-desktop") })
+            assertEquals(1, account.listenSubmittedCount)
+        } finally {
+            reporterScope.cancel()
+            player.releaseForTests()
+        }
+    }
+
     private fun assumeRealAudioTestsEnabled() {
         assumeTrue("Real audio playback tests are disabled", System.getProperty("phoebe.realAudioTests").toBoolean())
     }
@@ -421,6 +507,13 @@ class RealAudioPlaybackDesktopTest {
         }
         return condition()
     }
+
+    private fun HttpRequestData.bodyText(): String =
+        when (val content = body) {
+            is OutgoingContent.ByteArrayContent -> content.bytes().decodeToString()
+            is OutgoingContent.NoContent -> ""
+            else -> content.toString()
+        }
 
     private data class VolumeSample(
         val outgoingVolume: Float,

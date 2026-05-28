@@ -34,6 +34,7 @@ abstract class SimpleAudioPlayer : AudioPlayer {
     private var playGeneration = 0
     private var crossfadeDurationMs = 0L
     private var crossfadeRequestKey: String? = null
+    private var manualSeekCrossfadeSuppression: ManualSeekCrossfadeSuppression? = null
     protected var equalizerProfile: EqualizerProfile = EqualizerProfile.Default.normalized()
         private set
     protected val isCrossfadeConfigured: Boolean
@@ -69,7 +70,7 @@ abstract class SimpleAudioPlayer : AudioPlayer {
             if (previous.isPlaying && !previous.isBuffering && playWhenReady) {
                 return
             }
-            crossfadeRequestKey = null
+            clearCrossfadeRequestState()
             playWhenReady = true
             mutableState.value = previous.copy(
                 isPlaying = !previous.isBuffering,
@@ -83,7 +84,7 @@ abstract class SimpleAudioPlayer : AudioPlayer {
         }
 
         playGeneration++
-        crossfadeRequestKey = null
+        clearCrossfadeRequestState()
         playWhenReady = true
         val generation = playGeneration
         stopProgressTicker()
@@ -115,7 +116,7 @@ abstract class SimpleAudioPlayer : AudioPlayer {
         val index = startIndex.coerceIn(queue.indices)
         val track = queue.getOrNull(index)
         val generation = ++playGeneration
-        crossfadeRequestKey = null
+        clearCrossfadeRequestState()
         playWhenReady = false
         stopProgressTicker()
         stopCurrentPlaybackImmediately()
@@ -147,7 +148,7 @@ abstract class SimpleAudioPlayer : AudioPlayer {
         val index = if (queue.isEmpty()) -1 else startIndex.coerceIn(queue.indices)
         val track = queue.getOrNull(index)
         playGeneration++
-        crossfadeRequestKey = null
+        clearCrossfadeRequestState()
         playWhenReady = false
         stopProgressTicker()
         stopCurrentPlaybackImmediately()
@@ -202,7 +203,7 @@ abstract class SimpleAudioPlayer : AudioPlayer {
     override fun stopPlayback() {
         playGeneration++
         playWhenReady = false
-        crossfadeRequestKey = null
+        clearCrossfadeRequestState()
         stopProgressTicker()
         stopCurrentPlaybackImmediately()
         val volume = mutableState.value.volume
@@ -289,8 +290,20 @@ abstract class SimpleAudioPlayer : AudioPlayer {
     }
 
     override fun seekTo(positionMs: Long) {
-        mutableState.value = mutableState.value.copy(positionMs = positionMs)
-        seek(positionMs)
+        val current = mutableState.value
+        val boundedPositionMs = positionMs.coerceAtLeast(0L).let { position ->
+            if (current.durationMs > 0L) position.coerceAtMost(current.durationMs) else position
+        }
+        manualSeekCrossfadeSuppression = if (shouldSuppressCrossfadeAfterManualSeek(current, boundedPositionMs)) {
+            ManualSeekCrossfadeSuppression(
+                generation = activePlayGeneration,
+                trackId = current.currentTrack?.id,
+            )
+        } else {
+            null
+        }
+        mutableState.value = current.copy(positionMs = boundedPositionMs)
+        seek(boundedPositionMs)
     }
 
     override fun setShuffle(enabled: Boolean) {
@@ -325,6 +338,9 @@ abstract class SimpleAudioPlayer : AudioPlayer {
 
     override fun setCrossfadeDurationMs(durationMs: Long) {
         crossfadeDurationMs = durationMs.coerceIn(0L, MaxCrossfadeDurationMs)
+        if (crossfadeDurationMs == 0L) {
+            clearCrossfadeRequestState()
+        }
     }
 
     override fun setEqualizer(profile: EqualizerProfile) {
@@ -363,6 +379,7 @@ abstract class SimpleAudioPlayer : AudioPlayer {
             bufferedPositionMs = 0L,
             durationMs = track?.durationMs ?: 0L,
         )
+        manualSeekCrossfadeSuppression = null
         if (isPlaying && track != null && useProgressTicker) {
             startProgressTicker()
         } else {
@@ -539,7 +556,7 @@ abstract class SimpleAudioPlayer : AudioPlayer {
             durationMs = track.durationMs,
             playbackErrorMessage = null,
         )
-        crossfadeRequestKey = null
+        clearCrossfadeRequestState()
     }
 
     protected fun effectiveOutputVolume(): Float {
@@ -573,6 +590,7 @@ abstract class SimpleAudioPlayer : AudioPlayer {
         if (duration <= 0L || !isPlayRequestCurrent(generation)) return
         val current = mutableState.value
         if (!current.isPlaying || current.durationMs <= 0L || current.currentIndex !in current.queue.indices) return
+        if (manualSeekCrossfadeSuppression?.matches(generation, current.currentTrack?.id) == true) return
         if (current.currentIndex >= current.queue.lastIndex && current.repeat != RepeatMode.All) return
         val remaining = current.durationMs - current.positionMs
         if (remaining > duration) return
@@ -604,7 +622,31 @@ abstract class SimpleAudioPlayer : AudioPlayer {
         return false
     }
 
+    private fun clearCrossfadeRequestState() {
+        crossfadeRequestKey = null
+        manualSeekCrossfadeSuppression = null
+    }
+
+    private fun shouldSuppressCrossfadeAfterManualSeek(
+        current: PlayerState,
+        positionMs: Long,
+    ): Boolean {
+        val duration = crossfadeDurationMs
+        if (duration <= 0L || current.durationMs <= 0L) return false
+        if (current.currentTrack == null || current.currentIndex !in current.queue.indices) return false
+        if (current.currentIndex >= current.queue.lastIndex && current.repeat != RepeatMode.All) return false
+        return current.durationMs - positionMs <= duration
+    }
+
     private companion object {
         const val MaxCrossfadeDurationMs = 12_000L
     }
+}
+
+private data class ManualSeekCrossfadeSuppression(
+    val generation: Int,
+    val trackId: String?,
+) {
+    fun matches(generation: Int, trackId: String?): Boolean =
+        this.generation == generation && this.trackId == trackId
 }

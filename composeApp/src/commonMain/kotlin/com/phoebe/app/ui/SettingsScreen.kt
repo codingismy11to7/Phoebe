@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -42,11 +43,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -55,10 +59,13 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.phoebe.app.domain.AppSettings
 import com.phoebe.app.domain.HomeSection
+import com.phoebe.app.domain.ListenBrainzCredentialStorageStatus
 import com.phoebe.app.domain.LibraryUiPreferences
 import com.phoebe.app.domain.PersonalMixPreferences
 import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.providerLabel
+import com.phoebe.app.platform.SecureCredentialAvailability
+import com.phoebe.app.platform.openExternalUrl
 import com.phoebe.app.platform.rememberPickDownloadDirectory
 import kotlin.math.roundToInt
 
@@ -102,6 +109,12 @@ internal fun SettingsDesktopView(
     homeScreenLayoutMode: HomeScreenLayoutMode = HomeScreenLayoutMode.Default,
     onHomeScreenLayoutModeChange: (HomeScreenLayoutMode) -> Unit = {},
     session: PlexSession? = null,
+    listenBrainzCredentialAvailability: SecureCredentialAvailability = SecureCredentialAvailability.Unavailable,
+    onConnectListenBrainz: (String) -> Unit = {},
+    onDisconnectListenBrainz: () -> Unit = {},
+    onListenBrainzSubmitNowPlaying: (Boolean) -> Unit = {},
+    onListenBrainzSubmitListens: (Boolean) -> Unit = {},
+    onListenBrainzSubmitCurrentTrackFeedback: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
     initialCategory: SettingsCategory = SettingsCategory.AudioPlayback,
 ) {
@@ -156,7 +169,16 @@ internal fun SettingsDesktopView(
                         onScanLibraryOnLaunch = onScanLibraryOnLaunch,
                         onPersistEqualizerSettings = onPersistEqualizerSettings,
                     )
-                    SettingsCategory.Account -> AccountSettingsCard(session = session)
+                    SettingsCategory.Account -> AccountSettingsCard(
+                        session = session,
+                        appSettings = appSettings,
+                        listenBrainzCredentialAvailability = listenBrainzCredentialAvailability,
+                        onConnectListenBrainz = onConnectListenBrainz,
+                        onDisconnectListenBrainz = onDisconnectListenBrainz,
+                        onListenBrainzSubmitNowPlaying = onListenBrainzSubmitNowPlaying,
+                        onListenBrainzSubmitListens = onListenBrainzSubmitListens,
+                        onListenBrainzSubmitCurrentTrackFeedback = onListenBrainzSubmitCurrentTrackFeedback,
+                    )
                     SettingsCategory.Library -> {
                         GridSettingsCard(libraryUi.gridColumns, onGridColumns)
                         HomeSettingsCard(libraryUi.homeSections, onHomeSections)
@@ -206,6 +228,12 @@ internal fun SettingsMobileView(
     homeScreenLayoutMode: HomeScreenLayoutMode = HomeScreenLayoutMode.Default,
     onHomeScreenLayoutModeChange: (HomeScreenLayoutMode) -> Unit = {},
     session: PlexSession? = null,
+    listenBrainzCredentialAvailability: SecureCredentialAvailability = SecureCredentialAvailability.Unavailable,
+    onConnectListenBrainz: (String) -> Unit = {},
+    onDisconnectListenBrainz: () -> Unit = {},
+    onListenBrainzSubmitNowPlaying: (Boolean) -> Unit = {},
+    onListenBrainzSubmitListens: (Boolean) -> Unit = {},
+    onListenBrainzSubmitCurrentTrackFeedback: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -216,7 +244,17 @@ internal fun SettingsMobileView(
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
         SectionLabel("ACCOUNT", PhoebeUi.accentLight)
-        AccountSettingsCard(session = session, compact = true)
+        AccountSettingsCard(
+            session = session,
+            appSettings = appSettings,
+            listenBrainzCredentialAvailability = listenBrainzCredentialAvailability,
+            onConnectListenBrainz = onConnectListenBrainz,
+            onDisconnectListenBrainz = onDisconnectListenBrainz,
+            onListenBrainzSubmitNowPlaying = onListenBrainzSubmitNowPlaying,
+            onListenBrainzSubmitListens = onListenBrainzSubmitListens,
+            onListenBrainzSubmitCurrentTrackFeedback = onListenBrainzSubmitCurrentTrackFeedback,
+            compact = true,
+        )
         SectionLabel("APPEARANCE", PhoebeUi.accentLight)
         AppearanceSettingsCard(
             isLightMode,
@@ -990,6 +1028,13 @@ private fun SettingsSwitchRow(
 @Composable
 private fun AccountSettingsCard(
     session: PlexSession?,
+    appSettings: AppSettings,
+    listenBrainzCredentialAvailability: SecureCredentialAvailability,
+    onConnectListenBrainz: (String) -> Unit,
+    onDisconnectListenBrainz: () -> Unit,
+    onListenBrainzSubmitNowPlaying: (Boolean) -> Unit,
+    onListenBrainzSubmitListens: (Boolean) -> Unit,
+    onListenBrainzSubmitCurrentTrackFeedback: (Boolean) -> Unit,
     compact: Boolean = false,
 ) {
     val signedIn = session?.token?.isNotBlank() == true
@@ -1057,8 +1102,194 @@ private fun AccountSettingsCard(
                 }
             }
         }
+        Spacer(Modifier.height(if (compact) 16.dp else 18.dp))
+        ListenBrainzSettingsSection(
+            appSettings = appSettings,
+            credentialAvailability = listenBrainzCredentialAvailability,
+            onConnect = onConnectListenBrainz,
+            onDisconnect = onDisconnectListenBrainz,
+            onSubmitNowPlaying = onListenBrainzSubmitNowPlaying,
+            onSubmitListens = onListenBrainzSubmitListens,
+            onSubmitCurrentTrackFeedback = onListenBrainzSubmitCurrentTrackFeedback,
+            compact = compact,
+        )
     }
 }
+
+@Composable
+private fun ListenBrainzSettingsSection(
+    appSettings: AppSettings,
+    credentialAvailability: SecureCredentialAvailability,
+    onConnect: (String) -> Unit,
+    onDisconnect: () -> Unit,
+    onSubmitNowPlaying: (Boolean) -> Unit,
+    onSubmitListens: (Boolean) -> Unit,
+    onSubmitCurrentTrackFeedback: (Boolean) -> Unit,
+    compact: Boolean,
+) {
+    val settings = appSettings.listenBrainz
+    val nowMs = LocalNowMs.current
+    var token by remember(settings.connected) { mutableStateOf("") }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(PhoebeUi.subtleFill)
+            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(12.dp))
+            .padding(horizontal = 14.dp, vertical = 14.dp),
+    ) {
+        Text("ListenBrainz", color = PhoebeUi.primaryText, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        Text(
+            if (settings.connected) "Scrobbling as ${settings.username}" else "Connect first-party ListenBrainz scrobbling",
+            color = PhoebeUi.secondaryText,
+            fontSize = 12.sp,
+            modifier = Modifier.padding(top = 3.dp, bottom = 12.dp),
+        )
+        if (settings.connected) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(PhoebeUi.panel.copy(alpha = 0.52f))
+                    .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(10.dp))
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+            ) {
+                settings.username?.let { AccountDetailRow(label = "Username", value = it) }
+                AccountDetailRow(label = "Storage", value = listenBrainzStorageLabel(settings.storageStatus, credentialAvailability))
+                settings.lastNowPlayingSubmittedAtMs?.let {
+                    AccountDetailRow(label = "Last now playing", value = formatLastPlayed(it, nowMs))
+                }
+                settings.lastListenSubmittedAtMs?.let {
+                    AccountDetailRow(label = "Last listen", value = formatLastPlayed(it, nowMs))
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            SettingsSwitchRow(
+                title = "Now playing",
+                subtitle = "Show the current track on ListenBrainz",
+                checked = settings.submitNowPlaying,
+                onCheckedChange = onSubmitNowPlaying,
+            )
+            SettingsSwitchRow(
+                title = "Listen history",
+                subtitle = "Submit after half the track or four minutes",
+                checked = settings.submitListens,
+                onCheckedChange = onSubmitListens,
+            )
+            SettingsSwitchRow(
+                title = "Current-track feedback",
+                subtitle = "Enable Love, Hate, and Clear when ListenBrainz returns an MSID",
+                checked = settings.submitCurrentTrackFeedback,
+                onCheckedChange = onSubmitCurrentTrackFeedback,
+            )
+            (settings.lastListenError ?: settings.lastError)?.let { error ->
+                Text(error, color = PhoebeUi.accentLight, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+            }
+            TextButton(onClick = onDisconnect, modifier = Modifier.align(Alignment.End)) {
+                Text("Disconnect", color = PhoebeUi.accentLight, fontWeight = FontWeight.SemiBold)
+            }
+        } else {
+            ListenBrainzTokenField(
+                token = token,
+                onTokenChange = { token = it },
+                compact = compact,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                listenBrainzStorageNote(credentialAvailability),
+                color = PhoebeUi.secondaryText,
+                fontSize = 12.sp,
+            )
+            settings.lastError?.let { error ->
+                Text(error, color = PhoebeUi.accentLight, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(top = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = { openExternalUrl(ListenBrainzSettingsUrl) }) {
+                    Text("Get token", color = PhoebeUi.secondaryText)
+                }
+                if (token.isNotBlank()) {
+                    TextButton(onClick = { token = "" }) {
+                        Text("Clear", color = PhoebeUi.secondaryText)
+                    }
+                }
+                TextButton(
+                    enabled = token.isNotBlank() && credentialAvailability.canWrite,
+                    onClick = {
+                        val submittedToken = token
+                        token = ""
+                        onConnect(submittedToken)
+                    },
+                ) {
+                    Text(
+                        "Connect",
+                        color = if (token.isNotBlank() && credentialAvailability.canWrite) PhoebeUi.accentLight else PhoebeUi.mutedText,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ListenBrainzTokenField(
+    token: String,
+    onTokenChange: (String) -> Unit,
+    compact: Boolean,
+) {
+    BasicTextField(
+        value = token,
+        onValueChange = onTokenChange,
+        singleLine = true,
+        visualTransformation = PasswordVisualTransformation(),
+        textStyle = TextStyle(color = PhoebeUi.primaryText, fontSize = if (compact) 12.sp else 13.sp),
+        cursorBrush = SolidColor(PhoebeUi.accentLight),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(42.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(PhoebeUi.panel.copy(alpha = 0.58f))
+            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(10.dp))
+            .padding(horizontal = 12.dp, vertical = 12.dp),
+        decorationBox = { innerTextField ->
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
+                if (token.isBlank()) {
+                    Text("User token", color = PhoebeUi.mutedText, fontSize = if (compact) 12.sp else 13.sp)
+                }
+                innerTextField()
+            }
+        },
+    )
+}
+
+private fun listenBrainzStorageLabel(
+    status: ListenBrainzCredentialStorageStatus,
+    availability: SecureCredentialAvailability,
+): String = when (status) {
+    ListenBrainzCredentialStorageStatus.PersistentSecure -> availability.description
+    ListenBrainzCredentialStorageStatus.PersistentBrowser -> availability.description
+    ListenBrainzCredentialStorageStatus.SessionOnly -> "Session-only"
+    ListenBrainzCredentialStorageStatus.Unavailable -> "Unavailable"
+    ListenBrainzCredentialStorageStatus.Unknown -> availability.description
+}
+
+private fun listenBrainzStorageNote(availability: SecureCredentialAvailability): String =
+    when (availability.status) {
+        ListenBrainzCredentialStorageStatus.PersistentSecure ->
+            "Token storage: ${availability.description}."
+        ListenBrainzCredentialStorageStatus.PersistentBrowser ->
+            "Token storage: encrypted browser storage. It survives reloads for this origin, but it is not a system keychain."
+        ListenBrainzCredentialStorageStatus.SessionOnly ->
+            "Token storage: session-only. Web users reconnect after reload."
+        ListenBrainzCredentialStorageStatus.Unavailable ->
+            availability.description
+        ListenBrainzCredentialStorageStatus.Unknown ->
+            "Token storage status will be checked when you connect."
+    }
 
 @Composable
 private fun AccountDetailRow(
@@ -1098,6 +1329,8 @@ private fun GenericPlaceholderCard(title: String, compact: Boolean = false) {
         Text("This section is not implemented yet.", color = PhoebeUi.secondaryText, fontSize = 13.sp)
     }
 }
+
+private const val ListenBrainzSettingsUrl = "https://listenbrainz.org/settings/"
 
 @Composable
 private fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {

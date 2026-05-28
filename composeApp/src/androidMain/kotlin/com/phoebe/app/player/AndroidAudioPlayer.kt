@@ -29,6 +29,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import kotlin.math.abs
 
 actual fun createAudioPlayer(): AudioPlayer = AndroidAudioPlayerHolder.instance
 
@@ -61,6 +62,16 @@ private data class LoadedPlatformQueue(
         (firstAppIndex + platformIndex).takeIf { platformIndex in 0 until itemCount }
 }
 
+private data class PendingPlatformSeek(
+    val generation: Int,
+    val trackId: String?,
+    val positionMs: Long,
+    val startedAtMs: Long,
+) {
+    fun matches(generation: Int, trackId: String?): Boolean =
+        this.generation == generation && this.trackId == trackId
+}
+
 internal class AndroidAudioPlayer(
     private val diagnostics: PlaybackDiagnostics = AndroidPlaybackDiagnostics.diagnostics,
 ) : SimpleAudioPlayer() {
@@ -89,6 +100,7 @@ internal class AndroidAudioPlayer(
     private var loadedPlatformQueue: LoadedPlatformQueue? = null
     private var appControllerMutationInProgress = false
     private var pendingControllerTarget: PendingControllerTarget? = null
+    private var pendingPlatformSeek: PendingPlatformSeek? = null
 
     private val controllerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -149,6 +161,7 @@ internal class AndroidAudioPlayer(
             platformStopJob = null
             clearPendingAutoplay()
             pendingControllerTarget = null
+            pendingPlatformSeek = null
             seekJob?.cancel()
             seekJob = null
             stopAndroidCrossfade()
@@ -217,6 +230,7 @@ internal class AndroidAudioPlayer(
         stopBufferingTimeout()
         stopRetry()
         loadedPlatformQueue = null
+        pendingPlatformSeek = null
         clearPendingAutoplay()
         platformStopJob?.cancel()
         platformStopJob = scope.launch {
@@ -267,17 +281,45 @@ internal class AndroidAudioPlayer(
     override fun seek(positionMs: Long) {
         seekJob?.cancel()
         val generation = activePlayGeneration
+        val targetPositionMs = positionMs.coerceAtLeast(0L)
         seekJob = scope.launch {
             val ownedPlayer = ownedCrossfadePlayer()
             if (ownedPlayer != null) {
                 if (!isPlayRequestCurrent(generation)) return@launch
-                ownedPlayer.seekTo(positionMs)
+                ownedPlayer.seekTo(targetPositionMs)
                 syncFromCrossfadePlayer(ownedPlayer, generation)
             } else {
-                controllerMutex.withLock {
-                    if (!isPlayRequestCurrent(generation)) return@withLock
-                    activeLocalPlayer()?.seekTo(positionMs)
+                val trackId = state.value.currentTrack?.id
+                pendingPlatformSeek = PendingPlatformSeek(
+                    generation = generation,
+                    trackId = trackId,
+                    positionMs = targetPositionMs,
+                    startedAtMs = SystemClock.elapsedRealtime(),
+                )
+                stopPositionSyncLoop()
+                if (crossfadeJob?.isActive == true) {
+                    stopAndroidCrossfade()
                 }
+                val player = controllerMutex.withLock {
+                    if (!isPlayRequestCurrent(generation)) return@withLock null
+                    activeLocalPlayer()?.also { platformPlayer ->
+                        val shouldResume = playWhenReady &&
+                            (platformPlayer.isPlaying || platformPlayer.playWhenReady)
+                        if (shouldResume) {
+                            markPendingAutoplay(generation)
+                            platformPlayer.pause()
+                        }
+                        platformPlayer.seekToCurrentItem(targetPositionMs)
+                        if (shouldResume) {
+                            platformPlayer.play()
+                        }
+                    }
+                }
+                if (player == null) {
+                    pendingPlatformSeek = null
+                    return@launch
+                }
+                waitForPlatformSeek(player, targetPositionMs, generation)
                 syncFromController(generation)
             }
         }
@@ -540,6 +582,7 @@ internal class AndroidAudioPlayer(
         platformLoadJob?.cancel()
         platformStopJob?.cancel()
         platformStopJob = null
+        pendingPlatformSeek = null
         stopAndroidCrossfade()
         seekJob?.cancel()
         stopBufferingTimeout()
@@ -634,7 +677,7 @@ internal class AndroidAudioPlayer(
         if (!isPlayRequestCurrent(generation)) return
         if (crossfadePlayer != null && crossfadeOwnedTrackId != null) return
         val player = activeLocalPlayer() ?: return
-        val appState = state.value
+        var appState = state.value
         val controllerIndex = player.currentMediaItemIndex
         val loaded = loadedPlatformQueue
         val appControllerIndex = loaded?.appIndexFor(controllerIndex) ?: controllerIndex
@@ -650,11 +693,17 @@ internal class AndroidAudioPlayer(
             val queueIds = appState.queue.map { it.id }
             if (loaded?.queueIds == queueIds && appControllerIndex in appState.queue.indices) {
                 adoptQueueState(appState.queue, appControllerIndex, player.isPlaying)
+                appState = state.value
             } else {
                 return
             }
         }
         val controllerPosition = player.currentPosition.coerceAtLeast(0L)
+        val durationMs = player.duration.coerceAtLeast(0L)
+        if (isWaitingForPlatformSeek(appState.currentTrack?.id, controllerPosition, durationMs, generation)) {
+            startPositionSyncLoop(generation)
+            return
+        }
         if (appState.isBuffering &&
             appState.positionMs == 0L &&
             controllerPosition > 1_500L
@@ -664,7 +713,6 @@ internal class AndroidAudioPlayer(
         val bufferedPosition = player.bufferedPosition
             .coerceAtLeast(controllerPosition)
             .coerceAtLeast(0L)
-        val durationMs = player.duration.coerceAtLeast(0L)
         val buffering = player.playbackState == Player.STATE_BUFFERING
         val hasReadyBuffer = hasPlaybackReadyBuffer(
             positionMs = controllerPosition,
@@ -820,6 +868,74 @@ internal class AndroidAudioPlayer(
         positionSyncJob = null
     }
 
+    private suspend fun waitForPlatformSeek(
+        player: Player,
+        targetPositionMs: Long,
+        generation: Int,
+    ) {
+        val initialMediaItemIndex = player.currentMediaItemIndex
+        var waitedMs = 0L
+        var retried = false
+        while (waitedMs < SeekSettleTimeoutMs && isPlayRequestCurrent(generation)) {
+            val positionMs = player.currentPosition.coerceAtLeast(0L)
+            val durationMs = player.duration.coerceAtLeast(0L)
+            if (isSeekPositionSettled(positionMs, targetPositionMs, durationMs) ||
+                player.currentMediaItemIndex != initialMediaItemIndex ||
+                player.playbackState == Player.STATE_ENDED
+            ) {
+                return
+            }
+            if (!retried && waitedMs >= SeekRetryDelayMs) {
+                player.seekToCurrentItem(targetPositionMs)
+                retried = true
+            }
+            delay(SeekSettlePollMs)
+            waitedMs += SeekSettlePollMs
+        }
+    }
+
+    private fun Player.seekToCurrentItem(positionMs: Long) {
+        val itemIndex = currentMediaItemIndex.takeIf { it in 0 until mediaItemCount }
+        if (itemIndex != null) {
+            seekTo(itemIndex, positionMs)
+        } else {
+            seekTo(positionMs)
+        }
+    }
+
+    private fun isWaitingForPlatformSeek(
+        trackId: String?,
+        controllerPositionMs: Long,
+        durationMs: Long,
+        generation: Int,
+    ): Boolean {
+        val pending = pendingPlatformSeek ?: return false
+        if (!pending.matches(generation, trackId)) {
+            pendingPlatformSeek = null
+            return false
+        }
+        if (isSeekPositionSettled(controllerPositionMs, pending.positionMs, durationMs) ||
+            SystemClock.elapsedRealtime() - pending.startedAtMs >= SeekSettleTimeoutMs
+        ) {
+            pendingPlatformSeek = null
+            return false
+        }
+        return true
+    }
+
+    private fun isSeekPositionSettled(
+        positionMs: Long,
+        targetPositionMs: Long,
+        durationMs: Long,
+    ): Boolean {
+        val boundedTargetMs = if (durationMs > 0L) {
+            targetPositionMs.coerceAtMost(durationMs)
+        } else {
+            targetPositionMs
+        }
+        return abs(positionMs - boundedTargetMs) <= SeekSettleToleranceMs
+    }
+
     private fun startBufferingTimeout(generation: Int) {
         if (bufferingTimeoutJob?.isActive == true) return
         bufferingTimeoutJob = scope.launch {
@@ -930,6 +1046,10 @@ internal class AndroidAudioPlayer(
         const val AutoplayStartRetryMs = 2_000L
         const val MaxStreamRetryCount = 5
         const val StreamRetryBaseDelayMs = 1_000L
+        const val SeekSettleTimeoutMs = 1_500L
+        const val SeekSettlePollMs = 50L
+        const val SeekRetryDelayMs = 250L
+        const val SeekSettleToleranceMs = 500L
         const val NormalPositionSyncIntervalMs = 1_000L
         const val FinePositionSyncIntervalMs = 250L
         const val FinePositionSyncWindowMs = 12_000L

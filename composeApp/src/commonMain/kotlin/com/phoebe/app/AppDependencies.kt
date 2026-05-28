@@ -6,6 +6,9 @@ import com.phoebe.app.data.EmbyClient
 import com.phoebe.app.data.LibraryUiRepository
 import com.phoebe.app.data.JellyfinClient
 import com.phoebe.app.data.JellyfinPlayHistorySyncer
+import com.phoebe.app.data.ListenBrainzAccountRepository
+import com.phoebe.app.data.ListenBrainzClient
+import com.phoebe.app.data.ListenBrainzPlaybackReporter
 import com.phoebe.app.data.LyricsRepository
 import com.phoebe.app.data.MediaSourcesRepository
 import com.phoebe.app.data.MusicAssistantClient
@@ -28,7 +31,9 @@ import com.phoebe.app.data.db.createPhoebeDatabase
 import com.phoebe.app.db.PhoebeDatabase
 import com.phoebe.app.platform.PlatformStorage
 import com.phoebe.app.platform.DownloadNotifier
+import com.phoebe.app.platform.SecureCredentialStore
 import com.phoebe.app.platform.createPlatformHttpClient
+import com.phoebe.app.platform.createSecureCredentialStore
 import com.phoebe.app.player.AudioPlayer
 import com.phoebe.app.player.CastController
 import com.phoebe.app.player.SystemVolumeController
@@ -52,6 +57,9 @@ class AppDependencies(
     val jellyfinPlayHistorySyncer: JellyfinPlayHistorySyncer,
     val navidromePlayHistorySyncer: NavidromePlayHistorySyncer,
     val plexPlaybackReporter: PlexPlaybackReporter,
+    val listenBrainzAccountRepository: ListenBrainzAccountRepository,
+    val listenBrainzPlaybackReporter: ListenBrainzPlaybackReporter,
+    val secureCredentialStore: SecureCredentialStore,
     val audioPlayer: AudioPlayer,
     val castController: CastController,
     val systemVolume: SystemVolumeController,
@@ -61,6 +69,7 @@ class AppDependencies(
 ) {
     suspend fun deleteDatabaseDataForSignOut() {
         catalogRepository.awaitDatabaseIdle()
+        listenBrainzAccountRepository.disconnect()
         databaseWriteGate.withWrite {
             database.clearAllAppData(clearPlayHistory = true)
         }
@@ -83,6 +92,7 @@ class AppDependencies(
             val embyClient = EmbyClient(httpClient)
             val subsonicClient = SubsonicClient(httpClient)
             val musicAssistantClient = MusicAssistantClient(httpClient)
+            val listenBrainzClient = ListenBrainzClient(httpClient)
             val providerRegistry = MusicProviderRegistry(
                 listOf(
                     JellyfinProviderAdapter(jellyfinClient),
@@ -92,11 +102,17 @@ class AppDependencies(
                 ),
             )
             val storage = PlatformStorage()
+            val secureCredentialStore = createSecureCredentialStore()
             val database = createPhoebeDatabase()
             val databaseWriteGate = DatabaseWriteGate()
             val mediaSourcesRepository = MediaSourcesRepository(database, storage)
             val libraryUiRepository = LibraryUiRepository(database, storage)
             val appSettingsRepository = AppSettingsRepository(database)
+            val listenBrainzAccountRepository = ListenBrainzAccountRepository(
+                client = listenBrainzClient,
+                appSettingsRepository = appSettingsRepository,
+                credentialStore = secureCredentialStore,
+            )
             val playHistoryRepository = PlayHistoryRepository(database)
             val searchHistoryRepository = SearchHistoryRepository(storage)
             val audioPlayer = createAudioPlayer()
@@ -159,6 +175,15 @@ class AppDependencies(
                     audioPlayer = audioPlayer,
                     session = sessionRepository.session,
                 ),
+                listenBrainzAccountRepository = listenBrainzAccountRepository,
+                listenBrainzPlaybackReporter = ListenBrainzPlaybackReporter(
+                    client = listenBrainzClient,
+                    credentialStore = secureCredentialStore,
+                    accountRepository = listenBrainzAccountRepository,
+                    audioPlayer = audioPlayer,
+                    appSettings = appSettingsRepository.settings,
+                ),
+                secureCredentialStore = secureCredentialStore,
                 audioPlayer = audioPlayer,
                 castController = castController,
                 systemVolume = createSystemVolumeController(),

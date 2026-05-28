@@ -391,10 +391,11 @@ class SubsonicClient(
         }
     }
 
-    suspend fun scrobble(server: PlexServer, username: String, password: String, itemId: String, submission: Boolean) {
+    suspend fun scrobble(server: PlexServer, username: String, password: String, itemId: String, submission: Boolean, timeMs: Long? = null) {
         request<SubsonicRoot>(server.uri, username, password, "scrobble") {
             parameter("id", itemId.removePrefix("navidrome:"))
             parameter("submission", submission)
+            timeMs?.let { parameter("time", it.coerceAtLeast(0L)) }
         }
     }
 

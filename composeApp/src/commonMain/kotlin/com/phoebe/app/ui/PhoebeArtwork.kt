@@ -665,15 +665,6 @@ private fun ArtworkLoadingSlot(
     radius: Dp = 10.dp,
     elevated: Boolean = true,
 ) {
-    val borderProgress by rememberInfiniteTransition(label = "artwork-loading-border")
-        .animateFloat(
-            initialValue = 0f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 1500, easing = LinearEasing),
-            ),
-            label = "artwork-loading-border-progress",
-        )
     val shape = RoundedCornerShape(radius)
     val borderTrackColor = Color.White.copy(alpha = 0.05f)
     val borderProgressColor = PhoebeUi.accentLight.copy(alpha = 0.86f)
@@ -695,36 +686,77 @@ private fun ArtworkLoadingSlot(
             )
             .border(BorderStroke(1.dp, PhoebeUi.border.copy(alpha = 0.42f)), shape),
     ) {
-        Canvas(Modifier.fillMaxSize()) {
-            val strokePx = 2.dp.toPx()
-            val inset = strokePx / 2f
-            val left = inset
-            val top = inset
-            val right = size.width - inset
-            val bottom = size.height - inset
-            if (right <= left || bottom <= top) return@Canvas
+        PhoebeLoadingBorder(
+            modifier = Modifier.fillMaxSize(),
+            radius = radius,
+            trackColor = borderTrackColor,
+            progressColor = borderProgressColor,
+            label = "artwork-loading-border",
+        )
+    }
+}
 
-            val pathWidth = right - left
-            val pathHeight = bottom - top
-            val cornerRadius = radius.toPx().coerceIn(0f, minOf(pathWidth, pathHeight) / 2f)
-            drawRoundRect(
-                color = borderTrackColor,
-                topLeft = Offset(inset, inset),
-                size = Size(size.width - strokePx, size.height - strokePx),
-                cornerRadius = CornerRadius(cornerRadius, cornerRadius),
-                style = Stroke(width = strokePx),
-            )
+@Composable
+internal fun PhoebeLoadingBorder(
+    modifier: Modifier = Modifier,
+    radius: Dp = 10.dp,
+    trackColor: Color = Color.White.copy(alpha = 0.05f),
+    progressColor: Color = PhoebeUi.accentLight.copy(alpha = 0.86f),
+    strokeWidth: Dp = 2.dp,
+    label: String = "loading-border",
+) {
+    val animatedProgress by rememberInfiniteTransition(label = label)
+        .animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 1500, easing = LinearEasing),
+            ),
+            label = "$label-progress",
+        )
+    Canvas(modifier) {
+        val strokePx = strokeWidth.toPx()
+        val inset = strokePx / 2f
+        val left = inset
+        val top = inset
+        val right = size.width - inset
+        val bottom = size.height - inset
+        if (right <= left || bottom <= top) return@Canvas
 
-            val perimeter = roundedRectPerimeter(pathWidth, pathHeight, cornerRadius)
-            if (perimeter <= 0f) return@Canvas
+        val pathWidth = right - left
+        val pathHeight = bottom - top
+        val cornerRadius = radius.toPx().coerceIn(0f, minOf(pathWidth, pathHeight) / 2f)
+        drawRoundRect(
+            color = trackColor,
+            topLeft = Offset(inset, inset),
+            size = Size(size.width - strokePx, size.height - strokePx),
+            cornerRadius = CornerRadius(cornerRadius, cornerRadius),
+            style = Stroke(width = strokePx),
+        )
 
-            val segmentLength = perimeter * 0.28f
-            val start = borderProgress * perimeter
-            val segmentPath = Path()
-            val sampleStep = 2.dp.toPx().coerceAtLeast(1f)
-            var traveled = 0f
-            val firstPoint = roundedRectPointAt(
-                distance = start,
+        val perimeter = roundedRectPerimeter(pathWidth, pathHeight, cornerRadius)
+        if (perimeter <= 0f) return@Canvas
+
+        val segmentLength = perimeter * 0.28f
+        val start = animatedProgress * perimeter
+        val segmentPath = Path()
+        val sampleStep = 2.dp.toPx().coerceAtLeast(1f)
+        var traveled = 0f
+        val firstPoint = roundedRectPointAt(
+            distance = start,
+            perimeter = perimeter,
+            left = left,
+            top = top,
+            right = right,
+            bottom = bottom,
+            cornerRadius = cornerRadius,
+        )
+
+        segmentPath.moveTo(firstPoint.x, firstPoint.y)
+        while (traveled < segmentLength) {
+            traveled = minOf(segmentLength, traveled + sampleStep)
+            val nextPoint = roundedRectPointAt(
+                distance = start + traveled,
                 perimeter = perimeter,
                 left = left,
                 top = top,
@@ -732,27 +764,13 @@ private fun ArtworkLoadingSlot(
                 bottom = bottom,
                 cornerRadius = cornerRadius,
             )
-
-            segmentPath.moveTo(firstPoint.x, firstPoint.y)
-            while (traveled < segmentLength) {
-                traveled = minOf(segmentLength, traveled + sampleStep)
-                val nextPoint = roundedRectPointAt(
-                    distance = start + traveled,
-                    perimeter = perimeter,
-                    left = left,
-                    top = top,
-                    right = right,
-                    bottom = bottom,
-                    cornerRadius = cornerRadius,
-                )
-                segmentPath.lineTo(nextPoint.x, nextPoint.y)
-            }
-            drawPath(
-                path = segmentPath,
-                color = borderProgressColor,
-                style = Stroke(width = strokePx, cap = StrokeCap.Round, join = StrokeJoin.Round),
-            )
+            segmentPath.lineTo(nextPoint.x, nextPoint.y)
         }
+        drawPath(
+            path = segmentPath,
+            color = progressColor,
+            style = Stroke(width = strokePx, cap = StrokeCap.Round, join = StrokeJoin.Round),
+        )
     }
 }
 

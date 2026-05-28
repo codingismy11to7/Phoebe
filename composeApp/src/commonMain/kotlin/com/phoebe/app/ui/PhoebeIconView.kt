@@ -467,6 +467,50 @@ internal fun PhoebeIconView(
                 }
                 drawPath(path, tint, style = if (filled) androidx.compose.ui.graphics.drawscope.Fill else stroke)
             }
+            PhoebeIcon.ThumbsUp -> {
+                drawRoundRect(
+                    tint,
+                    topLeft = Offset(s * 0.16f, s * 0.48f),
+                    size = Size(s * 0.16f, s * 0.34f),
+                    cornerRadius = CornerRadius(s * 0.04f, s * 0.04f),
+                    style = stroke,
+                )
+                val thumb = Path().apply {
+                    moveTo(s * 0.34f, s * 0.80f)
+                    lineTo(s * 0.64f, s * 0.80f)
+                    cubicTo(s * 0.72f, s * 0.80f, s * 0.76f, s * 0.75f, s * 0.78f, s * 0.68f)
+                    lineTo(s * 0.84f, s * 0.50f)
+                    cubicTo(s * 0.86f, s * 0.44f, s * 0.82f, s * 0.40f, s * 0.76f, s * 0.40f)
+                    lineTo(s * 0.60f, s * 0.40f)
+                    lineTo(s * 0.63f, s * 0.28f)
+                    cubicTo(s * 0.65f, s * 0.20f, s * 0.62f, s * 0.14f, s * 0.56f, s * 0.12f)
+                    cubicTo(s * 0.52f, s * 0.11f, s * 0.50f, s * 0.13f, s * 0.49f, s * 0.17f)
+                    cubicTo(s * 0.47f, s * 0.28f, s * 0.43f, s * 0.38f, s * 0.35f, s * 0.48f)
+                }
+                drawPath(thumb, tint, style = stroke)
+            }
+            PhoebeIcon.ThumbsDown -> {
+                drawRoundRect(
+                    tint,
+                    topLeft = Offset(s * 0.16f, s * 0.18f),
+                    size = Size(s * 0.16f, s * 0.34f),
+                    cornerRadius = CornerRadius(s * 0.04f, s * 0.04f),
+                    style = stroke,
+                )
+                val thumb = Path().apply {
+                    moveTo(s * 0.34f, s * 0.20f)
+                    lineTo(s * 0.64f, s * 0.20f)
+                    cubicTo(s * 0.72f, s * 0.20f, s * 0.76f, s * 0.25f, s * 0.78f, s * 0.32f)
+                    lineTo(s * 0.84f, s * 0.50f)
+                    cubicTo(s * 0.86f, s * 0.56f, s * 0.82f, s * 0.60f, s * 0.76f, s * 0.60f)
+                    lineTo(s * 0.60f, s * 0.60f)
+                    lineTo(s * 0.63f, s * 0.72f)
+                    cubicTo(s * 0.65f, s * 0.80f, s * 0.62f, s * 0.86f, s * 0.56f, s * 0.88f)
+                    cubicTo(s * 0.52f, s * 0.89f, s * 0.50f, s * 0.87f, s * 0.49f, s * 0.83f)
+                    cubicTo(s * 0.47f, s * 0.72f, s * 0.43f, s * 0.62f, s * 0.35f, s * 0.52f)
+                }
+                drawPath(thumb, tint, style = stroke)
+            }
             PhoebeIcon.ChevronUp -> {
                 line(0.25f, 0.62f, 0.50f, 0.38f)
                 line(0.50f, 0.38f, 0.75f, 0.62f)

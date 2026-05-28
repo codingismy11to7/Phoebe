@@ -1,9 +1,13 @@
 package com.phoebe.app
 
 import com.phoebe.app.data.JellyfinClient
+import com.phoebe.app.data.MusicProviderRegistry
+import com.phoebe.app.data.NavidromeProviderAdapter
 import com.phoebe.app.data.PlexClient
 import com.phoebe.app.data.PlexPlaybackReporter
+import com.phoebe.app.data.SubsonicClient
 import com.phoebe.app.domain.EqualizerProfile
+import com.phoebe.app.domain.MediaProviderType
 import com.phoebe.app.domain.MusicLibrary
 import com.phoebe.app.domain.PlayerState
 import com.phoebe.app.domain.PlexServer
@@ -119,6 +123,72 @@ class PlexPlaybackReporterTest {
         assertEquals(listOf(null, "0"), continuingValues.value, "requests=${requests.value}")
     }
 
+    @Test
+    fun navidromeScrobblesWhenPlaybackPassesThreshold() = runTest {
+        val scrobbles = MutableStateFlow<List<Map<String, String>>>(emptyList())
+        val audioPlayer = FakeAudioPlayer()
+        val reporter = newNavidromeReporter(subsonicEngine(scrobbles), audioPlayer)
+        val scopeJob = SupervisorJob(coroutineContext[Job])
+        val scope = CoroutineScope(coroutineContext + scopeJob)
+        val track = navidromeTrack()
+
+        try {
+            reporter.start(scope, includePeriodicTimeline = false)
+
+            audioPlayer.mutableState.value = PlayerState(
+                queue = listOf(track),
+                currentIndex = 0,
+                isPlaying = true,
+                positionMs = 91_000L,
+                durationMs = track.durationMs,
+            )
+            advanceUntilIdle()
+            scrobbles.awaitSize(1)
+
+            assertEquals("tr1", scrobbles.value.single()["id"])
+            assertEquals("true", scrobbles.value.single()["submission"])
+        } finally {
+            scopeJob.cancelAndJoin()
+        }
+    }
+
+    @Test
+    fun navidromeDoesNotDuplicateThresholdScrobbleOnStop() = runTest {
+        val scrobbles = MutableStateFlow<List<Map<String, String>>>(emptyList())
+        val audioPlayer = FakeAudioPlayer()
+        val reporter = newNavidromeReporter(subsonicEngine(scrobbles), audioPlayer)
+        val scopeJob = SupervisorJob(coroutineContext[Job])
+        val scope = CoroutineScope(coroutineContext + scopeJob)
+        val track = navidromeTrack()
+
+        try {
+            reporter.start(scope, includePeriodicTimeline = false)
+
+            audioPlayer.mutableState.value = PlayerState(
+                queue = listOf(track),
+                currentIndex = 0,
+                isPlaying = true,
+                positionMs = 91_000L,
+                durationMs = track.durationMs,
+            )
+            advanceUntilIdle()
+            scrobbles.awaitSize(1)
+
+            audioPlayer.mutableState.value = PlayerState(
+                queue = listOf(track),
+                currentIndex = 0,
+                isPlaying = false,
+                positionMs = track.durationMs,
+                durationMs = track.durationMs,
+            )
+            advanceUntilIdle()
+
+            assertEquals(1, scrobbles.value.size)
+        } finally {
+            scopeJob.cancelAndJoin()
+        }
+    }
+
     private fun newReporter(engine: MockEngine, audioPlayer: AudioPlayer): PlexPlaybackReporter {
         val httpClient = testHttpClient(engine)
         return PlexPlaybackReporter(
@@ -135,6 +205,33 @@ class PlexPlaybackReporterTest {
                         owned = true,
                     ),
                     selectedLibrary = MusicLibrary("1", "Music"),
+                ),
+            ),
+        )
+    }
+
+    private fun newNavidromeReporter(engine: MockEngine, audioPlayer: AudioPlayer): PlexPlaybackReporter {
+        val httpClient = testHttpClient(engine)
+        return PlexPlaybackReporter(
+            plexClient = PlexClient(httpClient),
+            jellyfinClient = JellyfinClient(httpClient),
+            providerRegistry = MusicProviderRegistry(
+                listOf(NavidromeProviderAdapter(SubsonicClient(httpClient))),
+            ),
+            audioPlayer = audioPlayer,
+            session = MutableStateFlow(
+                PlexSession(
+                    token = "secret",
+                    userName = "ada",
+                    selectedServer = PlexServer(
+                        id = "navidrome:server",
+                        name = "Navidrome",
+                        uri = "https://navidrome.example",
+                        owned = true,
+                    ),
+                    selectedLibrary = MusicLibrary("all", "All Music"),
+                    providerType = MediaProviderType.Navidrome,
+                    userId = "ada",
                 ),
             ),
         )
@@ -162,6 +259,22 @@ class PlexPlaybackReporterTest {
         }
     }
 
+    private fun subsonicEngine(
+        scrobbles: MutableStateFlow<List<Map<String, String>>>,
+    ): MockEngine = MockEngine { request ->
+        when (request.url.encodedPath) {
+            "/rest/scrobble.view" -> {
+                scrobbles.update {
+                    it + request.url.parameters.entries().associate { entry ->
+                        entry.key to entry.value.last()
+                    }
+                }
+                respondJson("""{ "subsonic-response": { "status": "ok" } }""")
+            }
+            else -> respond("", HttpStatusCode.NotFound)
+        }
+    }
+
     private fun MockRequestHandleScope.respondJson(content: String) = respond(
         content = content,
         status = HttpStatusCode.OK,
@@ -177,6 +290,17 @@ class PlexPlaybackReporterTest {
             durationMs = durationMs,
             streamUrl = "https://plex.example:32400/library/parts/123/file.mp3",
             downloadUrl = "https://plex.example:32400/library/parts/123/file.mp3",
+        )
+
+    private fun navidromeTrack(durationMs: Long = 180_000L): Track =
+        Track(
+            id = "navidrome:tr1",
+            title = "Song",
+            artist = "Artist",
+            album = "Album",
+            durationMs = durationMs,
+            streamUrl = "https://navidrome.example/rest/stream.view?id=tr1",
+            downloadUrl = "https://navidrome.example/rest/download.view?id=tr1",
         )
 
     private suspend fun <T> StateFlow<List<T>>.awaitSize(size: Int) {

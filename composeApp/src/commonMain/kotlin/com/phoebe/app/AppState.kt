@@ -51,6 +51,7 @@ import com.phoebe.app.data.FavoriteSyncResult
 import com.phoebe.app.data.FavoritePlaylistsExport
 import com.phoebe.app.data.JellyfinQuickConnectResult
 import com.phoebe.app.data.JellyfinPlayHistorySyncResult
+import com.phoebe.app.data.ListenBrainzFeedbackScore
 import com.phoebe.app.data.NavidromePlayHistorySyncResult
 import com.phoebe.app.data.PlexPlayHistorySyncResult
 import com.phoebe.app.data.PlexClient
@@ -178,6 +179,8 @@ class AppState(
         )
     val libraryUi = dependencies.libraryUiRepository.preferences
     val appSettings = dependencies.appSettingsRepository.settings
+    val listenBrainzFeedbackTarget = dependencies.listenBrainzPlaybackReporter.feedbackTarget
+    val listenBrainzCredentialAvailability = dependencies.listenBrainzAccountRepository.storageAvailability
     private val mutablePersistEqualizerSettings = MutableStateFlow(false)
     private val mutableEqualizerProfile = MutableStateFlow(EqualizerProfile.Default.normalized())
     val equalizerProfile: StateFlow<EqualizerProfile> = mutableEqualizerProfile.asStateFlow()
@@ -283,6 +286,7 @@ class AppState(
             dependencies.sessionRepository.restore(refreshConnections = false)
             dependencies.mediaSourcesRepository.restore()
             dependencies.appSettingsRepository.restore()
+            dependencies.listenBrainzAccountRepository.restore()
             val restoredSettings = appSettings.value
             mutablePersistEqualizerSettings.value = restoredSettings.persistEqualizerSettings
             val startupEqualizer = if (restoredSettings.persistEqualizerSettings) {
@@ -344,6 +348,7 @@ class AppState(
         surfacePlaybackFailures()
         surfaceCastMessages()
         dependencies.plexPlaybackReporter.start(scope)
+        dependencies.listenBrainzPlaybackReporter.start(scope)
     }
 
     private fun bindAppSettingsToPlayback() {
@@ -1535,6 +1540,49 @@ class AppState(
 
     fun setNotifyWhenDownloadFinishes(enabled: Boolean) = scope.launch {
         dependencies.appSettingsRepository.setNotifyWhenDownloadFinishes(enabled)
+    }
+
+    fun connectListenBrainz(userToken: String) = scope.launch {
+        mutableMessage.value = "Connecting ListenBrainz…"
+        runCatching {
+            dependencies.listenBrainzAccountRepository.connect(userToken)
+        }.onSuccess { validation ->
+            mutableMessage.value = "ListenBrainz connected as ${validation.username}."
+        }.onFailure { error ->
+            mutableMessage.value = error.message ?: "Couldn't connect ListenBrainz."
+        }
+    }
+
+    fun disconnectListenBrainz() = scope.launch {
+        runCatching {
+            dependencies.listenBrainzAccountRepository.disconnect()
+        }.onSuccess {
+            mutableMessage.value = "ListenBrainz disconnected."
+        }.onFailure { error ->
+            mutableMessage.value = error.message ?: "Couldn't disconnect ListenBrainz."
+        }
+    }
+
+    fun setListenBrainzSubmitNowPlaying(enabled: Boolean) = scope.launch {
+        dependencies.listenBrainzAccountRepository.setSubmitNowPlaying(enabled)
+    }
+
+    fun setListenBrainzSubmitListens(enabled: Boolean) = scope.launch {
+        dependencies.listenBrainzAccountRepository.setSubmitListens(enabled)
+    }
+
+    fun setListenBrainzSubmitCurrentTrackFeedback(enabled: Boolean) = scope.launch {
+        dependencies.listenBrainzAccountRepository.setSubmitCurrentTrackFeedback(enabled)
+    }
+
+    fun submitListenBrainzFeedback(score: ListenBrainzFeedbackScore) = scope.launch {
+        val submitted = dependencies.listenBrainzPlaybackReporter.submitCurrentTrackFeedback(score)
+        mutableMessage.value = when {
+            !submitted -> "ListenBrainz feedback is not available for this play yet."
+            score == ListenBrainzFeedbackScore.Love -> "Marked loved on ListenBrainz."
+            score == ListenBrainzFeedbackScore.Hate -> "Marked hated on ListenBrainz."
+            else -> "Cleared ListenBrainz feedback."
+        }
     }
 
     fun setEqualizerEnabled(enabled: Boolean) {

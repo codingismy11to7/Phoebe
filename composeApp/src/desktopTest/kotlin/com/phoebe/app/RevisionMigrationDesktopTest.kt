@@ -1,8 +1,8 @@
 package com.phoebe.app
 
-import com.phoebe.app.data.AppSettingsRepository
+import app.cash.sqldelight.async.coroutines.awaitAsOne
 import com.phoebe.app.data.db.createPhoebeDatabase
-import com.phoebe.app.data.db.appSettingsSchemaCompatible
+import com.phoebe.app.db.PhoebeDatabase
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Before
@@ -29,62 +29,101 @@ class RevisionMigrationDesktopTest {
     }
 
     @Test
-    fun staleRevisionWithoutEqualizerColumnIsRebuilt() = runTest {
+    fun sqlDelightMigrationPreservesSessionWhenLegacyRevisionMarkerIsStale() = runTest {
         val root = File(System.getProperty("phoebe.storage.root"))
         val dbFile = File(root, "phoebe-debug.db")
         val revFile = File(root, "phoebe-debug.db.rev")
 
-        createLegacyAppSettingsDatabase(dbFile)
+        createVersion21Database(dbFile)
         revFile.writeText("18")
 
-        assertTrue(dbFile.exists())
-        assertEquals(false, appSettingsSchemaCompatible(dbFile))
-
         val database = createPhoebeDatabase()
-        AppSettingsRepository(database).restore()
 
-        assertTrue(appSettingsSchemaCompatible(dbFile))
-        assertEquals("20", revFile.readText().trim())
+        val session = database.sessionQueries.selectCurrent().awaitAsOne()
+        assertEquals("fixture-token", session.token)
+        assertEquals("Plex listener", session.userName)
+        assertEquals("Plex", session.providerType)
+        assertEquals("Quick", session.jellyfinSyncMode)
+
+        val settings = database.appSettingsQueries.selectCurrent().awaitAsOne()
+        assertTrue(settings.listenBrainzSettings.contains("\"enabled\":false"))
+        assertEquals(PhoebeDatabase.Schema.version, readUserVersion(dbFile))
+        assertEquals("18", revFile.readText().trim())
     }
 
-    @Test
-    fun revisionMarkerAheadOfSchemaIsRebuilt() = runTest {
-        val root = File(System.getProperty("phoebe.storage.root"))
-        val dbFile = File(root, "phoebe-debug.db")
-        val revFile = File(root, "phoebe-debug.db.rev")
-
-        createLegacyAppSettingsDatabase(dbFile)
-        revFile.writeText("19")
-
-        assertEquals(false, appSettingsSchemaCompatible(dbFile))
-
-        val database = createPhoebeDatabase()
-        AppSettingsRepository(database).restore()
-
-        assertTrue(appSettingsSchemaCompatible(dbFile))
-    }
-
-    private fun createLegacyAppSettingsDatabase(dbFile: File) {
+    private fun createVersion21Database(dbFile: File) {
         DriverManager.getConnection("jdbc:sqlite:${dbFile.absolutePath}").use { connection ->
             connection.createStatement().use { statement ->
+                statement.execute(
+                    """
+                    CREATE TABLE SessionRow (
+                        id INTEGER NOT NULL PRIMARY KEY CHECK (id = 1) DEFAULT 1,
+                        providerType TEXT NOT NULL DEFAULT 'Plex',
+                        token TEXT NOT NULL,
+                        userName TEXT NOT NULL,
+                        userId TEXT,
+                        selectedServerId TEXT,
+                        selectedServerName TEXT,
+                        selectedServerUri TEXT,
+                        selectedServerOwned INTEGER,
+                        selectedServerConnectionUris TEXT,
+                        selectedServerAdvertisedConnectionUris TEXT,
+                        selectedServerLocalConnectionUris TEXT,
+                        selectedServerAccessToken TEXT,
+                        selectedServerHttpsRequired INTEGER,
+                        selectedLibraryKey TEXT,
+                        selectedLibraryTitle TEXT,
+                        jellyfinSyncMode TEXT NOT NULL DEFAULT 'Quick'
+                    )
+                    """.trimIndent(),
+                )
+                statement.execute(
+                    """
+                    INSERT INTO SessionRow(
+                        id, providerType, token, userName, userId,
+                        selectedServerId, selectedServerName, selectedServerUri, selectedServerOwned,
+                        selectedServerConnectionUris, selectedServerAdvertisedConnectionUris,
+                        selectedServerLocalConnectionUris, selectedServerAccessToken, selectedServerHttpsRequired,
+                        selectedLibraryKey, selectedLibraryTitle, jellyfinSyncMode
+                    ) VALUES (1, 'Plex', 'fixture-token', 'Plex listener', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'Quick')
+                    """.trimIndent(),
+                )
                 statement.execute(
                     """
                     CREATE TABLE AppSettingsRow (
                         id INTEGER NOT NULL PRIMARY KEY CHECK (id = 1) DEFAULT 1,
                         crossfadeSeconds INTEGER NOT NULL DEFAULT 0,
                         scanLibraryOnLaunch INTEGER NOT NULL DEFAULT 0,
-                        notifyWhenDownloadFinishes INTEGER NOT NULL DEFAULT 0
+                        notifyWhenDownloadFinishes INTEGER NOT NULL DEFAULT 0,
+                        persistEqualizerSettings INTEGER NOT NULL DEFAULT 0,
+                        equalizerProfile TEXT NOT NULL DEFAULT '{"enabled":false,"bandCount":10,"gainsDb":[]}'
                     )
                     """.trimIndent(),
                 )
                 statement.execute(
                     """
                     INSERT INTO AppSettingsRow(
-                        id, crossfadeSeconds, scanLibraryOnLaunch, notifyWhenDownloadFinishes
-                    ) VALUES (1, 0, 0, 0)
+                        id,
+                        crossfadeSeconds,
+                        scanLibraryOnLaunch,
+                        notifyWhenDownloadFinishes,
+                        persistEqualizerSettings,
+                        equalizerProfile
+                    ) VALUES (1, 0, 0, 0, 0, '{"enabled":false,"bandCount":10,"gainsDb":[]}')
                     """.trimIndent(),
                 )
+                statement.execute("PRAGMA user_version = 21")
             }
         }
     }
+
+    private fun readUserVersion(dbFile: File): Long =
+        DriverManager.getConnection("jdbc:sqlite:${dbFile.absolutePath}").use { connection ->
+            connection.createStatement().use { statement ->
+                statement.executeQuery("PRAGMA user_version").use { rows ->
+                    check(rows.next()) { "PRAGMA user_version returned no rows." }
+                    rows.getLong(1)
+                }
+            }
+        }
 }

@@ -393,6 +393,41 @@ class PlayerStateTest {
     }
 
     @Test
+    fun manualSeekIntoCrossfadeWindowDoesNotStartAutomaticCrossfade() {
+        val player = CrossfadeTestPlayer()
+        val tracks = listOf(
+            Track("t1", "One", "Artist", "Album", 60_000, "http://a", ""),
+            Track("t2", "Two", "Artist", "Album", 90_000, "http://b", ""),
+        )
+
+        player.play(tracks, 0)
+        player.setCrossfadeDurationMs(6_000)
+        player.seekTo(55_000)
+        player.platformPlayback(positionMs = 55_000, durationMs = 60_000, bufferedPositionMs = 60_000)
+        player.platformPlayback(positionMs = 59_000, durationMs = 60_000, bufferedPositionMs = 60_000)
+
+        assertEquals(0, player.crossfadeStarts)
+        assertEquals(tracks[0], player.state.value.currentTrack)
+    }
+
+    @Test
+    fun manualSeekBeforeCrossfadeWindowCanStillCrossfadeLater() {
+        val player = CrossfadeTestPlayer()
+        val tracks = listOf(
+            Track("t1", "One", "Artist", "Album", 60_000, "http://a", ""),
+            Track("t2", "Two", "Artist", "Album", 90_000, "http://b", ""),
+        )
+
+        player.play(tracks, 0)
+        player.setCrossfadeDurationMs(6_000)
+        player.seekTo(50_000)
+        player.platformPlayback(positionMs = 54_000, durationMs = 60_000, bufferedPositionMs = 60_000)
+
+        assertEquals(1, player.crossfadeStarts)
+        assertEquals(1, player.lastTargetIndex)
+    }
+
+    @Test
     fun pausedPlaybackDoesNotStartAutomaticCrossfade() {
         val player = CrossfadeTestPlayer()
         val tracks = listOf(

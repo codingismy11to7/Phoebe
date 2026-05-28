@@ -1,10 +1,21 @@
 package com.phoebe.app
 
 import app.cash.sqldelight.db.SqlDriver
+import app.cash.sqldelight.async.coroutines.awaitAsOne
 import com.phoebe.app.data.AppSettingsRepository
+import com.phoebe.app.data.ListenBrainzAccountRepository
+import com.phoebe.app.data.ListenBrainzClient
 import com.phoebe.app.domain.AppSettings
 import com.phoebe.app.domain.EqualizerProfile
+import com.phoebe.app.platform.SecureCredentialKey
+import com.phoebe.app.testing.FakeSecureCredentialStore
 import com.phoebe.app.testing.newInMemoryPhoebeDatabase
+import com.phoebe.app.testing.testHttpClient
+import io.ktor.client.engine.mock.MockEngine
+import io.ktor.client.engine.mock.respond
+import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
+import io.ktor.http.headersOf
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Test
@@ -84,5 +95,58 @@ class AppSettingsRepositoryDesktopTest {
         assertEquals(31, repository.settings.value.equalizerProfile.bandCount)
         assertEquals(12f, repository.settings.value.equalizerProfile.gainsDb.first())
         assertEquals(31, repository.settings.value.equalizerProfile.gainsDb.size)
+    }
+
+    @Test
+    fun listenBrainzConnectStoresTokenOnlyInSecureStore() = runTest {
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        val settingsRepository = AppSettingsRepository(db)
+        val credentialStore = FakeSecureCredentialStore()
+        val accountRepository = ListenBrainzAccountRepository(
+            client = ListenBrainzClient(
+                testHttpClient(
+                    MockEngine {
+                        respond(
+                            content = """{"valid":true,"user_name":"ada","message":"Token valid."}""",
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    },
+                ),
+                baseUrl = "https://listenbrainz.example",
+            ),
+            appSettingsRepository = settingsRepository,
+            credentialStore = credentialStore,
+        )
+
+        accountRepository.connect("super-secret-token")
+
+        assertEquals("super-secret-token", credentialStore.values[SecureCredentialKey.ListenBrainzUserToken])
+        assertEquals("ada", settingsRepository.settings.value.listenBrainz.username)
+        val row = db.appSettingsQueries.selectCurrent().awaitAsOne()
+        assertFalse(row.listenBrainzSettings.contains("super-secret-token"))
+    }
+
+    @Test
+    fun listenBrainzDisconnectDeletesCredentialAndSettings() = runTest {
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        val settingsRepository = AppSettingsRepository(db)
+        val credentialStore = FakeSecureCredentialStore()
+        credentialStore.write(SecureCredentialKey.ListenBrainzUserToken, "secret")
+        settingsRepository.updateListenBrainzSettings {
+            it.copy(enabled = true, username = "ada")
+        }
+        val accountRepository = ListenBrainzAccountRepository(
+            client = ListenBrainzClient(testHttpClient(MockEngine { respond("{}") })),
+            appSettingsRepository = settingsRepository,
+            credentialStore = credentialStore,
+        )
+
+        accountRepository.disconnect()
+
+        assertFalse(settingsRepository.settings.value.listenBrainz.connected)
+        assertFalse(credentialStore.values.containsKey(SecureCredentialKey.ListenBrainzUserToken))
     }
 }
