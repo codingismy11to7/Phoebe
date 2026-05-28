@@ -8,6 +8,7 @@ import com.sun.jna.Structure
 import com.sun.jna.WString
 import com.sun.jna.ptr.PointerByReference
 import com.sun.jna.win32.StdCallLibrary
+import com.sun.jna.win32.W32APIOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -229,7 +230,8 @@ private interface WindowsCredApi : StdCallLibrary {
     fun CredFree(buffer: Pointer)
 
     companion object {
-        val INSTANCE: WindowsCredApi = Native.load("Advapi32", WindowsCredApi::class.java)
+        val INSTANCE: WindowsCredApi =
+            Native.load("Advapi32", WindowsCredApi::class.java, W32APIOptions.DEFAULT_OPTIONS)
     }
 }
 

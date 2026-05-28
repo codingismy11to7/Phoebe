@@ -23,6 +23,25 @@
 -keep class com.phoebe.app.MainKt$WindowsWindowChrome$WinUser32** { *; }
 -keep class com.phoebe.app.MainKt$WindowsWindowChrome$DwmApi** { *; }
 
+# JNA Structure field order must survive shrinking for Windows Credential Manager writes.
+-keep class com.phoebe.app.platform.WindowsCredential { *; }
+-keep class com.phoebe.app.platform.WindowsFileTime { *; }
+# Advapi32 is loaded by method name; ProGuard must not rename CredReadW/CredWriteW/etc.
+-keep interface com.phoebe.app.platform.WindowsCredApi {
+    boolean CredReadW(com.sun.jna.WString, int, int, com.sun.jna.ptr.PointerByReference);
+    boolean CredWriteW(com.phoebe.app.platform.WindowsCredential, int);
+    boolean CredDeleteW(com.sun.jna.WString, int, int);
+    void CredFree(com.sun.jna.Pointer);
+}
+
+# Borderless Windows frame (shell snap / resize).
+-keep class com.phoebe.app.platform.WindowsUndecoratedWindowSupport { *; }
+-keep class com.phoebe.app.platform.BorderlessWindowProcedure { *; }
+-keep class com.phoebe.app.platform.User32Ex { *; }
+-keep class com.phoebe.app.platform.WindowsHwnd { *; }
+-keep class com.phoebe.app.platform.WindowsWindowMetrics { *; }
+-keep class com.phoebe.app.platform.WindowsFrameStateSync { *; }
+
 -keep class com.sun.glass.** {
     *;
 }

@@ -1545,7 +1545,9 @@ class AppState(
     fun connectListenBrainz(userToken: String) = scope.launch {
         mutableMessage.value = "Connecting ListenBrainz…"
         runCatching {
-            dependencies.listenBrainzAccountRepository.connect(userToken)
+            kotlinx.coroutines.withTimeout(LISTEN_BRAINZ_CONNECT_TIMEOUT_MS) {
+                dependencies.listenBrainzAccountRepository.connect(userToken)
+            }
         }.onSuccess { validation ->
             mutableMessage.value = "ListenBrainz connected as ${validation.username}."
         }.onFailure { error ->
@@ -2268,3 +2270,4 @@ private fun withQueryParameters(url: Url, vararg replacements: Pair<String, Stri
 }
 
 private const val FavoritePlaylistsExportPath = "exports/favorite-playlists.json"
+private const val LISTEN_BRAINZ_CONNECT_TIMEOUT_MS = 45_000L

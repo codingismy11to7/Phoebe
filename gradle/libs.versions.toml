@@ -73,6 +73,7 @@ junit = { module = "junit:junit", version.ref = "junit" }
 jaudiotagger = { module = "net.jthink:jaudiotagger", version.ref = "jaudiotagger" }
 jnativehook = { module = "com.github.kwhat:jnativehook", version.ref = "jnativehook" }
 jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
+jna-platform = { module = "net.java.dev.jna:jna-platform", version.ref = "jna" }
 soundlibs-mp3spi = { module = "com.googlecode.soundlibs:mp3spi", version.ref = "soundlibs-mp3spi" }
 soundlibs-vorbisspi = { module = "com.googlecode.soundlibs:vorbisspi", version.ref = "soundlibs-vorbisspi" }
 jflac-codec = { module = "org.jflac:jflac-codec", version.ref = "jflac-codec" }

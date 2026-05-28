@@ -80,6 +80,12 @@ val aarch64C1OsrWorkaroundJvmArgs = if (usesJvmWithAarch64C1OsrBug()) {
     emptyList()
 }
 
+fun windowsSkikoJvmArgs(): List<String> {
+    if (!System.getProperty("os.name").orEmpty().lowercase().contains("win")) return emptyList()
+    // Skiko defaults to Direct3D on Windows, which GeForce Experience often treats like a game.
+    return listOf("-Dskiko.renderApi=OPENGL")
+}
+
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.androidApplication)
@@ -226,6 +232,7 @@ kotlin {
             implementation("org.jetbrains.compose.desktop:desktop-jvm-$composeDesktopTarget:${libs.versions.compose.get()}")
             implementation(libs.jnativehook)
             implementation(libs.jna)
+            implementation(libs.jna.platform)
             implementation(libs.coroutines.swing)
             implementation(libs.jaudiotagger)
             implementation(libs.ktor.client.cio)
@@ -365,7 +372,7 @@ compose.desktop {
             "-XX:MaxHeapFreeRatio=20",
             "-XX:+UseStringDeduplication",
             "-Dskiko.gpu.resourceCacheLimit=64M",
-        ) + aarch64C1OsrWorkaroundJvmArgs
+        ) + aarch64C1OsrWorkaroundJvmArgs + windowsSkikoJvmArgs()
         if (System.getProperty("os.name").lowercase().contains("mac")) {
             val mediaKeysDylibPath =
                 layout.buildDirectory.get().asFile.resolve("native/macos/libPhoebeMediaKeys.dylib").absolutePath
