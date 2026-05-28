@@ -489,68 +489,100 @@ private class WebAudioPlayer(
     }
 
     private fun installAudioEventHandlers(generation: Int) {
-        audio.onloadedmetadata = {
-            restorePendingReloadPosition(generation)
-            syncFromAudio(generation, isBuffering = audio.paused && playWhenReady)
+        val eventAudio = audio
+
+        fun isCurrentAudioEvent(): Boolean =
+            audio === eventAudio && isPlayRequestCurrent(generation)
+
+        eventAudio.onloadedmetadata = {
+            if (isCurrentAudioEvent()) {
+                restorePendingReloadPosition(generation)
+                syncFromAudio(generation, isBuffering = eventAudio.paused && playWhenReady)
+            }
         }
-        audio.onloadeddata = {
-            syncFromAudio(generation, isBuffering = audio.paused && playWhenReady)
+        eventAudio.onloadeddata = {
+            if (isCurrentAudioEvent()) {
+                syncFromAudio(generation, isBuffering = eventAudio.paused && playWhenReady)
+            }
         }
-        audio.ondurationchange = {
-            syncFromAudio(generation, isBuffering = audio.paused && playWhenReady)
+        eventAudio.ondurationchange = {
+            if (isCurrentAudioEvent()) {
+                syncFromAudio(generation, isBuffering = eventAudio.paused && playWhenReady)
+            }
         }
-        audio.onplaying = {
-            retryCount = 0
-            startWebAudioPrefetchIfNeeded(currentUri, generation)
-            syncFromAudio(generation, isBuffering = false)
-            diagnostics.platformPlaying(
-                PlaybackEnginePath.WebAudioElement,
-                (audio.currentTime * 1000.0).toLong().coerceAtLeast(0L),
-                webAudioPlaybackDurationMs(
-                    currentDurationMs = state.value.durationMs,
-                    browserDurationSeconds = audio.duration,
-                ),
-            )
-            markPlaybackReady(generation = generation)
+        eventAudio.onplaying = {
+            if (isCurrentAudioEvent()) {
+                retryCount = 0
+                startWebAudioPrefetchIfNeeded(currentUri, generation)
+                syncFromAudio(generation, isBuffering = false)
+                diagnostics.platformPlaying(
+                    PlaybackEnginePath.WebAudioElement,
+                    (eventAudio.currentTime * 1000.0).toLong().coerceAtLeast(0L),
+                    webAudioPlaybackDurationMs(
+                        currentDurationMs = state.value.durationMs,
+                        browserDurationSeconds = eventAudio.duration,
+                    ),
+                )
+                markPlaybackReady(generation = generation)
+            }
         }
-        audio.onpause = {
-            if (isPlayRequestCurrent(generation)) {
+        eventAudio.onpause = {
+            if (isCurrentAudioEvent()) {
                 syncFromAudio(generation, isBuffering = false)
             }
         }
-        audio.onwaiting = {
-            syncFromAudio(generation, isBuffering = true)
+        eventAudio.onwaiting = {
+            if (isCurrentAudioEvent()) {
+                syncFromAudio(generation, isBuffering = true)
+            }
         }
-        audio.onstalled = {
-            syncFromAudio(generation, isBuffering = true)
-            scheduleRetry(generation, reload = false)
+        eventAudio.onstalled = {
+            if (isCurrentAudioEvent()) {
+                syncFromAudio(generation, isBuffering = true)
+                scheduleRetry(generation, reload = false)
+            }
         }
-        audio.oncanplay = {
-            restorePendingReloadPosition(generation)
-            syncFromAudio(generation, isBuffering = audio.paused && playWhenReady)
+        eventAudio.oncanplay = {
+            if (isCurrentAudioEvent()) {
+                restorePendingReloadPosition(generation)
+                syncFromAudio(generation, isBuffering = eventAudio.paused && playWhenReady)
+            }
         }
-        audio.oncanplaythrough = {
-            syncFromAudio(generation, isBuffering = audio.paused && playWhenReady)
+        eventAudio.oncanplaythrough = {
+            if (isCurrentAudioEvent()) {
+                syncFromAudio(generation, isBuffering = eventAudio.paused && playWhenReady)
+            }
         }
-        installWebAudioProgressHandler(audio) {
-            syncFromAudio(generation, isBuffering = audio.paused && playWhenReady)
+        installWebAudioProgressHandler(eventAudio) {
+            if (isCurrentAudioEvent()) {
+                syncFromAudio(generation, isBuffering = eventAudio.paused && playWhenReady)
+            }
         }
-        audio.onsuspend = {
-            syncFromAudio(generation, isBuffering = audio.paused && playWhenReady)
+        eventAudio.onsuspend = {
+            if (isCurrentAudioEvent()) {
+                syncFromAudio(generation, isBuffering = eventAudio.paused && playWhenReady)
+            }
         }
-        audio.ontimeupdate = {
-            syncFromAudio(generation, isBuffering = false)
+        eventAudio.ontimeupdate = {
+            if (isCurrentAudioEvent()) {
+                syncFromAudio(generation, isBuffering = false)
+            }
         }
-        audio.onended = {
-            if (isPlayRequestCurrent(generation)) {
+        eventAudio.onended = {
+            if (isCurrentAudioEvent()) {
                 next()
             }
         }
-        audio.onerror = { _, _, _, _, _ ->
-            clearPendingReloadRestore()
-            if (!retryWithoutCors(generation)) {
-                diagnostics.playbackError(PlaybackEnginePath.WebAudioElement, webAudioErrorMessage(audio))
-                scheduleRetry(generation, reload = true)
+        eventAudio.onerror = { _, _, _, _, _ ->
+            if (isCurrentAudioEvent()) {
+                val message = webAudioErrorMessage(eventAudio)
+                if (!shouldIgnoreBrowserPlaybackFailure(eventAudio, message)) {
+                    clearPendingReloadRestore()
+                    if (!retryWithoutCors(generation)) {
+                        diagnostics.playbackError(PlaybackEnginePath.WebAudioElement, message)
+                        scheduleRetry(generation, reload = true)
+                    }
+                }
             }
             null
         }
@@ -747,7 +779,9 @@ private class WebAudioPlayer(
     }
 
     private fun playWebAudio(generation: Int) {
-        playWebAudio(audio) { message ->
+        val playbackAudio = audio
+        playWebAudio(playbackAudio) { message ->
+            if (shouldIgnoreBrowserPlaybackFailure(playbackAudio, message)) return@playWebAudio
             if (!isPlayRequestCurrent(generation) || !playWhenReady) return@playWebAudio
             if (audioUsesCors && currentUri?.isRemoteWebAudioUri() == true && retryWithoutCors(generation)) {
                 return@playWebAudio
@@ -755,6 +789,11 @@ private class WebAudioPlayer(
             diagnostics.playbackError(PlaybackEnginePath.WebAudioElement, message)
             markPlaybackFailed(generation = generation, message = message)
         }
+    }
+
+    private fun shouldIgnoreBrowserPlaybackFailure(playbackAudio: HTMLAudioElement, message: String?): Boolean {
+        if (audio !== playbackAudio) return true
+        return message.isUnsupportedSourceFailure() && isWebAudioEnded(playbackAudio)
     }
 
     private companion object {
@@ -793,6 +832,13 @@ data class WebAudioTimeRange(
 
 fun String.isRemoteWebAudioUri(): Boolean =
     startsWith("http://", ignoreCase = true) || startsWith("https://", ignoreCase = true)
+
+private fun String?.isUnsupportedSourceFailure(): Boolean {
+    val text = this?.lowercase() ?: return false
+    return "no supported source" in text ||
+        "src_not_supported" in text ||
+        ("not supported" in text && "source" in text)
+}
 
 fun webAudioPlaybackDurationMs(
     currentDurationMs: Long,
@@ -1123,6 +1169,10 @@ private external fun disposeWebAudioElement(audio: HTMLAudioElement)
     }""",
 )
 private external fun webAudioErrorMessage(audio: HTMLAudioElement): String
+
+@OptIn(ExperimentalWasmJsInterop::class)
+@JsFun("(audio) => !!(audio && audio.ended)")
+private external fun isWebAudioEnded(audio: HTMLAudioElement): Boolean
 
 @OptIn(ExperimentalWasmJsInterop::class)
 @JsFun(

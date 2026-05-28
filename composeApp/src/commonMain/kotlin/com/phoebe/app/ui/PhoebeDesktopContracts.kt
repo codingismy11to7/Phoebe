@@ -1,6 +1,8 @@
 package com.phoebe.app.ui
 
 import com.phoebe.app.data.JellyfinQuickConnectResult
+import com.phoebe.app.data.ListenBrainzFeedbackScore
+import com.phoebe.app.data.ListenBrainzFeedbackTarget
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.AppSettings
 import com.phoebe.app.domain.AppScreen
@@ -29,6 +31,7 @@ import com.phoebe.app.domain.ShellPlaybackState
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.defaultCollectionEntries
 import com.phoebe.app.player.CastState
+import com.phoebe.app.platform.SecureCredentialAvailability
 
 internal data class DesktopShellState(
     val screen: AppScreen,
@@ -54,6 +57,7 @@ internal data class PlaybackUiState(
     val lyricsState: LyricsLoadState = LyricsLoadState.Idle,
     val castState: CastState = CastState(),
     val remotePlaybackTarget: String? = null,
+    val listenBrainzFeedbackTarget: ListenBrainzFeedbackTarget = ListenBrainzFeedbackTarget(),
     val equalizerProfile: EqualizerProfile = EqualizerProfile.Default,
     val persistEqualizerSettings: Boolean = false,
     val equalizerRemoteUnavailable: Boolean = false,
@@ -74,6 +78,7 @@ internal data class PlaybackActions(
     val onEqualizerGain: (Int, Float) -> Unit = { _, _ -> },
     val onEqualizerReset: () -> Unit = {},
     val onPersistEqualizerSettings: (Boolean) -> Unit = {},
+    val onListenBrainzFeedback: (ListenBrainzFeedbackScore) -> Unit = {},
     val onPlayQueue: (Int) -> Unit,
     val onClearQueue: () -> Unit,
     val onMoveUpNext: (Int, Int) -> Unit,
@@ -180,6 +185,7 @@ internal data class SettingsUiState(
     val appearanceTintId: String,
     val homeScreenLayoutMode: HomeScreenLayoutMode = HomeScreenLayoutMode.Default,
     val settingsInitialCategory: SettingsCategory = SettingsCategory.AudioPlayback,
+    val listenBrainzCredentialAvailability: SecureCredentialAvailability = SecureCredentialAvailability.Unavailable,
 )
 
 internal data class SettingsActions(
@@ -197,4 +203,9 @@ internal data class SettingsActions(
     val onUseLightAppearanceChange: (Boolean) -> Unit,
     val onAppearanceTintChange: (String) -> Unit,
     val onHomeScreenLayoutModeChange: (HomeScreenLayoutMode) -> Unit = {},
+    val onConnectListenBrainz: (String) -> Unit = {},
+    val onDisconnectListenBrainz: () -> Unit = {},
+    val onListenBrainzSubmitNowPlaying: (Boolean) -> Unit = {},
+    val onListenBrainzSubmitListens: (Boolean) -> Unit = {},
+    val onListenBrainzSubmitCurrentTrackFeedback: (Boolean) -> Unit = {},
 )

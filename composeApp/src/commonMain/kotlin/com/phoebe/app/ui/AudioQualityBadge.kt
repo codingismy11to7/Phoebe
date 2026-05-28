@@ -47,6 +47,23 @@ internal fun AudioQualityBadge(
     }
 }
 
+@Composable
+internal fun AudioQualityText(
+    track: Track?,
+    modifier: Modifier = Modifier,
+    compact: Boolean = false,
+) {
+    val badge = rememberAudioQualityBadge(track) ?: return
+    Text(
+        badge.label,
+        modifier = modifier,
+        color = AudioQualityGold,
+        fontSize = if (compact) 9.sp else 10.sp,
+        fontWeight = FontWeight.Black,
+        maxLines = 1,
+    )
+}
+
 private data class AudioQualityBadgeModel(val label: String)
 
 private val AudioQualityGold = Color(0xFFD6A84A)

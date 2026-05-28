@@ -6,7 +6,8 @@ CREATE TABLE AppSettingsRow (
     scanLibraryOnLaunch INTEGER NOT NULL DEFAULT 0,
     notifyWhenDownloadFinishes INTEGER NOT NULL DEFAULT 0,
     persistEqualizerSettings INTEGER NOT NULL DEFAULT 0,
-    equalizerProfile TEXT NOT NULL DEFAULT '{"enabled":false,"bandCount":10,"gainsDb":[]}'
+    equalizerProfile TEXT NOT NULL DEFAULT '{"enabled":false,"bandCount":10,"gainsDb":[]}',
+    listenBrainzSettings TEXT NOT NULL DEFAULT '{"enabled":false,"username":null,"submitNowPlaying":true,"submitListens":true,"submitCurrentTrackFeedback":true,"storageStatus":"Unknown","connectedAtMs":null,"lastValidatedAtMs":null,"lastSubmittedAtMs":null,"lastNowPlayingSubmittedAtMs":null,"lastListenSubmittedAtMs":null,"lastListenError":null,"lastError":null}'
 );
 
 selectCurrent:
@@ -19,8 +20,9 @@ INSERT OR REPLACE INTO AppSettingsRow(
     scanLibraryOnLaunch,
     notifyWhenDownloadFinishes,
     persistEqualizerSettings,
-    equalizerProfile
-) VALUES (1, ?, ?, ?, ?, ?);
+    equalizerProfile,
+    listenBrainzSettings
+) VALUES (1, ?, ?, ?, ?, ?, ?);
 
 clear:
 DELETE FROM AppSettingsRow;

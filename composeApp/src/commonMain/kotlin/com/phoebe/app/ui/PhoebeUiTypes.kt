@@ -210,6 +210,8 @@ internal enum class PhoebeIcon {
     Settings,
     Plus,
     Heart,
+    ThumbsUp,
+    ThumbsDown,
     ChevronUp,
     ChevronDown,
     ChevronRight,

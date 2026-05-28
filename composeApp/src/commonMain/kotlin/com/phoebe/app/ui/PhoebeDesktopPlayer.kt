@@ -68,6 +68,7 @@ internal fun DesktopPlayer(
     val lyricsState = playbackState.lyricsState
     val castState = playbackState.castState
     val remotePlaybackTarget = playbackState.remotePlaybackTarget
+    val listenBrainzFeedbackTarget = playbackState.listenBrainzFeedbackTarget
     val equalizerProfile = playbackState.equalizerProfile
     val persistEqualizerSettings = playbackState.persistEqualizerSettings
     val equalizerRemoteUnavailable = playbackState.equalizerRemoteUnavailable
@@ -98,6 +99,7 @@ internal fun DesktopPlayer(
     val useLightAppearance = settingsState.useLightAppearance
     val appearanceTintId = settingsState.appearanceTintId
     val settingsInitialCategory = settingsState.settingsInitialCategory
+    val listenBrainzCredentialAvailability = settingsState.listenBrainzCredentialAvailability
     val onNavigate = browseActions.onNavigate
     val onSearchQuery = browseActions.onSearchQuery
     val onLibraryFilter = browseActions.onLibraryFilter
@@ -150,6 +152,7 @@ internal fun DesktopPlayer(
     val onEqualizerGain = playbackActions.onEqualizerGain
     val onEqualizerReset = playbackActions.onEqualizerReset
     val onPersistEqualizerSettings = playbackActions.onPersistEqualizerSettings
+    val onListenBrainzFeedback = playbackActions.onListenBrainzFeedback
     val onPlayQueue = playbackActions.onPlayQueue
     val onClearQueue = playbackActions.onClearQueue
     val onMoveUpNext = playbackActions.onMoveUpNext
@@ -187,6 +190,11 @@ internal fun DesktopPlayer(
     val onDeleteAllDownloads = settingsActions.onDeleteAllDownloads
     val onUseLightAppearanceChange = settingsActions.onUseLightAppearanceChange
     val onAppearanceTintChange = settingsActions.onAppearanceTintChange
+    val onConnectListenBrainz = settingsActions.onConnectListenBrainz
+    val onDisconnectListenBrainz = settingsActions.onDisconnectListenBrainz
+    val onListenBrainzSubmitNowPlaying = settingsActions.onListenBrainzSubmitNowPlaying
+    val onListenBrainzSubmitListens = settingsActions.onListenBrainzSubmitListens
+    val onListenBrainzSubmitCurrentTrackFeedback = settingsActions.onListenBrainzSubmitCurrentTrackFeedback
     val isPlaying = shellPlayback.isPlaying
     val isBuffering = shellPlayback.isBuffering
     val positionMs = player.positionMs
@@ -549,6 +557,12 @@ internal fun DesktopPlayer(
                                         onExportFavoritePlaylists = onExportFavoritePlaylists,
                                         onImportFavoritePlaylists = onImportFavoritePlaylists,
                                         session = session,
+                                        listenBrainzCredentialAvailability = listenBrainzCredentialAvailability,
+                                        onConnectListenBrainz = onConnectListenBrainz,
+                                        onDisconnectListenBrainz = onDisconnectListenBrainz,
+                                        onListenBrainzSubmitNowPlaying = onListenBrainzSubmitNowPlaying,
+                                        onListenBrainzSubmitListens = onListenBrainzSubmitListens,
+                                        onListenBrainzSubmitCurrentTrackFeedback = onListenBrainzSubmitCurrentTrackFeedback,
                                         modifier = Modifier.fillMaxSize(),
                                         initialCategory = settingsInitialCategory,
                                     )
@@ -615,6 +629,7 @@ internal fun DesktopPlayer(
                             volume = volume,
                             castState = castState,
                             remotePlaybackTarget = remotePlaybackTarget,
+                            listenBrainzFeedbackTarget = listenBrainzFeedbackTarget,
                             equalizerProfile = equalizerProfile,
                             persistEqualizerSettings = persistEqualizerSettings,
                             equalizerRemoteUnavailable = equalizerRemoteUnavailable,
@@ -635,6 +650,7 @@ internal fun DesktopPlayer(
                             onEqualizerGain = onEqualizerGain,
                             onEqualizerReset = onEqualizerReset,
                             onPersistEqualizerSettings = onPersistEqualizerSettings,
+                            onListenBrainzFeedback = onListenBrainzFeedback,
                             onToggleUpNext = { desktopUpNextExpanded = !desktopUpNextExpanded },
                             onCast = onCast,
                         )

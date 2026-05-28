@@ -296,6 +296,7 @@ private fun PhoebeRootStateHolder(
     val libraries by state.libraries.collectAsState()
     val libraryUi by state.libraryUi.collectAsState()
     val appSettings by state.appSettings.collectAsState()
+    val listenBrainzFeedbackTarget by state.listenBrainzFeedbackTarget.collectAsState()
     val equalizerProfile by state.equalizerProfile.collectAsState()
     val equalizerRemoteUnavailable by state.equalizerRemoteUnavailable.collectAsState()
     val lastPlayedByArtist by state.lastPlayedByArtist.collectAsState()
@@ -742,6 +743,7 @@ private fun PhoebeRootStateHolder(
             playlists = list,
             playlistsEnabled = plexReady || localReady,
             onAddTrackToPlaylist = { playlist, track -> state.addToPlaylist(playlist, track) },
+            onMovePlaylistTrack = { playlist, from, to -> state.movePlaylistTrack(playlist, from, to) },
             onCopyPlaylistToPlaylist = { source, target -> state.copyPlaylistIntoPlaylist(source, target) },
             onCreatePlaylist = { title, initialTracks -> state.createPlaylist(title, initialTracks) },
             onRequestCreatePlaylist = { initialTracks ->
@@ -1101,6 +1103,7 @@ private fun PhoebeRootStateHolder(
                         onDownloadPlaylist = state::download,
                         onCancelDownloadPlaylist = state::cancelDownloads,
                         onDeleteDownloadPlaylist = state::deleteDownloads,
+                        onMovePlaylistTrack = state::movePlaylistTrack,
                         onLibraryColumns = state::setLibraryColumns,
                     )
                     AppScreen.Player -> MobilePlayerHost(
@@ -1245,6 +1248,12 @@ private fun PhoebeRootStateHolder(
                         appearanceTintId = appearanceTintId,
                         onAppearanceTintChange = onAppearanceTintChange,
                         onHomeScreenLayoutModeChange = onHomeScreenLayoutModeChange,
+                        listenBrainzCredentialAvailability = state.listenBrainzCredentialAvailability,
+                        onConnectListenBrainz = state::connectListenBrainz,
+                        onDisconnectListenBrainz = state::disconnectListenBrainz,
+                        onListenBrainzSubmitNowPlaying = state::setListenBrainzSubmitNowPlaying,
+                        onListenBrainzSubmitListens = state::setListenBrainzSubmitListens,
+                        onListenBrainzSubmitCurrentTrackFeedback = state::setListenBrainzSubmitCurrentTrackFeedback,
                     )
                     }
                 }
@@ -1330,6 +1339,7 @@ private fun PhoebeRootStateHolder(
                         lyricsState = lyricsState,
                         castState = cast,
                         remotePlaybackTarget = musicAssistantRemotePlayback?.target,
+                        listenBrainzFeedbackTarget = listenBrainzFeedbackTarget,
                         equalizerProfile = equalizerProfile,
                         persistEqualizerSettings = appSettings.persistEqualizerSettings,
                         equalizerRemoteUnavailable = equalizerRemoteUnavailable,
@@ -1348,6 +1358,7 @@ private fun PhoebeRootStateHolder(
                         onEqualizerGain = state::setEqualizerGain,
                         onEqualizerReset = state::resetEqualizer,
                         onPersistEqualizerSettings = state::setPersistEqualizerSettings,
+                        onListenBrainzFeedback = state::submitListenBrainzFeedback,
                         onLyrics = {
                             selectedPlaylistId = null
                             navigator.openBrowse(
@@ -1488,6 +1499,7 @@ private fun PhoebeRootStateHolder(
                         useLightAppearance = useLightAppearance,
                         appearanceTintId = appearanceTintId,
                         homeScreenLayoutMode = homeScreenLayoutMode,
+                        listenBrainzCredentialAvailability = state.listenBrainzCredentialAvailability,
                     ),
                     settingsActions = SettingsActions(
                         onHomeSections = state::setHomeSections,
@@ -1504,6 +1516,11 @@ private fun PhoebeRootStateHolder(
                         onUseLightAppearanceChange = onUseLightAppearanceChange,
                         onAppearanceTintChange = onAppearanceTintChange,
                         onHomeScreenLayoutModeChange = onHomeScreenLayoutModeChange,
+                        onConnectListenBrainz = state::connectListenBrainz,
+                        onDisconnectListenBrainz = state::disconnectListenBrainz,
+                        onListenBrainzSubmitNowPlaying = state::setListenBrainzSubmitNowPlaying,
+                        onListenBrainzSubmitListens = state::setListenBrainzSubmitListens,
+                        onListenBrainzSubmitCurrentTrackFeedback = state::setListenBrainzSubmitCurrentTrackFeedback,
                     ),
                 )
             }
@@ -1731,6 +1748,7 @@ private fun MobilePlayerHost(
     val appSettings by appState.appSettings.collectAsState()
     val equalizerProfile by appState.equalizerProfile.collectAsState()
     val equalizerRemoteUnavailable by appState.equalizerRemoteUnavailable.collectAsState()
+    val listenBrainzFeedbackTarget by appState.listenBrainzFeedbackTarget.collectAsState()
     val showStartingState = playbackStarting && track?.id != player.currentTrack?.id
     MobilePlayer(
         track = track,
@@ -1745,6 +1763,7 @@ private fun MobilePlayerHost(
         currentIndex = currentIndex,
         castState = castState,
         remotePlaybackTarget = remotePlaybackTarget,
+        listenBrainzFeedbackTarget = listenBrainzFeedbackTarget,
         equalizerProfile = equalizerProfile,
         persistEqualizerSettings = appSettings.persistEqualizerSettings,
         equalizerRemoteUnavailable = equalizerRemoteUnavailable,
@@ -1766,6 +1785,7 @@ private fun MobilePlayerHost(
         onEqualizerGain = appState::setEqualizerGain,
         onEqualizerReset = appState::resetEqualizer,
         onPersistEqualizerSettings = appState::setPersistEqualizerSettings,
+        onListenBrainzFeedback = appState::submitListenBrainzFeedback,
         onBack = onBack,
         onSwipeDismiss = onSwipeDismiss,
         handleSystemBack = handleSystemBack,

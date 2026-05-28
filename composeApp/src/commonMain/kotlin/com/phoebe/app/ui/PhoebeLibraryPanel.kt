@@ -516,6 +516,6 @@ internal fun LibraryRow(
                 modifier = Modifier.sharedBoundsTransition(sharedKey?.let { "$it:subtitle" }),
             )
         }
-        PhoebeIconView(PhoebeIcon.Forward, tint = PhoebeUi.mutedText, modifier = Modifier.size(18.dp))
+        PhoebeIconView(PhoebeIcon.Forward, tint = PhoebeUi.mutedText, modifier = Modifier.size(12.dp))
     }
 }

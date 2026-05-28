@@ -2105,7 +2105,7 @@ private fun DesktopRecentArtistsPanel(
         } else {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 items(artists.take(10), key = { it.id }, contentType = { "desktop-recent-artist" }) { artist ->
-                    MobileArtistTile(artist, artistThumbs[artist.id], "artist:${artist.id}") { onArtist(artist) }
+                    MobileArtistTile(artist, artistThumbs[artist.id], "artist:${artist.id}", width = 112.dp) { onArtist(artist) }
                 }
             }
         }
@@ -2480,7 +2480,7 @@ private fun HomeActionCard(
             Text(title, color = PhoebeUi.primaryText, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(subtitle, color = PhoebeUi.secondaryText, fontSize = 11.sp, lineHeight = 15.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
-        PhoebeIconView(PhoebeIcon.Forward, tint = PhoebeUi.secondaryText, modifier = Modifier.size(18.dp))
+        PhoebeIconView(PhoebeIcon.Forward, tint = PhoebeUi.secondaryText, modifier = Modifier.size(14.dp))
     }
 }
 
@@ -2675,11 +2675,13 @@ private fun MobileArtistTile(
     artist: Artist,
     thumbUrl: String?,
     sharedKey: String? = null,
-    width: Dp = 82.dp,
+    modifier: Modifier = Modifier,
+    width: Dp = 92.dp,
+    artworkSize: Dp = width,
     onClick: () -> Unit,
 ) {
     Column(
-        Modifier
+        modifier
             .width(width)
             .clip(RoundedCornerShape(8.dp))
             .clickable(onClick = onClick)
@@ -2691,10 +2693,10 @@ private fun MobileArtistTile(
             artist.title,
             thumbUrl,
             Modifier
-                .size(66.dp)
+                .size(artworkSize)
                 .sharedArtworkTransition(sharedKey)
                 .clip(CircleShape),
-            radius = 33.dp,
+            radius = artworkSize / 2f,
             elevated = false,
             maxDecodeDimension = 160,
         )
@@ -2797,6 +2799,7 @@ private fun FeaturedArtistCard(
     val lastPlayedLabel = remember(stats?.lastPlayedMs, nowMs) { formatLastPlayed(stats?.lastPlayedMs, nowMs) }
     val albumWord = if (albumCount == 1) "album" else "albums"
     val songWord = if (trackCount == 1) "song" else "songs"
+    val artworkSize = 124.dp
 
     Row(
         modifier
@@ -2815,10 +2818,10 @@ private fun FeaturedArtistCard(
                 artist.title,
                 artistThumbUrl,
                 Modifier
-                    .size(112.dp)
+                    .size(artworkSize)
                     .sharedArtworkTransition("artist:${artist.id}")
                     .clip(CircleShape),
-                radius = 56.dp,
+                radius = artworkSize / 2f,
                 elevated = false,
             )
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {

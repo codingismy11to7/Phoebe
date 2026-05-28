@@ -383,11 +383,13 @@ data class AppSettings(
     val notifyWhenDownloadFinishes: Boolean = false,
     val persistEqualizerSettings: Boolean = false,
     val equalizerProfile: EqualizerProfile = EqualizerProfile.Default,
+    val listenBrainz: ListenBrainzSettings = ListenBrainzSettings(),
 ) {
     fun normalized(): AppSettings =
         copy(
             crossfadeSeconds = crossfadeSeconds.coerceIn(MinCrossfadeSeconds, MaxCrossfadeSeconds),
             equalizerProfile = equalizerProfile.normalized(),
+            listenBrainz = listenBrainz.normalized(),
         )
 
     companion object {
@@ -395,6 +397,49 @@ data class AppSettings(
         const val MinCrossfadeSeconds = 0
         const val MaxCrossfadeSeconds = 12
     }
+}
+
+@Serializable
+data class ListenBrainzSettings(
+    val enabled: Boolean = false,
+    val username: String? = null,
+    val submitNowPlaying: Boolean = true,
+    val submitListens: Boolean = true,
+    val submitCurrentTrackFeedback: Boolean = true,
+    val storageStatus: ListenBrainzCredentialStorageStatus = ListenBrainzCredentialStorageStatus.Unknown,
+    val connectedAtMs: Long? = null,
+    val lastValidatedAtMs: Long? = null,
+    val lastSubmittedAtMs: Long? = null,
+    val lastNowPlayingSubmittedAtMs: Long? = null,
+    val lastListenSubmittedAtMs: Long? = null,
+    val lastListenError: String? = null,
+    val lastError: String? = null,
+) {
+    val connected: Boolean
+        get() = enabled && !username.isNullOrBlank()
+
+    fun normalized(): ListenBrainzSettings {
+        val normalizedUsername = username?.trim()?.takeIf { it.isNotBlank() }
+        return copy(
+            enabled = enabled && normalizedUsername != null,
+            username = normalizedUsername,
+            lastListenError = lastListenError?.trim()?.takeIf { it.isNotBlank() }?.take(180),
+            lastError = lastError?.trim()?.takeIf { it.isNotBlank() }?.take(180),
+        )
+    }
+
+    companion object {
+        val Disconnected = ListenBrainzSettings()
+    }
+}
+
+@Serializable
+enum class ListenBrainzCredentialStorageStatus {
+    Unknown,
+    PersistentSecure,
+    PersistentBrowser,
+    SessionOnly,
+    Unavailable,
 }
 
 @Serializable

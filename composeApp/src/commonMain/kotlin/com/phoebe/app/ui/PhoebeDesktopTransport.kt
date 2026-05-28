@@ -101,17 +101,12 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.composed
 import androidx.compose.ui.platform.LocalDensity
@@ -132,6 +127,8 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.zIndex
 import kotlin.math.roundToInt
 import com.phoebe.app.AppState
+import com.phoebe.app.data.ListenBrainzFeedbackScore
+import com.phoebe.app.data.ListenBrainzFeedbackTarget
 import com.phoebe.app.data.catalogAlbumsForArtist
 import com.phoebe.app.data.catalogTracksForArtist
 import com.phoebe.app.domain.Album
@@ -182,6 +179,7 @@ internal fun DesktopTransport(
     volume: Float,
     castState: CastState = CastState(),
     remotePlaybackTarget: String? = null,
+    listenBrainzFeedbackTarget: ListenBrainzFeedbackTarget = ListenBrainzFeedbackTarget(),
     equalizerProfile: EqualizerProfile = EqualizerProfile.Default,
     persistEqualizerSettings: Boolean = false,
     equalizerRemoteUnavailable: Boolean = false,
@@ -202,6 +200,7 @@ internal fun DesktopTransport(
     onEqualizerGain: (Int, Float) -> Unit = { _, _ -> },
     onEqualizerReset: () -> Unit = {},
     onPersistEqualizerSettings: (Boolean) -> Unit = {},
+    onListenBrainzFeedback: (ListenBrainzFeedbackScore) -> Unit = {},
     onToggleUpNext: () -> Unit,
     onCast: () -> Unit,
 ) {
@@ -217,6 +216,9 @@ internal fun DesktopTransport(
     val trackNavigationActions = LocalTrackNavigationActions.current
     val canLike = track != null && likeActions.likesEnabled && track.canTogglePlexLike()
     val liked = track != null && likeActions.isLiked(track)
+    val showListenBrainzFeedback = track != null &&
+        listenBrainzFeedbackTarget.enabled &&
+        listenBrainzFeedbackTarget.trackId == track.id
     val showCastControls = !isDesktopPlatform() || castState.isAvailable || castState.isConnected
     var equalizerOpen by remember { mutableStateOf(false) }
     var transportOptionsOpen by remember { mutableStateOf(false) }
@@ -325,6 +327,13 @@ internal fun DesktopTransport(
                     track?.let { trackNavigationActions.onOpenAlbumForTrack(it) }
                 },
             )
+            if (!overflowSecondaryControls) {
+                AudioQualityText(
+                    track = track,
+                    compact = true,
+                    modifier = Modifier.padding(top = 1.dp),
+                )
+            }
         }
         LikeButton(
             liked = liked,
@@ -332,8 +341,13 @@ internal fun DesktopTransport(
             onClick = { track?.let(likeActions.onToggleLiked) },
             modifier = Modifier.size(34.dp),
         )
-        if (!overflowSecondaryControls) {
-            AudioQualityBadge(track = track, compact = true, modifier = Modifier.padding(start = 8.dp))
+        if (showListenBrainzFeedback) {
+            Spacer(Modifier.width(8.dp))
+            ListenBrainzFeedbackControls(
+                target = listenBrainzFeedbackTarget,
+                onFeedback = onListenBrainzFeedback,
+                stackedVotes = true,
+            )
         }
         Spacer(Modifier.width(if (overflowSecondaryControls || compact) 10.dp else 24.dp))
         BoxWithConstraints(
@@ -353,9 +367,9 @@ internal fun DesktopTransport(
                     modifier = Modifier.height(48.dp),
                 ) {
                     ShuffleIcon(active = shuffle, onClick = onShuffle)
-                    TransportIcon(PhoebeIcon.Previous, "Previous Track", onPrevious)
+                    TransportIcon(PhoebeIcon.Previous, "Previous Track", onPrevious, iconSize = 16.dp)
                     PlayButton(isPlaying, isBuffering, 48.dp, onToggle, enabled = hasTrack)
-                    TransportIcon(PhoebeIcon.Next, "Next Track", onNext)
+                    TransportIcon(PhoebeIcon.Next, "Next Track", onNext, iconSize = 16.dp)
                     RepeatIcon(mode = repeat, onClick = onRepeat)
                 }
                 ProgressLine(
@@ -458,6 +472,234 @@ internal fun DesktopTransport(
             }
         }
         }
+    }
+}
+
+@Composable
+internal fun ListenBrainzFeedbackControls(
+    target: ListenBrainzFeedbackTarget,
+    onFeedback: (ListenBrainzFeedbackScore) -> Unit,
+    modifier: Modifier = Modifier,
+    stackedVotes: Boolean = false,
+    horizontalVotes: Boolean = false,
+) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(
+            when {
+                horizontalVotes -> 8.dp
+                stackedVotes -> 6.dp
+                else -> 4.dp
+            },
+        ),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val loveActive = target.score == ListenBrainzFeedbackScore.Love
+        val hateActive = target.score == ListenBrainzFeedbackScore.Hate
+        val resolvingTarget = target.enabled && target.recordingMsid.isNullOrBlank()
+        val resolvingFeedback = resolvingTarget || target.loadingScore
+        val canSubmitFeedback = target.available && !target.loadingScore && target.submittingScore == null
+        if (stackedVotes) {
+            ListenBrainzFeedbackVoteStack(
+                target = target,
+                resolvingFeedback = resolvingFeedback,
+                canSubmitFeedback = canSubmitFeedback,
+                onFeedback = onFeedback,
+            )
+        } else if (horizontalVotes) {
+            ListenBrainzFeedbackVoteButton(
+                icon = PhoebeIcon.ThumbsUp,
+                label = "Love on ListenBrainz",
+                active = loveActive,
+                loading = resolvingFeedback || target.submittingScore == ListenBrainzFeedbackScore.Love,
+                enabled = canSubmitFeedback,
+                onClick = { onFeedback(if (loveActive) ListenBrainzFeedbackScore.Clear else ListenBrainzFeedbackScore.Love) },
+                modifier = Modifier.size(width = 46.dp, height = 40.dp),
+                iconSize = 20.dp,
+            )
+            ListenBrainzFeedbackVoteButton(
+                icon = PhoebeIcon.ThumbsDown,
+                label = "Hate on ListenBrainz",
+                active = hateActive,
+                loading = resolvingFeedback || target.submittingScore == ListenBrainzFeedbackScore.Hate,
+                enabled = canSubmitFeedback,
+                onClick = { onFeedback(if (hateActive) ListenBrainzFeedbackScore.Clear else ListenBrainzFeedbackScore.Hate) },
+                modifier = Modifier.size(width = 46.dp, height = 40.dp),
+                iconSize = 20.dp,
+            )
+        } else {
+            ListenBrainzFeedbackButton(
+                icon = PhoebeIcon.Heart,
+                label = "Love on ListenBrainz",
+                active = loveActive,
+                loading = resolvingFeedback || target.submittingScore == ListenBrainzFeedbackScore.Love,
+                enabled = canSubmitFeedback,
+                onClick = { onFeedback(if (loveActive) ListenBrainzFeedbackScore.Clear else ListenBrainzFeedbackScore.Love) },
+            )
+            ListenBrainzFeedbackTextButton(
+                label = "Hate",
+                active = hateActive,
+                loading = resolvingFeedback || target.submittingScore == ListenBrainzFeedbackScore.Hate,
+                enabled = canSubmitFeedback,
+                onClick = { onFeedback(if (hateActive) ListenBrainzFeedbackScore.Clear else ListenBrainzFeedbackScore.Hate) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ListenBrainzFeedbackVoteStack(
+    target: ListenBrainzFeedbackTarget,
+    resolvingFeedback: Boolean,
+    canSubmitFeedback: Boolean,
+    onFeedback: (ListenBrainzFeedbackScore) -> Unit,
+) {
+    val loveActive = target.score == ListenBrainzFeedbackScore.Love
+    val hateActive = target.score == ListenBrainzFeedbackScore.Hate
+    Column(
+        modifier = Modifier
+            .width(42.dp)
+            .height(60.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        ListenBrainzFeedbackVoteButton(
+            icon = PhoebeIcon.ThumbsUp,
+            label = "Love on ListenBrainz",
+            active = loveActive,
+            loading = resolvingFeedback || target.submittingScore == ListenBrainzFeedbackScore.Love,
+            enabled = canSubmitFeedback,
+            onClick = { onFeedback(if (loveActive) ListenBrainzFeedbackScore.Clear else ListenBrainzFeedbackScore.Love) },
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            iconSize = 20.dp,
+            contentPadding = 2.dp,
+        )
+        ListenBrainzFeedbackVoteButton(
+            icon = PhoebeIcon.ThumbsDown,
+            label = "Hate on ListenBrainz",
+            active = hateActive,
+            loading = resolvingFeedback || target.submittingScore == ListenBrainzFeedbackScore.Hate,
+            enabled = canSubmitFeedback,
+            onClick = { onFeedback(if (hateActive) ListenBrainzFeedbackScore.Clear else ListenBrainzFeedbackScore.Hate) },
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            iconSize = 20.dp,
+            contentPadding = 2.dp,
+        )
+    }
+}
+
+@Composable
+private fun ListenBrainzFeedbackVoteButton(
+    icon: PhoebeIcon,
+    label: String,
+    active: Boolean,
+    loading: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    iconSize: Dp = 18.dp,
+    contentPadding: Dp = 0.dp,
+) {
+    Box(
+        modifier
+            .clip(RoundedCornerShape(7.dp))
+            .background(if (active) PhoebeUi.accent.copy(alpha = 0.18f) else Color.Transparent)
+            .border(
+                BorderStroke(1.dp, if (active) PhoebeUi.accent.copy(alpha = 0.28f) else PhoebeUi.border.copy(alpha = 0.45f)),
+                RoundedCornerShape(7.dp),
+            )
+            .clickable(enabled = enabled, onClick = onClick)
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        if (loading) {
+            PhoebeLoadingBorder(
+                modifier = Modifier.matchParentSize(),
+                radius = 7.dp,
+                strokeWidth = 1.5.dp,
+                label = "listenbrainz-feedback-loading",
+            )
+        }
+        PhoebeIconView(
+            icon,
+            tint = if (active) PhoebeUi.accentLight else PhoebeUi.secondaryText,
+            modifier = Modifier.size(iconSize).padding(contentPadding),
+        )
+    }
+}
+
+@Composable
+private fun ListenBrainzFeedbackButton(
+    icon: PhoebeIcon,
+    label: String,
+    active: Boolean,
+    loading: Boolean = false,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    Box(
+        Modifier
+            .size(34.dp)
+            .clip(CircleShape)
+            .background(if (active) PhoebeUi.accent.copy(alpha = 0.18f) else Color.Transparent)
+            .clickable(enabled = enabled, onClick = onClick)
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        if (loading) {
+            PhoebeLoadingBorder(
+                modifier = Modifier.matchParentSize(),
+                radius = 999.dp,
+                strokeWidth = 1.5.dp,
+                label = "listenbrainz-feedback-loading",
+            )
+        }
+        PhoebeIconView(
+            icon,
+            tint = if (active) PhoebeUi.accentLight else PhoebeUi.secondaryText,
+            modifier = Modifier.size(17.dp),
+            filled = active,
+        )
+    }
+}
+
+@Composable
+private fun ListenBrainzFeedbackTextButton(
+    label: String,
+    active: Boolean,
+    loading: Boolean = false,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    Box(
+        Modifier
+            .height(34.dp)
+            .widthIn(min = 44.dp)
+            .clip(RoundedCornerShape(999.dp))
+            .background(if (active) PhoebeUi.accent.copy(alpha = 0.18f) else Color.Transparent)
+            .border(
+                BorderStroke(1.dp, if (active) PhoebeUi.accent.copy(alpha = 0.28f) else PhoebeUi.border.copy(alpha = 0.55f)),
+                RoundedCornerShape(999.dp),
+            )
+            .clickable(enabled = enabled, onClick = onClick)
+            .semantics { contentDescription = "$label on ListenBrainz" }
+            .padding(horizontal = 8.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (loading) {
+            PhoebeLoadingBorder(
+                modifier = Modifier.matchParentSize(),
+                radius = 999.dp,
+                strokeWidth = 1.5.dp,
+                label = "listenbrainz-feedback-loading",
+            )
+        }
+        Text(
+            label,
+            color = if (active) PhoebeUi.accentLight else PhoebeUi.secondaryText,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+        )
     }
 }
 
@@ -606,22 +848,7 @@ internal fun ShuffleIcon(active: Boolean, onClick: () -> Unit) {
         contentAlignment = Alignment.Center,
     ) {
         val tint = if (active) PhoebeUi.accentLight else PhoebeUi.primaryText
-        Canvas(Modifier.size(20.dp)) {
-            val s = size.minDimension
-            val arrowHeadLen = s * 0.18f
-            val stroke = androidx.compose.ui.graphics.drawscope.Stroke(width = s * 0.085f, cap = StrokeCap.Round)
-            val p1Start = Offset(s * 0.10f, s * 0.22f)
-            val p1End = Offset(s * 0.85f, s * 0.78f)
-            val p2Start = Offset(s * 0.10f, s * 0.78f)
-            val p2End = Offset(s * 0.85f, s * 0.22f)
-            drawLine(tint, p1Start, p1End, strokeWidth = stroke.width, cap = StrokeCap.Round)
-            drawLine(tint, p2Start, p2End, strokeWidth = stroke.width, cap = StrokeCap.Round)
-            // Arrowheads
-            drawLine(tint, p1End, p1End + Offset(-arrowHeadLen, 0f), strokeWidth = stroke.width, cap = StrokeCap.Round)
-            drawLine(tint, p1End, p1End + Offset(0f, -arrowHeadLen), strokeWidth = stroke.width, cap = StrokeCap.Round)
-            drawLine(tint, p2End, p2End + Offset(-arrowHeadLen, 0f), strokeWidth = stroke.width, cap = StrokeCap.Round)
-            drawLine(tint, p2End, p2End + Offset(0f, arrowHeadLen), strokeWidth = stroke.width, cap = StrokeCap.Round)
-        }
+        PhoebeIconView(PhoebeIcon.InterwovenArrows, tint = tint, modifier = Modifier.size(20.dp))
     }
 }
 
@@ -741,47 +968,6 @@ internal fun CastIcon(active: Boolean, loading: Boolean, enabled: Boolean, onCli
             )
             return@Box
         }
-        // Match the Up Next toggle's 20.dp canvas. Inside that canvas, draw the cast
-        // glyph in a 14.dp-tall band that is vertically centred — this keeps the icon's
-        // optical centre on the same baseline as the music note, slider, and up-next bars.
-        Canvas(Modifier.size(20.dp)) {
-            val w = size.width
-            val h = size.height
-            val rectH = h * 0.70f
-            val rectTop = (h - rectH) / 2f
-            val rectBottom = rectTop + rectH
-            val stroke = h * 0.10f
-            val cornerRadius = h * 0.12f
-            drawRoundRect(
-                color = strokeColor,
-                topLeft = Offset(0f, rectTop),
-                size = androidx.compose.ui.geometry.Size(w, rectH),
-                cornerRadius = CornerRadius(cornerRadius, cornerRadius),
-                style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke),
-            )
-            // Wifi-style arcs anchored at the bottom-left interior of the screen.
-            val arcOrigin = Offset(stroke * 1.5f, rectBottom - stroke * 1.5f)
-            drawCircle(color = strokeColor, radius = stroke * 0.9f, center = arcOrigin)
-            val midRadius = rectH * 0.28f
-            drawArc(
-                color = strokeColor,
-                startAngle = -90f,
-                sweepAngle = 90f,
-                useCenter = false,
-                topLeft = Offset(arcOrigin.x - midRadius, arcOrigin.y - midRadius),
-                size = androidx.compose.ui.geometry.Size(midRadius * 2, midRadius * 2),
-                style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke, cap = StrokeCap.Round),
-            )
-            val outRadius = rectH * 0.5f
-            drawArc(
-                color = strokeColor,
-                startAngle = -90f,
-                sweepAngle = 90f,
-                useCenter = false,
-                topLeft = Offset(arcOrigin.x - outRadius, arcOrigin.y - outRadius),
-                size = androidx.compose.ui.geometry.Size(outRadius * 2, outRadius * 2),
-                style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke, cap = StrokeCap.Round),
-            )
-        }
+        PhoebeIconView(PhoebeIcon.Cast, tint = strokeColor, modifier = Modifier.size(20.dp))
     }
 }

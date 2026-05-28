@@ -70,6 +70,8 @@ interface MusicProviderAdapter {
 
     suspend fun addTracksToPlaylist(session: PlexSession, playlist: Playlist, tracks: List<Track>) {}
 
+    suspend fun replacePlaylistTracks(session: PlexSession, playlist: Playlist, tracks: List<Track>): Boolean = false
+
     suspend fun setFavorite(session: PlexSession, itemId: String, favorite: Boolean, kind: ProviderItemKind = ProviderItemKind.Unknown): Boolean = false
 
     suspend fun rateItem(session: PlexSession, itemId: String, rating: Float?): Boolean = false

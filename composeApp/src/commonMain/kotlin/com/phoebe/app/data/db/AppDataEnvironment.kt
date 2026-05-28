@@ -6,13 +6,9 @@ import com.phoebe.app.platform.isDebugBuild
 internal fun localDatabaseFileName(): String =
     if (isDebugBuild()) "phoebe-debug.db" else "phoebe.db"
 
-/** UserDefaults / SharedPreferences key for the schema wipe revision marker. */
+/** Stable key prefix for web schema-version metadata and legacy web database lookup. */
 internal fun localDatabaseRevisionKey(): String =
     if (isDebugBuild()) "phoebe-debug.db.revision" else "phoebe.db.revision"
-
-/** Android SharedPreferences file backing the DB revision marker. */
-internal fun localDatabaseMetaPrefsName(): String =
-    if (isDebugBuild()) "phoebe-db-meta-debug" else "phoebe-db-meta"
 
 /** Relative directory under the platform storage root (filesDir, Documents, ~/.phoebe). */
 internal fun localStorageDirectoryName(): String =

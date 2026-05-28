@@ -374,6 +374,13 @@ class SubsonicClient(
         }
     }
 
+    suspend fun replacePlaylistTracks(server: PlexServer, username: String, password: String, playlistId: String, itemIds: List<String>) {
+        request<SubsonicRoot>(server.uri, username, password, "updatePlaylist") {
+            parameter("playlistId", playlistId.removePrefix("navidrome:"))
+            itemIds.forEach { parameter("songId", it.removePrefix("navidrome:")) }
+        }
+    }
+
     suspend fun setFavorite(server: PlexServer, username: String, password: String, itemId: String, favorite: Boolean, kind: ProviderItemKind = ProviderItemKind.Unknown) {
         request<SubsonicRoot>(server.uri, username, password, if (favorite) "star" else "unstar") {
             when (kind) {
@@ -391,10 +398,11 @@ class SubsonicClient(
         }
     }
 
-    suspend fun scrobble(server: PlexServer, username: String, password: String, itemId: String, submission: Boolean) {
+    suspend fun scrobble(server: PlexServer, username: String, password: String, itemId: String, submission: Boolean, timeMs: Long? = null) {
         request<SubsonicRoot>(server.uri, username, password, "scrobble") {
             parameter("id", itemId.removePrefix("navidrome:"))
             parameter("submission", submission)
+            timeMs?.let { parameter("time", it.coerceAtLeast(0L)) }
         }
     }
 

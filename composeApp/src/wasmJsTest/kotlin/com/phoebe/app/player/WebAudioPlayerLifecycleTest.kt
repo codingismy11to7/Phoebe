@@ -171,6 +171,50 @@ class WebAudioPlayerLifecycleTest {
     }
 
     @Test
+    fun staleRejectedPlayPromiseFromOutgoingCrossfadeAudioIsIgnored() = runTest {
+        installMockWebAudioElement(mode = "crossfade-stale-source-reject", durationSeconds = 1.0)
+        val diagnostics = RecordingPlaybackDiagnostics()
+        val player = createWebAudioPlayerForTests(diagnostics)
+        try {
+            val first = playbackTrack(
+                id = "web-crossfade-stale-first",
+                localUri = "phoebe-test://music/crossfade-stale-first.mp3",
+                durationMs = 1_000L,
+            )
+            val second = playbackTrack(
+                id = "web-crossfade-stale-second",
+                localUri = "phoebe-test://music/crossfade-stale-second.mp3",
+                durationMs = 1_000L,
+            )
+
+            player.setCrossfadeDurationMs(500L)
+            player.play(listOf(first, second), 0)
+
+            assertTrue(
+                waitUntil(timeoutMs = 1_500L) {
+                    player.state.value.currentTrack?.id == second.id &&
+                        diagnostics.committedTrackIds.contains(second.id)
+                },
+                "Web crossfade did not commit before stale play() rejection; state=${player.state.value} " +
+                    "errors=${diagnostics.errors}",
+            )
+            delay(400L)
+            assertTrue(
+                player.state.value.playbackErrorSerial == 0,
+                "A stale outgoing play() rejection should not surface a playback error; " +
+                    "state=${player.state.value} errors=${diagnostics.errors}",
+            )
+            assertTrue(
+                diagnostics.errors.none { it.contains("no supported source", ignoreCase = true) },
+                "Stale outgoing play() rejection should not be reported; errors=${diagnostics.errors}",
+            )
+        } finally {
+            player.stopPlayback()
+            restoreMockWebAudioElement()
+        }
+    }
+
+    @Test
     fun remoteWebAudioRetriesWithoutCorsWhenCorsPlaybackRejects() = runTest {
         installMockWebAudioElement(mode = "cors-reject-then-complete", durationSeconds = 0.25)
         val diagnostics = RecordingPlaybackDiagnostics()
@@ -302,6 +346,7 @@ class WebAudioPlayerLifecycleTest {
             src: Object.getOwnPropertyDescriptor(proto, "src")
         };
         const timers = new Set();
+        let playCalls = 0;
         const stateByElement = new WeakMap();
         const stateFor = (audio) => {
             let state = stateByElement.get(audio);
@@ -369,6 +414,7 @@ class WebAudioPlayerLifecycleTest {
         proto.play = function() {
             const audio = this;
             const state = stateFor(audio);
+            const playCall = ++playCalls;
             if (mode === "reject") {
                 return Promise.reject(new Error("Mock play rejected"));
             }
@@ -383,7 +429,8 @@ class WebAudioPlayerLifecycleTest {
             }
             state.timer = setInterval(() => {
                 if (state.paused) return;
-                const stepSeconds = mode === "crossfade" ? 0.025 : Math.max(0.04, state.duration / 5);
+                const crossfadeTiming = mode === "crossfade" || mode === "crossfade-stale-source-reject";
+                const stepSeconds = crossfadeTiming ? 0.025 : Math.max(0.04, state.duration / 5);
                 state.currentTime = Math.min(state.duration, state.currentTime + stepSeconds);
                 call(audio, audio.ontimeupdate, "timeupdate");
                 if (state.currentTime >= state.duration) {
@@ -395,6 +442,15 @@ class WebAudioPlayerLifecycleTest {
                 }
             }, 20);
             timers.add(state.timer);
+            if (mode === "crossfade-stale-source-reject" && playCall === 1) {
+                return new Promise((_, reject) => {
+                    const timer = setTimeout(() => {
+                        timers.delete(timer);
+                        reject(new Error("Failed to load because no supported source was found."));
+                    }, 950);
+                    timers.add(timer);
+                });
+            }
             return Promise.resolve();
         };
         proto.pause = function() {
@@ -409,7 +465,10 @@ class WebAudioPlayerLifecycleTest {
         };
 
         globalThis.__phoebeRestoreMockWebAudioElement = () => {
-            for (const timer of Array.from(timers)) clearInterval(timer);
+            for (const timer of Array.from(timers)) {
+                clearTimeout(timer);
+                clearInterval(timer);
+            }
             timers.clear();
             for (const [name, descriptor] of Object.entries(descriptors)) {
                 if (descriptor) Object.defineProperty(proto, name, descriptor);

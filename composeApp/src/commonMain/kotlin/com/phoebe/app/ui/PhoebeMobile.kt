@@ -144,6 +144,8 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.zIndex
 import kotlin.math.roundToInt
 import com.phoebe.app.AppState
+import com.phoebe.app.data.ListenBrainzFeedbackScore
+import com.phoebe.app.data.ListenBrainzFeedbackTarget
 import com.phoebe.app.data.catalogAlbumsForArtist
 import com.phoebe.app.data.catalogTracksForArtist
 import com.phoebe.app.domain.Album
@@ -171,6 +173,7 @@ import com.phoebe.app.domain.PlexRadioStation
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.defaultCollectionEntries
+import com.phoebe.app.domain.canTogglePlexLike
 import com.phoebe.app.player.CastState
 import com.phoebe.app.domain.isEmbyFamily
 import com.phoebe.app.domain.isJellyfin
@@ -181,6 +184,7 @@ import com.phoebe.app.platform.createPlatformHttpClient
 import com.phoebe.app.platform.currentTimeMs
 import com.phoebe.app.platform.isDesktopPlatform
 import com.phoebe.app.platform.prefersReducedArtworkEffects
+import com.phoebe.app.platform.SecureCredentialAvailability
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -204,6 +208,7 @@ private val MobileChromeScrollGap = 12.dp
 private val MobilePlayerMetadataReserveWithAlbum = 104.dp
 private val MobilePlayerMetadataReserveWithoutAlbum = 84.dp
 private val MobilePlayerRemoteTargetReserve = 18.dp
+private val MobilePlayerFeedbackActionsReserve = 50.dp
 
 @Composable
 internal fun MobileCompactMainFeature(
@@ -477,6 +482,12 @@ internal fun MobileBrowseShell(
     appearanceTintId: String,
     onAppearanceTintChange: (String) -> Unit,
     onHomeScreenLayoutModeChange: (HomeScreenLayoutMode) -> Unit = {},
+    listenBrainzCredentialAvailability: SecureCredentialAvailability = SecureCredentialAvailability.Unavailable,
+    onConnectListenBrainz: (String) -> Unit = {},
+    onDisconnectListenBrainz: () -> Unit = {},
+    onListenBrainzSubmitNowPlaying: (Boolean) -> Unit = {},
+    onListenBrainzSubmitListens: (Boolean) -> Unit = {},
+    onListenBrainzSubmitCurrentTrackFeedback: (Boolean) -> Unit = {},
     initialExpandedPhoneSection: PhoneHomeAccordionSection? = null,
     homeListState: LazyListState? = null,
 ) {
@@ -567,6 +578,12 @@ internal fun MobileBrowseShell(
                     onExportFavoritePlaylists = onExportFavoritePlaylists,
                     onImportFavoritePlaylists = onImportFavoritePlaylists,
                     session = session,
+                    listenBrainzCredentialAvailability = listenBrainzCredentialAvailability,
+                    onConnectListenBrainz = onConnectListenBrainz,
+                    onDisconnectListenBrainz = onDisconnectListenBrainz,
+                    onListenBrainzSubmitNowPlaying = onListenBrainzSubmitNowPlaying,
+                    onListenBrainzSubmitListens = onListenBrainzSubmitListens,
+                    onListenBrainzSubmitCurrentTrackFeedback = onListenBrainzSubmitCurrentTrackFeedback,
                     modifier = Modifier.fillMaxSize().padding(top = chromePadding.top, bottom = chromePadding.bottom),
                 )
                 section == BrowseSection.Home && selectedPlaylistId == null -> {
@@ -1150,6 +1167,7 @@ internal fun MobilePlayer(
     @Suppress("UNUSED_PARAMETER") currentIndex: Int,
     castState: CastState = CastState(),
     remotePlaybackTarget: String? = null,
+    listenBrainzFeedbackTarget: ListenBrainzFeedbackTarget = ListenBrainzFeedbackTarget(),
     equalizerProfile: EqualizerProfile = EqualizerProfile.Default,
     persistEqualizerSettings: Boolean = false,
     equalizerRemoteUnavailable: Boolean = false,
@@ -1171,6 +1189,7 @@ internal fun MobilePlayer(
     onEqualizerGain: (Int, Float) -> Unit = { _, _ -> },
     onEqualizerReset: () -> Unit = {},
     onPersistEqualizerSettings: (Boolean) -> Unit = {},
+    onListenBrainzFeedback: (ListenBrainzFeedbackScore) -> Unit = {},
     onBack: () -> Unit,
     onSwipeDismiss: () -> Unit,
     handleSystemBack: Boolean = true,
@@ -1240,6 +1259,7 @@ internal fun MobilePlayer(
     }
     var equalizerOpen by remember { mutableStateOf(false) }
     val trackNavigationActions = LocalTrackNavigationActions.current
+    val likeActions = LocalLikeActions.current
     if (equalizerOpen) {
         EqualizerDialog(
             profile = equalizerProfile,
@@ -1423,8 +1443,14 @@ internal fun MobilePlayer(
                             } else {
                                 MobilePlayerMetadataReserveWithoutAlbum
                             }
+                            val showListenBrainzFeedback =
+                                listenBrainzFeedbackTarget.available &&
+                                    listenBrainzFeedbackTarget.trackId == track.id
+                            val showLikeControl = likeActions.likesEnabled && track.canTogglePlexLike()
+                            val showFeedbackActions = showLikeControl || showListenBrainzFeedback
                             val metadataReserve = baseMetadataReserve +
-                                if (remotePlaybackTarget != null) MobilePlayerRemoteTargetReserve else 0.dp
+                                (if (remotePlaybackTarget != null) MobilePlayerRemoteTargetReserve else 0.dp) +
+                                (if (showFeedbackActions) MobilePlayerFeedbackActionsReserve else 0.dp)
                             val artworkSize = minOf(
                                 maxWidth,
                                 (maxHeight - metadataReserve).coerceAtLeast(180.dp),
@@ -1503,6 +1529,28 @@ internal fun MobilePlayer(
                                         overflow = TextOverflow.Ellipsis,
                                     )
                                 }
+                                if (showFeedbackActions) {
+                                    Spacer(Modifier.height(10.dp))
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        if (showLikeControl) {
+                                            LikeButton(
+                                                liked = likeActions.isLiked(track),
+                                                enabled = true,
+                                                onClick = { likeActions.onToggleLiked(track) },
+                                            )
+                                        }
+                                        if (showListenBrainzFeedback) {
+                                            ListenBrainzFeedbackControls(
+                                                target = listenBrainzFeedbackTarget,
+                                                onFeedback = onListenBrainzFeedback,
+                                                horizontalVotes = true,
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     } else {
@@ -1539,9 +1587,9 @@ internal fun MobilePlayer(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         ShuffleIcon(active = shuffle, onClick = onShuffle)
-                        TransportIcon(PhoebeIcon.Previous, "Previous Track", onPrevious)
+                        TransportIcon(PhoebeIcon.Previous, "Previous Track", onPrevious, iconSize = 16.dp)
                         PlayButton(isPlaying, isBuffering, 58.dp, onToggle, enabled = hasTrack)
-                        TransportIcon(PhoebeIcon.Next, "Next Track", onNext)
+                        TransportIcon(PhoebeIcon.Next, "Next Track", onNext, iconSize = 16.dp)
                         RepeatIcon(mode = repeat, onClick = onRepeat)
                     }
                 }

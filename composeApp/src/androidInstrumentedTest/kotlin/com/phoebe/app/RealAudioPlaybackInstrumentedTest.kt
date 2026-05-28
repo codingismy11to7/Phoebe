@@ -9,10 +9,24 @@ import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.phoebe.app.data.ListenBrainzClient
+import com.phoebe.app.data.ListenBrainzPlaybackReporter
+import com.phoebe.app.domain.AppSettings
+import com.phoebe.app.domain.ListenBrainzSettings
 import com.phoebe.app.domain.Track
 import com.phoebe.app.player.AndroidAudioPlayer
 import com.phoebe.app.player.PlaybackDiagnostics
 import com.phoebe.app.player.PlaybackEnginePath
+import com.phoebe.app.platform.SecureCredentialKey
+import com.phoebe.app.testing.FakeListenBrainzAccountActions
+import com.phoebe.app.testing.FakeSecureCredentialStore
+import com.phoebe.app.testing.testHttpClient
+import io.ktor.client.engine.mock.MockEngine
+import io.ktor.client.engine.mock.respond
+import io.ktor.client.request.HttpRequestData
+import io.ktor.http.HttpHeaders
+import io.ktor.http.content.OutgoingContent
+import io.ktor.http.headersOf
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -20,6 +34,11 @@ import java.util.Collections
 import kotlin.math.sqrt
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assume.assumeTrue
@@ -135,6 +154,73 @@ class RealAudioPlaybackInstrumentedTest {
         }
     }
 
+    @Test
+    fun media3PlaybackFeedsListenBrainzReporterAfterAudibleThreshold() = runBlocking {
+        assumeRealAudioTestsEnabled()
+        val diagnostics = RecordingPlaybackDiagnostics()
+        val player = AndroidAudioPlayer(diagnostics)
+        val reporterScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+        val submittedBodies = Collections.synchronizedList(mutableListOf<String>())
+        try {
+            val file = copyAssetFixture("mdn-t-rex-roar-cc0.mp3")
+            val track = fixtureTrack(file, durationMs = 2_500, id = "listenbrainz-real-android")
+            val credentialStore = FakeSecureCredentialStore()
+            credentialStore.write(SecureCredentialKey.ListenBrainzUserToken, "token")
+            val settings = MutableStateFlow(
+                AppSettings(
+                    listenBrainz = ListenBrainzSettings(
+                        enabled = true,
+                        username = "ada",
+                        submitNowPlaying = false,
+                        submitCurrentTrackFeedback = false,
+                    ),
+                ),
+            )
+            val nowMs = { 1_700_000_000_000L + player.state.value.positionMs.coerceAtLeast(0L) }
+            val client = ListenBrainzClient(
+                testHttpClient(
+                    MockEngine { request ->
+                        val body = request.bodyText()
+                        submittedBodies += body
+                        respond(
+                            content = """{"status":"ok"}""",
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    },
+                ),
+                baseUrl = "https://listenbrainz.example",
+            )
+            val account = FakeListenBrainzAccountActions(
+                settings = settings,
+                credentialStore = credentialStore,
+                nowMs = nowMs,
+            )
+            ListenBrainzPlaybackReporter(
+                client = client,
+                credentialStore = credentialStore,
+                accountRepository = account,
+                audioPlayer = player,
+                appSettings = settings,
+                nowMs = nowMs,
+            ).start(reporterScope)
+
+            player.play(listOf(track), 0)
+
+            assertTrue(
+                waitUntil(timeoutMs = 30_000L) {
+                    submittedBodies.any { it.contains(""""listen_type":"single"""") }
+                },
+                "Expected real Android playback to submit a ListenBrainz listen; " +
+                    "state=${player.state.value} engines=${diagnostics.hasEngine(PlaybackEnginePath.Media3)} bodies=${submittedBodies.toList()}",
+            )
+            assertTrue(submittedBodies.any { it.contains("listenbrainz-real-android") })
+            assertEquals(1, account.listenSubmittedCount)
+        } finally {
+            reporterScope.cancel()
+            player.releaseForTests()
+        }
+    }
+
     private fun assumeRealAudioTestsEnabled() {
         val enabled = InstrumentationRegistry.getArguments()
             .getString("phoebe.realAudioTests")
@@ -193,6 +279,13 @@ class RealAudioPlaybackInstrumentedTest {
         }
         return condition()
     }
+
+    private fun HttpRequestData.bodyText(): String =
+        when (val content = body) {
+            is OutgoingContent.ByteArrayContent -> content.bytes().decodeToString()
+            is OutgoingContent.NoContent -> ""
+            else -> content.toString()
+        }
 
     private fun decodedFixtureRms(file: File): Double {
         val extractor = MediaExtractor()
