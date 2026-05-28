@@ -28,13 +28,12 @@ import io.ktor.http.headersOf
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.yield
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -42,6 +41,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Test
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -176,6 +176,7 @@ class ListenBrainzPlaybackReporterDesktopTest {
     fun failedFutureListenIsQueuedAndRetried() = runTest {
         val requests = MutableStateFlow<List<ListenBrainzRequest>>(emptyList())
         val failSingle = MutableStateFlow(true)
+        val releaseRetry = CompletableDeferred<Unit>()
         val audioPlayer = FakeAudioPlayer()
         var nowMs = 1_700_000_000_000L
         val (settingsRepository, reporter) = newReporterWithSettings(
@@ -183,6 +184,7 @@ class ListenBrainzPlaybackReporterDesktopTest {
             audioPlayer = audioPlayer,
             settings = ListenBrainzSettings(enabled = true, username = "ada", submitNowPlaying = false),
             failSingle = failSingle,
+            singleRetryGate = releaseRetry,
             nowMs = { nowMs },
         )
 
@@ -193,14 +195,19 @@ class ListenBrainzPlaybackReporterDesktopTest {
         audioPlayer.mutableState.value = audioPlayer.mutableState.value.copy(positionMs = 91_000L)
         runCurrent()
         requests.awaitSize(1)
+        runCurrent()
 
-        reporter.awaitQueuedRetryCount(1)
-        settingsRepository.settings.awaitSettings { it.listenBrainz.lastListenError != null }
+        awaitQueuedRetryCount(reporter, 1)
+        awaitCondition(
+            failureMessage = { "Expected ListenBrainz listen error to be recorded" },
+            predicate = { settingsRepository.settings.value.listenBrainz.lastListenError != null },
+        )
         failSingle.value = false
+        releaseRetry.complete(Unit)
         advanceTimeBy(ListenBrainzPlaybackReporter.RetryIntervalMs)
         runCurrent()
 
-        reporter.awaitQueuedRetryCount(0)
+        awaitQueuedRetryCount(reporter, 0)
         assertEquals(2, requests.value.size)
     }
 
@@ -331,6 +338,7 @@ class ListenBrainzPlaybackReporterDesktopTest {
         settings: ListenBrainzSettings = ListenBrainzSettings(enabled = true, username = "ada"),
         failSingle: StateFlow<Boolean> = MutableStateFlow(false),
         feedbackGate: CompletableDeferred<Unit>? = null,
+        singleRetryGate: CompletableDeferred<Unit>? = null,
         feedbackScoresByMsid: StateFlow<Map<String, Int>> = MutableStateFlow(emptyMap()),
         playingNowMsidForBody: (String) -> String = { "msid-1" },
         nowMs: () -> Long = { 1_700_000_000_000L },
@@ -341,6 +349,7 @@ class ListenBrainzPlaybackReporterDesktopTest {
             settings = settings,
             failSingle = failSingle,
             feedbackGate = feedbackGate,
+            singleRetryGate = singleRetryGate,
             feedbackScoresByMsid = feedbackScoresByMsid,
             playingNowMsidForBody = playingNowMsidForBody,
             nowMs = nowMs,
@@ -355,6 +364,7 @@ class ListenBrainzPlaybackReporterDesktopTest {
         singleStatus: HttpStatusCode = HttpStatusCode.OK,
         singleBody: String = """{"status":"ok"}""",
         feedbackGate: CompletableDeferred<Unit>? = null,
+        singleRetryGate: CompletableDeferred<Unit>? = null,
         feedbackScoresByMsid: StateFlow<Map<String, Int>> = MutableStateFlow(emptyMap()),
         playingNowMsidForBody: (String) -> String = { "msid-1" },
         nowMs: () -> Long = { 1_700_000_000_000L },
@@ -366,6 +376,7 @@ class ListenBrainzPlaybackReporterDesktopTest {
         driver = d
         val settingsRepository = AppSettingsRepository(db)
         settingsRepository.setListenBrainzSettings(settings)
+        val singleSubmitAttempts = AtomicInteger()
         val httpClient = testHttpClient(
             MockEngine { request ->
                 val body = request.bodyText()
@@ -388,8 +399,16 @@ class ListenBrainzPlaybackReporterDesktopTest {
                         respondJson("""{"status":"ok"}""")
                     }
                     body.contains("playing_now") -> respondJson("""{"recording_msid":"${playingNowMsidForBody(body)}"}""")
-                    failSingle.value -> respond("", HttpStatusCode.InternalServerError)
-                    else -> respondJson(singleBody, singleStatus)
+                    else -> {
+                        if (singleSubmitAttempts.incrementAndGet() > 1) {
+                            singleRetryGate?.await()
+                        }
+                        if (failSingle.value) {
+                            respond("", HttpStatusCode.InternalServerError)
+                        } else {
+                            respondJson(singleBody, singleStatus)
+                        }
+                    }
                 }
             },
         )
@@ -451,16 +470,25 @@ class ListenBrainzPlaybackReporterDesktopTest {
             }
         }
 
-    private suspend fun ListenBrainzPlaybackReporter.awaitQueuedRetryCount(size: Int) {
-        try {
-            withTimeout(2_000L) {
-                while (queuedRetryCount() != size) {
-                    yield()
-                    delay(1)
-                }
+    private fun TestScope.awaitQueuedRetryCount(
+        reporter: ListenBrainzPlaybackReporter,
+        size: Int,
+    ) = awaitCondition(
+        failureMessage = { "Expected queued retry count $size, got ${reporter.queuedRetryCount()}" },
+        predicate = { reporter.queuedRetryCount() == size },
+    )
+
+    private fun TestScope.awaitCondition(
+        failureMessage: () -> String,
+        predicate: () -> Boolean,
+    ) {
+        val deadline = System.nanoTime() + 2_000_000_000L
+        while (!predicate()) {
+            runCurrent()
+            if (System.nanoTime() >= deadline) {
+                throw AssertionError(failureMessage())
             }
-        } catch (error: Throwable) {
-            throw AssertionError("Expected queued retry count $size, got ${queuedRetryCount()}", error)
+            Thread.sleep(1)
         }
     }
 

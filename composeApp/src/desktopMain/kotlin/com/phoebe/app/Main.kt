@@ -18,6 +18,7 @@ import androidx.compose.ui.window.WindowScope
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.phoebe.app.platform.PhoebeLog
+import com.phoebe.app.platform.WindowsUndecoratedWindowSupport
 import com.phoebe.app.platform.appDisplayName
 import com.phoebe.app.platform.isDebugBuild
 import com.phoebe.app.ui.DesktopWindowTitleBar
@@ -139,6 +140,7 @@ private fun WindowScope.ApplyDesktopWindowChrome() {
         MacWindowChrome.apply(window)
         if (isWindows()) {
             WindowsWindowChrome.apply(window, useLightAppearance = false)
+            WindowsUndecoratedWindowSupport.install(window)
         }
         onDispose {}
     }

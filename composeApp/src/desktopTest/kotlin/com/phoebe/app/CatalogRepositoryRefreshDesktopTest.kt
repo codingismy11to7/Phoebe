@@ -27,11 +27,13 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
-import kotlinx.coroutines.yield
 import org.junit.After
 import org.junit.Before
 import org.junit.Rule
@@ -1393,12 +1395,16 @@ class CatalogRepositoryRefreshDesktopTest {
         headers = headersOf(HttpHeaders.ContentType, "application/json"),
     )
 
-    private suspend fun waitForCatalogState(condition: () -> Boolean) {
-        repeat(1_000) {
-            if (condition()) return
-            yield()
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun TestScope.waitForCatalogState(condition: () -> Boolean) {
+        val deadline = System.nanoTime() + 2_000_000_000L
+        while (!condition()) {
+            runCurrent()
+            if (System.nanoTime() >= deadline) {
+                assertTrue(condition())
+            }
+            Thread.sleep(1)
         }
-        assertTrue(condition())
     }
 
     @Suppress("UNCHECKED_CAST")

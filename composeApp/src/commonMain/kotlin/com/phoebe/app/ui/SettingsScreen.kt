@@ -1134,7 +1134,7 @@ private fun ListenBrainzSettingsSection(
     val nowMs = LocalNowMs.current
     var token by remember(settings.connected) { mutableStateOf("") }
     var isConnecting by remember(settings.connected) { mutableStateOf(false) }
-    LaunchedEffect(settings.connected, settings.lastValidatedAtMs) {
+    LaunchedEffect(settings.connected, settings.lastValidatedAtMs, settings.lastError) {
         isConnecting = false
         if (settings.connected) token = ""
     }
