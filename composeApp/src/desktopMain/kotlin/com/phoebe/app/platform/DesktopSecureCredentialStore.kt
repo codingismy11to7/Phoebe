@@ -171,8 +171,18 @@ private object WindowsCredentialManagerBackend : DesktopCredentialBackend {
             Persist = CredPersistLocalMachine
             UserName = WString("Phoebe")
         }
+        credential.write()
         val ok = runCatching { WindowsCredApi.INSTANCE.CredWriteW(credential, 0) }.getOrDefault(false)
-        if (!ok) error("Unable to store ListenBrainz token in Windows Credential Manager.")
+        if (!ok) {
+            val errorCode = Native.getLastError()
+            error(
+                if (errorCode != 0) {
+                    "Unable to store ListenBrainz token in Windows Credential Manager (error $errorCode)."
+                } else {
+                    "Unable to store ListenBrainz token in Windows Credential Manager."
+                },
+            )
+        }
         Unit
     }
 
@@ -223,7 +233,7 @@ private interface WindowsCredApi : StdCallLibrary {
     }
 }
 
-private class WindowsCredential : Structure {
+internal class WindowsCredential : Structure {
     @JvmField var Flags: Int = 0
     @JvmField var Type: Int = CredTypeGeneric
     @JvmField var TargetName: WString? = null
@@ -259,7 +269,7 @@ private class WindowsCredential : Structure {
     )
 }
 
-private class WindowsFileTime : Structure() {
+internal class WindowsFileTime : Structure() {
     @JvmField var dwLowDateTime: Int = 0
     @JvmField var dwHighDateTime: Int = 0
 

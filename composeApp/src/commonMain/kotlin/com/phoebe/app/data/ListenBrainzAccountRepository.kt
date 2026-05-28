@@ -46,36 +46,52 @@ class ListenBrainzAccountRepository(
         if (token.isBlank()) error("Enter a ListenBrainz user token.")
         if (!credentialStore.availability.canWrite) error(credentialStore.availability.description)
 
-        val validation = client.validateToken(token)
-        if (!validation.valid || validation.username.isNullOrBlank()) {
-            credentialStore.delete(SecureCredentialKey.ListenBrainzUserToken)
-            appSettingsRepository.updateListenBrainzSettings {
-                it.copy(
-                    enabled = false,
-                    username = null,
-                    storageStatus = credentialStore.availability.status,
-                    lastValidatedAtMs = currentTimeMs(),
-                    lastError = validation.message ?: "ListenBrainz token is invalid.",
-                )
+        return try {
+            val validation = client.validateToken(token)
+            if (!validation.valid || validation.username.isNullOrBlank()) {
+                credentialStore.delete(SecureCredentialKey.ListenBrainzUserToken)
+                appSettingsRepository.updateListenBrainzSettings {
+                    it.copy(
+                        enabled = false,
+                        username = null,
+                        storageStatus = credentialStore.availability.status,
+                        lastValidatedAtMs = currentTimeMs(),
+                        lastError = validation.message ?: "ListenBrainz token is invalid.",
+                    )
+                }
+                error(validation.message ?: "ListenBrainz token is invalid.")
             }
-            error(validation.message ?: "ListenBrainz token is invalid.")
-        }
 
-        credentialStore.write(SecureCredentialKey.ListenBrainzUserToken, token)
-        val now = currentTimeMs()
-        appSettingsRepository.setListenBrainzSettings(
-            ListenBrainzSettings(
-                enabled = true,
-                username = validation.username,
-                submitNowPlaying = true,
-                submitListens = true,
-                submitCurrentTrackFeedback = true,
-                storageStatus = credentialStore.availability.status,
-                connectedAtMs = now,
-                lastValidatedAtMs = now,
-            ),
-        )
-        return validation
+            credentialStore.write(SecureCredentialKey.ListenBrainzUserToken, token)
+            val now = currentTimeMs()
+            appSettingsRepository.setListenBrainzSettings(
+                ListenBrainzSettings(
+                    enabled = true,
+                    username = validation.username,
+                    submitNowPlaying = true,
+                    submitListens = true,
+                    submitCurrentTrackFeedback = true,
+                    storageStatus = credentialStore.availability.status,
+                    connectedAtMs = now,
+                    lastValidatedAtMs = now,
+                ),
+            )
+            validation
+        } catch (error: Exception) {
+            if (error.message != "Enter a ListenBrainz user token." &&
+                error.message != credentialStore.availability.description
+            ) {
+                val message = error.message ?: "Couldn't connect ListenBrainz."
+                appSettingsRepository.updateListenBrainzSettings {
+                    it.copy(
+                        storageStatus = credentialStore.availability.status,
+                        lastValidatedAtMs = currentTimeMs(),
+                        lastError = message,
+                    )
+                }
+            }
+            throw error
+        }
     }
 
     override suspend fun disconnect(lastError: String?) {

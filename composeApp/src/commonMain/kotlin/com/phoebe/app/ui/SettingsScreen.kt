@@ -23,6 +23,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -50,6 +52,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -1130,6 +1133,17 @@ private fun ListenBrainzSettingsSection(
     val settings = appSettings.listenBrainz
     val nowMs = LocalNowMs.current
     var token by remember(settings.connected) { mutableStateOf("") }
+    var isConnecting by remember(settings.connected) { mutableStateOf(false) }
+    LaunchedEffect(settings.connected, settings.lastValidatedAtMs) {
+        isConnecting = false
+        if (settings.connected) token = ""
+    }
+    val submitConnect = {
+        if (token.isNotBlank() && credentialAvailability.canWrite && !isConnecting) {
+            isConnecting = true
+            onConnect(token.trim())
+        }
+    }
     Column(
         Modifier
             .fillMaxWidth()
@@ -1192,6 +1206,8 @@ private fun ListenBrainzSettingsSection(
             ListenBrainzTokenField(
                 token = token,
                 onTokenChange = { token = it },
+                onSubmit = submitConnect,
+                enabled = !isConnecting,
                 compact = compact,
             )
             Spacer(Modifier.height(8.dp))
@@ -1200,6 +1216,14 @@ private fun ListenBrainzSettingsSection(
                 color = PhoebeUi.secondaryText,
                 fontSize = 12.sp,
             )
+            if (isConnecting) {
+                Text(
+                    "Connecting…",
+                    color = PhoebeUi.secondaryText,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+            }
             settings.lastError?.let { error ->
                 Text(error, color = PhoebeUi.accentLight, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
             }
@@ -1211,22 +1235,22 @@ private fun ListenBrainzSettingsSection(
                 TextButton(onClick = { openExternalUrl(ListenBrainzSettingsUrl) }) {
                     Text("Get token", color = PhoebeUi.secondaryText)
                 }
-                if (token.isNotBlank()) {
+                if (token.isNotBlank() && !isConnecting) {
                     TextButton(onClick = { token = "" }) {
                         Text("Clear", color = PhoebeUi.secondaryText)
                     }
                 }
                 TextButton(
-                    enabled = token.isNotBlank() && credentialAvailability.canWrite,
-                    onClick = {
-                        val submittedToken = token
-                        token = ""
-                        onConnect(submittedToken)
-                    },
+                    enabled = token.isNotBlank() && credentialAvailability.canWrite && !isConnecting,
+                    onClick = submitConnect,
                 ) {
                     Text(
-                        "Connect",
-                        color = if (token.isNotBlank() && credentialAvailability.canWrite) PhoebeUi.accentLight else PhoebeUi.mutedText,
+                        if (isConnecting) "Connecting…" else "Connect",
+                        color = if (token.isNotBlank() && credentialAvailability.canWrite && !isConnecting) {
+                            PhoebeUi.accentLight
+                        } else {
+                            PhoebeUi.mutedText
+                        },
                         fontWeight = FontWeight.SemiBold,
                     )
                 }
@@ -1239,12 +1263,17 @@ private fun ListenBrainzSettingsSection(
 private fun ListenBrainzTokenField(
     token: String,
     onTokenChange: (String) -> Unit,
+    onSubmit: () -> Unit,
+    enabled: Boolean,
     compact: Boolean,
 ) {
     BasicTextField(
         value = token,
         onValueChange = onTokenChange,
+        enabled = enabled,
         singleLine = true,
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+        keyboardActions = KeyboardActions(onDone = { onSubmit() }),
         visualTransformation = PasswordVisualTransformation(),
         textStyle = TextStyle(color = PhoebeUi.primaryText, fontSize = if (compact) 12.sp else 13.sp),
         cursorBrush = SolidColor(PhoebeUi.accentLight),
