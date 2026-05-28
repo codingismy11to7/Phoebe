@@ -28,6 +28,7 @@ import io.ktor.http.headersOf
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.yield
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -177,7 +178,7 @@ class ListenBrainzPlaybackReporterDesktopTest {
         val failSingle = MutableStateFlow(true)
         val audioPlayer = FakeAudioPlayer()
         var nowMs = 1_700_000_000_000L
-        val reporter = newReporter(
+        val (settingsRepository, reporter) = newReporterWithSettings(
             requests = requests,
             audioPlayer = audioPlayer,
             settings = ListenBrainzSettings(enabled = true, username = "ada", submitNowPlaying = false),
@@ -194,6 +195,7 @@ class ListenBrainzPlaybackReporterDesktopTest {
         requests.awaitSize(1)
 
         reporter.awaitQueuedRetryCount(1)
+        settingsRepository.settings.awaitSettings { it.listenBrainz.lastListenError != null }
         failSingle.value = false
         advanceTimeBy(ListenBrainzPlaybackReporter.RetryIntervalMs)
         runCurrent()
@@ -450,10 +452,15 @@ class ListenBrainzPlaybackReporterDesktopTest {
         }
 
     private suspend fun ListenBrainzPlaybackReporter.awaitQueuedRetryCount(size: Int) {
-        withTimeout(2_000L) {
-            while (queuedRetryCount() != size) {
-                yield()
+        try {
+            withTimeout(2_000L) {
+                while (queuedRetryCount() != size) {
+                    yield()
+                    delay(1)
+                }
             }
+        } catch (error: Throwable) {
+            throw AssertionError("Expected queued retry count $size, got ${queuedRetryCount()}", error)
         }
     }
 
