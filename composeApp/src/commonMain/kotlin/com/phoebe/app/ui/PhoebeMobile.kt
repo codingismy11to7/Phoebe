@@ -208,7 +208,6 @@ private val MobileChromeScrollGap = 12.dp
 private val MobilePlayerMetadataReserveWithAlbum = 104.dp
 private val MobilePlayerMetadataReserveWithoutAlbum = 84.dp
 private val MobilePlayerRemoteTargetReserve = 18.dp
-private val MobilePlayerFeedbackActionsReserve = 50.dp
 
 @Composable
 internal fun MobileCompactMainFeature(
@@ -1449,8 +1448,7 @@ internal fun MobilePlayer(
                             val showLikeControl = likeActions.likesEnabled && track.canTogglePlexLike()
                             val showFeedbackActions = showLikeControl || showListenBrainzFeedback
                             val metadataReserve = baseMetadataReserve +
-                                (if (remotePlaybackTarget != null) MobilePlayerRemoteTargetReserve else 0.dp) +
-                                (if (showFeedbackActions) MobilePlayerFeedbackActionsReserve else 0.dp)
+                                (if (remotePlaybackTarget != null) MobilePlayerRemoteTargetReserve else 0.dp)
                             val artworkSize = minOf(
                                 maxWidth,
                                 (maxHeight - metadataReserve).coerceAtLeast(180.dp),
@@ -1490,6 +1488,37 @@ internal fun MobilePlayer(
                                             .align(Alignment.TopEnd)
                                             .padding(12.dp),
                                     )
+                                    if (showFeedbackActions) {
+                                        Row(
+                                            modifier = Modifier
+                                                .align(Alignment.BottomEnd)
+                                                .padding(12.dp)
+                                                .clip(RoundedCornerShape(999.dp))
+                                                .background(PhoebeUi.canvasBackground.copy(alpha = 0.72f))
+                                                .border(
+                                                    BorderStroke(1.dp, PhoebeUi.border.copy(alpha = 0.55f)),
+                                                    RoundedCornerShape(999.dp),
+                                                )
+                                                .padding(horizontal = 6.dp, vertical = 5.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            if (showLikeControl) {
+                                                LikeButton(
+                                                    liked = likeActions.isLiked(track),
+                                                    enabled = true,
+                                                    onClick = { likeActions.onToggleLiked(track) },
+                                                )
+                                            }
+                                            if (showListenBrainzFeedback) {
+                                                ListenBrainzFeedbackControls(
+                                                    target = listenBrainzFeedbackTarget,
+                                                    onFeedback = onListenBrainzFeedback,
+                                                    horizontalVotes = true,
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                                 Spacer(Modifier.height(20.dp))
                                 CompositionLocalProvider(
@@ -1528,28 +1557,6 @@ internal fun MobilePlayer(
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                     )
-                                }
-                                if (showFeedbackActions) {
-                                    Spacer(Modifier.height(10.dp))
-                                    Row(
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        if (showLikeControl) {
-                                            LikeButton(
-                                                liked = likeActions.isLiked(track),
-                                                enabled = true,
-                                                onClick = { likeActions.onToggleLiked(track) },
-                                            )
-                                        }
-                                        if (showListenBrainzFeedback) {
-                                            ListenBrainzFeedbackControls(
-                                                target = listenBrainzFeedbackTarget,
-                                                onFeedback = onListenBrainzFeedback,
-                                                horizontalVotes = true,
-                                            )
-                                        }
-                                    }
                                 }
                             }
                         }
