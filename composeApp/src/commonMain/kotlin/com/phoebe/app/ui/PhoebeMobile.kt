@@ -1495,10 +1495,6 @@ internal fun MobilePlayer(
                                                 .padding(12.dp)
                                                 .clip(RoundedCornerShape(999.dp))
                                                 .background(PhoebeUi.canvasBackground.copy(alpha = 0.72f))
-                                                .border(
-                                                    BorderStroke(1.dp, PhoebeUi.border.copy(alpha = 0.55f)),
-                                                    RoundedCornerShape(999.dp),
-                                                )
                                                 .padding(horizontal = 6.dp, vertical = 5.dp),
                                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                                             verticalAlignment = Alignment.CenterVertically,
@@ -1515,6 +1511,7 @@ internal fun MobilePlayer(
                                                     target = listenBrainzFeedbackTarget,
                                                     onFeedback = onListenBrainzFeedback,
                                                     horizontalVotes = true,
+                                                    showVoteBorders = false,
                                                 )
                                             }
                                         }

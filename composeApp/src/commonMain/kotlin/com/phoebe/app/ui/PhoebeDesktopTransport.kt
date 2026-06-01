@@ -482,6 +482,7 @@ internal fun ListenBrainzFeedbackControls(
     modifier: Modifier = Modifier,
     stackedVotes: Boolean = false,
     horizontalVotes: Boolean = false,
+    showVoteBorders: Boolean = true,
 ) {
     Row(
         modifier = modifier,
@@ -516,6 +517,7 @@ internal fun ListenBrainzFeedbackControls(
                 onClick = { onFeedback(if (loveActive) ListenBrainzFeedbackScore.Clear else ListenBrainzFeedbackScore.Love) },
                 modifier = Modifier.size(width = 46.dp, height = 40.dp),
                 iconSize = 20.dp,
+                showBorder = showVoteBorders,
             )
             ListenBrainzFeedbackVoteButton(
                 icon = PhoebeIcon.ThumbsDown,
@@ -526,6 +528,7 @@ internal fun ListenBrainzFeedbackControls(
                 onClick = { onFeedback(if (hateActive) ListenBrainzFeedbackScore.Clear else ListenBrainzFeedbackScore.Hate) },
                 modifier = Modifier.size(width = 46.dp, height = 40.dp),
                 iconSize = 20.dp,
+                showBorder = showVoteBorders,
             )
         } else {
             ListenBrainzFeedbackButton(
@@ -598,14 +601,22 @@ private fun ListenBrainzFeedbackVoteButton(
     modifier: Modifier = Modifier,
     iconSize: Dp = 18.dp,
     contentPadding: Dp = 0.dp,
+    showBorder: Boolean = true,
 ) {
+    val shape = RoundedCornerShape(7.dp)
     Box(
         modifier
-            .clip(RoundedCornerShape(7.dp))
+            .clip(shape)
             .background(if (active) PhoebeUi.accent.copy(alpha = 0.18f) else Color.Transparent)
-            .border(
-                BorderStroke(1.dp, if (active) PhoebeUi.accent.copy(alpha = 0.28f) else PhoebeUi.border.copy(alpha = 0.45f)),
-                RoundedCornerShape(7.dp),
+            .then(
+                if (showBorder) {
+                    Modifier.border(
+                        BorderStroke(1.dp, if (active) PhoebeUi.accent.copy(alpha = 0.28f) else PhoebeUi.border.copy(alpha = 0.45f)),
+                        shape,
+                    )
+                } else {
+                    Modifier
+                },
             )
             .clickable(enabled = enabled, onClick = onClick)
             .semantics { contentDescription = label },
