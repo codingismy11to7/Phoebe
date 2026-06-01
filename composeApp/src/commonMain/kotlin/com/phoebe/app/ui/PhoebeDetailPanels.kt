@@ -38,6 +38,7 @@ import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -418,6 +419,7 @@ internal fun FlippableSongArtwork(
     artworkModifier: Modifier = Modifier,
     radius: Dp = 10.dp,
     maxDecodeDimension: Int = ListArtworkMaxDecodeDimension,
+    frontOverlay: @Composable BoxScope.() -> Unit = {},
 ) {
     var showingDetails by remember(track.id) { mutableStateOf(false) }
     val rotation by animateFloatAsState(
@@ -450,6 +452,7 @@ internal fun FlippableSongArtwork(
                 radius = radius,
                 maxDecodeDimension = maxDecodeDimension,
             )
+            frontOverlay()
         } else {
             SongArtworkDetailBack(
                 track = track,

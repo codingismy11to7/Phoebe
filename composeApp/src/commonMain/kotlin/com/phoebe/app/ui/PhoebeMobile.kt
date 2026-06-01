@@ -43,6 +43,7 @@ import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -952,6 +953,7 @@ internal fun SwipeableMobileArtwork(
     onSkipQueueBy: (Int) -> Unit,
     modifier: Modifier = Modifier,
     maxDecodeDimension: Int = ListArtworkMaxDecodeDimension,
+    frontOverlay: @Composable BoxScope.() -> Unit = {},
 ) {
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
@@ -1122,6 +1124,7 @@ internal fun SwipeableMobileArtwork(
                         modifier = Modifier.fillMaxSize(),
                         radius = 10.dp,
                         maxDecodeDimension = maxDecodeDimension,
+                        frontOverlay = frontOverlay,
                     )
                 }
             }
@@ -1479,40 +1482,41 @@ internal fun MobilePlayer(
                                             onSkipQueueBy = onSkipQueueBy,
                                             modifier = Modifier.fillMaxSize(),
                                             maxDecodeDimension = HeroArtworkMaxDecodeDimension,
-                                        )
-                                    }
-                                    AudioQualityBadge(
-                                        track = track,
-                                        onArtwork = true,
-                                        modifier = Modifier
-                                            .align(Alignment.TopEnd)
-                                            .padding(12.dp),
-                                    )
-                                    if (showFeedbackActions) {
-                                        Row(
-                                            modifier = Modifier
-                                                .align(Alignment.BottomEnd)
-                                                .padding(12.dp)
-                                                .clip(RoundedCornerShape(999.dp))
-                                                .background(PhoebeUi.canvasBackground.copy(alpha = 0.72f))
-                                                .padding(horizontal = 6.dp, vertical = 5.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
                                         ) {
-                                            if (showLikeControl) {
-                                                LikeButton(
-                                                    liked = likeActions.isLiked(track),
-                                                    enabled = true,
-                                                    onClick = { likeActions.onToggleLiked(track) },
-                                                )
-                                            }
-                                            if (showListenBrainzFeedback) {
-                                                ListenBrainzFeedbackControls(
-                                                    target = listenBrainzFeedbackTarget,
-                                                    onFeedback = onListenBrainzFeedback,
-                                                    horizontalVotes = true,
-                                                    showVoteBorders = false,
-                                                )
+                                            AudioQualityBadge(
+                                                track = track,
+                                                onArtwork = true,
+                                                modifier = Modifier
+                                                    .align(Alignment.TopEnd)
+                                                    .padding(12.dp),
+                                            )
+                                            if (showFeedbackActions) {
+                                                Row(
+                                                    modifier = Modifier
+                                                        .align(Alignment.BottomEnd)
+                                                        .padding(12.dp)
+                                                        .clip(RoundedCornerShape(999.dp))
+                                                        .background(PhoebeUi.canvasBackground.copy(alpha = 0.72f))
+                                                        .padding(horizontal = 6.dp, vertical = 5.dp),
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                ) {
+                                                    if (showLikeControl) {
+                                                        LikeButton(
+                                                            liked = likeActions.isLiked(track),
+                                                            enabled = true,
+                                                            onClick = { likeActions.onToggleLiked(track) },
+                                                        )
+                                                    }
+                                                    if (showListenBrainzFeedback) {
+                                                        ListenBrainzFeedbackControls(
+                                                            target = listenBrainzFeedbackTarget,
+                                                            onFeedback = onListenBrainzFeedback,
+                                                            horizontalVotes = true,
+                                                            showVoteBorders = false,
+                                                        )
+                                                    }
+                                                }
                                             }
                                         }
                                     }
