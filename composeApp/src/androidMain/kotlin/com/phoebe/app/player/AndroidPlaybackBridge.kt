@@ -10,7 +10,10 @@ import com.phoebe.app.domain.Track
 object AndroidPlaybackBridge {
     var onSkipNext: (() -> Unit)? = null
     var onSkipPrevious: (() -> Unit)? = null
+    var hasNextTrack: (() -> Boolean)? = null
+    var hasPreviousTrack: (() -> Boolean)? = null
     var onTrackEnded: (() -> Unit)? = null
+    var onServicePlayerChanged: (() -> Unit)? = null
     var onPlayQueue: ((List<Track>, Int) -> Unit)? = null
     var onAdoptQueue: ((List<Track>, Int, Boolean) -> Unit)? = null
     var onToggleLikedTrack: ((Track) -> Unit)? = null
@@ -36,7 +39,7 @@ object AndroidPlaybackBridge {
     @Volatile
     private var suspendingLocalPlayback = false
 
-  @Volatile
+    @Volatile
     var servicePlayer: Player? = null
         private set
 

@@ -22,7 +22,10 @@ internal class CastMediaSessionPlayer(
     }
 
     override fun getState(): SimpleBasePlayer.State {
-        val cast = castState ?: return super.getState()
+        val cast = castState ?: return super.getState().withPhoebeQueueNavigationCommands(
+            hasNext = AndroidPlaybackBridge.hasNextTrack?.invoke() == true,
+            hasPrevious = AndroidPlaybackBridge.hasPreviousTrack?.invoke() == true,
+        )
         val mediaItem = playbackMediaItem(cast.track, inAppPlayback = true)
         val itemData = SimpleBasePlayer.MediaItemData.Builder(cast.track.id)
             .setMediaItem(mediaItem)
@@ -52,6 +55,10 @@ internal class CastMediaSessionPlayer(
             )
             .setTotalBufferedDurationMs(SimpleBasePlayer.PositionSupplier.ZERO)
             .build()
+            .withPhoebeQueueNavigationCommands(
+                hasNext = AndroidPlaybackBridge.hasNextTrack?.invoke() == true,
+                hasPrevious = AndroidPlaybackBridge.hasPreviousTrack?.invoke() == true,
+            )
     }
 
     override fun handleSetPlayWhenReady(playWhenReady: Boolean): ListenableFuture<*> {
@@ -85,4 +92,23 @@ internal class CastMediaSessionPlayer(
         }
         return super.handleSeek(mediaItemIndex, positionMs, seekCommand)
     }
+}
+
+@OptIn(UnstableApi::class)
+internal fun SimpleBasePlayer.State.withPhoebeQueueNavigationCommands(
+    hasNext: Boolean,
+    hasPrevious: Boolean,
+): SimpleBasePlayer.State {
+    if (!hasNext && !hasPrevious) return this
+    val commands = availableCommands.buildUpon().apply {
+        if (hasNext) {
+            add(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+        }
+        if (hasPrevious) {
+            add(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+        }
+    }.build()
+    return buildUpon()
+        .setAvailableCommands(commands)
+        .build()
 }

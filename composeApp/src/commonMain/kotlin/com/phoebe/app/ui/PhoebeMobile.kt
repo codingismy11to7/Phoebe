@@ -43,6 +43,7 @@ import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -93,6 +94,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
@@ -111,6 +113,7 @@ import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -201,14 +204,13 @@ import kotlin.math.max
 
 private const val MobilePlayerArtworkLoadDelayMs = 96L
 private const val MobilePlayerContinuousMotionDelayMs = 240L
-private val MobileToolbarChromeHeight = 56.dp
-private val MobileBottomNavChromeHeight = 68.dp
-private val MobileMiniPlayerChromeHeight = 66.dp
-private val MobileChromeScrollGap = 12.dp
+internal val MobileToolbarChromeHeight = 56.dp
+internal val MobileBottomNavChromeHeight = 68.dp
+internal val MobileMiniPlayerChromeHeight = 66.dp
+internal val MobileChromeScrollGap = 12.dp
 private val MobilePlayerMetadataReserveWithAlbum = 104.dp
 private val MobilePlayerMetadataReserveWithoutAlbum = 84.dp
 private val MobilePlayerRemoteTargetReserve = 18.dp
-private val MobilePlayerFeedbackActionsReserve = 50.dp
 
 @Composable
 internal fun MobileCompactMainFeature(
@@ -271,6 +273,7 @@ internal fun MobileHomeHero(track: Track?, onOpenFullPlayer: () -> Unit) {
 internal fun MobileBottomNavigation(
     section: BrowseSection,
     onSection: (BrowseSection) -> Unit,
+    attachedToMiniPlayer: Boolean = false,
 ) {
     val tabs = listOf(
         BrowseSection.Home to (PhoebeIcon.Home to "Home"),
@@ -278,14 +281,18 @@ internal fun MobileBottomNavigation(
         BrowseSection.Library to (PhoebeIcon.Library to "Library"),
         BrowseSection.Playlists to (PhoebeIcon.PlaylistPlay to "Playlists"),
     )
-    val topShape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+    val topShape = if (attachedToMiniPlayer) {
+        RoundedCornerShape(0.dp)
+    } else {
+        RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+    }
     Column(
         Modifier
             .fillMaxWidth()
             .heightIn(min = MobileBottomNavChromeHeight)
             .clip(topShape)
             .background(PhoebeUi.navBar, topShape)
-            .border(BorderStroke(1.dp, PhoebeUi.border), topShape),
+            .then(if (attachedToMiniPlayer) Modifier else Modifier.border(BorderStroke(1.dp, PhoebeUi.border), topShape)),
     ) {
         Row(
             Modifier
@@ -490,6 +497,7 @@ internal fun MobileBrowseShell(
     onListenBrainzSubmitCurrentTrackFeedback: (Boolean) -> Unit = {},
     initialExpandedPhoneSection: PhoneHomeAccordionSection? = null,
     homeListState: LazyListState? = null,
+    showBottomChrome: Boolean = true,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     val pickLocalFolder = rememberPickLocalFolder(onPicked = onAddLocalFolder)
@@ -498,53 +506,21 @@ internal fun MobileBrowseShell(
         selectedPlaylistId != null -> "Playlist"
         else -> mobileSectionTitle(section)
     }
-    val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     val navigationBottomPadding = with(density) {
         WindowInsets.navigationBars.getBottom(this).toDp()
     }
-    val miniPlayerOpenDragThresholdPx = with(density) { 48.dp.toPx() }
-    val miniPlayerSkipDragThresholdPx = with(density) { 56.dp.toPx() }
-    val miniPlayerSkipPreviewMaxPx = miniPlayerSkipDragThresholdPx * 1.45f
-    var miniPlayerDragOffsetPx by remember { mutableFloatStateOf(0f) }
-    var isDraggingMiniPlayer by remember { mutableStateOf(false) }
-    val miniPlayerSettleOffsetPx = remember { Animatable(0f) }
-    var miniPlayerSettleJob by remember { mutableStateOf<Job?>(null) }
-    fun resistedMiniPlayerOffset(rawOffsetPx: Float): Float {
-        val direction = if (rawOffsetPx < 0f) -1f else 1f
-        val distance = abs(rawOffsetPx)
-        val resistedDistance = when {
-            distance <= miniPlayerSkipDragThresholdPx -> distance
-            else -> miniPlayerSkipDragThresholdPx + (distance - miniPlayerSkipDragThresholdPx) * 0.38f
-        }.coerceAtMost(miniPlayerSkipPreviewMaxPx)
-        return direction * resistedDistance
-    }
-    fun settleMiniPlayer(fromOffsetPx: Float, targetOffsetPx: Float, onTargetReached: (() -> Unit)? = null) {
-        miniPlayerSettleJob?.cancel()
-        miniPlayerSettleJob = scope.launch {
-            miniPlayerSettleOffsetPx.snapTo(fromOffsetPx)
-            if (targetOffsetPx != 0f) {
-                miniPlayerSettleOffsetPx.animateTo(
-                    targetValue = targetOffsetPx,
-                    animationSpec = tween(durationMillis = 120, easing = FastOutSlowInEasing),
-                )
-                onTargetReached?.invoke()
-            }
-            miniPlayerSettleOffsetPx.animateTo(
-                targetValue = 0f,
-                animationSpec = spring(
-                    stiffness = Spring.StiffnessMedium,
-                    dampingRatio = Spring.DampingRatioNoBouncy,
-                ),
-            )
-        }
-    }
+    val inheritedChromePadding = LocalMobileChromePadding.current
     val chromePadding = MobileChromePadding(
         top = MobileToolbarChromeHeight + MobileChromeScrollGap,
-        bottom = MobileBottomNavChromeHeight +
-            navigationBottomPadding +
-            MobileChromeScrollGap +
-            if (currentTrack != null) MobileMiniPlayerChromeHeight else 0.dp,
+        bottom = if (showBottomChrome) {
+            MobileBottomNavChromeHeight +
+                navigationBottomPadding +
+                MobileChromeScrollGap +
+                if (currentTrack != null) MobileMiniPlayerChromeHeight else 0.dp
+        } else {
+            inheritedChromePadding.bottom
+        },
     )
     Box(
         Modifier
@@ -818,132 +794,291 @@ internal fun MobileBrowseShell(
                 },
             )
         }
-
-    Column(
-        Modifier
-            .align(Alignment.BottomCenter)
-            .fillMaxWidth()
-            .zIndex(2f),
-    ) {
-            if (currentTrack != null) {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .pointerInput(
-                            onOpenNowPlaying,
-                            onPreviousTrack,
-                            onNextTrack,
-                            miniPlayerOpenDragThresholdPx,
-                            miniPlayerSkipDragThresholdPx,
-                            miniPlayerSkipPreviewMaxPx,
-                        ) {
-                            var upwardDragPx = 0f
-                            var horizontalDragPx = 0f
-                            fun resetMiniPlayerDrag(offsetPx: Float = 0f, horizontalOffsetPx: Float = 0f) {
-                                upwardDragPx = 0f
-                                horizontalDragPx = horizontalOffsetPx
-                                miniPlayerDragOffsetPx = offsetPx
-                            }
-                            fun horizontalDragIsDominant(): Boolean =
-                                abs(horizontalDragPx) > upwardDragPx * 1.2f
-
-                            detectDragGestures(
-                                onDragStart = {
-                                    miniPlayerSettleJob?.cancel()
-                                    isDraggingMiniPlayer = true
-                                    resetMiniPlayerDrag(miniPlayerSettleOffsetPx.value)
-                                    scope.launch { miniPlayerSettleOffsetPx.stop() }
-                                },
-                                onDragEnd = {
-                                    isDraggingMiniPlayer = false
-                                    val releaseOffsetPx = miniPlayerDragOffsetPx
-                                    val horizontalDominant = horizontalDragIsDominant()
-                                    val shouldSkip = abs(horizontalDragPx) > miniPlayerSkipDragThresholdPx && horizontalDominant
-                                    val shouldOpen = upwardDragPx > miniPlayerOpenDragThresholdPx && !horizontalDominant
-                                    when {
-                                        shouldSkip && horizontalDragPx < 0f -> {
-                                            settleMiniPlayer(releaseOffsetPx, -miniPlayerSkipPreviewMaxPx, onNextTrack)
-                                        }
-                                        shouldSkip -> {
-                                            settleMiniPlayer(releaseOffsetPx, miniPlayerSkipPreviewMaxPx, onPreviousTrack)
-                                        }
-                                        else -> {
-                                            settleMiniPlayer(releaseOffsetPx, 0f)
-                                            if (shouldOpen) onOpenNowPlaying()
-                                        }
-                                    }
-                                    resetMiniPlayerDrag()
-                                },
-                                onDragCancel = {
-                                    isDraggingMiniPlayer = false
-                                    val releaseOffsetPx = miniPlayerDragOffsetPx
-                                    settleMiniPlayer(releaseOffsetPx, 0f)
-                                    resetMiniPlayerDrag()
-                                },
-                                onDrag = { change, dragAmount ->
-                                    change.consume()
-                                    upwardDragPx = (upwardDragPx - dragAmount.y).coerceAtLeast(0f)
-                                    horizontalDragPx += dragAmount.x
-                                    miniPlayerDragOffsetPx = if (horizontalDragIsDominant()) {
-                                        val targetOffset = resistedMiniPlayerOffset(horizontalDragPx)
-                                        miniPlayerDragOffsetPx + (targetOffset - miniPlayerDragOffsetPx) * 0.72f
-                                    } else {
-                                        0f
-                                    }
-                                },
-                            )
-                        }
-                        .graphicsLayer {
-                            val offsetPx = if (isDraggingMiniPlayer) {
-                                miniPlayerDragOffsetPx
-                            } else {
-                                miniPlayerSettleOffsetPx.value
-                            }
-                            val swipeProgress = (abs(offsetPx) / miniPlayerSkipDragThresholdPx).coerceIn(0f, 1f)
-                            translationX = offsetPx
-                            alpha = 1f - swipeProgress * 0.14f
-                            val scale = 1f - swipeProgress * 0.025f
-                            scaleX = scale
-                            scaleY = scale
-                        }
-                        .clip(RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp))
-                        .background(PhoebeUi.navBar)
-                        .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp))
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Row(
-                        Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable(onClick = onOpenNowPlaying)
-                            .padding(end = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        TrackArtworkImage(currentTrack, Modifier.size(44.dp))
-                        Column(Modifier.weight(1f)) {
-                            AutoScrollingText(
-                                currentTrack.title,
-                                color = PhoebeUi.primaryText,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                            )
-                            AutoScrollingText(
-                                currentTrack.artist,
-                                color = PhoebeUi.secondaryText,
-                                fontSize = 12.sp,
-                            )
-                        }
-                    }
-                    PlayButton(isPlaying, isBuffering, 40.dp, onTogglePlayPause, enabled = true)
-                }
-            }
-            MobileBottomNavigation(section = section, onSection = onNavigate)
+        if (showBottomChrome) {
+            MobilePersistentPlaybackChrome(
+                section = section,
+                currentTrack = currentTrack,
+                isPlaying = isPlaying,
+                isBuffering = isBuffering,
+                onNavigate = onNavigate,
+                onOpenNowPlaying = onOpenNowPlaying,
+                onTogglePlayPause = onTogglePlayPause,
+                onPreviousTrack = onPreviousTrack,
+                onNextTrack = onNextTrack,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .zIndex(2f),
+            )
         }
     }
 }
 
+
+@Composable
+internal fun MobilePersistentPlaybackChrome(
+    section: BrowseSection,
+    currentTrack: Track?,
+    isPlaying: Boolean,
+    isBuffering: Boolean = false,
+    onNavigate: (BrowseSection) -> Unit,
+    onOpenNowPlaying: () -> Unit,
+    onTogglePlayPause: () -> Unit,
+    onPreviousTrack: () -> Unit,
+    onNextTrack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val density = LocalDensity.current
+    val scope = rememberCoroutineScope()
+    val artworkTransition = LocalMobileNowPlayingArtworkTransition.current
+    val miniPlayerOpenDragThresholdPx = with(density) { 48.dp.toPx() }
+    val miniPlayerSkipDragThresholdPx = with(density) { 56.dp.toPx() }
+    val miniPlayerSkipPreviewMaxPx = miniPlayerSkipDragThresholdPx * 1.45f
+    var miniPlayerDragOffsetPx by remember { mutableFloatStateOf(0f) }
+    var isDraggingMiniPlayer by remember { mutableStateOf(false) }
+    val miniPlayerSettleOffsetPx = remember { Animatable(0f) }
+    var miniPlayerSettleJob by remember { mutableStateOf<Job?>(null) }
+
+    fun resistedMiniPlayerOffset(rawOffsetPx: Float): Float {
+        val direction = if (rawOffsetPx < 0f) -1f else 1f
+        val distance = abs(rawOffsetPx)
+        val resistedDistance = when {
+            distance <= miniPlayerSkipDragThresholdPx -> distance
+            else -> miniPlayerSkipDragThresholdPx + (distance - miniPlayerSkipDragThresholdPx) * 0.38f
+        }.coerceAtMost(miniPlayerSkipPreviewMaxPx)
+        return direction * resistedDistance
+    }
+
+    fun settleMiniPlayer(fromOffsetPx: Float, targetOffsetPx: Float, onTargetReached: (() -> Unit)? = null) {
+        miniPlayerSettleJob?.cancel()
+        miniPlayerSettleJob = scope.launch {
+            miniPlayerSettleOffsetPx.snapTo(fromOffsetPx)
+            if (targetOffsetPx != 0f) {
+                miniPlayerSettleOffsetPx.animateTo(
+                    targetValue = targetOffsetPx,
+                    animationSpec = tween(durationMillis = 120, easing = FastOutSlowInEasing),
+                )
+                onTargetReached?.invoke()
+            }
+            miniPlayerSettleOffsetPx.animateTo(
+                targetValue = 0f,
+                animationSpec = spring(
+                    stiffness = Spring.StiffnessMedium,
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                ),
+            )
+        }
+    }
+
+    Column(
+        modifier.then(if (currentTrack != null) Modifier.background(PhoebeUi.navBar) else Modifier),
+    ) {
+        if (currentTrack != null) {
+            val miniArtworkHidden = artworkTransition?.activeTrack?.id == currentTrack.id &&
+                artworkTransition.progress > 0.01f
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .pointerInput(
+                        onOpenNowPlaying,
+                        onPreviousTrack,
+                        onNextTrack,
+                        miniPlayerOpenDragThresholdPx,
+                        miniPlayerSkipDragThresholdPx,
+                        miniPlayerSkipPreviewMaxPx,
+                    ) {
+                        var upwardDragPx = 0f
+                        var horizontalDragPx = 0f
+                        fun resetMiniPlayerDrag(offsetPx: Float = 0f, horizontalOffsetPx: Float = 0f) {
+                            upwardDragPx = 0f
+                            horizontalDragPx = horizontalOffsetPx
+                            miniPlayerDragOffsetPx = offsetPx
+                        }
+                        fun horizontalDragIsDominant(): Boolean =
+                            abs(horizontalDragPx) > upwardDragPx * 1.2f
+
+                        detectDragGestures(
+                            onDragStart = {
+                                miniPlayerSettleJob?.cancel()
+                                isDraggingMiniPlayer = true
+                                resetMiniPlayerDrag(miniPlayerSettleOffsetPx.value)
+                                scope.launch { miniPlayerSettleOffsetPx.stop() }
+                            },
+                            onDragEnd = {
+                                isDraggingMiniPlayer = false
+                                val releaseOffsetPx = miniPlayerDragOffsetPx
+                                val horizontalDominant = horizontalDragIsDominant()
+                                val shouldSkip = abs(horizontalDragPx) > miniPlayerSkipDragThresholdPx && horizontalDominant
+                                val shouldOpen = upwardDragPx > miniPlayerOpenDragThresholdPx && !horizontalDominant
+                                when {
+                                    shouldSkip && horizontalDragPx < 0f -> {
+                                        settleMiniPlayer(releaseOffsetPx, -miniPlayerSkipPreviewMaxPx, onNextTrack)
+                                    }
+                                    shouldSkip -> {
+                                        settleMiniPlayer(releaseOffsetPx, miniPlayerSkipPreviewMaxPx, onPreviousTrack)
+                                    }
+                                    else -> {
+                                        settleMiniPlayer(releaseOffsetPx, 0f)
+                                        if (shouldOpen) onOpenNowPlaying()
+                                    }
+                                }
+                                resetMiniPlayerDrag()
+                            },
+                            onDragCancel = {
+                                isDraggingMiniPlayer = false
+                                val releaseOffsetPx = miniPlayerDragOffsetPx
+                                settleMiniPlayer(releaseOffsetPx, 0f)
+                                resetMiniPlayerDrag()
+                            },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                upwardDragPx = (upwardDragPx - dragAmount.y).coerceAtLeast(0f)
+                                horizontalDragPx += dragAmount.x
+                                miniPlayerDragOffsetPx = if (horizontalDragIsDominant()) {
+                                    val targetOffset = resistedMiniPlayerOffset(horizontalDragPx)
+                                    miniPlayerDragOffsetPx + (targetOffset - miniPlayerDragOffsetPx) * 0.72f
+                                } else {
+                                    0f
+                                }
+                            },
+                        )
+                    }
+                    .graphicsLayer {
+                        val offsetPx = if (isDraggingMiniPlayer) {
+                            miniPlayerDragOffsetPx
+                        } else {
+                            miniPlayerSettleOffsetPx.value
+                        }
+                        val swipeProgress = (abs(offsetPx) / miniPlayerSkipDragThresholdPx).coerceIn(0f, 1f)
+                        translationX = offsetPx
+                        alpha = 1f - swipeProgress * 0.14f
+                        val scale = 1f - swipeProgress * 0.025f
+                        scaleX = scale
+                        scaleY = scale
+                    }
+                    .clip(RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp))
+                    .background(PhoebeUi.navBar)
+                    .mobileMiniPlayerChromeBorder(PhoebeUi.border)
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable(onClick = onOpenNowPlaying)
+                        .padding(end = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    TrackArtworkImage(
+                        currentTrack,
+                        Modifier
+                            .size(44.dp)
+                            .onGloballyPositioned { coordinates ->
+                                artworkTransition?.miniArtworkBounds = coordinates.boundsInRoot()
+                            }
+                            .graphicsLayer {
+                                alpha = if (miniArtworkHidden) 0f else 1f
+                            },
+                    )
+                    Column(Modifier.weight(1f)) {
+                        AutoScrollingText(
+                            currentTrack.title,
+                            color = PhoebeUi.primaryText,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        AutoScrollingText(
+                            currentTrack.artist,
+                            color = PhoebeUi.secondaryText,
+                            fontSize = 12.sp,
+                        )
+                    }
+                }
+                PlayButton(isPlaying, isBuffering, 40.dp, onTogglePlayPause, enabled = true)
+            }
+        }
+        MobileBottomNavigation(
+            section = section,
+            onSection = onNavigate,
+            attachedToMiniPlayer = currentTrack != null,
+        )
+    }
+}
+
+private fun Modifier.mobileMiniPlayerChromeBorder(color: Color): Modifier = drawBehind {
+    val strokeWidth = 1.dp.toPx()
+    val inset = strokeWidth / 2f
+    drawLine(
+        color = color,
+        start = Offset(inset, inset),
+        end = Offset(size.width - inset, inset),
+        strokeWidth = strokeWidth,
+    )
+    drawLine(
+        color = color,
+        start = Offset(inset, 0f),
+        end = Offset(inset, size.height),
+        strokeWidth = strokeWidth,
+    )
+    drawLine(
+        color = color,
+        start = Offset(size.width - inset, 0f),
+        end = Offset(size.width - inset, size.height),
+        strokeWidth = strokeWidth,
+    )
+}
+
+@Composable
+internal fun MobileNowPlayingArtworkOverlay(
+    transitionState: MobileNowPlayingArtworkTransitionState,
+    modifier: Modifier = Modifier,
+) {
+    val track = transitionState.activeTrack ?: return
+    var overlayBounds by remember { mutableStateOf<Rect?>(null) }
+    val density = LocalDensity.current
+
+    Box(
+        modifier = modifier.onGloballyPositioned { coordinates ->
+            overlayBounds = coordinates.boundsInRoot()
+        },
+    ) {
+        val fullBounds = transitionState.fullArtworkBounds ?: return@Box
+        val miniBounds = transitionState.miniArtworkBounds ?: return@Box
+        val overlayOrigin = overlayBounds ?: return@Box
+        val progress = transitionState.progress.coerceIn(0f, 1f)
+        if (
+            progress <= 0.001f ||
+            fullBounds.width <= 0f ||
+            fullBounds.height <= 0f ||
+            miniBounds.width <= 0f ||
+            miniBounds.height <= 0f
+        ) {
+            return@Box
+        }
+
+        val left = mobileArtworkLerp(fullBounds.left, miniBounds.left, progress) - overlayOrigin.left
+        val top = mobileArtworkLerp(fullBounds.top, miniBounds.top, progress) - overlayOrigin.top
+        val width = mobileArtworkLerp(fullBounds.width, miniBounds.width, progress)
+        val height = mobileArtworkLerp(fullBounds.height, miniBounds.height, progress)
+
+        TrackArtworkImage(
+            track = track,
+            modifier = Modifier
+                .offset { IntOffset(left.roundToInt(), top.roundToInt()) }
+                .size(
+                    width = with(density) { width.toDp() },
+                    height = with(density) { height.toDp() },
+                ),
+            radius = 10.dp,
+            maxDecodeDimension = HeroArtworkMaxDecodeDimension,
+        )
+    }
+}
+
+private fun mobileArtworkLerp(start: Float, stop: Float, fraction: Float): Float =
+    start + (stop - start) * fraction
 
 @Composable
 internal fun SwipeableMobileArtwork(
@@ -953,6 +1088,8 @@ internal fun SwipeableMobileArtwork(
     onSkipQueueBy: (Int) -> Unit,
     modifier: Modifier = Modifier,
     maxDecodeDimension: Int = ListArtworkMaxDecodeDimension,
+    sharedKey: String? = null,
+    frontOverlay: @Composable BoxScope.() -> Unit = {},
 ) {
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
@@ -1120,9 +1257,12 @@ internal fun SwipeableMobileArtwork(
                 key(track.id) {
                     FlippableSongArtwork(
                         track = track,
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .sharedArtworkTransition(sharedKey),
                         radius = 10.dp,
                         maxDecodeDimension = maxDecodeDimension,
+                        frontOverlay = frontOverlay,
                     )
                 }
             }
@@ -1209,10 +1349,12 @@ internal fun MobilePlayer(
         initiallyExpanded = initialUpNextExpanded,
     )
     val upNextListState = RetainedLazyListStates.remember("mobile-player-up-next-list")
+    val artworkTransition = LocalMobileNowPlayingArtworkTransition.current
     var dragOffset by remember { mutableFloatStateOf(0f) }
     var isDraggingDismiss by remember { mutableStateOf(false) }
     var dismissing by remember { mutableStateOf(false) }
     val dismissThresholdPx = with(density) { 96.dp.toPx() }
+    val collapseGestureRangePx = dismissThresholdPx * 2.2f
     val offScreenPx = with(density) { 1200.dp.toPx() }
     val animatedOffset by animateFloatAsState(
         targetValue = when {
@@ -1236,6 +1378,23 @@ internal fun MobilePlayer(
         predictiveBackProgress > 0f -> offScreenPx * predictiveBackProgress.coerceIn(0f, 1f)
         isDraggingDismiss -> dragOffset.coerceAtLeast(0f)
         else -> animatedOffset
+    }
+    fun requestPlayerCollapse() {
+        predictiveBackProgress = 0f
+        if (!dismissing) {
+            dismissing = true
+        }
+    }
+    val collapseProgress = (displayOffset / collapseGestureRangePx).coerceIn(0f, 1f)
+    val playerContentAlpha = 1f - collapseProgress
+    val playerBackgroundAlpha = 1f - collapseProgress
+    SideEffect {
+        val transition = artworkTransition ?: return@SideEffect
+        transition.activeTrack = track
+        transition.progress = collapseProgress
+        if (track == null) {
+            transition.fullArtworkBounds = null
+        }
     }
     val hasTrack = track != null
     val inheritedArtworkLoadingEnabled = LocalArtworkLoadingEnabled.current
@@ -1276,8 +1435,7 @@ internal fun MobilePlayer(
     PlatformBackHandler(
         enabled = handleSystemBack,
         onBack = {
-            predictiveBackProgress = 0f
-            onBack()
+            requestPlayerCollapse()
         },
         onBackProgress = { progress ->
             predictiveBackProgress = progress.coerceIn(0f, 1f)
@@ -1289,15 +1447,21 @@ internal fun MobilePlayer(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .offset { IntOffset(0, displayOffset.roundToInt()) }
             .background(
                 Brush.radialGradient(
-                    listOf(PhoebeUi.shellRadialTint, Color.Transparent),
+                    listOf(PhoebeUi.shellRadialTint.copy(alpha = playerBackgroundAlpha), Color.Transparent),
                     center = Offset(210f, 50f),
                     radius = 380f,
                 ),
             )
-            .background(Brush.verticalGradient(listOf(PhoebeUi.shellTop, PhoebeUi.canvasBackground))),
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        PhoebeUi.shellTop.copy(alpha = playerBackgroundAlpha),
+                        PhoebeUi.canvasBackground.copy(alpha = playerBackgroundAlpha),
+                    ),
+                ),
+            ),
     ) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val collapsedSheetHeightPx = with(density) {
@@ -1374,12 +1538,13 @@ internal fun MobilePlayer(
                     Modifier
                         .fillMaxWidth()
                         .height(56.dp)
+                        .graphicsLayer { alpha = playerContentAlpha }
                         .padding(horizontal = 20.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Row(Modifier.width(132.dp), verticalAlignment = Alignment.CenterVertically) {
                         Box(
-                            modifier = Modifier.size(44.dp).clickable(onClick = onBack).semantics { contentDescription = "Back" },
+                            modifier = Modifier.size(44.dp).clickable(onClick = { requestPlayerCollapse() }).semantics { contentDescription = "Back" },
                             contentAlignment = Alignment.Center,
                         ) {
                             PhoebeIconView(PhoebeIcon.ChevronDown, tint = PhoebeUi.primaryText, modifier = Modifier.size(24.dp))
@@ -1449,12 +1614,16 @@ internal fun MobilePlayer(
                             val showLikeControl = likeActions.likesEnabled && track.canTogglePlexLike()
                             val showFeedbackActions = showLikeControl || showListenBrainzFeedback
                             val metadataReserve = baseMetadataReserve +
-                                (if (remotePlaybackTarget != null) MobilePlayerRemoteTargetReserve else 0.dp) +
-                                (if (showFeedbackActions) MobilePlayerFeedbackActionsReserve else 0.dp)
+                                (if (remotePlaybackTarget != null) MobilePlayerRemoteTargetReserve else 0.dp)
                             val artworkSize = minOf(
                                 maxWidth,
                                 (maxHeight - metadataReserve).coerceAtLeast(180.dp),
                             )
+                            var fullArtworkBounds by remember(track.id) { mutableStateOf<Rect?>(null) }
+                            val artworkMovesInOverlay =
+                                collapseProgress > 0.001f &&
+                                    artworkTransition?.miniArtworkBounds != null &&
+                                    fullArtworkBounds != null
                             Column(
                                 Modifier
                                     .fillMaxWidth()
@@ -1467,7 +1636,15 @@ internal fun MobilePlayer(
                                 Box(
                                     Modifier
                                         .size(artworkSize)
-                                        .align(Alignment.Start),
+                                        .align(Alignment.Start)
+                                        .onGloballyPositioned { coordinates ->
+                                            val bounds = coordinates.boundsInRoot()
+                                            fullArtworkBounds = bounds
+                                            artworkTransition?.fullArtworkBounds = bounds
+                                        }
+                                        .graphicsLayer {
+                                            alpha = if (artworkMovesInOverlay) 0f else 1f
+                                        },
                                 ) {
                                     val artworkLoadsEnabled = inheritedArtworkLoadingEnabled &&
                                         playerArtworkLoadingEnabled
@@ -1481,74 +1658,83 @@ internal fun MobilePlayer(
                                             onSkipQueueBy = onSkipQueueBy,
                                             modifier = Modifier.fillMaxSize(),
                                             maxDecodeDimension = HeroArtworkMaxDecodeDimension,
-                                        )
+                                        ) {
+                                            AudioQualityBadge(
+                                                track = track,
+                                                onArtwork = true,
+                                                modifier = Modifier
+                                                    .align(Alignment.TopEnd)
+                                                    .padding(12.dp),
+                                            )
+                                            if (showFeedbackActions) {
+                                                Row(
+                                                    modifier = Modifier
+                                                        .align(Alignment.BottomEnd)
+                                                        .padding(12.dp)
+                                                        .clip(RoundedCornerShape(999.dp))
+                                                        .background(PhoebeUi.canvasBackground.copy(alpha = 0.72f))
+                                                        .padding(horizontal = 6.dp, vertical = 5.dp),
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                ) {
+                                                    if (showLikeControl) {
+                                                        LikeButton(
+                                                            liked = likeActions.isLiked(track),
+                                                            enabled = true,
+                                                            onClick = { likeActions.onToggleLiked(track) },
+                                                        )
+                                                    }
+                                                    if (showListenBrainzFeedback) {
+                                                        ListenBrainzFeedbackControls(
+                                                            target = listenBrainzFeedbackTarget,
+                                                            onFeedback = onListenBrainzFeedback,
+                                                            horizontalVotes = true,
+                                                            showVoteBorders = false,
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
-                                    AudioQualityBadge(
-                                        track = track,
-                                        onArtwork = true,
-                                        modifier = Modifier
-                                            .align(Alignment.TopEnd)
-                                            .padding(12.dp),
-                                    )
                                 }
                                 Spacer(Modifier.height(20.dp))
-                                CompositionLocalProvider(
-                                    LocalContinuousMotionEnabled provides playerMotionEnabled,
-                                ) {
-                                    AutoScrollingText(
-                                        track.title,
-                                        color = PhoebeUi.primaryText,
-                                        fontSize = 22.sp,
-                                        fontWeight = FontWeight.Black,
-                                    )
-                                    AutoScrollingText(
-                                        track.artist,
-                                        color = PhoebeUi.secondaryText,
-                                        fontSize = 15.sp,
-                                        modifier = Modifier.clickable(enabled = track.artist.isNotBlank()) {
-                                            trackNavigationActions.onOpenArtistForTrack(track)
-                                        },
-                                    )
-                                    if (track.album.isNotBlank()) {
+                                Column(Modifier.graphicsLayer { alpha = playerContentAlpha }) {
+                                    CompositionLocalProvider(
+                                        LocalContinuousMotionEnabled provides playerMotionEnabled,
+                                    ) {
                                         AutoScrollingText(
-                                            track.album,
-                                            color = PhoebeUi.mutedText,
-                                            fontSize = 13.sp,
-                                            modifier = Modifier.clickable {
-                                                trackNavigationActions.onOpenAlbumForTrack(track)
+                                            track.title,
+                                            color = PhoebeUi.primaryText,
+                                            fontSize = 22.sp,
+                                            fontWeight = FontWeight.Black,
+                                        )
+                                        AutoScrollingText(
+                                            track.artist,
+                                            color = PhoebeUi.secondaryText,
+                                            fontSize = 15.sp,
+                                            modifier = Modifier.clickable(enabled = track.artist.isNotBlank()) {
+                                                trackNavigationActions.onOpenArtistForTrack(track)
                                             },
                                         )
+                                        if (track.album.isNotBlank()) {
+                                            AutoScrollingText(
+                                                track.album,
+                                                color = PhoebeUi.mutedText,
+                                                fontSize = 13.sp,
+                                                modifier = Modifier.clickable {
+                                                    trackNavigationActions.onOpenAlbumForTrack(track)
+                                                },
+                                            )
+                                        }
                                     }
-                                }
-                                if (remotePlaybackTarget != null) {
-                                    Text(
-                                        "Music Assistant: $remotePlaybackTarget",
-                                        color = PhoebeUi.accentLight,
-                                        fontSize = 12.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                                if (showFeedbackActions) {
-                                    Spacer(Modifier.height(10.dp))
-                                    Row(
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        if (showLikeControl) {
-                                            LikeButton(
-                                                liked = likeActions.isLiked(track),
-                                                enabled = true,
-                                                onClick = { likeActions.onToggleLiked(track) },
-                                            )
-                                        }
-                                        if (showListenBrainzFeedback) {
-                                            ListenBrainzFeedbackControls(
-                                                target = listenBrainzFeedbackTarget,
-                                                onFeedback = onListenBrainzFeedback,
-                                                horizontalVotes = true,
-                                            )
-                                        }
+                                    if (remotePlaybackTarget != null) {
+                                        Text(
+                                            "Music Assistant: $remotePlaybackTarget",
+                                            color = PhoebeUi.accentLight,
+                                            fontSize = 12.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
                                     }
                                 }
                             }
@@ -1576,13 +1762,19 @@ internal fun MobilePlayer(
                     bufferedPositionMs = timelineBufferedPositionMs,
                     durationMs = track?.durationMs ?: 0L,
                     waveformSeed = track?.let(::trackWaveformSeed) ?: "",
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .graphicsLayer { alpha = playerContentAlpha },
                     onSeek = if (hasTrack) onSeek else null,
                 )
                 Spacer(Modifier.height(22.dp))
                 CompositionLocalProvider(LocalContinuousMotionEnabled provides playerMotionEnabled) {
                     Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp)
+                            .graphicsLayer { alpha = playerContentAlpha },
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -1618,7 +1810,8 @@ internal fun MobilePlayer(
                     },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(with(density) { displayedSheetHeightPx.toDp() }),
+                        .height(with(density) { displayedSheetHeightPx.toDp() })
+                        .graphicsLayer { alpha = playerContentAlpha },
                     onPlayQueue = onPlayQueue,
                     onMoveUpNext = onMoveUpNext,
                     onRemoveUpNext = onRemoveUpNext,

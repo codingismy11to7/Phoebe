@@ -65,10 +65,11 @@ internal fun PlayHistoryScreen(
         PlayHistoryKind.RecentlyPlayed -> playHistory.topRecentlyPlayed.size
     }
     val showResolving = rows != null && rankedTotal > 0 && (rows?.size ?: 0) < rankedTotal
+    val chromePadding = LocalMobileChromePadding.current
     Column(
         modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp + chromePadding.bottom),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         PlayHistoryHeader(

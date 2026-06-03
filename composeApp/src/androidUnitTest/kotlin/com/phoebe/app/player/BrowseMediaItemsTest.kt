@@ -3,6 +3,8 @@ package com.phoebe.app.player
 import android.os.Bundle
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.Player
+import androidx.media3.session.SessionResult
 import com.phoebe.app.domain.Track
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -90,6 +92,68 @@ class BrowseMediaItemsTest {
 
         assertNull(expanded)
     }
+
+    @Test
+    fun externalNextCommandUsesPhoebeQueueWhenPlatformWindowHasNoNext() {
+        var localNextCalls = 0
+        var castNextCalls = 0
+
+        val result = handleExternalQueueNavigationCommand(
+            playerCommand = Player.COMMAND_SEEK_TO_NEXT,
+            isCastActive = false,
+            hasNextTrack = true,
+            hasPreviousTrack = false,
+            onSkipNext = { localNextCalls++ },
+            onSkipPrevious = null,
+            onCastSkipNext = { castNextCalls++ },
+            onCastSkipPrevious = null,
+        )
+
+        assertEquals(SessionResult.RESULT_INFO_SKIPPED, result)
+        assertEquals(1, localNextCalls)
+        assertEquals(0, castNextCalls)
+    }
+
+    @Test
+    fun externalNextCommandFallsThroughAtEndOfPhoebeQueue() {
+        var localNextCalls = 0
+
+        val result = handleExternalQueueNavigationCommand(
+            playerCommand = Player.COMMAND_SEEK_TO_NEXT,
+            isCastActive = false,
+            hasNextTrack = false,
+            hasPreviousTrack = false,
+            onSkipNext = { localNextCalls++ },
+            onSkipPrevious = null,
+            onCastSkipNext = null,
+            onCastSkipPrevious = null,
+        )
+
+        assertNull(result)
+        assertEquals(0, localNextCalls)
+    }
+
+    @Test
+    fun externalCastNextCommandKeepsUsingCastQueueHandler() {
+        var localNextCalls = 0
+        var castNextCalls = 0
+
+        val result = handleExternalQueueNavigationCommand(
+            playerCommand = Player.COMMAND_SEEK_TO_NEXT,
+            isCastActive = true,
+            hasNextTrack = true,
+            hasPreviousTrack = false,
+            onSkipNext = { localNextCalls++ },
+            onSkipPrevious = null,
+            onCastSkipNext = { castNextCalls++ },
+            onCastSkipPrevious = null,
+        )
+
+        assertEquals(SessionResult.RESULT_INFO_SKIPPED, result)
+        assertEquals(0, localNextCalls)
+        assertEquals(1, castNextCalls)
+    }
+
 }
 
 private class FakeCatalogBrowseSource(

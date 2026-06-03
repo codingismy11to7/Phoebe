@@ -225,7 +225,12 @@ internal fun FavoriteArtistsMobileView(
     val favoriteArtists = remember(catalog, libraryUi.sortBy, libraryUi.ascending) {
         sortArtistsForLibrary(catalog, libraryUi.sortBy, libraryUi.ascending).filter { it.favorite }
     }
-    Column(modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 18.dp)) {
+    val chromePadding = LocalMobileChromePadding.current
+    Column(
+        modifier
+            .fillMaxSize()
+            .padding(start = 16.dp, end = 16.dp, top = 18.dp, bottom = 18.dp + chromePadding.bottom),
+    ) {
         FavoriteLibraryHeader(
             title = "Favorite Artists",
             count = favoriteArtists.size,
@@ -269,7 +274,12 @@ internal fun FavoriteAlbumsMobileView(
     val favoriteAlbums = remember(catalog.albums, libraryUi.sortBy, libraryUi.ascending) {
         sortAlbumsForLibrary(catalog.albums, libraryUi.sortBy, libraryUi.ascending).filter { it.favorite }
     }
-    Column(modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 18.dp)) {
+    val chromePadding = LocalMobileChromePadding.current
+    Column(
+        modifier
+            .fillMaxSize()
+            .padding(start = 16.dp, end = 16.dp, top = 18.dp, bottom = 18.dp + chromePadding.bottom),
+    ) {
         FavoriteLibraryHeader(
             title = "Favorite Albums",
             count = favoriteAlbums.size,
@@ -969,8 +979,13 @@ internal fun FavoritePlaylistsMobileView(
         ?: if (searchQuery.isBlank()) preparedFavoritePlaylists else emptyList()
     val preparingPlaylists = favoritePlaylists == null ||
         (visiblePlaylists == null && preparedVisiblePlaylists.isEmpty() && preparedFavoritePlaylists.isNotEmpty())
+    val chromePadding = LocalMobileChromePadding.current
 
-    Column(modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 18.dp)) {
+    Column(
+        modifier
+            .fillMaxSize()
+            .padding(start = 16.dp, end = 16.dp, top = 18.dp, bottom = 18.dp + chromePadding.bottom),
+    ) {
         Row(
             Modifier.fillMaxWidth().padding(bottom = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -1001,9 +1016,11 @@ internal fun FavoritePlaylistsMobileView(
         CompositionLocalProvider(LocalArtworkLoadingEnabled provides artworkLoadingEnabled) {
             LazyColumn(
                 state = listState,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
-                contentPadding = PaddingValues(bottom = 18.dp),
+                contentPadding = PaddingValues(bottom = MobileChromeScrollGap),
             ) {
                 when {
                     preparingPlaylists -> item(contentType = "loading") {
@@ -1073,7 +1090,11 @@ internal fun PlaylistsMobileView(
         ?: if (searchQuery.isBlank()) playlists else emptyList()
     val preparingPlaylists = visiblePlaylists == null && preparedVisiblePlaylists.isEmpty() && playlists.isNotEmpty()
 
-    Column(modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp)) {
+    Column(
+        modifier
+            .fillMaxSize()
+            .padding(start = 16.dp, end = 16.dp, top = 8.dp),
+    ) {
         SearchPill(
             query = searchQuery,
             onQueryChange = onSearchQuery,
@@ -1112,9 +1133,11 @@ internal fun PlaylistsMobileView(
             CompositionLocalProvider(LocalArtworkLoadingEnabled provides artworkLoadingEnabled) {
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
-                    contentPadding = PaddingValues(bottom = 18.dp),
+                    contentPadding = PaddingValues(bottom = MobileChromeScrollGap),
                 ) {
                     item(contentType = "create") {
                         MobilePlaylistRow(

@@ -37,14 +37,25 @@ class PlaybackService : MediaLibraryService() {
     private var mediaLibrarySession: MediaLibrarySession? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val servicePlayerListener = object : Player.Listener {
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            AndroidPlaybackBridge.onServicePlayerChanged?.invoke()
+        }
+
         override fun onPlaybackStateChanged(playbackState: Int) {
             if (playbackState == Player.STATE_ENDED) {
                 if (AndroidPlaybackBridge.suppressServiceEndedCallback) return
                 AndroidPlaybackBridge.onTrackEnded?.invoke()
+            } else {
+                AndroidPlaybackBridge.onServicePlayerChanged?.invoke()
             }
         }
 
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            AndroidPlaybackBridge.onServicePlayerChanged?.invoke()
+        }
+
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            AndroidPlaybackBridge.onServicePlayerChanged?.invoke()
             updateLikeButton()
         }
     }
@@ -73,23 +84,8 @@ class PlaybackService : MediaLibraryService() {
             controller: MediaSession.ControllerInfo,
             playerCommand: Int,
         ): Int {
-            if (AndroidPlaybackBridge.isCastActive?.invoke() == true) {
-                val handled = when (playerCommand) {
-                    Player.COMMAND_SEEK_TO_NEXT,
-                    Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
-                    -> {
-                        AndroidPlaybackBridge.onCastSkipNext?.invoke()
-                        true
-                    }
-                    Player.COMMAND_SEEK_TO_PREVIOUS,
-                    Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
-                    -> {
-                        AndroidPlaybackBridge.onCastSkipPrevious?.invoke()
-                        true
-                    }
-                    else -> false
-                }
-                if (handled) return Player.COMMAND_INVALID
+            handledQueueNavigationCommand(playerCommand)?.let { result ->
+                return result
             }
             return when (playerCommand) {
                 else -> super.onPlayerCommandRequest(session, controller, playerCommand)
@@ -385,6 +381,18 @@ class PlaybackService : MediaLibraryService() {
         }
     }
 
+    private fun handledQueueNavigationCommand(playerCommand: Int): Int? =
+        handleExternalQueueNavigationCommand(
+            playerCommand = playerCommand,
+            isCastActive = AndroidPlaybackBridge.isCastActive?.invoke() == true,
+            hasNextTrack = AndroidPlaybackBridge.hasNextTrack?.invoke() == true,
+            hasPreviousTrack = AndroidPlaybackBridge.hasPreviousTrack?.invoke() == true,
+            onSkipNext = AndroidPlaybackBridge.onSkipNext,
+            onSkipPrevious = AndroidPlaybackBridge.onSkipPrevious,
+            onCastSkipNext = AndroidPlaybackBridge.onCastSkipNext,
+            onCastSkipPrevious = AndroidPlaybackBridge.onCastSkipPrevious,
+        )
+
     private fun List<MediaItem>.isInAppPlaybackQueue(): Boolean =
         isNotEmpty() && all { it.requestMetadata.extras?.getBoolean(InAppPlaybackExtra, false) == true }
 
@@ -486,3 +494,35 @@ private fun String.shouldExpandFromPagedBrowseSelection(): Boolean =
         BrowseMediaIds.parseAlbumPlayId(this) != null ||
         BrowseMediaIds.parsePlaylistPlayId(this) != null ||
         BrowseMediaIds.parsePlaylistShuffleId(this) != null
+
+internal fun handleExternalQueueNavigationCommand(
+    playerCommand: Int,
+    isCastActive: Boolean,
+    hasNextTrack: Boolean,
+    hasPreviousTrack: Boolean,
+    onSkipNext: (() -> Unit)?,
+    onSkipPrevious: (() -> Unit)?,
+    onCastSkipNext: (() -> Unit)?,
+    onCastSkipPrevious: (() -> Unit)?,
+): Int? {
+    val handler = when (playerCommand) {
+        Player.COMMAND_SEEK_TO_NEXT,
+        Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
+        -> if (isCastActive) {
+            onCastSkipNext
+        } else {
+            onSkipNext.takeIf { hasNextTrack }
+        }
+        Player.COMMAND_SEEK_TO_PREVIOUS,
+        Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
+        -> if (isCastActive) {
+            onCastSkipPrevious
+        } else {
+            onSkipPrevious.takeIf { hasPreviousTrack }
+        }
+        else -> null
+    } ?: return null
+
+    handler()
+    return SessionResult.RESULT_INFO_SKIPPED
+}

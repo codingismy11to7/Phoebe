@@ -13,6 +13,7 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.phoebe.app.AndroidContextHolder
 import com.phoebe.app.domain.EqualizerProfile
+import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
 import com.phoebe.app.platform.PhoebeLog
 import kotlinx.coroutines.CancellationException
@@ -72,6 +73,12 @@ private data class PendingPlatformSeek(
         this.generation == generation && this.trackId == trackId
 }
 
+private data class PendingPlatformQueueRebase(
+    val queue: List<Track>,
+    val currentIndex: Int,
+    val generation: Int,
+)
+
 internal class AndroidAudioPlayer(
     private val diagnostics: PlaybackDiagnostics = AndroidPlaybackDiagnostics.diagnostics,
 ) : SimpleAudioPlayer() {
@@ -101,6 +108,7 @@ internal class AndroidAudioPlayer(
     private var appControllerMutationInProgress = false
     private var pendingControllerTarget: PendingControllerTarget? = null
     private var pendingPlatformSeek: PendingPlatformSeek? = null
+    private var pendingPlatformQueueRebase: PendingPlatformQueueRebase? = null
 
     private val controllerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -133,7 +141,10 @@ internal class AndroidAudioPlayer(
         AndroidPlaybackDiagnostics.diagnostics = diagnostics
         AndroidPlaybackBridge.onSkipNext = { next() }
         AndroidPlaybackBridge.onSkipPrevious = { previous() }
-        AndroidPlaybackBridge.onTrackEnded = { next() }
+        AndroidPlaybackBridge.hasNextTrack = { hasNextTrack() }
+        AndroidPlaybackBridge.hasPreviousTrack = { hasPreviousTrack() }
+        AndroidPlaybackBridge.onTrackEnded = { scope.launch { handlePlatformPlaybackEnded() } }
+        AndroidPlaybackBridge.onServicePlayerChanged = { scope.launch { syncFromController() } }
         AndroidPlaybackBridge.onPlayQueue = { queue, index -> play(queue, index) }
         AndroidPlaybackBridge.onAdoptQueue = { queue, index, playing ->
             loadedPlatformQueue = LoadedPlatformQueue(
@@ -150,6 +161,8 @@ internal class AndroidAudioPlayer(
     fun ensureConnected() {
         if (controller == null) {
             scope.launch { ensureController() }
+        } else {
+            scope.launch { syncFromController() }
         }
     }
 
@@ -162,6 +175,7 @@ internal class AndroidAudioPlayer(
             clearPendingAutoplay()
             pendingControllerTarget = null
             pendingPlatformSeek = null
+            pendingPlatformQueueRebase = null
             seekJob?.cancel()
             seekJob = null
             stopAndroidCrossfade()
@@ -231,6 +245,7 @@ internal class AndroidAudioPlayer(
         stopRetry()
         loadedPlatformQueue = null
         pendingPlatformSeek = null
+        pendingPlatformQueueRebase = null
         clearPendingAutoplay()
         platformStopJob?.cancel()
         platformStopJob = scope.launch {
@@ -241,6 +256,15 @@ internal class AndroidAudioPlayer(
                     clearMediaItems()
                 }
             }
+        }
+    }
+
+    override fun onQueueEdited(queue: List<Track>, currentIndex: Int) {
+        if (currentIndex !in queue.indices) return
+        val generation = activePlayGeneration
+        pendingPlatformQueueRebase = PendingPlatformQueueRebase(queue, currentIndex, generation)
+        scope.launch {
+            rebasePlatformQueueOnCurrentTrack(queue, currentIndex, generation)
         }
     }
 
@@ -462,6 +486,123 @@ internal class AndroidAudioPlayer(
     private fun activeLocalPlayer(): Player? =
         AndroidPlaybackBridge.servicePlayer ?: controller
 
+    private fun hasNextTrack(): Boolean {
+        val current = state.value
+        if (current.currentIndex !in current.queue.indices) return false
+        return when (current.repeat) {
+            RepeatMode.One,
+            RepeatMode.All,
+            -> current.queue.isNotEmpty()
+            RepeatMode.Off -> current.currentIndex < current.queue.lastIndex
+        }
+    }
+
+    private fun hasPreviousTrack(): Boolean =
+        state.value.currentIndex in state.value.queue.indices
+
+    private fun handlePlatformPlaybackEnded() {
+        val player = activeLocalPlayer()?.takeIf { it.playbackState == Player.STATE_ENDED } ?: return
+        val endedAppIndex = endedPlatformAppIndex(player)
+        if (endedAppIndex != null) {
+            val queue = state.value.queue
+            val endedTrack = queue.getOrNull(endedAppIndex)
+            if (endedTrack != null) {
+                if (endedAppIndex != state.value.currentIndex) {
+                    adoptQueueState(queue, endedAppIndex, isPlaying = false)
+                }
+                val endedPositionMs = endedTrack.durationMs
+                    .takeIf { it > 0L }
+                    ?: state.value.positionMs
+                applyPlatformPlayback(
+                    positionMs = endedPositionMs,
+                    durationMs = endedTrack.durationMs,
+                    isPlaying = false,
+                    isBuffering = false,
+                    bufferedPositionMs = endedPositionMs,
+                )
+            }
+        }
+        next()
+    }
+
+    private fun endedPlatformAppIndex(player: Player): Int? {
+        val controllerIndex = player.currentMediaItemIndex.takeIf { it >= 0 } ?: return null
+        val loaded = loadedPlatformQueue
+        val appIndex = loaded?.appIndexFor(controllerIndex) ?: controllerIndex
+        val currentQueue = state.value.queue
+        if (appIndex !in currentQueue.indices) return null
+        val loadedTrackId = loaded?.queueIds?.getOrNull(appIndex)
+        if (loadedTrackId != null && currentQueue[appIndex].id != loadedTrackId) return null
+        return appIndex
+    }
+
+    private suspend fun rebasePlatformQueueOnCurrentTrack(
+        queue: List<Track>,
+        currentIndex: Int,
+        generation: Int,
+    ) {
+        if (!isPlayRequestCurrent(generation) || currentIndex !in queue.indices) return
+        if (crossfadePlayer != null && crossfadeOwnedTrackId != null) return
+        val currentTrack = queue[currentIndex]
+        controllerMutex.withLock {
+            if (!isPlayRequestCurrent(generation)) return@withLock
+            val player = activeLocalPlayer() ?: return@withLock
+            if (player.mediaItemCount == 0 || player.playbackState == Player.STATE_IDLE) return@withLock
+            val platformTrackId = player.currentMediaItem?.mediaId
+            if (platformTrackId != null && platformTrackId != currentTrack.id) return@withLock
+            val positionMs = player.currentPosition.coerceAtLeast(0L)
+            val shouldPlay = playWhenReady && (player.isPlaying || player.playWhenReady)
+            appControllerMutationInProgress = true
+            try {
+                rebasePlatformQueueOnCurrentTrackLocked(
+                    player = player,
+                    queue = queue,
+                    currentIndex = currentIndex,
+                    generation = generation,
+                    startPositionMs = positionMs,
+                    shouldPlay = shouldPlay,
+                )
+            } finally {
+                appControllerMutationInProgress = false
+            }
+            clearPendingPlatformQueueRebase(queue, currentIndex, generation)
+            syncFromController(generation)
+        }
+    }
+
+    private fun rebasePlatformQueueOnCurrentTrackLocked(
+        player: Player,
+        queue: List<Track>,
+        currentIndex: Int,
+        generation: Int,
+        startPositionMs: Long,
+        shouldPlay: Boolean,
+    ) {
+        loadQueueOnPlayer(
+            player = player,
+            queue = queue,
+            targetIndex = currentIndex,
+            queueIds = queue.map { it.id },
+            generation = generation,
+            startPositionMs = startPositionMs,
+            shouldPlay = shouldPlay,
+        )
+    }
+
+    private fun clearPendingPlatformQueueRebase(
+        queue: List<Track>,
+        currentIndex: Int,
+        generation: Int,
+    ) {
+        val pending = pendingPlatformQueueRebase ?: return
+        if (pending.generation == generation &&
+            pending.currentIndex == currentIndex &&
+            pending.queue.map { it.id } == queue.map { it.id }
+        ) {
+            pendingPlatformQueueRebase = null
+        }
+    }
+
     private fun markPendingAutoplay(generation: Int) {
         if (pendingAutoplayGeneration != generation) {
             pendingAutoplayStartedAtMs = SystemClock.elapsedRealtime()
@@ -599,6 +740,27 @@ internal class AndroidAudioPlayer(
                     appControllerMutationInProgress = true
                     try {
                         block(player)
+                        pendingPlatformQueueRebase
+                            ?.takeIf { it.generation == generation && it.currentIndex in it.queue.indices }
+                            ?.let { pending ->
+                                val currentTrack = pending.queue[pending.currentIndex]
+                                val platformTrackId = player.currentMediaItem?.mediaId
+                                if (platformTrackId == null || platformTrackId == currentTrack.id) {
+                                    rebasePlatformQueueOnCurrentTrackLocked(
+                                        player = player,
+                                        queue = pending.queue,
+                                        currentIndex = pending.currentIndex,
+                                        generation = generation,
+                                        startPositionMs = player.currentPosition.coerceAtLeast(0L),
+                                        shouldPlay = playWhenReady && (player.isPlaying || player.playWhenReady),
+                                    )
+                                    clearPendingPlatformQueueRebase(
+                                        pending.queue,
+                                        pending.currentIndex,
+                                        generation,
+                                    )
+                                }
+                            }
                         if (isPlayRequestCurrent(generation)) {
                             syncFromController(generation)
                         }
@@ -624,6 +786,8 @@ internal class AndroidAudioPlayer(
         targetIndex: Int,
         queueIds: List<String>,
         generation: Int,
+        startPositionMs: Long = 0L,
+        shouldPlay: Boolean = playWhenReady,
     ) {
         val windowStartIndex = targetIndex
         val windowTracks = queue.subList(
@@ -635,7 +799,11 @@ internal class AndroidAudioPlayer(
         player.stop()
         player.clearMediaItems()
         player.volume = effectiveOutputVolume()
-        player.setMediaItems(windowTracks.map { playbackMediaItem(it, inAppPlayback = true) }, 0, 0L)
+        player.setMediaItems(
+            windowTracks.map { playbackMediaItem(it, inAppPlayback = true) },
+            0,
+            startPositionMs.coerceAtLeast(0L),
+        )
         player.prepare()
         loadedPlatformQueue = LoadedPlatformQueue(
             queueIds = queueIds,
@@ -643,9 +811,10 @@ internal class AndroidAudioPlayer(
             itemCount = windowTracks.size,
         )
         queue.getOrNull(targetIndex)?.let { updateOptimisticLocalBufferedPosition(it, generation) }
-        if (playWhenReady) {
+        if (shouldPlay && playWhenReady) {
             markPendingAutoplay(generation)
             player.play()
+            startPositionSyncLoop(generation)
         }
     }
 
@@ -695,7 +864,16 @@ internal class AndroidAudioPlayer(
                 adoptQueueState(appState.queue, appControllerIndex, player.isPlaying)
                 appState = state.value
             } else {
-                return
+                val platformTrackId = player.currentMediaItem?.mediaId
+                val queueIndexForPlatformItem = platformTrackId
+                    ?.let { id -> appState.queue.indexOfFirst { it.id == id } }
+                    ?.takeIf { it >= 0 }
+                    ?: return
+                adoptQueueState(appState.queue, queueIndexForPlatformItem, player.isPlaying)
+                appState = state.value
+                scope.launch {
+                    rebasePlatformQueueOnCurrentTrack(appState.queue, queueIndexForPlatformItem, generation)
+                }
             }
         }
         val controllerPosition = player.currentPosition.coerceAtLeast(0L)
@@ -704,9 +882,11 @@ internal class AndroidAudioPlayer(
             startPositionSyncLoop(generation)
             return
         }
+        val platformTrackId = player.currentMediaItem?.mediaId
         if (appState.isBuffering &&
             appState.positionMs == 0L &&
-            controllerPosition > 1_500L
+            controllerPosition > 1_500L &&
+            platformTrackId != appState.currentTrack?.id
         ) {
             return
         }

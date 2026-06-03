@@ -57,10 +57,11 @@ internal fun RecentlyAddedScreen(
     val page = remember(kind, catalog, nowMs) {
         RecentlyAddedPage.from(kind, catalog, nowMs)
     }
+    val chromePadding = LocalMobileChromePadding.current
     Column(
         modifier
             .fillMaxSize()
-            .padding(horizontal = 28.dp, vertical = 24.dp),
+            .padding(start = 28.dp, end = 28.dp, top = 24.dp, bottom = 24.dp + chromePadding.bottom),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         RecentlyAddedHeader(page, onBack)

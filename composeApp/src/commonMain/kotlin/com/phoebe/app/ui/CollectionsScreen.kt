@@ -78,6 +78,7 @@ internal fun CollectionsScreen(
         val markers = catalog.collectionValueLoads.count { it.target == entry.target.name && it.facet == entry.facet.name }
         "screen values target=${entry.target.name} facet=${entry.facet.name} loading=$loading buckets=${buckets.size} nonEmpty=${buckets.count { it.items.isNotEmpty() }} values=${values.size} markers=$markers sample=${values.take(10).map { "${it.value}:${it.key}:${it.filterField}" }}"
     }
+    val chromePadding = LocalMobileChromePadding.current
     val gridState = rememberSaveable(
         entry.target.name,
         entry.facet.name,
@@ -86,7 +87,7 @@ internal fun CollectionsScreen(
     Column(
         modifier
             .fillMaxSize()
-            .padding(horizontal = 28.dp, vertical = 24.dp),
+            .padding(start = 28.dp, end = 28.dp, top = 24.dp, bottom = 24.dp + chromePadding.bottom),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         CollectionsHeader(
@@ -172,10 +173,11 @@ internal fun CollectionItemsScreen(
         value,
         saver = LazyGridState.Saver,
     ) { LazyGridState() }
+    val chromePadding = LocalMobileChromePadding.current
     Column(
         modifier
             .fillMaxSize()
-            .padding(horizontal = 28.dp, vertical = 24.dp),
+            .padding(start = 28.dp, end = 28.dp, top = 24.dp, bottom = 24.dp + chromePadding.bottom),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         CollectionsHeader(
