@@ -1903,6 +1903,8 @@ internal fun SongRow(
     onDownload: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     leadingHandle: (@Composable () -> Unit)? = null,
+    showPlaylistDragHandle: Boolean = true,
+    sharedKey: String? = "song:${track.id}",
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     val hasMenu = true
@@ -1915,12 +1917,13 @@ internal fun SongRow(
     val canLike = likeActions.likesEnabled && track.canTogglePlexLike()
     val liked = likeActions.isLiked(track)
     val downloaded = downloads.isComplete(track)
-    val showPlaylistDragHandle = playlistDragEnabled && leadingHandle == null
+    val rowDragEnabled = playlistDragEnabled && leadingHandle == null
+    val dragHandleVisible = rowDragEnabled && showPlaylistDragHandle
     Row(
         modifier
             .fillMaxWidth()
             .playTrackTarget(track)
-            .then(if (showPlaylistDragHandle) Modifier.draggableSong(track) else Modifier)
+            .then(if (rowDragEnabled) Modifier.draggableSong(track, immediate = !dragHandleVisible) else Modifier)
             .openContextMenuOnSecondaryClick(enabled = hasMenu) { menuExpanded = true }
             .clip(RoundedCornerShape(10.dp))
             .clickable(onClick = onSelect)
@@ -1938,7 +1941,7 @@ internal fun SongRow(
         Row(modifier = Modifier.weight(2.2f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             if (leadingHandle != null) {
                 leadingHandle()
-            } else if (showPlaylistDragHandle) {
+            } else if (dragHandleVisible) {
                 // Immediate-drag handle. Visible target so users discover that songs can be
                 // dragged onto sidebar playlists without having to long-press the row.
                 Box(
@@ -1953,7 +1956,7 @@ internal fun SongRow(
             Box(
                 Modifier
                     .size(42.dp)
-                    .sharedArtworkTransition("song:${track.id}")
+                    .sharedArtworkTransition(sharedKey)
                     .clickable(onClick = onPlay),
                 contentAlignment = Alignment.Center,
             ) {
@@ -1990,7 +1993,7 @@ internal fun SongRow(
                 fontWeight = if (isCurrent || selected) FontWeight.SemiBold else FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.sharedBoundsTransition("song:${track.id}:title"),
+                modifier = Modifier.sharedBoundsTransition(sharedKey?.let { "$it:title" }),
             )
         }
         TableCellText(track.artist, modifier = Modifier.weight(1.4f), color = PhoebeUi.secondaryText)

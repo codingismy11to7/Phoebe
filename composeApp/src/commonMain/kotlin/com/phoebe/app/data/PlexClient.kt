@@ -295,6 +295,69 @@ class PlexClient(
     suspend fun trackDetails(server: PlexServer, ratingKey: String, token: String): Track? =
         metadataDetails(server, ratingKey, token).firstOrNull()?.toTrack(server, token)
 
+    suspend fun popularTracksForArtist(
+        server: PlexServer,
+        library: MusicLibrary,
+        ratingKey: String,
+        token: String,
+        limit: Int = 12,
+    ): List<Track> {
+        if (ratingKey.isBlank() || limit <= 0) return emptyList()
+        val response: PlexMediaContainerResponse = withReachableBase(server) { base ->
+            val response = httpClient.get("$base/library/sections/${library.key}/all") {
+                plexServerAuth(token)
+                header(HttpHeaders.Accept, "application/json")
+                header("X-Plex-Container-Start", "0")
+                header("X-Plex-Container-Size", limit.toString())
+                parameter("X-Plex-Container-Start", 0)
+                parameter("X-Plex-Container-Size", limit)
+                parameter("type", PlexTrackType)
+                parameter("artist.id", ratingKey)
+                parameter("album.subformat!", "Compilation,Live")
+                parameter("group", "title")
+                parameter("ratingCount>>", 0)
+                parameter("sort", "ratingCount:desc")
+                parameter("limit", limit)
+            }
+            if (!response.status.isSuccess()) {
+                val body = response.bodyAsText()
+                error("Plex artist popular tracks failed (${response.status.value}) via $base: ${body.take(200)}")
+            }
+            response.body()
+        }
+        return response.mediaContainer.metadata.mapNotNull { it.toTrack(server, token) }
+    }
+
+    suspend fun similarArtistsForArtist(
+        server: PlexServer,
+        ratingKey: String,
+        token: String,
+        limit: Int = 20,
+    ): List<Artist> {
+        if (ratingKey.isBlank() || limit <= 0) return emptyList()
+        val body = plexGetRaw(server, token, "/library/metadata/$ratingKey/similar?count=$limit")
+        val root = runCatching { PlexJson.decodeFromString<JsonElement>(body) }
+            .onFailure { error ->
+                PhoebeLog.d("PlexClient") { "similarArtistsForArtist failed to parse response for $ratingKey: ${error.message}" }
+            }
+            .getOrNull()
+            ?: return emptyList()
+        return root
+            .similarArtistObjects()
+            .mapNotNull { artistJson ->
+                artistJson.toRawArtist { thumb -> server.assetUrl(thumb, token) }
+            }
+            .filter { artist -> artist.id != ratingKey }
+            .distinctBy { artist -> artist.id.takeIf { it.isNotBlank() } ?: artist.title.normalizedArtistLookupKey() }
+            .take(limit)
+            .toList()
+            .also { artists ->
+                if (artists.isEmpty()) {
+                    PhoebeLog.d("PlexClient") { "similarArtistsForArtist found no similar artists for $ratingKey bodyPrefix=${body.take(360)}" }
+                }
+            }
+    }
+
     suspend fun trackPlaybackStat(server: PlexServer, ratingKey: String, token: String): PlexTrackPlaybackStat? {
         val body = runCatching {
             plexGetRaw(server, token, "/library/metadata/$ratingKey?includeUserState=1")
@@ -2138,6 +2201,80 @@ private fun JsonObject.toRadioStation(
     )
 }
 
+private fun JsonElement.similarArtistObjects(): Sequence<JsonObject> = sequence {
+    val container = jsonObjectOrNull()?.get("MediaContainer") ?: this@similarArtistObjects
+    val directArtists = container.childObjectsNamed("Metadata", "Directory")
+        .filter { artist -> artist.looksLikeArtistObject() }
+        .toList()
+    val nestedSimilarArtists = container.walkObjects()
+        .flatMap { item -> item.childObjectsNamed("Similar") }
+        .filter { artist -> artist.looksLikeArtistObject() }
+        .toList()
+    val artists = (directArtists + nestedSimilarArtists).distinctBy { artist ->
+        artist.stringValue("ratingKey")
+            ?: artist.stringValue("id")
+            ?: artist.stringValue("key")
+            ?: artist.stringValue("guid")
+            ?: artist.stringValue("title")
+            ?: artist.stringValue("tag")
+            ?: artist.toString()
+    }
+    yieldAll(artists)
+    if (artists.isEmpty()) {
+        yieldAll(container.walkObjects().filter { artist -> artist.looksLikeArtistObject() })
+    }
+}
+
+private fun JsonElement.childObjectsNamed(vararg names: String): Sequence<JsonObject> = sequence {
+    val wanted = names.toSet()
+    val container = this@childObjectsNamed.jsonObjectOrNull() ?: return@sequence
+    container.entries
+        .asSequence()
+        .filter { (name, _) -> wanted.any { wantedName -> name.equals(wantedName, ignoreCase = true) } }
+        .flatMap { (_, value) ->
+            when (value) {
+                is JsonObject -> sequenceOf(value)
+                is JsonArray -> value.asSequence().mapNotNull { child -> child.jsonObjectOrNull() }
+                else -> emptySequence()
+            }
+        }
+        .forEach { child -> yield(child) }
+}
+
+private fun JsonObject.looksLikeArtistObject(): Boolean {
+    val title = stringValue("title") ?: stringValue("tag") ?: stringValue("name")
+    val type = stringValue("type")
+    val key = stringValue("ratingKey")
+        ?: stringValue("id")
+        ?: stringValue("key")?.ratingKeyFromMetadataPath()
+        ?: stringValue("guid")
+    return title?.isNotBlank() == true &&
+        key?.isNotBlank() == true &&
+        (type == null || type.equals("artist", ignoreCase = true))
+}
+
+private fun JsonObject.toRawArtist(assetUrl: (String) -> String): Artist? {
+    val title = (stringValue("title") ?: stringValue("tag") ?: stringValue("name"))
+        ?.trim()
+        ?.takeIf { it.isNotBlank() }
+        ?: return null
+    val id = (stringValue("ratingKey")
+        ?: stringValue("id")
+        ?: stringValue("key")?.ratingKeyFromMetadataPath()
+        ?: stringValue("guid")
+        ?: title)
+        .trim()
+        .takeIf { it.isNotBlank() }
+        ?: return null
+    return Artist(
+        id = id,
+        title = title,
+        thumbUrl = stringValue("thumb")?.let(assetUrl),
+        albumCount = stringValue("leafCount")?.toIntOrNull() ?: 0,
+        dateAddedMs = stringValue("addedAt")?.toLongOrNull()?.times(1000L),
+    )
+}
+
 private fun String.normalizedStationKey(): String =
     trim().let { if (it.startsWith("/")) it else "/$it" }
 
@@ -2205,6 +2342,9 @@ private fun JsonElement.jsonObjectOrNull(): JsonObject? = this as? JsonObject
 
 private fun JsonObject.stringValue(key: String): String? =
     (this[key] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+
+private fun String.normalizedArtistLookupKey(): String =
+    trim().lowercase()
 
 private fun String.isTrackCollectionField(facet: PlexCollectionFacet): Boolean =
     this == facet.filterField || this == "track.${facet.filterField}"

@@ -555,6 +555,50 @@ class PlexClientPlaylistEndToEndTest {
     }
 
     @Test
+    fun similarArtistsForArtistReadsPlexSimilarEndpoint() = runTest {
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/library/metadata/a1/similar" -> {
+                    assertEquals("10", request.url.parameters["count"])
+                    respond(
+                        """{
+                            "MediaContainer": {
+                              "Metadata": [
+                                {
+                                  "ratingKey": "a2",
+                                  "key": "/library/metadata/a2",
+                                  "type": "artist",
+                                  "title": "The Front Bottoms",
+                                  "thumb": "/library/metadata/a2/thumb/1",
+                                  "leafCount": 4
+                                },
+                                {
+                                  "ratingKey": "album-1",
+                                  "type": "album",
+                                  "title": "Ignored Album"
+                                }
+                              ]
+                            }
+                        }""".trimIndent(),
+                        HttpStatusCode.OK,
+                        headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val client = PlexClient(testHttpClient(engine))
+        val server = PlexServer("server", "Plex", "https://plex.example:32400", owned = true)
+
+        val artists = client.similarArtistsForArtist(server, "a1", "token", limit = 10)
+
+        assertEquals(1, artists.size)
+        assertEquals("a2", artists.single().id)
+        assertEquals("The Front Bottoms", artists.single().title)
+        assertTrue(artists.single().thumbUrl?.contains("X-Plex-Token=token") == true)
+    }
+
+    @Test
     fun artistStationReadsTopLevelStationsResponse() = runTest {
         val engine = MockEngine { request ->
             when (request.url.encodedPath) {

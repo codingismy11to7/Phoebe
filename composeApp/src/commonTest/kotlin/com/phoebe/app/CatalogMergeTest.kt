@@ -17,12 +17,17 @@ class CatalogMergeTest {
             albums = listOf(Album("al1", "Al", "A", null, null)),
             playlists = emptyList(),
             tracksByParent = mapOf("al1" to listOf(Track("t1", "T", "A", "Al", 1L, "", ""))),
+            popularTracksByArtist = mapOf("a1" to listOf(Track("t2", "Top", "A", "Al", 1L, "", "", parentAlbumId = "al1"))),
+            similarArtistsByArtist = mapOf("a1" to listOf(Artist("a2", "B", null, 1))),
             downloads = emptyList(),
         )
         val p = CatalogMerge.withPrefix("plex", inner)
         assertEquals("plex:a1", p.artists.single().id)
         assertEquals("plex:al1", p.albums.single().id)
         assertEquals("plex:t1", p.tracksByParent.keys.single().let { p.tracksByParent[it]!!.single().id })
+        assertEquals("plex:t2", p.popularTracksByArtist["plex:a1"]!!.single().id)
+        assertEquals("plex:al1", p.popularTracksByArtist["plex:a1"]!!.single().parentAlbumId)
+        assertEquals("plex:a2", p.similarArtistsByArtist["plex:a1"]!!.single().id)
     }
 
     @Test

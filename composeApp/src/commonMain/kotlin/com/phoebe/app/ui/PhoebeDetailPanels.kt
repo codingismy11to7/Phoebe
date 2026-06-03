@@ -179,6 +179,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 import kotlin.math.max
 
+private const val ArtistSimilarArtistDisplayLimit = 20
+
 @Composable
 internal fun DetailBackButton(
     onBack: () -> Unit,
@@ -972,6 +974,12 @@ internal fun ArtistDetailPanel(
         artist.thumbUrl ?: albums.firstNotNullOfOrNull { it.thumbUrl }
     }
     val tracks = remember(catalog.tracksByParent, artist.title) { catalogTracksForArtist(catalog, artist.title) }
+    val playHistory = LocalPlayHistory.current
+    val popularTracks = remember(catalog.popularTracksByArtist, tracks, playHistory.playCountByTrack, playHistory.byTrack, artist.id) {
+        catalog.popularTracksByArtist[artist.id]
+            ?.takeIf { it.isNotEmpty() }
+            ?: popularTracksFromPlayHistory(tracks, playHistory)
+    }
     val albumWord = if (albums.size == 1) "album" else "albums"
     val songWord = if (tracks.size == 1) "song" else "songs"
 
@@ -995,7 +1003,13 @@ internal fun ArtistDetailPanel(
         filterTracksByQuery(sortedTracks, searchQuery)
     }
     val similarArtists = remember(catalog, artist.id, artist.title) {
-        similarArtistsFor(catalog, artist).take(10)
+        if (catalog.similarArtistsByArtist.containsKey(artist.id)) {
+            catalog.similarArtistsByArtist[artist.id].orEmpty()
+        } else if (artist.id.startsWith("plex:")) {
+            emptyList()
+        } else {
+            similarArtistsFor(catalog, artist).take(ArtistSimilarArtistDisplayLimit)
+        }
     }
     val nowPlaying = LocalNowPlaying.current
     val ratingActions = LocalRatingActions.current
@@ -1111,6 +1125,17 @@ internal fun ArtistDetailPanel(
                     )
                 }
                 Spacer(Modifier.height(10.dp))
+                if (popularTracks.isNotEmpty() && searchQuery.isBlank()) {
+                    PopularTracksSection(
+                        tracks = popularTracks,
+                        useTable = useTable,
+                        columns = libraryUi.columns,
+                        onPlayTracks = onPlayTracks,
+                        onAddToUpNext = onAddToUpNext,
+                        onDownload = onDownload,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                }
                 DetailSectionHeader(
                     title = "Albums",
                     sortBy = albumSortBy,
@@ -1255,7 +1280,7 @@ internal fun ArtistDetailPanel(
             }
         } else if (useTable) {
             item(contentType = "artist-song-header") {
-                SongsTableHeader(libraryUi.columns)
+                SongsTableHeader(libraryUi.columns, showLeadingHandle = false)
             }
             itemsIndexed(visibleTracks, key = { _, t -> t.id }, contentType = { _, _ -> "artist-song" }) { index, track ->
                 SongRow(
@@ -1266,6 +1291,7 @@ internal fun ArtistDetailPanel(
                     onPlay = { onPlayTracks(visibleTracks, index) },
                     onAddToUpNext = { onAddToUpNext(track) },
                     onDownload = { onDownload(track) },
+                    showPlaylistDragHandle = false,
                 )
             }
         } else {
@@ -1281,6 +1307,7 @@ internal fun ArtistDetailPanel(
                     isNowPlaying = isNowPlaying,
                     nowPlayingIsPlaying = nowPlaying.isPlaying,
                     nowPlayingIsBuffering = nowPlaying.isBuffering,
+                    showPlaylistDragHandle = false,
                 )
             }
         }
@@ -1295,6 +1322,78 @@ internal fun ArtistDetailPanel(
             }
         }
     }
+        }
+    }
+}
+
+private fun popularTracksFromPlayHistory(
+    tracks: List<Track>,
+    history: PlayHistorySnapshot,
+    limit: Int = 6,
+): List<Track> =
+    tracks.asSequence()
+        .mapNotNull { track ->
+            val count = history.playCountByTrack[track.id]?.takeIf { it > 0L } ?: return@mapNotNull null
+            val lastPlayed = history.byTrack[track.id] ?: 0L
+            track to MostPlayedSort(count, lastPlayed)
+        }
+        .sortedWith(
+            compareByDescending<Pair<Track, MostPlayedSort>> { it.second }
+                .thenBy { it.first.title.lowercase() },
+        )
+        .map { it.first }
+        .take(limit)
+        .toList()
+
+private data class MostPlayedSort(
+    val playCount: Long,
+    val lastPlayedMs: Long,
+) : Comparable<MostPlayedSort> {
+    override fun compareTo(other: MostPlayedSort): Int =
+        playCount.compareTo(other.playCount).takeIf { it != 0 }
+            ?: lastPlayedMs.compareTo(other.lastPlayedMs)
+}
+
+@Composable
+private fun PopularTracksSection(
+    tracks: List<Track>,
+    useTable: Boolean,
+    columns: LibraryColumnVisibility,
+    onPlayTracks: (List<Track>, Int) -> Unit,
+    onAddToUpNext: (Track) -> Unit,
+    onDownload: (Track) -> Unit,
+) {
+    val nowPlaying = LocalNowPlaying.current
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        SectionLabel("Popular Tracks", PhoebeUi.primaryText)
+        tracks.take(if (useTable) 6 else 5).forEachIndexed { index, track ->
+            if (useTable) {
+                SongRow(
+                    track = track,
+                    selected = false,
+                    columns = columns,
+                    onSelect = { onPlayTracks(tracks, index) },
+                    onPlay = { onPlayTracks(tracks, index) },
+                    onAddToUpNext = { onAddToUpNext(track) },
+                    onDownload = { onDownload(track) },
+                    showPlaylistDragHandle = false,
+                    sharedKey = "popular:${track.id}",
+                )
+            } else {
+                ContentTrackRow(
+                    track = track,
+                    libraryColumns = columns,
+                    onPlay = { onPlayTracks(tracks, index) },
+                    onAddToUpNext = { onAddToUpNext(track) },
+                    onDownload = { onDownload(track) },
+                    compactLayout = true,
+                    isNowPlaying = track.id == nowPlaying.trackId,
+                    nowPlayingIsPlaying = nowPlaying.isPlaying,
+                    nowPlayingIsBuffering = nowPlaying.isBuffering,
+                    sharedKey = "popular:${track.id}",
+                    showPlaylistDragHandle = false,
+                )
+            }
         }
     }
 }

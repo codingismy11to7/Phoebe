@@ -928,6 +928,7 @@ private fun PhoebeRootStateHolder(
                     if (!mobilePlayerAsSheet) {
                         mobileArtworkTransition.activeTrack = null
                         mobileArtworkTransition.fullArtworkBounds = null
+                        mobileArtworkTransition.fullArtworkTrackId = null
                         mobileArtworkTransition.progress = 0f
                     }
                 }
