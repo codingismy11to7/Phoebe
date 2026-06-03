@@ -3045,6 +3045,72 @@ class CatalogRepository(
         persistCurrentTrackParentsWithoutClearingCatalog()
     }
 
+    suspend fun ensurePopularTracksForArtist(session: PlexSession?, artist: Artist): List<Track> {
+        mutableCatalog.value.popularTracksByArtist[artist.id]?.let { return it }
+        val plexSession = session?.takeIf { it.isPlex() } ?: return emptyList()
+        val ratingKey = plexRatingKey(artist.id) ?: return emptyList()
+        val server = plexSession.selectedServer ?: return emptyList()
+        val library = plexSession.selectedLibrary ?: return emptyList()
+        val token = plexSession.serverAuthToken() ?: return emptyList()
+        val tracks = plexClient.popularTracksForArtist(
+            server = server,
+            library = library,
+            ratingKey = ratingKey,
+            token = token,
+            limit = ArtistPopularTrackLimit,
+        ).map { it.withPlexPrefix() }
+        publishIndexedPlexTracks(tracks)
+        catalogMergeMutex.withLock {
+            val cur = mutableCatalog.value
+            if (cur.popularTracksByArtist[artist.id] == null) {
+                mutableCatalog.value = cur.copy(
+                    popularTracksByArtist = cur.popularTracksByArtist + (artist.id to tracks),
+                )
+            }
+        }
+        if (tracks.isNotEmpty()) {
+            runCatalogDbWrite { persistTrackBatch(tracks) }
+        }
+        return tracks
+    }
+
+    suspend fun ensureSimilarArtistsForArtist(session: PlexSession?, artist: Artist): List<Artist> {
+        mutableCatalog.value.similarArtistsByArtist[artist.id]?.let { return it }
+        val plexSession = session?.takeIf { it.isPlex() } ?: return emptyList()
+        val ratingKey = plexRatingKey(artist.id) ?: return emptyList()
+        val server = plexSession.selectedServer ?: return emptyList()
+        val token = plexSession.serverAuthToken() ?: return emptyList()
+        val plexSimilar = plexClient.similarArtistsForArtist(
+            server = server,
+            ratingKey = ratingKey,
+            token = token,
+            limit = ArtistSimilarArtistLimit,
+        )
+        val current = mutableCatalog.value
+        val byPlexRatingKey = current.artists.mapNotNull { candidate ->
+            plexRatingKey(candidate.id)?.let { key -> key to candidate }
+        }.toMap()
+        val byTitle = current.artists.associateBy { candidate -> candidate.title.normalizedArtistLookupKey() }
+        val similar = plexSimilar
+            .mapNotNull { candidate ->
+                byPlexRatingKey[candidate.id]
+                    ?: byPlexRatingKey[candidate.id.ratingKeyFromPlexPath().orEmpty()]
+                    ?: byTitle[candidate.title.normalizedArtistLookupKey()]
+            }
+            .filter { candidate -> candidate.id != artist.id }
+            .distinctBy { candidate -> candidate.id }
+            .take(ArtistSimilarArtistLimit)
+        catalogMergeMutex.withLock {
+            val cur = mutableCatalog.value
+            if (cur.similarArtistsByArtist[artist.id] == null) {
+                mutableCatalog.value = cur.copy(
+                    similarArtistsByArtist = cur.similarArtistsByArtist + (artist.id to similar),
+                )
+            }
+        }
+        return similar
+    }
+
     suspend fun warmTracksForPersonalMix(session: PlexSession?, minTracks: Int): Int {
         if (minTracks <= 0) return 0
         val startCount = mutableCatalog.value.playableTrackCount()
@@ -7061,6 +7127,17 @@ class CatalogRepository(
     private fun plexRatingKey(id: String): String? =
         if (id.startsWith("plex:")) id.removePrefix("plex:") else null
 
+    private fun String.normalizedArtistLookupKey(): String =
+        trim().lowercase()
+
+    private fun String.ratingKeyFromPlexPath(): String? =
+        trim('/')
+            .split('/')
+            .dropWhile { it != "metadata" }
+            .drop(1)
+            .firstOrNull()
+            ?.takeIf { it.isNotBlank() }
+
     private fun String.normalizedFavoritePlaylistTitle(): String =
         trim().lowercase()
 
@@ -7161,6 +7238,8 @@ class CatalogRepository(
         const val MaxTrackIndexPages = 400
         const val SyncProgressUpdateIntervalMs = 600L
         const val PlaylistWarmParallelism = 4
+        const val ArtistPopularTrackLimit = 12
+        const val ArtistSimilarArtistLimit = 20
         const val LikelyWarmAlbumCount = 50
         const val DecadeTrackPageSize = 250
         const val DecadeFirstPageSize = 80

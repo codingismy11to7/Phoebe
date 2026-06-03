@@ -516,8 +516,16 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Cache Kotlin Wasm Binaryen
+        uses: actions/cache@v4
+        with:
+          path: ~/.gradle/binaryen
+          key: ${{ runner.os }}-kotlin-wasm-binaryen-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-kotlin-wasm-binaryen-
+
       - name: Build web bundle
-        run: ./gradlew :composeApp:wasmJsBrowserDistribution
+        run: ./.github/scripts/gradle-wasm-retry.sh :composeApp:wasmJsBrowserDistribution
 
       - name: Prepare GitHub Pages artifact
         shell: bash

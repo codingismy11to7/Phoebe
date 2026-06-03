@@ -691,6 +691,8 @@ data class CatalogSnapshot(
     val albums: List<Album> = emptyList(),
     val playlists: List<Playlist> = emptyList(),
     val tracksByParent: Map<String, List<Track>> = emptyMap(),
+    val popularTracksByArtist: Map<String, List<Track>> = emptyMap(),
+    val similarArtistsByArtist: Map<String, List<Artist>> = emptyMap(),
     val collectionValues: List<CatalogCollectionValue> = emptyList(),
     val collectionValueLoads: List<CatalogCollectionValueLoad> = emptyList(),
     val collectionTags: List<CatalogCollectionTag> = emptyList(),

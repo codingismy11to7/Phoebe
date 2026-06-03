@@ -117,7 +117,6 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -875,7 +874,7 @@ internal fun MobilePersistentPlaybackChrome(
     ) {
         if (currentTrack != null) {
             val miniArtworkHidden = artworkTransition?.activeTrack?.id == currentTrack.id &&
-                artworkTransition.progress > 0.01f
+                artworkTransition.artworkOverlayVisible
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -976,7 +975,10 @@ internal fun MobilePersistentPlaybackChrome(
                         Modifier
                             .size(44.dp)
                             .onGloballyPositioned { coordinates ->
-                                artworkTransition?.miniArtworkBounds = coordinates.boundsInRoot()
+                                artworkTransition?.apply {
+                                    miniArtworkTrackId = currentTrack.id
+                                    miniArtworkBounds = coordinates.boundsInRoot()
+                                }
                             }
                             .graphicsLayer {
                                 alpha = if (miniArtworkHidden) 0f else 1f
@@ -1036,27 +1038,28 @@ internal fun MobileNowPlayingArtworkOverlay(
     modifier: Modifier = Modifier,
 ) {
     val track = transitionState.activeTrack ?: return
-    var overlayBounds by remember { mutableStateOf<Rect?>(null) }
     val density = LocalDensity.current
 
     Box(
         modifier = modifier.onGloballyPositioned { coordinates ->
-            overlayBounds = coordinates.boundsInRoot()
+            transitionState.overlayBounds = coordinates.boundsInRoot()
         },
     ) {
         val fullBounds = transitionState.fullArtworkBounds ?: return@Box
         val miniBounds = transitionState.miniArtworkBounds ?: return@Box
-        val overlayOrigin = overlayBounds ?: return@Box
+        val overlayOrigin = transitionState.overlayBounds ?: return@Box
         val progress = transitionState.progress.coerceIn(0f, 1f)
         if (
-            progress <= 0.001f ||
             fullBounds.width <= 0f ||
             fullBounds.height <= 0f ||
             miniBounds.width <= 0f ||
-            miniBounds.height <= 0f
+            miniBounds.height <= 0f ||
+            overlayOrigin.width <= 0f ||
+            overlayOrigin.height <= 0f
         ) {
             return@Box
         }
+        val overlayVisible = transitionState.artworkOverlayVisible
 
         val left = mobileArtworkLerp(fullBounds.left, miniBounds.left, progress) - overlayOrigin.left
         val top = mobileArtworkLerp(fullBounds.top, miniBounds.top, progress) - overlayOrigin.top
@@ -1070,7 +1073,8 @@ internal fun MobileNowPlayingArtworkOverlay(
                 .size(
                     width = with(density) { width.toDp() },
                     height = with(density) { height.toDp() },
-                ),
+                )
+                .graphicsLayer { alpha = if (overlayVisible) 1f else 0f },
             radius = 10.dp,
             maxDecodeDimension = HeroArtworkMaxDecodeDimension,
         )
@@ -1373,19 +1377,62 @@ internal fun MobilePlayer(
         },
         label = "player-swipe-settle",
     )
+    val predictiveBackSettleProgress = remember { Animatable(0f) }
     var predictiveBackProgress by remember { mutableFloatStateOf(0f) }
-    val displayOffset = when {
-        predictiveBackProgress > 0f -> offScreenPx * predictiveBackProgress.coerceIn(0f, 1f)
+    var predictiveBackInProgress by remember { mutableStateOf(false) }
+    var predictiveBackSettleJob by remember { mutableStateOf<Job?>(null) }
+    val dismissOffset = when {
         isDraggingDismiss -> dragOffset.coerceAtLeast(0f)
         else -> animatedOffset
     }
+    val predictiveCollapseProgress = when {
+        predictiveBackInProgress -> predictiveBackProgress.coerceIn(0f, 1f)
+        predictiveBackSettleProgress.value > 0f -> predictiveBackSettleProgress.value.coerceIn(0f, 1f)
+        else -> 0f
+    }
     fun requestPlayerCollapse() {
+        predictiveBackSettleJob?.cancel()
+        predictiveBackInProgress = false
         predictiveBackProgress = 0f
+        scope.launch { predictiveBackSettleProgress.snapTo(0f) }
         if (!dismissing) {
             dismissing = true
         }
     }
-    val collapseProgress = (displayOffset / collapseGestureRangePx).coerceIn(0f, 1f)
+    fun finishPredictiveBackCollapse() {
+        val progress = predictiveBackProgress.coerceIn(0f, 1f)
+        predictiveBackSettleJob?.cancel()
+        predictiveBackInProgress = false
+        predictiveBackProgress = 0f
+        predictiveBackSettleJob = scope.launch {
+            predictiveBackSettleProgress.snapTo(progress)
+            predictiveBackSettleProgress.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(durationMillis = 140, easing = FastOutSlowInEasing),
+            )
+            onSwipeDismiss()
+            predictiveBackSettleProgress.snapTo(0f)
+        }
+    }
+    fun cancelPredictiveBackCollapse() {
+        val progress = predictiveBackProgress.coerceIn(0f, 1f)
+        predictiveBackSettleJob?.cancel()
+        predictiveBackInProgress = false
+        predictiveBackProgress = 0f
+        predictiveBackSettleJob = scope.launch {
+            predictiveBackSettleProgress.snapTo(progress)
+            predictiveBackSettleProgress.animateTo(
+                targetValue = 0f,
+                animationSpec = tween(durationMillis = 160, easing = FastOutSlowInEasing),
+            )
+        }
+    }
+    val dragCollapseProgress = (dismissOffset / collapseGestureRangePx).coerceIn(0f, 1f)
+    val collapseProgress = if (predictiveBackInProgress || predictiveBackSettleProgress.value > 0f) {
+        predictiveCollapseProgress
+    } else {
+        dragCollapseProgress
+    }
     val playerContentAlpha = 1f - collapseProgress
     val playerBackgroundAlpha = 1f - collapseProgress
     SideEffect {
@@ -1435,13 +1482,19 @@ internal fun MobilePlayer(
     PlatformBackHandler(
         enabled = handleSystemBack,
         onBack = {
-            requestPlayerCollapse()
+            if (predictiveBackInProgress || predictiveBackProgress > 0f) {
+                finishPredictiveBackCollapse()
+            } else {
+                requestPlayerCollapse()
+            }
         },
         onBackProgress = { progress ->
+            predictiveBackSettleJob?.cancel()
+            predictiveBackInProgress = true
             predictiveBackProgress = progress.coerceIn(0f, 1f)
         },
         onBackCancel = {
-            predictiveBackProgress = 0f
+            cancelPredictiveBackCollapse()
         },
     )
     Column(
@@ -1619,11 +1672,9 @@ internal fun MobilePlayer(
                                 maxWidth,
                                 (maxHeight - metadataReserve).coerceAtLeast(180.dp),
                             )
-                            var fullArtworkBounds by remember(track.id) { mutableStateOf<Rect?>(null) }
                             val artworkMovesInOverlay =
-                                collapseProgress > 0.001f &&
-                                    artworkTransition?.miniArtworkBounds != null &&
-                                    fullArtworkBounds != null
+                                artworkTransition?.activeTrack?.id == track.id &&
+                                    artworkTransition.artworkOverlayVisible
                             Column(
                                 Modifier
                                     .fillMaxWidth()
@@ -1638,9 +1689,10 @@ internal fun MobilePlayer(
                                         .size(artworkSize)
                                         .align(Alignment.Start)
                                         .onGloballyPositioned { coordinates ->
-                                            val bounds = coordinates.boundsInRoot()
-                                            fullArtworkBounds = bounds
-                                            artworkTransition?.fullArtworkBounds = bounds
+                                            artworkTransition?.apply {
+                                                fullArtworkTrackId = track.id
+                                                fullArtworkBounds = coordinates.boundsInRoot()
+                                            }
                                         }
                                         .graphicsLayer {
                                             alpha = if (artworkMovesInOverlay) 0f else 1f

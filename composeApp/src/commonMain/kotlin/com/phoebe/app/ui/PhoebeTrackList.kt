@@ -278,6 +278,7 @@ internal fun ContentTrackRow(
     playCount: Long? = null,
     sharedKey: String? = null,
     leadingHandle: (@Composable () -> Unit)? = null,
+    showPlaylistDragHandle: Boolean = true,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     val cols = libraryColumns
@@ -305,8 +306,9 @@ internal fun ContentTrackRow(
         }
     }
     val playlistDragEnabled = LocalPlaylistDragEnabled.current
-    val showPlaylistDragHandle = playlistDragEnabled && leadingHandle == null
-    Box(if (showPlaylistDragHandle) modifier.draggableSong(track) else modifier) {
+    val rowDragEnabled = playlistDragEnabled && leadingHandle == null
+    val dragHandleVisible = rowDragEnabled && showPlaylistDragHandle
+    Box(if (rowDragEnabled) modifier.draggableSong(track, immediate = !dragHandleVisible) else modifier) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -322,7 +324,7 @@ internal fun ContentTrackRow(
         ) {
             if (leadingHandle != null) {
                 leadingHandle()
-            } else if (showPlaylistDragHandle) {
+            } else if (dragHandleVisible) {
                 Box(
                     Modifier
                         .draggableSong(track, immediate = true)

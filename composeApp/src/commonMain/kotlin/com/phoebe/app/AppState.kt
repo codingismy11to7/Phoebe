@@ -986,6 +986,16 @@ class AppState(
     fun preloadArtistDetail(artist: Artist) {
         scope.launch {
             runCatching {
+                dependencies.catalogRepository.ensurePopularTracksForArtist(session.value, artist)
+            }.onFailure {
+                PhoebeLog.d("AppState") { "artist popular tracks preload failed for '${artist.title}': ${it.message}" }
+            }
+            runCatching {
+                dependencies.catalogRepository.ensureSimilarArtistsForArtist(session.value, artist)
+            }.onFailure {
+                PhoebeLog.d("AppState") { "artist similar preload failed for '${artist.title}': ${it.message}" }
+            }
+            runCatching {
                 dependencies.catalogRepository.ensureTracksForArtistAlbums(session.value, artist.title)
             }
         }

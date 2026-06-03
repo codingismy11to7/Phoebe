@@ -192,6 +192,68 @@ class PlexMappingTest {
     }
 
     @Test
+    fun popularTracksForArtistUsesPlexPopularTrackFilters() = runTest {
+        var capturedPath = ""
+        var capturedType: String? = null
+        var capturedArtist: String? = null
+        var capturedSubformat: String? = null
+        var capturedGroup: String? = null
+        var capturedRatingCount: String? = null
+        var capturedSort: String? = null
+        var capturedLimit: String? = null
+        val engine = MockEngine { request ->
+            capturedPath = request.url.encodedPath
+            capturedType = request.url.parameters["type"]
+            capturedArtist = request.url.parameters["artist.id"]
+            capturedSubformat = request.url.parameters["album.subformat!"]
+            capturedGroup = request.url.parameters["group"]
+            capturedRatingCount = request.url.parameters["ratingCount>>"]
+            capturedSort = request.url.parameters["sort"]
+            capturedLimit = request.url.parameters["limit"]
+            respond(
+                content = """
+                    {
+                      "MediaContainer": {
+                        "Metadata": [
+                          {
+                            "ratingKey": "t1",
+                            "title": "Popular Song",
+                            "grandparentTitle": "Artist One",
+                            "parentTitle": "Album One",
+                            "duration": 1000,
+                            "Media": [
+                              { "Part": [ { "key": "/library/parts/t1/file.mp3", "file": "file.mp3" } ] }
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, "application/json"),
+            )
+        }
+        val client = PlexClient(testHttpClient(engine))
+        val tracks = client.popularTracksForArtist(
+            server = PlexServer("server", "Plex", "https://plex.example", owned = true),
+            library = MusicLibrary("1", "Music"),
+            ratingKey = "artist-1",
+            token = "token",
+            limit = 5,
+        )
+
+        assertEquals("/library/sections/1/all", capturedPath)
+        assertEquals("10", capturedType)
+        assertEquals("artist-1", capturedArtist)
+        assertEquals("Compilation,Live", capturedSubformat)
+        assertEquals("title", capturedGroup)
+        assertEquals("0", capturedRatingCount)
+        assertEquals("ratingCount:desc", capturedSort)
+        assertEquals("5", capturedLimit)
+        assertEquals("Popular Song", tracks.single().title)
+    }
+
+    @Test
     fun mapsPlexMoodAndStyleOntoTracks() = runTest {
         val engine = MockEngine { request ->
             when (request.url.encodedPath) {

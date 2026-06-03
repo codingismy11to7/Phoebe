@@ -450,13 +450,34 @@ internal val LocalNowPlaying = compositionLocalOf { NowPlayingIndicatorState() }
 
 internal class MobileNowPlayingArtworkTransitionState {
     var miniArtworkBounds by mutableStateOf<Rect?>(null)
+    var miniArtworkTrackId by mutableStateOf<String?>(null)
     var fullArtworkBounds by mutableStateOf<Rect?>(null)
+    var fullArtworkTrackId by mutableStateOf<String?>(null)
+    var overlayBounds by mutableStateOf<Rect?>(null)
     var activeTrack by mutableStateOf<Track?>(null)
     var progress by mutableFloatStateOf(0f)
+
+    val canPlaceArtworkOverlay: Boolean
+        get() {
+            val activeTrackId = activeTrack?.id ?: return false
+            return miniArtworkTrackId == activeTrackId &&
+                fullArtworkTrackId == activeTrackId &&
+                miniArtworkBounds.hasPositiveSize() &&
+                fullArtworkBounds.hasPositiveSize() &&
+                overlayBounds.hasPositiveSize()
+        }
+
+    val artworkOverlayVisible: Boolean
+        get() = canPlaceArtworkOverlay && progress > MobileNowPlayingArtworkOverlayVisibilityThreshold
 }
 
 internal val LocalMobileNowPlayingArtworkTransition =
     compositionLocalOf<MobileNowPlayingArtworkTransitionState?> { null }
+
+private const val MobileNowPlayingArtworkOverlayVisibilityThreshold = 0.001f
+
+private fun Rect?.hasPositiveSize(): Boolean =
+    this != null && width > 0f && height > 0f
 
 /**
  * Snapshot of "last played" timestamps (Unix millis) keyed by artist title, album title,
