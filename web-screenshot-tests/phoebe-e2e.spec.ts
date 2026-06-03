@@ -55,6 +55,7 @@ for (const path of [
   '/playlists/road-trip',
 ]) {
   test(`web path ${path} loads and reloads`, async ({ page }) => {
+    await seedLocalSource(page);
     await page.goto(path, { waitUntil: 'domcontentloaded' });
     await waitForPhoebeCanvas(page);
     await expect(page).toHaveURL(new RegExp(`${escapeRegExp(path)}$`));
@@ -65,7 +66,20 @@ for (const path of [
   });
 }
 
+for (const path of ['/', '/library', '/settings', '/artist/modern-baseball'] as const) {
+  test(`web path ${path} redirects to sign in without sources`, async ({ page }) => {
+    await page.goto(path, { waitUntil: 'domcontentloaded' });
+    await waitForPhoebeCanvas(page);
+    await expect(page).toHaveURL(/\/signin$/);
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await waitForPhoebeCanvas(page);
+    await expect(page).toHaveURL(/\/signin$/);
+  });
+}
+
 test('web browser history popstate keeps routes in sync', async ({ page }) => {
+  await seedLocalSource(page);
   await page.goto('/settings', { waitUntil: 'domcontentloaded' });
   await waitForPhoebeCanvas(page);
   const initialHistoryLength = await page.evaluate(() => window.history.length);
@@ -92,6 +106,24 @@ test('web browser history popstate keeps routes in sync', async ({ page }) => {
 async function waitForPhoebeCanvas(page) {
   await page.locator('canvas').waitFor({ state: 'visible', timeout: 60_000 });
   await page.waitForTimeout(250);
+}
+
+async function seedLocalSource(page) {
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      'phoebe:media_sources.json',
+      JSON.stringify({
+        localFolders: [
+          {
+            id: 'web-route-test-folder',
+            rootUri: 'phoebe-web-folder://route-test/Music',
+            label: 'Route Test Music',
+            enabled: true,
+          },
+        ],
+      }),
+    );
+  });
 }
 
 function escapeRegExp(value: string): string {

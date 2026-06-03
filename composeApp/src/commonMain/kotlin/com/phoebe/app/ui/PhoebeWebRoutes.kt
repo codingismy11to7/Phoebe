@@ -40,6 +40,19 @@ internal fun phoebeWebRoutesForPath(path: String?): List<PhoebeRoute> {
     }
 }
 
+internal fun List<PhoebeRoute>.withUnavailableBrowseFallback(
+    fallbackRoutes: List<PhoebeRoute>,
+): List<PhoebeRoute> {
+    val safeFallbackRoutes = fallbackRoutes.ifEmpty { listOf(PhoebeRoute.SignIn) }
+    val needsBrowseSource = firstOrNull() is PhoebeRoute.Browse
+    val fallbackHasBrowseSource = safeFallbackRoutes.firstOrNull() is PhoebeRoute.Browse
+    return if (needsBrowseSource && !fallbackHasBrowseSource) {
+        safeFallbackRoutes
+    } else {
+        this
+    }
+}
+
 internal fun PhoebeRoute.toPhoebeWebPath(
     routeResolution: PhoebeRouteResolution? = null,
 ): String = when (this) {
