@@ -272,19 +272,23 @@ private fun PhoebeRootStateHolder(
     navigationPath: String?,
     onNavigationPathChange: ((path: String, replace: Boolean) -> Unit)?,
 ) {
-    val initialRoutes = remember(navigationPath, state) {
+    val session by state.session.collectAsState()
+    val mediaSources by state.mediaSources.collectAsState()
+    val browseFallbackRoutes = remember(session, mediaSources) {
+        listOf(state.initialNavigationRequest().toPhoebeRoute())
+    }
+    val initialRoutes = remember(navigationPath, browseFallbackRoutes) {
         navigationPath
             ?.let(::phoebeWebRoutesForPath)
-            ?: listOf(state.initialNavigationRequest().toPhoebeRoute())
+            ?.withUnavailableBrowseFallback(browseFallbackRoutes)
+            ?: browseFallbackRoutes
     }
     val navigator = rememberPhoebeNavigator(initialRoutes)
     val catalog by state.catalog.collectAsState()
     val catalogWorkActive by state.catalogRefreshing.collectAsState()
     val catalogSyncState by state.catalogSyncState.collectAsState()
     val tracksLoading by state.tracksLoading.collectAsState()
-    val session by state.session.collectAsState()
     val supportedCollectionEntries = remember(session) { session.supportedCollectionEntries().toSet() }
-    val mediaSources by state.mediaSources.collectAsState()
     val shellPlayback by state.shellPlayback.collectAsState()
     val playerQueue by state.playerQueue.collectAsState()
     val musicAssistantRemotePlayback by state.musicAssistantRemotePlayback.collectAsState()
@@ -339,13 +343,23 @@ private fun PhoebeRootStateHolder(
     }
     val missingRoute = routeResolution as? PhoebeRouteResolution.Missing
     val screen = (routeResolution as? PhoebeRouteResolution.Resolved)?.screen ?: AppScreen.Home
-    val browseSection = navigator.routes.filterIsInstance<PhoebeRoute.Browse>().lastOrNull()?.section ?: BrowseSection.Home
+    val currentRoutes = navigator.routes
+    val browseSection = currentRoutes.filterIsInstance<PhoebeRoute.Browse>().lastOrNull()?.section ?: BrowseSection.Home
     var selectedPlaylistId by remember { mutableStateOf<String?>(null) }
     var replaceNextNavigationPath by remember { mutableStateOf(navigationPath != null) }
     var lastPublishedNavigationRoute by remember { mutableStateOf<PhoebeRoute?>(null) }
-    LaunchedEffect(navigationPath) {
+    LaunchedEffect(currentRoutes, browseFallbackRoutes) {
+        val guardedRoutes = currentRoutes.withUnavailableBrowseFallback(browseFallbackRoutes)
+        if (currentRoutes != guardedRoutes) {
+            selectedPlaylistId = null
+            replaceNextNavigationPath = true
+            navigator.replaceAll(guardedRoutes)
+        }
+    }
+    LaunchedEffect(navigationPath, browseFallbackRoutes) {
         val path = navigationPath ?: return@LaunchedEffect
         val parsedRoutes = phoebeWebRoutesForPath(path)
+            .withUnavailableBrowseFallback(browseFallbackRoutes)
         if (navigator.routes != parsedRoutes) {
             selectedPlaylistId = null
             replaceNextNavigationPath = true

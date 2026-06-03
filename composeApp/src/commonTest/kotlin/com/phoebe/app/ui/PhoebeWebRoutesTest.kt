@@ -25,6 +25,35 @@ class PhoebeWebRoutesTest {
     }
 
     @Test
+    fun browsePathsFallBackWhenNoBrowseSourceIsAvailable() {
+        val fallback = listOf(PhoebeRoute.SignIn)
+
+        assertEquals(fallback, phoebeWebRoutesForPath("/").withUnavailableBrowseFallback(fallback))
+        assertEquals(fallback, phoebeWebRoutesForPath("/library").withUnavailableBrowseFallback(fallback))
+        assertEquals(
+            fallback,
+            phoebeWebRoutesForPath("/artist/modern-baseball")
+                .withUnavailableBrowseFallback(fallback),
+        )
+    }
+
+    @Test
+    fun browsePathsRemainAvailableWhenFallbackCanBrowse() {
+        val fallback = listOf(PhoebeRoute.Browse(BrowseSection.Home))
+        val route = listOf(PhoebeRoute.Browse(BrowseSection.Library))
+
+        assertEquals(route, route.withUnavailableBrowseFallback(fallback))
+    }
+
+    @Test
+    fun setupPathsDoNotRequireBrowseSource() {
+        val fallback = listOf(PhoebeRoute.SignIn)
+        val setupRoutes = listOf(PhoebeRoute.SignIn, PhoebeRoute.ServerPicker)
+
+        assertEquals(setupRoutes, setupRoutes.withUnavailableBrowseFallback(fallback))
+    }
+
+    @Test
     fun parsesPrettyArtistAlbumAndPlaylistPaths() {
         assertEquals(
             listOf(PhoebeRoute.Browse(BrowseSection.Home), PhoebeRoute.ArtistSlugDetail("modern-baseball")),
