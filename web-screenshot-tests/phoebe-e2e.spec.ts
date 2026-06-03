@@ -45,3 +45,55 @@ test('web local playback regression starts real browser audio after tap', async 
   expect(results.passed, results.message).toBe(true);
   expect(results.message).toContain('web local playback started');
 });
+
+for (const path of [
+  '/settings',
+  '/search',
+  '/player',
+  '/favorites/artists',
+  '/artist/modern-baseball/album/youre-gonna-miss-it-all',
+  '/playlists/road-trip',
+]) {
+  test(`web path ${path} loads and reloads`, async ({ page }) => {
+    await page.goto(path, { waitUntil: 'domcontentloaded' });
+    await waitForPhoebeCanvas(page);
+    await expect(page).toHaveURL(new RegExp(`${escapeRegExp(path)}$`));
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await waitForPhoebeCanvas(page);
+    await expect(page).toHaveURL(new RegExp(`${escapeRegExp(path)}$`));
+  });
+}
+
+test('web browser history popstate keeps routes in sync', async ({ page }) => {
+  await page.goto('/settings', { waitUntil: 'domcontentloaded' });
+  await waitForPhoebeCanvas(page);
+  const initialHistoryLength = await page.evaluate(() => window.history.length);
+
+  await page.evaluate(() => {
+    window.history.pushState(null, '', '/search');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+  await expect(page).toHaveURL(/\/search$/);
+  await waitForPhoebeCanvas(page);
+
+  const pushedHistoryLength = await page.evaluate(() => window.history.length);
+  expect(pushedHistoryLength).toBeLessThanOrEqual(initialHistoryLength + 1);
+
+  await page.goBack();
+  await expect(page).toHaveURL(/\/settings$/);
+  await waitForPhoebeCanvas(page);
+
+  await page.goForward();
+  await expect(page).toHaveURL(/\/search$/);
+  await waitForPhoebeCanvas(page);
+});
+
+async function waitForPhoebeCanvas(page) {
+  await page.locator('canvas').waitFor({ state: 'visible', timeout: 60_000 });
+  await page.waitForTimeout(250);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}

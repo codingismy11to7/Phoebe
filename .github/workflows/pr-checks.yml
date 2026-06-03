@@ -364,6 +364,7 @@ jobs:
             composeApp/build/dist/wasmJs/productionExecutable/ \
             preview-pages/
           touch preview-pages/.nojekyll
+          cp preview-pages/index.html preview-pages/404.html
           printf 'phoebe-test.joetr.com\n' > preview-pages/CNAME
 
           (

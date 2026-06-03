@@ -11,6 +11,7 @@ config.resolve.fallback = {
 config.devServer = {
     ...(config.devServer || {}),
     port: Number(process.env.PHOEBE_WEB_PORT || config.devServer?.port || 8080),
+    historyApiFallback: true,
 };
 
 config.plugins.push(

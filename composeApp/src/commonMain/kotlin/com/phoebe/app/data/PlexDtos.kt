@@ -127,6 +127,7 @@ data class PlexMetadataDto(
     @SerialName("grandparentRatingKey") val grandparentRatingKey: String? = null,
     @SerialName("parentTitle") val parentTitle: String? = null,
     @SerialName("grandparentTitle") val grandparentTitle: String? = null,
+    @SerialName("originalTitle") val originalTitle: String? = null,
     @SerialName("parentThumb") val parentThumb: String? = null,
     @SerialName("grandparentThumb") val grandparentThumb: String? = null,
     val year: Int? = null,

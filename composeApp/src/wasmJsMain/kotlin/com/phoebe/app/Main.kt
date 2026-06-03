@@ -2,6 +2,12 @@ package com.phoebe.app
 
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.window.ComposeViewport
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import com.phoebe.app.e2e.PhoebeWasmE2eApp
 import com.phoebe.app.ui.PhoebeScreenshotApp
 import com.phoebe.app.ui.PhoebeScreenshotScenario
@@ -31,7 +37,69 @@ fun main() {
                     useLightAppearance = useLightAppearance,
                 )
             }
-            else -> App()
+            else -> BrowserRoutedApp()
         }
     }
 }
+
+@Composable
+private fun BrowserRoutedApp() {
+    var navigationPath by remember { mutableStateOf(currentBrowserPath()) }
+    DisposableEffect(Unit) {
+        installPhoebePopStateListener { path ->
+            navigationPath = path
+        }
+        onDispose {
+            removePhoebePopStateListener()
+        }
+    }
+    App(
+        navigationPath = navigationPath,
+        onNavigationPathChange = { path, replace ->
+            updatePhoebeBrowserPath(path, replace)
+        },
+    )
+}
+
+private fun currentBrowserPath(): String = window.location.pathname.ifBlank { "/" }
+
+@OptIn(ExperimentalWasmJsInterop::class)
+@JsFun(
+    """
+    (callback) => {
+      const listener = () => callback(location.pathname || "/");
+      if (globalThis.__phoebePopStateListener) {
+        window.removeEventListener("popstate", globalThis.__phoebePopStateListener);
+      }
+      globalThis.__phoebePopStateListener = listener;
+      window.addEventListener("popstate", listener);
+    }
+    """,
+)
+private external fun installPhoebePopStateListener(callback: (String) -> Unit)
+
+@OptIn(ExperimentalWasmJsInterop::class)
+@JsFun(
+    """
+    () => {
+      if (globalThis.__phoebePopStateListener) {
+        window.removeEventListener("popstate", globalThis.__phoebePopStateListener);
+        globalThis.__phoebePopStateListener = null;
+      }
+    }
+    """,
+)
+private external fun removePhoebePopStateListener()
+
+@OptIn(ExperimentalWasmJsInterop::class)
+@JsFun(
+    """
+    (path, replace) => {
+      const nextPath = path || "/";
+      if ((location.pathname || "/") === nextPath) return;
+      const method = replace ? "replaceState" : "pushState";
+      history[method](null, "", nextPath);
+    }
+    """,
+)
+private external fun updatePhoebeBrowserPath(path: String, replace: Boolean)

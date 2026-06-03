@@ -1802,7 +1802,7 @@ class PlexClient(
         return Track(
             id = ratingKey,
             title = title,
-            artist = grandparentTitle ?: parentTitle ?: "Unknown artist",
+            artist = resolvedTrackArtist(default = "Unknown artist"),
             album = parentTitle ?: "Unknown album",
             durationMs = duration ?: 0L,
             streamUrl = streamUrl,
@@ -1835,7 +1835,7 @@ class PlexClient(
             type = type,
             librarySectionId = librarySectionID,
             title = title,
-            artist = grandparentTitle ?: parentTitle ?: "Unknown Artist",
+            artist = resolvedTrackArtist(default = "Unknown Artist"),
             album = parentTitle ?: "Unknown Album",
         )
     }
@@ -1848,7 +1848,7 @@ class PlexClient(
             viewCount = count,
             lastViewedAtMs = resolvedLastViewedAtMs(),
             title = title.ifBlank { "Unknown Song" },
-            artist = grandparentTitle ?: parentTitle ?: "Unknown Artist",
+            artist = resolvedTrackArtist(default = "Unknown Artist"),
             album = parentTitle ?: "Unknown Album",
         )
     }
@@ -1914,7 +1914,7 @@ class PlexClient(
             viewCount = viewCount,
             lastViewedAtMs = resolveRawLastViewedAt(),
             title = stringValue("title") ?: "Unknown Song",
-            artist = stringValue("grandparentTitle") ?: stringValue("parentTitle") ?: "Unknown Artist",
+            artist = rawTrackArtist(default = "Unknown Artist"),
             album = stringValue("parentTitle") ?: "Unknown Album",
         )
     }
@@ -1985,6 +1985,12 @@ private fun PlexMetadataDto.primaryGenreTag(): String? = genreTags.primaryTag()
 private fun PlexMetadataDto.primaryMoodTag(): String? = moodTags.primaryTag()
 
 private fun PlexMetadataDto.primaryStyleTag(): String? = styleTags.primaryTag()
+
+private fun PlexMetadataDto.resolvedTrackArtist(default: String): String =
+    originalTitle?.takeIf { it.isNotBlank() }
+        ?: grandparentTitle?.takeIf { it.isNotBlank() }
+        ?: parentTitle?.takeIf { it.isNotBlank() }
+        ?: default
 
 private fun PlexMetadataDto.isFavoriteArtistCollection(): Boolean =
     collectionTags.hasAnyTag(PlexClient.FavoriteArtistsCollection, PlexClient.LegacyFavoriteArtistsCollection)
@@ -2342,6 +2348,12 @@ private fun JsonElement.jsonObjectOrNull(): JsonObject? = this as? JsonObject
 
 private fun JsonObject.stringValue(key: String): String? =
     (this[key] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+
+private fun JsonObject.rawTrackArtist(default: String): String =
+    stringValue("originalTitle")
+        ?: stringValue("grandparentTitle")
+        ?: stringValue("parentTitle")
+        ?: default
 
 private fun String.normalizedArtistLookupKey(): String =
     trim().lowercase()

@@ -531,6 +531,8 @@ jobs:
         shell: bash
         run: |
           touch composeApp/build/dist/wasmJs/productionExecutable/.nojekyll
+          cp composeApp/build/dist/wasmJs/productionExecutable/index.html \
+            composeApp/build/dist/wasmJs/productionExecutable/404.html
 
       - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@v4

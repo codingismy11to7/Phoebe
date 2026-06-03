@@ -45,6 +45,8 @@ private sealed interface AppBootstrapState {
 fun App(
     dependencies: AppDependencies? = null,
     onAppearanceChange: ((Boolean) -> Unit)? = null,
+    navigationPath: String? = null,
+    onNavigationPathChange: ((path: String, replace: Boolean) -> Unit)? = null,
 ) {
     LaunchedEffect(Unit) {
         Telemetry.initialize()
@@ -175,6 +177,8 @@ fun App(
                         )
                     }
                 },
+                navigationPath = navigationPath,
+                onNavigationPathChange = onNavigationPathChange,
             )
         }
     }
