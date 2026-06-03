@@ -387,6 +387,14 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Cache Kotlin Wasm Binaryen
+        uses: actions/cache@v4
+        with:
+          path: ~/.gradle/binaryen
+          key: ${{ runner.os }}-kotlin-wasm-binaryen-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-kotlin-wasm-binaryen-
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
@@ -400,7 +408,7 @@ jobs:
         run: npm run web:install-browsers
 
       - name: Build production web bundle
-        run: ./gradlew :composeApp:wasmJsBrowserDistribution
+        run: ./.github/scripts/gradle-wasm-retry.sh :composeApp:wasmJsBrowserDistribution
 
       - name: Smoke test production web playback
         env:

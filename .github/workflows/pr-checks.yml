@@ -184,6 +184,14 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Cache Kotlin Wasm Binaryen
+        uses: actions/cache@v4
+        with:
+          path: ~/.gradle/binaryen
+          key: ${{ runner.os }}-kotlin-wasm-binaryen-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-kotlin-wasm-binaryen-
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
@@ -197,7 +205,7 @@ jobs:
         run: npm run web:install-browsers
 
       - name: Build wasm web bundle
-        run: ./gradlew :composeApp:wasmJsBrowserDevelopmentWebpack
+        run: ./.github/scripts/gradle-wasm-retry.sh :composeApp:wasmJsBrowserDevelopmentWebpack
 
       - name: Verify web screenshots
         run: npm run web:screenshots
@@ -234,8 +242,16 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Cache Kotlin Wasm Binaryen
+        uses: actions/cache@v4
+        with:
+          path: ~/.gradle/binaryen
+          key: ${{ runner.os }}-kotlin-wasm-binaryen-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-kotlin-wasm-binaryen-
+
       - name: Run wasm JS tests
-        run: ./gradlew :composeApp:wasmJsTest
+        run: ./.github/scripts/gradle-wasm-retry.sh :composeApp:wasmJsTest
 
   android-instrumented-tests:
     name: Android instrumented tests
@@ -298,6 +314,14 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Cache Kotlin Wasm Binaryen
+        uses: actions/cache@v4
+        with:
+          path: ~/.gradle/binaryen
+          key: ${{ runner.os }}-kotlin-wasm-binaryen-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-kotlin-wasm-binaryen-
+
       - name: Validate web preview deploy settings
         shell: bash
         run: |
@@ -310,7 +334,7 @@ jobs:
           fi
 
       - name: Build web bundle
-        run: ./gradlew :composeApp:wasmJsBrowserDistribution
+        run: ./.github/scripts/gradle-wasm-retry.sh :composeApp:wasmJsBrowserDistribution
 
       - name: Configure SSH
         shell: bash
