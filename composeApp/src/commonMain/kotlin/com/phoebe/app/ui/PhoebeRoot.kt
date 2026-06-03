@@ -243,6 +243,8 @@ fun PhoebeRoot(
     onAppearanceTintChange: (String) -> Unit,
     homeScreenLayoutMode: HomeScreenLayoutMode = HomeScreenLayoutMode.Default,
     onHomeScreenLayoutModeChange: (HomeScreenLayoutMode) -> Unit = {},
+    navigationPath: String? = null,
+    onNavigationPathChange: ((path: String, replace: Boolean) -> Unit)? = null,
 ) {
     PhoebeRootStateHolder(
         state = state,
@@ -252,6 +254,8 @@ fun PhoebeRoot(
         onAppearanceTintChange = onAppearanceTintChange,
         homeScreenLayoutMode = homeScreenLayoutMode,
         onHomeScreenLayoutModeChange = onHomeScreenLayoutModeChange,
+        navigationPath = navigationPath,
+        onNavigationPathChange = onNavigationPathChange,
     )
 }
 
@@ -265,8 +269,15 @@ private fun PhoebeRootStateHolder(
     onAppearanceTintChange: (String) -> Unit,
     homeScreenLayoutMode: HomeScreenLayoutMode,
     onHomeScreenLayoutModeChange: (HomeScreenLayoutMode) -> Unit,
+    navigationPath: String?,
+    onNavigationPathChange: ((path: String, replace: Boolean) -> Unit)?,
 ) {
-    val navigator = rememberPhoebeNavigator(state.initialNavigationRequest().toPhoebeRoute())
+    val initialRoutes = remember(navigationPath, state) {
+        navigationPath
+            ?.let(::phoebeWebRoutesForPath)
+            ?: listOf(state.initialNavigationRequest().toPhoebeRoute())
+    }
+    val navigator = rememberPhoebeNavigator(initialRoutes)
     val catalog by state.catalog.collectAsState()
     val catalogWorkActive by state.catalogRefreshing.collectAsState()
     val catalogSyncState by state.catalogSyncState.collectAsState()
@@ -310,8 +321,15 @@ private fun PhoebeRootStateHolder(
     val upNext = playerQueue.upNext
     val currentTrack = shellPlayback.currentTrack
     val currentIndex = playerQueue.currentIndex.takeIf { it >= 0 } ?: 0
+    var suppressInitialNavigationRequest by remember(state) {
+        mutableStateOf(navigationPath != null)
+    }
     LaunchedEffect(state, navigator) {
         state.navigationRequests.collect { request ->
+            if (suppressInitialNavigationRequest) {
+                suppressInitialNavigationRequest = false
+                if (request == state.initialNavigationRequest()) return@collect
+            }
             navigator.handle(request)
         }
     }
@@ -323,6 +341,36 @@ private fun PhoebeRootStateHolder(
     val screen = (routeResolution as? PhoebeRouteResolution.Resolved)?.screen ?: AppScreen.Home
     val browseSection = navigator.routes.filterIsInstance<PhoebeRoute.Browse>().lastOrNull()?.section ?: BrowseSection.Home
     var selectedPlaylistId by remember { mutableStateOf<String?>(null) }
+    var replaceNextNavigationPath by remember { mutableStateOf(navigationPath != null) }
+    var lastPublishedNavigationRoute by remember { mutableStateOf<PhoebeRoute?>(null) }
+    LaunchedEffect(navigationPath) {
+        val path = navigationPath ?: return@LaunchedEffect
+        val parsedRoutes = phoebeWebRoutesForPath(path)
+        if (navigator.routes != parsedRoutes) {
+            selectedPlaylistId = null
+            replaceNextNavigationPath = true
+            navigator.replaceAll(parsedRoutes)
+        }
+    }
+    LaunchedEffect(currentRoute, screen) {
+        when {
+            currentRoute is PhoebeRoute.PlaylistDetail -> selectedPlaylistId = currentRoute.playlistId
+            screen is AppScreen.PlaylistDetail -> selectedPlaylistId = screen.playlist.id
+        }
+    }
+    val canonicalNavigationPath = remember(currentRoute, routeResolution) {
+        currentRoute.toPhoebeWebPath(routeResolution)
+    }
+    val currentOnNavigationPathChange by rememberUpdatedState(onNavigationPathChange)
+    LaunchedEffect(canonicalNavigationPath, currentRoute) {
+        val onPathChange = currentOnNavigationPathChange ?: return@LaunchedEffect
+        val routeChanged = lastPublishedNavigationRoute != null &&
+            lastPublishedNavigationRoute != currentRoute
+        val replace = replaceNextNavigationPath || !routeChanged
+        replaceNextNavigationPath = false
+        lastPublishedNavigationRoute = currentRoute
+        onPathChange(canonicalNavigationPath, replace)
+    }
     val collapseMobilePlayer: () -> Unit = {
         if (!navigator.pop()) {
             navigator.replaceRoot(PhoebeRoute.Browse(BrowseSection.Home))
@@ -940,6 +988,7 @@ private fun PhoebeRootStateHolder(
                     onBack = {
                         when (navigator.currentRoute) {
                             is PhoebeRoute.PlaylistDetail -> exitPlaylistDetail()
+                            is PhoebeRoute.PlaylistSlugDetail -> exitPlaylistDetail()
                             else -> navigator.pop()
                         }
                     },

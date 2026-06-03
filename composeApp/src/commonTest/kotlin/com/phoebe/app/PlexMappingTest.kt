@@ -8,6 +8,7 @@ import com.phoebe.app.data.PlexDeviceDto
 import com.phoebe.app.data.PlexMediaContainerResponse
 import com.phoebe.app.domain.MusicLibrary
 import com.phoebe.app.domain.PlexServer
+import com.phoebe.app.domain.Playlist
 import com.phoebe.app.sources.PlexCatalogBuilder
 import com.phoebe.app.testing.testHttpClient
 import io.ktor.client.engine.mock.MockEngine
@@ -117,6 +118,47 @@ class PlexMappingTest {
 
         assertEquals("/playlists/42/items", playlist.key)
         assertEquals(19, playlist.leafCount)
+    }
+
+    @Test
+    fun playlistTracksPreferPlexTrackArtistOverCompilationArtist() = runTest {
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/playlists/42/items" -> respond(
+                    content = """
+                        {
+                          "MediaContainer": {
+                            "Metadata": [
+                              {
+                                "ratingKey": "31615",
+                                "title": "Only You",
+                                "grandparentTitle": "Various Artists",
+                                "originalTitle": "Yazoo",
+                                "parentTitle": "80s Pop: 111 Original Hits",
+                                "duration": 194208,
+                                "Media": [
+                                  { "Part": [ { "key": "/library/parts/22742/file.mp3", "file": "Only You.mp3" } ] }
+                                ]
+                              }
+                            ]
+                          }
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val client = PlexClient(testHttpClient(engine))
+        val track = client.playlistTracks(
+            server = PlexServer("server", "Plex", "https://plex.example", owned = true),
+            playlist = Playlist(id = "42", title = "80s", trackCount = 1),
+            token = "token",
+        ).single()
+
+        assertEquals("Yazoo", track.artist)
+        assertEquals("80s Pop: 111 Original Hits", track.album)
     }
 
     @Test

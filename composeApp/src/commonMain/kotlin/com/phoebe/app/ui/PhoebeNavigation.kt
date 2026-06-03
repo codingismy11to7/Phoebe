@@ -82,7 +82,16 @@ internal sealed interface PhoebeRoute : NavKey {
     data class ArtistDetail(val artistId: String) : PhoebeRoute
 
     @Serializable
+    data class ArtistSlugDetail(val artistSlug: String) : PhoebeRoute
+
+    @Serializable
     data class AlbumDetail(val albumId: String) : PhoebeRoute
+
+    @Serializable
+    data class ArtistAlbumSlugDetail(
+        val artistSlug: String,
+        val albumSlug: String,
+    ) : PhoebeRoute
 
     @Serializable
     data class SongDetail(val trackId: String) : PhoebeRoute
@@ -109,6 +118,9 @@ internal sealed interface PhoebeRoute : NavKey {
     data class PlaylistDetail(val playlistId: String) : PhoebeRoute
 
     @Serializable
+    data class PlaylistSlugDetail(val playlistSlug: String) : PhoebeRoute
+
+    @Serializable
     data object Player : PhoebeRoute
 }
 
@@ -121,7 +133,9 @@ internal val phoebeRouteSerializersModule = SerializersModule {
         subclass(PhoebeRoute.Collections::class, PhoebeRoute.Collections.serializer())
         subclass(PhoebeRoute.CollectionItems::class, PhoebeRoute.CollectionItems.serializer())
         subclass(PhoebeRoute.ArtistDetail::class, PhoebeRoute.ArtistDetail.serializer())
+        subclass(PhoebeRoute.ArtistSlugDetail::class, PhoebeRoute.ArtistSlugDetail.serializer())
         subclass(PhoebeRoute.AlbumDetail::class, PhoebeRoute.AlbumDetail.serializer())
+        subclass(PhoebeRoute.ArtistAlbumSlugDetail::class, PhoebeRoute.ArtistAlbumSlugDetail.serializer())
         subclass(PhoebeRoute.SongDetail::class, PhoebeRoute.SongDetail.serializer())
         subclass(PhoebeRoute.Lyrics::class, PhoebeRoute.Lyrics.serializer())
         subclass(PhoebeRoute.RecentlyAdded::class, PhoebeRoute.RecentlyAdded.serializer())
@@ -130,6 +144,7 @@ internal val phoebeRouteSerializersModule = SerializersModule {
         subclass(PhoebeRoute.FavoriteArtists::class, PhoebeRoute.FavoriteArtists.serializer())
         subclass(PhoebeRoute.FavoriteAlbums::class, PhoebeRoute.FavoriteAlbums.serializer())
         subclass(PhoebeRoute.PlaylistDetail::class, PhoebeRoute.PlaylistDetail.serializer())
+        subclass(PhoebeRoute.PlaylistSlugDetail::class, PhoebeRoute.PlaylistSlugDetail.serializer())
         subclass(PhoebeRoute.Player::class, PhoebeRoute.Player.serializer())
     }
 }
@@ -209,7 +224,9 @@ internal fun PhoebeNavDisplay(
             entry<PhoebeRoute.Collections> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
             entry<PhoebeRoute.CollectionItems> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
             entry<PhoebeRoute.ArtistDetail> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
+            entry<PhoebeRoute.ArtistSlugDetail> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
             entry<PhoebeRoute.AlbumDetail> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
+            entry<PhoebeRoute.ArtistAlbumSlugDetail> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
             entry<PhoebeRoute.SongDetail> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
             entry<PhoebeRoute.Lyrics> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
             entry<PhoebeRoute.RecentlyAdded> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
@@ -218,6 +235,7 @@ internal fun PhoebeNavDisplay(
             entry<PhoebeRoute.FavoriteArtists> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
             entry<PhoebeRoute.FavoriteAlbums> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
             entry<PhoebeRoute.PlaylistDetail> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
+            entry<PhoebeRoute.PlaylistSlugDetail> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
             entry<PhoebeRoute.Player> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
         },
     )
@@ -255,12 +273,19 @@ private fun PhoebeNavEntryContent(
 }
 
 @Composable
-internal fun rememberPhoebeNavigator(initialRoute: PhoebeRoute): PhoebeNavigator {
+internal fun rememberPhoebeNavigator(initialRoute: PhoebeRoute): PhoebeNavigator =
+    rememberPhoebeNavigator(listOf(initialRoute))
+
+@Composable
+internal fun rememberPhoebeNavigator(initialRoutes: List<PhoebeRoute>): PhoebeNavigator {
+    val safeInitialRoutes = initialRoutes.ifEmpty { listOf(PhoebeRoute.SignIn) }
     val backStack = rememberSerializable(
         configuration = phoebeRouteSavedStateConfiguration,
         serializer = NavBackStackSerializer(PolymorphicSerializer(NavKey::class)),
     ) {
-        NavBackStack(initialRoute)
+        NavBackStack<NavKey>(safeInitialRoutes.first()).apply {
+            addAll(safeInitialRoutes.drop(1))
+        }
     }
     return remember(backStack) { PhoebeNavigator(backStack) }
 }
@@ -294,6 +319,13 @@ internal class PhoebeNavigator(
         while (backStack.size > 1) {
             backStack.removeAt(backStack.lastIndex)
         }
+    }
+
+    fun replaceAll(routes: List<PhoebeRoute>) {
+        val safeRoutes = routes.ifEmpty { listOf(PhoebeRoute.SignIn) }
+        if (this.routes == safeRoutes) return
+        backStack.clear()
+        backStack.addAll(safeRoutes)
     }
 
     fun pop(): Boolean {
@@ -388,9 +420,19 @@ internal fun resolvePhoebeRoute(
     is PhoebeRoute.ArtistDetail -> catalog.findArtist(route.artistId)
         ?.let { route.resolved(AppScreen.ArtistDetail(it)) }
         ?: route.missing("Artist not found", "This artist is no longer available in the current library.")
+    is PhoebeRoute.ArtistSlugDetail -> when (val match = catalog.findArtistBySlug(route.artistSlug)) {
+        is SlugMatch.Found -> route.resolved(AppScreen.ArtistDetail(match.value))
+        SlugMatch.Ambiguous -> route.missing("Artist name is ambiguous", "More than one artist matches this URL.")
+        SlugMatch.Missing -> route.missing("Artist not found", "No artist in the current library matches this URL.")
+    }
     is PhoebeRoute.AlbumDetail -> catalog.findAlbum(route.albumId)
         ?.let { route.resolved(AppScreen.AlbumDetail(it)) }
         ?: route.missing("Album not found", "This album is no longer available in the current library.")
+    is PhoebeRoute.ArtistAlbumSlugDetail -> when (val match = catalog.findAlbumByArtistAndAlbumSlug(route.artistSlug, route.albumSlug)) {
+        is SlugMatch.Found -> route.resolved(AppScreen.AlbumDetail(match.value))
+        SlugMatch.Ambiguous -> route.missing("Album name is ambiguous", "More than one album matches this URL.")
+        SlugMatch.Missing -> route.missing("Album not found", "No album in the current library matches this URL.")
+    }
     is PhoebeRoute.SongDetail -> catalog.findTrack(route.trackId, currentTrack)
         ?.let { route.resolved(AppScreen.SongDetail(it)) }
         ?: route.missing("Song not found", "This song is no longer available in the current library.")
@@ -410,6 +452,11 @@ internal fun resolvePhoebeRoute(
     is PhoebeRoute.PlaylistDetail -> catalog.findPlaylist(route.playlistId)
         ?.let { route.resolved(AppScreen.PlaylistDetail(it)) }
         ?: route.missing("Playlist not found", "This playlist is no longer available in the current library.")
+    is PhoebeRoute.PlaylistSlugDetail -> when (val match = catalog.findPlaylistBySlug(route.playlistSlug)) {
+        is SlugMatch.Found -> route.resolved(AppScreen.PlaylistDetail(match.value))
+        SlugMatch.Ambiguous -> route.missing("Playlist name is ambiguous", "More than one playlist matches this URL.")
+        SlugMatch.Missing -> route.missing("Playlist not found", "No playlist in the current library matches this URL.")
+    }
     PhoebeRoute.Player -> route.resolved(AppScreen.Player)
 }
 
@@ -432,7 +479,9 @@ internal val PhoebeRoute.telemetryName: String
         is PhoebeRoute.Collections -> "collections"
         is PhoebeRoute.CollectionItems -> "collection_items"
         is PhoebeRoute.AlbumDetail -> "album_detail"
+        is PhoebeRoute.ArtistAlbumSlugDetail -> "album_detail"
         is PhoebeRoute.ArtistDetail -> "artist_detail"
+        is PhoebeRoute.ArtistSlugDetail -> "artist_detail"
         is PhoebeRoute.SongDetail -> "song_detail"
         is PhoebeRoute.Lyrics -> "lyrics"
         is PhoebeRoute.RecentlyAdded -> "recently_added"
@@ -441,6 +490,7 @@ internal val PhoebeRoute.telemetryName: String
         PhoebeRoute.FavoriteArtists -> "favorite_artists"
         PhoebeRoute.FavoriteAlbums -> "favorite_albums"
         is PhoebeRoute.PlaylistDetail -> "playlist_detail"
+        is PhoebeRoute.PlaylistSlugDetail -> "playlist_detail"
         PhoebeRoute.Player -> "player"
     }
 
@@ -458,3 +508,35 @@ private fun CatalogSnapshot.findPlaylist(id: String): Playlist? = playlists.firs
 private fun CatalogSnapshot.findTrack(id: String, currentTrack: Track?): Track? =
     currentTrack?.takeIf { it.id == id }
         ?: tracksByParent.values.asSequence().flatten().firstOrNull { it.id == id }
+
+private fun CatalogSnapshot.findArtistBySlug(slug: String): SlugMatch<Artist> =
+    artists.matchSingleBySlug(slug) { title }
+
+private fun CatalogSnapshot.findAlbumByArtistAndAlbumSlug(
+    artistSlug: String,
+    albumSlug: String,
+): SlugMatch<Album> =
+    albums
+        .filter { phoebePathSlug(it.artist) == artistSlug }
+        .matchSingleBySlug(albumSlug) { title }
+
+private fun CatalogSnapshot.findPlaylistBySlug(slug: String): SlugMatch<Playlist> =
+    playlists.matchSingleBySlug(slug) { title }
+
+private sealed interface SlugMatch<out T> {
+    data class Found<T>(val value: T) : SlugMatch<T>
+    data object Missing : SlugMatch<Nothing>
+    data object Ambiguous : SlugMatch<Nothing>
+}
+
+private inline fun <T> Iterable<T>.matchSingleBySlug(
+    slug: String,
+    label: T.() -> String,
+): SlugMatch<T> {
+    val matches = filter { phoebePathSlug(it.label()) == slug }
+    return when (matches.size) {
+        0 -> SlugMatch.Missing
+        1 -> SlugMatch.Found(matches.single())
+        else -> SlugMatch.Ambiguous
+    }
+}
