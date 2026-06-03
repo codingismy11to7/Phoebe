@@ -448,6 +448,16 @@ internal data class NowPlayingIndicatorState(
 
 internal val LocalNowPlaying = compositionLocalOf { NowPlayingIndicatorState() }
 
+internal class MobileNowPlayingArtworkTransitionState {
+    var miniArtworkBounds by mutableStateOf<Rect?>(null)
+    var fullArtworkBounds by mutableStateOf<Rect?>(null)
+    var activeTrack by mutableStateOf<Track?>(null)
+    var progress by mutableFloatStateOf(0f)
+}
+
+internal val LocalMobileNowPlayingArtworkTransition =
+    compositionLocalOf<MobileNowPlayingArtworkTransitionState?> { null }
+
 /**
  * Snapshot of "last played" timestamps (Unix millis) keyed by artist title, album title,
  * and track id. Threaded through the composition so any row in the library / detail UI

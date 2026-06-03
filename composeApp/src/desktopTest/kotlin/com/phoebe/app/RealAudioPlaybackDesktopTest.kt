@@ -457,10 +457,12 @@ class RealAudioPlaybackDesktopTest {
 
             assertTrue(
                 waitUntil(timeoutMs = 30_000L) {
-                    submittedBodies.any { it.contains(""""listen_type":"single"""") }
+                    submittedBodies.any { it.contains(""""listen_type":"single"""") } &&
+                        account.listenSubmittedCount >= 1
                 },
                 "Expected real desktop playback to submit a ListenBrainz listen; " +
-                    "state=${player.state.value} engines=${diagnostics.engineEvents()} errors=${diagnostics.errorEvents()}",
+                    "state=${player.state.value} engines=${diagnostics.engineEvents()} errors=${diagnostics.errorEvents()} " +
+                    "bodies=${submittedBodies.toList()} listenSubmittedCount=${account.listenSubmittedCount}",
             )
             assertTrue(submittedBodies.any { it.contains("listenbrainz-real-desktop") })
             assertEquals(1, account.listenSubmittedCount)

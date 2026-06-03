@@ -208,10 +208,12 @@ class RealAudioPlaybackInstrumentedTest {
 
             assertTrue(
                 waitUntil(timeoutMs = 30_000L) {
-                    submittedBodies.any { it.contains(""""listen_type":"single"""") }
+                    submittedBodies.any { it.contains(""""listen_type":"single"""") } &&
+                        account.listenSubmittedCount >= 1
                 },
                 "Expected real Android playback to submit a ListenBrainz listen; " +
-                    "state=${player.state.value} engines=${diagnostics.hasEngine(PlaybackEnginePath.Media3)} bodies=${submittedBodies.toList()}",
+                    "state=${player.state.value} engines=${diagnostics.hasEngine(PlaybackEnginePath.Media3)} " +
+                    "bodies=${submittedBodies.toList()} listenSubmittedCount=${account.listenSubmittedCount}",
             )
             assertTrue(submittedBodies.any { it.contains("listenbrainz-real-android") })
             assertEquals(1, account.listenSubmittedCount)

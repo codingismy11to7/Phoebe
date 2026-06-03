@@ -199,6 +199,57 @@ class PlayerStateTest {
     }
 
     @Test
+    fun playingCurrentEndedTrackReloadsInsteadOfResumingEndedPlatformItem() {
+        val player = EndedReplayTestPlayer()
+        val tracks = listOf(
+            Track("t1", "One", "Artist", "Album", 60_000, "http://a", ""),
+            Track("t2", "Two", "Artist", "Album", 90_000, "http://b", ""),
+        )
+
+        player.play(tracks, 0)
+        player.platformPlayback(
+            positionMs = 60_000,
+            durationMs = 60_000,
+            bufferedPositionMs = 60_000,
+            isPlaying = false,
+        )
+        player.play(tracks, 0)
+
+        assertEquals(1, player.fullLoads)
+        assertEquals(1, player.queueSkips)
+        assertEquals(0, player.resumeCalls)
+        assertEquals(tracks[0], player.state.value.currentTrack)
+        assertEquals(0L, player.state.value.positionMs)
+        assertTrue(player.state.value.isPlaying)
+    }
+
+    @Test
+    fun repeatOneRestartsEndedTrackFromBeginning() {
+        val player = EndedReplayTestPlayer()
+        val tracks = listOf(
+            Track("t1", "One", "Artist", "Album", 60_000, "http://a", ""),
+            Track("t2", "Two", "Artist", "Album", 90_000, "http://b", ""),
+        )
+
+        player.play(tracks, 0)
+        player.setRepeat(RepeatMode.One)
+        player.platformPlayback(
+            positionMs = 60_000,
+            durationMs = 60_000,
+            bufferedPositionMs = 60_000,
+            isPlaying = false,
+        )
+        player.next()
+
+        assertEquals(1, player.fullLoads)
+        assertEquals(1, player.queueSkips)
+        assertEquals(0, player.resumeCalls)
+        assertEquals(tracks[0], player.state.value.currentTrack)
+        assertEquals(0L, player.state.value.positionMs)
+        assertTrue(player.state.value.isPlaying)
+    }
+
+    @Test
     fun bufferedPositionIsClampedToPositionAndDuration() {
         val player = PlatformStateTestPlayer()
         val tracks = listOf(
@@ -543,6 +594,40 @@ class PlayerStateTest {
     }
 
     @Test
+    fun queueEditsNotifyPlatformWithoutChangingCurrentTrack() {
+        val player = QueueEditHookTestPlayer()
+        val tracks = listOf(
+            Track("t1", "One", "Artist", "Album", 60_000, "http://a", ""),
+            Track("t2", "Two", "Artist", "Album", 90_000, "http://b", ""),
+            Track("t3", "Three", "Artist", "Album", 120_000, "http://c", ""),
+        )
+        val inserted = Track("t4", "Four", "Artist", "Album", 150_000, "http://d", "")
+
+        player.play(tracks, 0)
+        player.addToUpNext(inserted)
+
+        assertEquals(tracks[0], player.state.value.currentTrack)
+        assertEquals(0, player.lastEditedCurrentIndex)
+        assertEquals(listOf("t1", "t4", "t2", "t3"), player.lastEditedQueue.map { it.id })
+    }
+
+    @Test
+    fun clearingQueueNotifiesPlatformToDropFutureItems() {
+        val player = QueueEditHookTestPlayer()
+        val tracks = listOf(
+            Track("t1", "One", "Artist", "Album", 60_000, "http://a", ""),
+            Track("t2", "Two", "Artist", "Album", 90_000, "http://b", ""),
+        )
+
+        player.play(tracks, 0)
+        player.clearQueue()
+
+        assertEquals(tracks[0], player.state.value.currentTrack)
+        assertEquals(0, player.lastEditedCurrentIndex)
+        assertEquals(listOf("t1"), player.lastEditedQueue.map { it.id })
+    }
+
+    @Test
     fun clearQueueKeepsCurrentTrackButRemovesUpNext() {
         val player = TestPlayer()
         val tracks = listOf(
@@ -671,6 +756,57 @@ private class QueueAwareTestPlayer : SimpleAudioPlayer() {
 
     fun finishPendingLoad() {
         markPlaybackReady(generation = activePlayGeneration)
+    }
+}
+
+private class QueueEditHookTestPlayer : SimpleAudioPlayer() {
+    var lastEditedQueue: List<Track> = emptyList()
+    var lastEditedCurrentIndex: Int = -2
+
+    override fun playUri(uri: String) {
+        markPlaybackReady()
+    }
+
+    override fun onQueueEdited(queue: List<Track>, currentIndex: Int) {
+        lastEditedQueue = queue
+        lastEditedCurrentIndex = currentIndex
+    }
+}
+
+private class EndedReplayTestPlayer : SimpleAudioPlayer() {
+    var fullLoads = 0
+    var queueSkips = 0
+    var resumeCalls = 0
+
+    override fun playUri(uri: String) = Unit
+
+    override fun playQueueOnPlatform(queue: List<Track>, startIndex: Int, track: Track, generation: Int) {
+        fullLoads++
+        markPlaybackReady(generation = generation)
+    }
+
+    override fun skipToInQueueOnPlatform(queue: List<Track>, startIndex: Int, track: Track, generation: Int) {
+        queueSkips++
+        markPlaybackReady(generation = generation)
+    }
+
+    override fun resume() {
+        resumeCalls++
+    }
+
+    fun platformPlayback(
+        positionMs: Long,
+        durationMs: Long,
+        bufferedPositionMs: Long,
+        isPlaying: Boolean,
+    ) {
+        applyPlatformPlayback(
+            positionMs = positionMs,
+            durationMs = durationMs,
+            isPlaying = isPlaying,
+            isBuffering = false,
+            bufferedPositionMs = bufferedPositionMs,
+        )
     }
 }
 

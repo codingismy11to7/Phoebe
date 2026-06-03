@@ -61,6 +61,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -322,6 +323,11 @@ private fun PhoebeRootStateHolder(
     val screen = (routeResolution as? PhoebeRouteResolution.Resolved)?.screen ?: AppScreen.Home
     val browseSection = navigator.routes.filterIsInstance<PhoebeRoute.Browse>().lastOrNull()?.section ?: BrowseSection.Home
     var selectedPlaylistId by remember { mutableStateOf<String?>(null) }
+    val collapseMobilePlayer: () -> Unit = {
+        if (!navigator.pop()) {
+            navigator.replaceRoot(PhoebeRoute.Browse(BrowseSection.Home))
+        }
+    }
     val exitPlaylistDetail: () -> Unit = {
         selectedPlaylistId = null
         navigator.pop()
@@ -359,12 +365,6 @@ private fun PhoebeRootStateHolder(
     }
     LaunchedEffect(searchScopeKey) {
         searchQuery = ""
-    }
-    var playerSwipeDismiss by remember { mutableStateOf(false) }
-    LaunchedEffect(screen) {
-        if (screen != AppScreen.Player) {
-            playerSwipeDismiss = false
-        }
     }
     val recentSearchItems by state.recentSearchItems.collectAsState()
     var libraryFilter by remember { mutableStateOf(LibraryFilterTab.Artists) }
@@ -896,13 +896,41 @@ private fun PhoebeRootStateHolder(
             if (compact) {
                 SharedTransitionLayout(Modifier.fillMaxSize()) {
                 val sharedTransitionScope = this
+                val mobileArtworkTransition = remember { MobileNowPlayingArtworkTransitionState() }
+                val mobileChromeVisible = canBrowseMainSections(session, mediaSources) &&
+                    screen != AppScreen.SignIn &&
+                    screen != AppScreen.ServerPicker &&
+                    screen != AppScreen.LibraryPicker
+                val mobileChromePadding = if (mobileChromeVisible) {
+                    val mobileDensity = LocalDensity.current
+                    val navigationBottomPadding = with(mobileDensity) {
+                        WindowInsets.navigationBars.getBottom(this).toDp()
+                    }
+                    MobileChromePadding(
+                        bottom = MobileBottomNavChromeHeight +
+                            navigationBottomPadding +
+                            MobileChromeScrollGap +
+                            if (currentTrack != null) MobileMiniPlayerChromeHeight else 0.dp,
+                    )
+                } else {
+                    MobileChromePadding()
+                }
                 CompositionLocalProvider(
                     LocalSharedTransitionScope provides sharedTransitionScope,
                     LocalSharedElementTransitionsEnabled provides trackHeavySectionsEnabled,
+                    LocalMobileChromePadding provides mobileChromePadding,
+                    LocalMobileNowPlayingArtworkTransition provides mobileArtworkTransition,
                 ) {
                 val mobileRoutes = navigator.routes
                 val mobilePlayerAsSheet = mobileRoutes.lastOrNull() == PhoebeRoute.Player && mobileRoutes.size > 1
                 val mobileContentRoutes = if (mobilePlayerAsSheet) mobileRoutes.dropLast(1) else mobileRoutes
+                LaunchedEffect(mobilePlayerAsSheet, currentTrack?.id) {
+                    if (!mobilePlayerAsSheet) {
+                        mobileArtworkTransition.activeTrack = null
+                        mobileArtworkTransition.fullArtworkBounds = null
+                        mobileArtworkTransition.progress = 0f
+                    }
+                }
                 PhoebeNavDisplay(
                     backStack = mobileContentRoutes,
                     modifier = Modifier.fillMaxSize(),
@@ -1130,11 +1158,8 @@ private fun PhoebeRootStateHolder(
                         onLyrics = {
                             currentTrack?.let { navigator.open(PhoebeRoute.Lyrics(it.id)) }
                         },
-                        onBack = { navigator.pop() },
-                        onSwipeDismiss = {
-                            playerSwipeDismiss = true
-                            navigator.pop()
-                        },
+                        onBack = collapseMobilePlayer,
+                        onSwipeDismiss = collapseMobilePlayer,
                         handleSystemBack = navigator.routes.size > 1,
                     )
                     AppScreen.Home -> {
@@ -1254,10 +1279,40 @@ private fun PhoebeRootStateHolder(
                         onListenBrainzSubmitNowPlaying = state::setListenBrainzSubmitNowPlaying,
                         onListenBrainzSubmitListens = state::setListenBrainzSubmitListens,
                         onListenBrainzSubmitCurrentTrackFeedback = state::setListenBrainzSubmitCurrentTrackFeedback,
+                        showBottomChrome = false,
                     )
                     }
                 }
                 }
+                }
+                AnimatedVisibility(
+                    visible = mobileChromeVisible,
+                    enter = EnterTransition.None,
+                    exit = ExitTransition.None,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .zIndex(3f),
+                ) {
+                    CompositionLocalProvider(
+                        LocalAnimatedVisibilityScope provides this,
+                    ) {
+                        MobilePersistentPlaybackChrome(
+                            section = browseSection,
+                            currentTrack = currentTrack,
+                            isPlaying = shellPlayback.isPlaying,
+                            isBuffering = shellPlayback.isBuffering,
+                            onNavigate = { section ->
+                                navigator.openBrowse(section)
+                                selectedPlaylistId = null
+                            },
+                            onOpenNowPlaying = { navigator.openPlayer() },
+                            onTogglePlayPause = state::togglePlayPause,
+                            onPreviousTrack = state::previous,
+                            onNextTrack = state::next,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
                 }
                 if (mobilePlayerAsSheet) {
                     val playerSheetVisibility = remember {
@@ -1279,39 +1334,46 @@ private fun PhoebeRootStateHolder(
                             .fillMaxSize()
                             .zIndex(4f),
                     ) {
-                        MobilePlayerHost(
-                            appState = state,
-                            track = mobilePlayerTrack,
-                            upNext = mobilePlayerUpNext,
-                            previousTrack = mobilePlayerPreviousTrack,
-                            currentIndex = mobilePlayerCurrentIndex,
-                            playbackStarting = mobilePlaybackStarting,
-                            castState = cast,
-                            remotePlaybackTarget = musicAssistantRemotePlayback?.target,
-                            onToggle = state::togglePlayPause,
-                            onPrevious = state::previous,
-                            onNext = state::next,
-                            onSkipQueueBy = state::skipQueueBy,
-                            onShuffle = state::toggleShuffle,
-                            onRepeat = state::cycleRepeat,
-                            onSeek = state::seekTo,
-                            onPlayQueue = state::playUpNext,
-                            onMoveUpNext = state::moveUpNext,
-                            onRemoveUpNext = state::removeUpNext,
-                            onOpenSongDetail = { navigator.open(it.route()) },
-                            onCast = state::showCastPicker,
-                            onLyrics = {
-                                currentTrack?.let { navigator.open(PhoebeRoute.Lyrics(it.id)) }
-                            },
-                            onBack = { navigator.pop() },
-                            onSwipeDismiss = {
-                                playerSwipeDismiss = true
-                                navigator.pop()
-                            },
-                            handleSystemBack = true,
-                        )
+                        CompositionLocalProvider(
+                            LocalAnimatedVisibilityScope provides this,
+                        ) {
+                            MobilePlayerHost(
+                                appState = state,
+                                track = mobilePlayerTrack,
+                                upNext = mobilePlayerUpNext,
+                                previousTrack = mobilePlayerPreviousTrack,
+                                currentIndex = mobilePlayerCurrentIndex,
+                                playbackStarting = mobilePlaybackStarting,
+                                castState = cast,
+                                remotePlaybackTarget = musicAssistantRemotePlayback?.target,
+                                onToggle = state::togglePlayPause,
+                                onPrevious = state::previous,
+                                onNext = state::next,
+                                onSkipQueueBy = state::skipQueueBy,
+                                onShuffle = state::toggleShuffle,
+                                onRepeat = state::cycleRepeat,
+                                onSeek = state::seekTo,
+                                onPlayQueue = state::playUpNext,
+                                onMoveUpNext = state::moveUpNext,
+                                onRemoveUpNext = state::removeUpNext,
+                                onOpenSongDetail = { navigator.open(it.route()) },
+                                onCast = state::showCastPicker,
+                                onLyrics = {
+                                    currentTrack?.let { navigator.open(PhoebeRoute.Lyrics(it.id)) }
+                                },
+                                onBack = collapseMobilePlayer,
+                                onSwipeDismiss = collapseMobilePlayer,
+                                handleSystemBack = true,
+                            )
+                        }
                     }
                 }
+                MobileNowPlayingArtworkOverlay(
+                    transitionState = mobileArtworkTransition,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .zIndex(5f),
+                )
                 }
                 }
             } else {
@@ -1706,12 +1768,13 @@ private fun LyricsScreenHost(
     modifier: Modifier = Modifier,
 ) {
     val player by appState.player.collectAsState()
+    val chromePadding = LocalMobileChromePadding.current
     LyricsView(
         track = track,
         currentTrackId = currentTrackId,
         positionMs = player.positionMs,
         state = lyricsState,
-        modifier = modifier,
+        modifier = modifier.padding(bottom = chromePadding.bottom),
         onBack = onBack,
         onRetry = onRetry,
     )

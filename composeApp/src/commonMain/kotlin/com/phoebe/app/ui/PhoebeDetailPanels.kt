@@ -230,10 +230,16 @@ internal fun SongDetailPanel(
     val nowMs = LocalNowMs.current
     val playHistory = LocalPlayHistory.current
     val lastPlayed = playHistory.byTrack[track.id]
+    val mobileChromeBottom = LocalMobileChromePadding.current.bottom
     BoxWithConstraints(modifier.fillMaxSize()) {
         val compact = maxWidth < 520.dp
         val horizontalPadding = if (compact) 20.dp else 28.dp
-        val bottomContentPadding = if (compact) 88.dp else 0.dp
+        val compactBottomPadding = mobileChromeBottom + 24.dp
+        val bottomContentPadding = if (compact) {
+            if (compactBottomPadding > 88.dp) compactBottomPadding else 88.dp
+        } else {
+            mobileChromeBottom
+        }
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
@@ -840,11 +846,12 @@ private fun ArtistStatsPanel(
     val albumWord = if (albums.size == 1) "album" else "albums"
     val songWord = if (tracks.size == 1) "song" else "songs"
     val scrollState = rememberScrollState()
+    val chromeBottom = LocalMobileChromePadding.current.bottom
 
     Column(
         modifier
             .fillMaxSize()
-            .padding(start = edgePadding, end = edgePadding, top = topPadding, bottom = 24.dp)
+            .padding(start = edgePadding, end = edgePadding, top = topPadding, bottom = 24.dp + chromeBottom)
             .verticalScroll(scrollState),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
@@ -997,12 +1004,18 @@ internal fun ArtistDetailPanel(
         if (artist.id.startsWith("plex:") || artist.id.startsWith("jellyfin:")) onProbeArtistRadio(artist)
     }
     var showStats by remember(artist.id) { mutableStateOf(false) }
+    val mobileChromeBottom = LocalMobileChromePadding.current.bottom
 
     BoxWithConstraints(modifier.fillMaxSize()) {
         val useTable = maxWidth >= 640.dp
         val edgePadding = if (maxWidth < 640.dp) 20.dp else 36.dp
         val topPadding = if (maxWidth < 640.dp) 16.dp else 36.dp
-        val bottomContentPadding = if (useTable) 24.dp else 144.dp
+        val mobileBottomPadding = mobileChromeBottom + 24.dp
+        val bottomContentPadding = if (useTable) {
+            if (mobileBottomPadding > 24.dp) mobileBottomPadding else 24.dp
+        } else {
+            if (mobileBottomPadding > 144.dp) mobileBottomPadding else 144.dp
+        }
         val albumGridColumns = libraryUi.gridColumns
         val albumGridRows = remember(visibleAlbums, albumGridColumns) {
             visibleAlbums.chunked(albumGridColumns)
@@ -1578,12 +1591,18 @@ internal fun AlbumDetailPanel(
         filterTracksByQuery(sortedTracks, searchQuery)
     }
     val nowPlaying = LocalNowPlaying.current
+    val mobileChromeBottom = LocalMobileChromePadding.current.bottom
 
     BoxWithConstraints(modifier.fillMaxSize()) {
         val useTable = maxWidth >= 640.dp
         val edgePadding = if (maxWidth < 640.dp) 20.dp else 36.dp
         val topPadding = if (maxWidth < 640.dp) 16.dp else 36.dp
-        val bottomContentPadding = if (useTable) 24.dp else 144.dp
+        val mobileBottomPadding = mobileChromeBottom + 24.dp
+        val bottomContentPadding = if (useTable) {
+            if (mobileBottomPadding > 24.dp) mobileBottomPadding else 24.dp
+        } else {
+            if (mobileBottomPadding > 144.dp) mobileBottomPadding else 144.dp
+        }
         val listState = RetainedLazyListStates.remember("album-detail:${album.id}")
     LazyColumn(
         state = listState,
@@ -1849,6 +1868,7 @@ internal fun PlaylistDetailPanel(
 
     var sortBy by remember(playlist.id) { mutableStateOf(LibrarySortBy.PlaylistOrder) }
     var ascending by remember(playlist.id) { mutableStateOf(true) }
+    var reorderModeEnabled by remember(playlist.id) { mutableStateOf(false) }
     var trackListState by remember(playlist.id) { mutableStateOf<PlaylistTrackListState?>(null) }
     LaunchedEffect(playlist.id, tracks, sortBy, ascending, searchQuery) {
         trackListState = withContext(Dispatchers.Default) {
@@ -1868,16 +1888,22 @@ internal fun PlaylistDetailPanel(
     val ratingActions = LocalRatingActions.current
     val favoriteActions = LocalFavoriteActions.current
     val nowPlaying = LocalNowPlaying.current
+    val mobileChromeBottom = LocalMobileChromePadding.current.bottom
+    LaunchedEffect(playlist.id, searchQuery) {
+        if (searchQuery.isNotBlank()) reorderModeEnabled = false
+    }
 
     BoxWithConstraints(modifier.fillMaxSize()) {
         val useTable = maxWidth >= 640.dp
+        val bottomContentPadding = mobileChromeBottom + 24.dp
         val listState = RetainedLazyListStates.remember("playlist-detail:${playlist.id}")
         val scrolling by remember(listState) { derivedStateOf { listState.isScrollInProgress } }
         val artworkLoadingEnabled = LocalArtworkLoadingEnabled.current && (useTable || !scrolling)
-        val reorderEnabled = sortBy == LibrarySortBy.PlaylistOrder &&
+        val reorderModeAvailable = searchQuery.isBlank() && visibleTracks.size > 1
+        val reorderEnabled = reorderModeEnabled &&
+            sortBy == LibrarySortBy.PlaylistOrder &&
             ascending &&
-            searchQuery.isBlank() &&
-            visibleTracks.size > 1
+            reorderModeAvailable
         val reorderState = rememberPlaylistTrackReorderState(
             tracks = visibleTracks,
             enabled = reorderEnabled,
@@ -1900,7 +1926,7 @@ internal fun PlaylistDetailPanel(
                 state = listState,
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 24.dp)
+                    .padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = bottomContentPadding)
                     .then(if (reorderEnabled) reorderState.listModifier() else Modifier),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
@@ -1968,11 +1994,26 @@ internal fun PlaylistDetailPanel(
                                     else -> "Song name"
                                 }
                             },
-                            onSortBy = { sortBy = it },
+                            onSortBy = {
+                                sortBy = it
+                                if (it != LibrarySortBy.PlaylistOrder) reorderModeEnabled = false
+                            },
                             ascending = ascending,
-                            onAscending = { ascending = it },
+                            onAscending = {
+                                ascending = it
+                                if (!it) reorderModeEnabled = false
+                            },
                             columns = libraryUi.columns,
                             onColumns = onLibraryColumns,
+                            reorderMode = reorderModeEnabled,
+                            reorderModeAvailable = reorderModeAvailable,
+                            onReorderMode = { enabled ->
+                                reorderModeEnabled = enabled
+                                if (enabled) {
+                                    sortBy = LibrarySortBy.PlaylistOrder
+                                    ascending = true
+                                }
+                            },
                             actions = {
                                 if (useTable) {
                                     DownloadActionButton(
@@ -2015,7 +2056,10 @@ internal fun PlaylistDetailPanel(
                     }
                 } else if (useTable) {
                     item(contentType = "playlist-track-header") {
-                        SongsTableHeader(libraryUi.columns)
+                        SongsTableHeader(
+                            columns = libraryUi.columns,
+                            showLeadingHandle = reorderEnabled,
+                        )
                     }
                     itemsIndexed(displayTracks, key = { _, t -> t.id }, contentType = { _, _ -> "playlist-track" }) { index, track ->
                         SongRow(
@@ -2030,7 +2074,7 @@ internal fun PlaylistDetailPanel(
                             leadingHandle = if (reorderEnabled) {
                                 { PlaylistTrackReorderHandle(reorderState, track, index) }
                             } else {
-                                null
+                                {}
                             },
                         )
                     }
@@ -2049,7 +2093,7 @@ internal fun PlaylistDetailPanel(
                             leadingHandle = if (reorderEnabled) {
                                 { PlaylistTrackReorderHandle(reorderState, track, index) }
                             } else {
-                                null
+                                {}
                             },
                         )
                     }

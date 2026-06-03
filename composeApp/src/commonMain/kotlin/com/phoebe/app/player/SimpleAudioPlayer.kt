@@ -63,10 +63,14 @@ abstract class SimpleAudioPlayer : AudioPlayer {
         val track = queue.getOrNull(index)
         val sameQueue = tracksMatch(previous.queue, queue)
 
-        if (sameQueue && track != null &&
+        val sameCurrentTrack = sameQueue && track != null &&
             previous.currentIndex == index &&
             previous.currentTrack?.id == track.id
-        ) {
+        val currentTrackEnded = sameCurrentTrack &&
+            previous.durationMs > 0L &&
+            previous.positionMs >= previous.durationMs
+
+        if (sameCurrentTrack && !currentTrackEnded) {
             if (previous.isPlaying && !previous.isBuffering && playWhenReady) {
                 return
             }
@@ -197,7 +201,9 @@ abstract class SimpleAudioPlayer : AudioPlayer {
             return
         }
         val keep = (state.currentIndex + 1).coerceAtMost(state.queue.size)
-        mutableState.value = state.copy(queue = state.queue.subList(0, keep).toList())
+        val nextQueue = state.queue.subList(0, keep).toList()
+        mutableState.value = state.copy(queue = nextQueue)
+        onQueueEdited(nextQueue, state.currentIndex)
     }
 
     override fun stopPlayback() {
@@ -218,6 +224,7 @@ abstract class SimpleAudioPlayer : AudioPlayer {
         val newCurrent = if (state.currentIndex < 0) state.currentIndex
         else newQueue.indexOfFirst { it.id == state.currentTrack?.id }.takeIf { it >= 0 } ?: state.currentIndex
         mutableState.value = state.copy(queue = newQueue, currentIndex = newCurrent)
+        onQueueEdited(newQueue, newCurrent)
     }
 
     override fun appendToQueue(tracks: List<Track>) {
@@ -226,7 +233,9 @@ abstract class SimpleAudioPlayer : AudioPlayer {
         val existingIds = state.queue.map { it.id }.toMutableSet()
         val additions = tracks.filter { existingIds.add(it.id) }
         if (additions.isEmpty()) return
-        mutableState.value = state.copy(queue = state.queue + additions)
+        val nextQueue = state.queue + additions
+        mutableState.value = state.copy(queue = nextQueue)
+        onQueueEdited(nextQueue, state.currentIndex)
     }
 
     override fun moveUpNext(fromIndex: Int, toIndex: Int) {
@@ -240,6 +249,7 @@ abstract class SimpleAudioPlayer : AudioPlayer {
         val moved = newQueue.removeAt(base + fromIndex)
         newQueue.add(base + target, moved)
         mutableState.value = state.copy(queue = newQueue)
+        onQueueEdited(newQueue, state.currentIndex)
     }
 
     override fun removeUpNext(index: Int) {
@@ -248,6 +258,7 @@ abstract class SimpleAudioPlayer : AudioPlayer {
         if (index !in state.upNext.indices) return
         val newQueue = state.queue.toMutableList().also { it.removeAt(base + index) }
         mutableState.value = state.copy(queue = newQueue)
+        onQueueEdited(newQueue, state.currentIndex)
     }
 
     override fun next() {
@@ -321,7 +332,9 @@ abstract class SimpleAudioPlayer : AudioPlayer {
         }
         val head = state.queue.subList(0, state.currentIndex + 1).toList()
         val tail = state.queue.subList(state.currentIndex + 1, state.queue.size).shuffled()
-        mutableState.value = state.copy(shuffle = true, queue = head + tail)
+        val nextQueue = head + tail
+        mutableState.value = state.copy(shuffle = true, queue = nextQueue)
+        onQueueEdited(nextQueue, state.currentIndex)
     }
 
     override fun setRepeat(mode: RepeatMode) {
@@ -440,6 +453,9 @@ abstract class SimpleAudioPlayer : AudioPlayer {
 
     /** Stop audible output immediately when leaving the current track (before the next loads). */
     protected open fun stopCurrentPlaybackImmediately() = Unit
+
+    /** Keep a platform playlist aligned after queue-only edits that do not reload playback. */
+    protected open fun onQueueEdited(queue: List<Track>, currentIndex: Int) = Unit
 
     protected fun markPlaybackReady(isPlaying: Boolean = true, generation: Int = playGeneration) {
         if (!isPlayRequestCurrent(generation)) return

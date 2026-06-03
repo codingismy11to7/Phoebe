@@ -862,6 +862,9 @@ internal fun DetailSectionHeader(
     onViewMode: ((LibraryViewMode) -> Unit)? = null,
     columns: LibraryColumnVisibility? = null,
     onColumns: ((LibraryColumnVisibility) -> Unit)? = null,
+    reorderMode: Boolean? = null,
+    reorderModeAvailable: Boolean = true,
+    onReorderMode: ((Boolean) -> Unit)? = null,
     modifier: Modifier = Modifier,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
@@ -884,9 +887,14 @@ internal fun DetailSectionHeader(
             onViewMode = onViewMode,
             columns = columns,
             onColumns = onColumns,
+            reorderMode = reorderMode,
+            reorderModeAvailable = reorderModeAvailable,
+            onReorderMode = onReorderMode,
         )
     }
 }
+
+private enum class LibrarySectionOptionsSubmenu { Sort, Order, View, Columns }
 
 @Composable
 internal fun LibrarySectionOptionsMenu(
@@ -900,15 +908,20 @@ internal fun LibrarySectionOptionsMenu(
     onViewMode: ((LibraryViewMode) -> Unit)? = null,
     columns: LibraryColumnVisibility? = null,
     onColumns: ((LibraryColumnVisibility) -> Unit)? = null,
+    reorderMode: Boolean? = null,
+    reorderModeAvailable: Boolean = true,
+    onReorderMode: ((Boolean) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val hasSort = sortBy != null && onSortBy != null && sortKeys.isNotEmpty()
     val hasOrder = ascending != null && onAscending != null
     val hasView = viewMode != null && onViewMode != null
     val hasColumns = columns != null && onColumns != null
-    if (!hasSort && !hasOrder && !hasView && !hasColumns) return
+    val hasReorderMode = reorderMode != null && onReorderMode != null
+    if (!hasSort && !hasOrder && !hasView && !hasColumns && !hasReorderMode) return
 
     var expanded by remember { mutableStateOf(false) }
+    var submenu by remember { mutableStateOf<LibrarySectionOptionsSubmenu?>(null) }
     Box(modifier) {
         Box(
             Modifier
@@ -920,99 +933,233 @@ internal fun LibrarySectionOptionsMenu(
         ) {
             PhoebeIconView(PhoebeIcon.More, tint = PhoebeUi.mutedText, modifier = Modifier.size(18.dp))
         }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            if (hasSort) {
-                sortKeys.forEach { key ->
-                    DropdownMenuItem(
-                        text = {
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                if (key == sortBy) {
-                                    PhoebeIconView(PhoebeIcon.Check, tint = PhoebeUi.accentLight, modifier = Modifier.size(14.dp))
-                                } else {
-                                    Spacer(Modifier.size(14.dp))
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = {
+                expanded = false
+                submenu = null
+            },
+        ) {
+            when (submenu) {
+                null -> {
+                    if (hasSort) {
+                        val selectedSortBy = sortBy
+                        OptionsNavigationMenuItem(
+                            label = "Sort",
+                            value = sortLabel(selectedSortBy),
+                            onClick = { submenu = LibrarySectionOptionsSubmenu.Sort },
+                        )
+                    }
+                    if (hasOrder) {
+                        OptionsNavigationMenuItem(
+                            label = "Order",
+                            value = if (ascending == true) "Ascending" else "Descending",
+                            onClick = { submenu = LibrarySectionOptionsSubmenu.Order },
+                        )
+                    }
+                    if (hasView) {
+                        OptionsNavigationMenuItem(
+                            label = "View",
+                            value = if (viewMode == LibraryViewMode.Grid) "Grid" else "List",
+                            onClick = { submenu = LibrarySectionOptionsSubmenu.View },
+                        )
+                    }
+                    if (hasColumns) {
+                        OptionsNavigationMenuItem(
+                            label = "Columns",
+                            onClick = { submenu = LibrarySectionOptionsSubmenu.Columns },
+                        )
+                    }
+                    if (hasReorderMode) {
+                        DropdownMenuItem(
+                            text = {
+                                Row(
+                                    modifier = Modifier.width(220.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    if (reorderMode == true) {
+                                        PhoebeIconView(PhoebeIcon.Check, tint = PhoebeUi.accentLight, modifier = Modifier.size(14.dp))
+                                    } else {
+                                        Spacer(Modifier.size(14.dp))
+                                    }
+                                    Text("Reorder mode")
                                 }
-                                Text("Sort: ${sortLabel(key)}")
-                            }
-                        },
-                        onClick = {
-                            onSortBy(key)
-                            expanded = false
-                        },
-                    )
+                            },
+                            enabled = reorderModeAvailable || reorderMode == true,
+                            onClick = {
+                                onReorderMode(reorderMode != true)
+                                expanded = false
+                                submenu = null
+                            },
+                        )
+                    }
                 }
-            }
-            if (hasOrder) {
-                OrderMenuItem(
-                    label = "Ascending",
-                    selected = ascending == true,
-                    onClick = {
-                        onAscending(true)
-                        expanded = false
-                    },
-                )
-                OrderMenuItem(
-                    label = "Descending",
-                    selected = ascending == false,
-                    onClick = {
-                        onAscending(false)
-                        expanded = false
-                    },
-                )
-            }
-            if (hasView) {
-                DropdownMenuItem(
-                    text = {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            if (viewMode == LibraryViewMode.Grid) {
-                                PhoebeIconView(PhoebeIcon.Check, tint = PhoebeUi.accentLight, modifier = Modifier.size(14.dp))
-                            } else {
-                                Spacer(Modifier.size(14.dp))
-                            }
-                            Text("View: Grid")
+                LibrarySectionOptionsSubmenu.Sort -> {
+                    OptionsBackMenuItem("Sort") { submenu = null }
+                    if (hasSort) {
+                        val selectedSortBy = sortBy
+                        val selectSortBy = onSortBy
+                        sortKeys.forEach { key ->
+                            SelectableOptionsMenuItem(
+                                label = sortLabel(key),
+                                selected = key == selectedSortBy,
+                                onClick = {
+                                    selectSortBy(key)
+                                    expanded = false
+                                    submenu = null
+                                },
+                            )
                         }
-                    },
-                    onClick = {
-                        onViewMode(LibraryViewMode.Grid)
-                        expanded = false
-                    },
-                )
-                DropdownMenuItem(
-                    text = {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            if (viewMode == LibraryViewMode.List) {
-                                PhoebeIconView(PhoebeIcon.Check, tint = PhoebeUi.accentLight, modifier = Modifier.size(14.dp))
-                            } else {
-                                Spacer(Modifier.size(14.dp))
-                            }
-                            Text("View: List")
-                        }
-                    },
-                    onClick = {
-                        onViewMode(LibraryViewMode.List)
-                        expanded = false
-                    },
-                )
-            }
-            if (hasColumns) {
-                DropdownMenuItem(
-                    text = { Text("Columns", color = PhoebeUi.mutedText, fontWeight = FontWeight.SemiBold) },
-                    onClick = {},
-                    enabled = false,
-                )
-                ColumnsToggleRow("Duration", columns.duration) { onColumns(columns.copy(duration = !columns.duration)) }
-                ColumnsToggleRow("Audio codec", columns.audioCodec) { onColumns(columns.copy(audioCodec = !columns.audioCodec)) }
-                ColumnsToggleRow("Bitrate", columns.bitrate) { onColumns(columns.copy(bitrate = !columns.bitrate)) }
-                ColumnsToggleRow("Sample rate", columns.sampleRate) { onColumns(columns.copy(sampleRate = !columns.sampleRate)) }
-                ColumnsToggleRow("File type", columns.fileType) { onColumns(columns.copy(fileType = !columns.fileType)) }
-                ColumnsToggleRow("Date added", columns.dateAdded) { onColumns(columns.copy(dateAdded = !columns.dateAdded)) }
-                ColumnsToggleRow("Rating", columns.rating) { onColumns(columns.copy(rating = !columns.rating)) }
-                ColumnsToggleRow("Favorite", columns.favorite) { onColumns(columns.copy(favorite = !columns.favorite)) }
-                ColumnsToggleRow("File path", columns.filepath) { onColumns(columns.copy(filepath = !columns.filepath)) }
-                ColumnsToggleRow("Year", columns.year) { onColumns(columns.copy(year = !columns.year)) }
-                ColumnsToggleRow("Genre", columns.genre) { onColumns(columns.copy(genre = !columns.genre)) }
+                    }
+                }
+                LibrarySectionOptionsSubmenu.Order -> {
+                    OptionsBackMenuItem("Order") { submenu = null }
+                    if (hasOrder) {
+                        val selectAscending = onAscending
+                        SelectableOptionsMenuItem(
+                            label = "Ascending",
+                            selected = ascending == true,
+                            onClick = {
+                                selectAscending(true)
+                                expanded = false
+                                submenu = null
+                            },
+                        )
+                        SelectableOptionsMenuItem(
+                            label = "Descending",
+                            selected = ascending == false,
+                            onClick = {
+                                selectAscending(false)
+                                expanded = false
+                                submenu = null
+                            },
+                        )
+                    }
+                }
+                LibrarySectionOptionsSubmenu.View -> {
+                    OptionsBackMenuItem("View") { submenu = null }
+                    if (hasView) {
+                        val selectViewMode = onViewMode
+                        SelectableOptionsMenuItem(
+                            label = "Grid",
+                            selected = viewMode == LibraryViewMode.Grid,
+                            onClick = {
+                                selectViewMode(LibraryViewMode.Grid)
+                                expanded = false
+                                submenu = null
+                            },
+                        )
+                        SelectableOptionsMenuItem(
+                            label = "List",
+                            selected = viewMode == LibraryViewMode.List,
+                            onClick = {
+                                selectViewMode(LibraryViewMode.List)
+                                expanded = false
+                                submenu = null
+                            },
+                        )
+                    }
+                }
+                LibrarySectionOptionsSubmenu.Columns -> {
+                    OptionsBackMenuItem("Columns") { submenu = null }
+                    if (hasColumns) {
+                        val currentColumns = columns
+                        val updateColumns = onColumns
+                        ColumnsToggleRow("Duration", currentColumns.duration) { updateColumns(currentColumns.copy(duration = !currentColumns.duration)) }
+                        ColumnsToggleRow("Audio codec", currentColumns.audioCodec) { updateColumns(currentColumns.copy(audioCodec = !currentColumns.audioCodec)) }
+                        ColumnsToggleRow("Bitrate", currentColumns.bitrate) { updateColumns(currentColumns.copy(bitrate = !currentColumns.bitrate)) }
+                        ColumnsToggleRow("Sample rate", currentColumns.sampleRate) { updateColumns(currentColumns.copy(sampleRate = !currentColumns.sampleRate)) }
+                        ColumnsToggleRow("File type", currentColumns.fileType) { updateColumns(currentColumns.copy(fileType = !currentColumns.fileType)) }
+                        ColumnsToggleRow("Date added", currentColumns.dateAdded) { updateColumns(currentColumns.copy(dateAdded = !currentColumns.dateAdded)) }
+                        ColumnsToggleRow("Rating", currentColumns.rating) { updateColumns(currentColumns.copy(rating = !currentColumns.rating)) }
+                        ColumnsToggleRow("Favorite", currentColumns.favorite) { updateColumns(currentColumns.copy(favorite = !currentColumns.favorite)) }
+                        ColumnsToggleRow("File path", currentColumns.filepath) { updateColumns(currentColumns.copy(filepath = !currentColumns.filepath)) }
+                        ColumnsToggleRow("Year", currentColumns.year) { updateColumns(currentColumns.copy(year = !currentColumns.year)) }
+                        ColumnsToggleRow("Genre", currentColumns.genre) { updateColumns(currentColumns.copy(genre = !currentColumns.genre)) }
+                    }
+                }
             }
         }
     }
+}
+
+@Composable
+private fun OptionsNavigationMenuItem(
+    label: String,
+    value: String? = null,
+    onClick: () -> Unit,
+) {
+    DropdownMenuItem(
+        text = {
+            Row(
+                modifier = Modifier.width(220.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(label, color = PhoebeUi.primaryText, fontWeight = FontWeight.SemiBold)
+                if (value != null) {
+                    Text(
+                        value,
+                        color = PhoebeUi.mutedText,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                } else {
+                    Spacer(Modifier.weight(1f))
+                }
+                PhoebeIconView(PhoebeIcon.ChevronRight, tint = PhoebeUi.mutedText, modifier = Modifier.size(14.dp))
+            }
+        },
+        onClick = onClick,
+    )
+}
+
+@Composable
+private fun OptionsBackMenuItem(
+    label: String,
+    onClick: () -> Unit,
+) {
+    DropdownMenuItem(
+        text = {
+            Row(
+                modifier = Modifier.width(220.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                PhoebeIconView(PhoebeIcon.Back, tint = PhoebeUi.mutedText, modifier = Modifier.size(14.dp))
+                Text(label, color = PhoebeUi.primaryText, fontWeight = FontWeight.SemiBold)
+            }
+        },
+        onClick = onClick,
+    )
+}
+
+@Composable
+private fun SelectableOptionsMenuItem(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    DropdownMenuItem(
+        text = {
+            Row(
+                modifier = Modifier.width(220.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (selected) {
+                    PhoebeIconView(PhoebeIcon.Check, tint = PhoebeUi.accentLight, modifier = Modifier.size(14.dp))
+                } else {
+                    Spacer(Modifier.size(14.dp))
+                }
+                Text(label)
+            }
+        },
+        onClick = onClick,
+    )
 }
 
 @Composable
@@ -1718,7 +1865,10 @@ private fun SongsTable(
 }
 
 @Composable
-internal fun SongsTableHeader(columns: LibraryColumnVisibility) {
+internal fun SongsTableHeader(
+    columns: LibraryColumnVisibility,
+    showLeadingHandle: Boolean = LocalPlaylistDragEnabled.current,
+) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -1726,7 +1876,7 @@ internal fun SongsTableHeader(columns: LibraryColumnVisibility) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        TableHeaderCell("# Title", modifier = Modifier.weight(2.2f).padding(start = 92.dp))
+        TableHeaderCell("# Title", modifier = Modifier.weight(2.2f).padding(start = if (showLeadingHandle) 92.dp else 56.dp))
         TableHeaderCell("Artist", modifier = Modifier.weight(1.4f))
         TableHeaderCell("Album", modifier = Modifier.weight(1.6f))
         if (columns.duration) TableHeaderCell("Duration", modifier = Modifier.width(70.dp))

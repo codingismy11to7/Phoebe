@@ -82,7 +82,10 @@ import io.ktor.utils.io.readAvailable
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -214,21 +217,49 @@ class CatalogRepository(
     private val canceledDownloadTrackIds = mutableSetOf<String>()
     private val pendingPlaylistPrependedTrackIds = mutableMapOf<String, List<String>>()
     private val persistenceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val pendingCatalogDbWrites = mutableSetOf<Job>()
+    private val pendingCatalogDbWritesMutex = Mutex()
 
     suspend fun awaitDatabaseIdle() {
-        databaseWriteGate.withWrite { }
+        while (true) {
+            val pending = pendingCatalogDbWritesMutex.withLock { pendingCatalogDbWrites.toList() }
+            if (pending.isNotEmpty()) {
+                pending.joinAll()
+                continue
+            }
+            databaseWriteGate.withWrite { }
+            val queuedDuringGate = pendingCatalogDbWritesMutex.withLock { pendingCatalogDbWrites.isNotEmpty() }
+            if (!queuedDuringGate) return
+        }
     }
 
-    private fun enqueueCatalogDbWrite(block: suspend () -> Unit) {
-        persistenceScope.launch {
-            runCatching {
-                databaseWriteGate.withWrite { block() }
-            }.onFailure { error ->
-                PhoebeLog.d("CatalogRepository") {
-                    "catalog db write failed: ${error.message}"
+    private suspend fun enqueueCatalogDbWrite(block: suspend () -> Unit) {
+        var trackedJob: Job? = null
+        val job = persistenceScope.launch(start = CoroutineStart.LAZY) {
+            try {
+                runCatching {
+                    databaseWriteGate.withWrite { block() }
+                }.onFailure { error ->
+                    PhoebeLog.d("CatalogRepository") {
+                        "catalog db write failed: ${error.message}"
+                    }
+                }
+            } finally {
+                val completed = trackedJob
+                if (completed != null) {
+                    withContext(NonCancellable) {
+                        pendingCatalogDbWritesMutex.withLock {
+                            pendingCatalogDbWrites.remove(completed)
+                        }
+                    }
                 }
             }
         }
+        trackedJob = job
+        pendingCatalogDbWritesMutex.withLock {
+            pendingCatalogDbWrites += job
+        }
+        job.start()
     }
 
     private suspend fun runCatalogDbWrite(block: suspend () -> Unit) {
@@ -6497,7 +6528,7 @@ class CatalogRepository(
         }
     }
 
-    private fun persistPlaylistTracksAsync(snapshot: CatalogSnapshot, playlistId: String) {
+    private suspend fun persistPlaylistTracksAsync(snapshot: CatalogSnapshot, playlistId: String) {
         enqueueCatalogDbWrite { persistPlaylistTracks(snapshot, playlistId) }
     }
 

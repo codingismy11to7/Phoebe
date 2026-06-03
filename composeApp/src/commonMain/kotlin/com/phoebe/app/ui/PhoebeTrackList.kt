@@ -219,7 +219,10 @@ internal fun TrackList(
             }
             if (useTable) {
                 item(contentType = "track-header") {
-                    SongsTableHeader(libraryColumns)
+                    SongsTableHeader(
+                        columns = libraryColumns,
+                        showLeadingHandle = reorderEnabled || LocalPlaylistDragEnabled.current,
+                    )
                 }
                 itemsIndexed(displayTracks, key = { _, track -> track.id }, contentType = { _, _ -> "track" }) { index, track ->
                     SongRow(
