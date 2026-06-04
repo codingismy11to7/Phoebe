@@ -7,6 +7,7 @@ import com.phoebe.app.data.ListenBrainzAccountRepository
 import com.phoebe.app.data.ListenBrainzClient
 import com.phoebe.app.domain.AppSettings
 import com.phoebe.app.domain.EqualizerProfile
+import com.phoebe.app.domain.NowPlayingVisualizerPreset
 import com.phoebe.app.platform.SecureCredentialKey
 import com.phoebe.app.testing.FakeSecureCredentialStore
 import com.phoebe.app.testing.newInMemoryPhoebeDatabase
@@ -53,6 +54,7 @@ class AppSettingsRepositoryDesktopTest {
             setScanLibraryOnLaunch(true)
             setNotifyWhenDownloadFinishes(true)
             setPersistEqualizerSettings(true, EqualizerProfile.Default.normalized().withGain(7, 4.5f))
+            setBlurredArtworkAppearance(false)
         }
         val restored = AppSettingsRepository(db).apply { restore() }
 
@@ -61,6 +63,34 @@ class AppSettingsRepositoryDesktopTest {
         assertTrue(restored.settings.value.notifyWhenDownloadFinishes)
         assertTrue(restored.settings.value.persistEqualizerSettings)
         assertEquals(4.5f, restored.settings.value.equalizerProfile.gainsDb[7])
+        assertFalse(restored.settings.value.blurredArtworkAppearance)
+    }
+
+    @Test
+    fun visualizerPresetPersistsAndRestores() = runTest {
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+
+        AppSettingsRepository(db).setNowPlayingVisualizerPreset(NowPlayingVisualizerPreset.Alchemy)
+        val restored = AppSettingsRepository(db).apply { restore() }
+
+        assertEquals(NowPlayingVisualizerPreset.Alchemy, restored.settings.value.nowPlayingVisualizerPreset)
+    }
+
+    @Test
+    fun invalidVisualizerPresetFallsBackToArtwork() = runTest {
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+
+        AppSettingsRepository(db).setNowPlayingVisualizerPreset(NowPlayingVisualizerPreset.Plenoptic)
+        d.execute(
+            identifier = null,
+            sql = "UPDATE AppSettingsRow SET nowPlayingVisualizerPreset = 'FuturePreset'",
+            parameters = 0,
+        )
+        val restored = AppSettingsRepository(db).apply { restore() }
+
+        assertEquals(NowPlayingVisualizerPreset.Artwork, restored.settings.value.nowPlayingVisualizerPreset)
     }
 
     @Test

@@ -113,13 +113,19 @@ import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
@@ -144,6 +150,10 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.zIndex
+import dev.chrisbanes.haze.HazeInputScale
+import dev.chrisbanes.haze.blur.HazeProgressive
+import dev.chrisbanes.haze.blur.blurEffect
+import dev.chrisbanes.haze.hazeEffect
 import kotlin.math.roundToInt
 import com.phoebe.app.AppState
 import com.phoebe.app.data.ListenBrainzFeedbackScore
@@ -155,6 +165,7 @@ import com.phoebe.app.domain.AppSettings
 import com.phoebe.app.domain.AppScreen
 import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.ArtistRadioAvailability
+import com.phoebe.app.domain.AudioAnalysisFrame
 import com.phoebe.app.domain.HomeSection
 import com.phoebe.app.domain.JellyfinLibraryPageKind
 import com.phoebe.app.domain.JellyfinSyncMode
@@ -167,6 +178,7 @@ import com.phoebe.app.domain.EqualizerProfile
 import com.phoebe.app.domain.LocalFolderMediaSourceConfig
 import com.phoebe.app.domain.MediaSourcesState
 import com.phoebe.app.domain.MusicLibrary
+import com.phoebe.app.domain.NowPlayingVisualizerPreset
 import com.phoebe.app.domain.PersonalMixPreferences
 import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.PlexSession
@@ -210,6 +222,7 @@ internal val MobileChromeScrollGap = 12.dp
 private val MobilePlayerMetadataReserveWithAlbum = 104.dp
 private val MobilePlayerMetadataReserveWithoutAlbum = 84.dp
 private val MobilePlayerRemoteTargetReserve = 18.dp
+private val MobilePlayerReflectionOverlap = 112.dp
 
 @Composable
 internal fun MobileCompactMainFeature(
@@ -478,6 +491,8 @@ internal fun MobileBrowseShell(
     onScanLibraryOnLaunch: (Boolean) -> Unit,
     onNotifyWhenDownloadFinishes: (Boolean) -> Unit,
     onPersistEqualizerSettings: (Boolean) -> Unit = {},
+    onVisualizerPreset: (NowPlayingVisualizerPreset) -> Unit = {},
+    onBlurredArtworkAppearance: (Boolean) -> Unit = {},
     downloadDirectory: String?,
     downloadCount: Int,
     defaultDownloadDirectoryLabel: String,
@@ -547,6 +562,8 @@ internal fun MobileBrowseShell(
                     onScanLibraryOnLaunch = onScanLibraryOnLaunch,
                     onNotifyWhenDownloadFinishes = onNotifyWhenDownloadFinishes,
                     onPersistEqualizerSettings = onPersistEqualizerSettings,
+                    onVisualizerPreset = onVisualizerPreset,
+                    onBlurredArtworkAppearance = onBlurredArtworkAppearance,
                     onHomeSections = onHomeSections,
                     onPersonalMix = onPersonalMix,
                     onGridColumns = onGridColumns,
@@ -1091,9 +1108,7 @@ internal fun SwipeableMobileArtwork(
     previousTrack: Track?,
     onSkipQueueBy: (Int) -> Unit,
     modifier: Modifier = Modifier,
-    maxDecodeDimension: Int = ListArtworkMaxDecodeDimension,
-    sharedKey: String? = null,
-    frontOverlay: @Composable BoxScope.() -> Unit = {},
+    trackContent: @Composable (Track) -> Unit,
 ) {
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
@@ -1106,8 +1121,7 @@ internal fun SwipeableMobileArtwork(
 
     BoxWithConstraints(
         modifier = modifier
-            .aspectRatio(1f)
-            .clip(RoundedCornerShape(10.dp))
+            .clipToBounds()
             .semantics {
                 contentDescription = "Album artwork. Swipe left for next track, swipe right for previous track."
             },
@@ -1228,28 +1242,26 @@ internal fun SwipeableMobileArtwork(
                 },
         ) {
             if (nextTrack != null && swipePreviewDirection < 0) {
-                TrackArtworkImage(
-                    nextTrack,
-                    Modifier
-                        .fillMaxSize()
-                        .offset { IntOffset((widthPx + artworkOffsetPx()).roundToInt(), 0) },
-                    radius = 10.dp,
-                    maxDecodeDimension = maxDecodeDimension,
-                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .offset { IntOffset((widthPx + artworkOffsetPx()).roundToInt(), 0) }
+                ) {
+                    trackContent(nextTrack)
+                }
             }
             if (previousTrack != null && swipePreviewDirection > 0) {
-                TrackArtworkImage(
-                    previousTrack,
-                    Modifier
-                        .fillMaxSize()
-                        .offset { IntOffset((artworkOffsetPx() - widthPx).roundToInt(), 0) },
-                    radius = 10.dp,
-                    maxDecodeDimension = maxDecodeDimension,
-                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .offset { IntOffset((artworkOffsetPx() - widthPx).roundToInt(), 0) }
+                ) {
+                    trackContent(previousTrack)
+                }
             }
             Box(
                 modifier = Modifier
-                    .fillMaxSize()
+                    .fillMaxWidth()
                     .offset { IntOffset(artworkOffsetPx().roundToInt(), 0) }
                     .graphicsLayer {
                         val dragProgress = (abs(artworkOffsetPx()) / widthPx).coerceIn(0f, 1f)
@@ -1259,15 +1271,7 @@ internal fun SwipeableMobileArtwork(
                     },
             ) {
                 key(track.id) {
-                    FlippableSongArtwork(
-                        track = track,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .sharedArtworkTransition(sharedKey),
-                        radius = 10.dp,
-                        maxDecodeDimension = maxDecodeDimension,
-                        frontOverlay = frontOverlay,
-                    )
+                    trackContent(track)
                 }
             }
         }
@@ -1315,6 +1319,9 @@ internal fun MobilePlayer(
     equalizerProfile: EqualizerProfile = EqualizerProfile.Default,
     persistEqualizerSettings: Boolean = false,
     equalizerRemoteUnavailable: Boolean = false,
+    visualizerPreset: NowPlayingVisualizerPreset = NowPlayingVisualizerPreset.Default,
+    blurredArtworkAppearance: Boolean = true,
+    audioAnalysis: AudioAnalysisFrame = AudioAnalysisFrame.Empty,
     onToggle: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
@@ -1333,6 +1340,7 @@ internal fun MobilePlayer(
     onEqualizerGain: (Int, Float) -> Unit = { _, _ -> },
     onEqualizerReset: () -> Unit = {},
     onPersistEqualizerSettings: (Boolean) -> Unit = {},
+    onVisualizerPreset: (NowPlayingVisualizerPreset) -> Unit = {},
     onListenBrainzFeedback: (ListenBrainzFeedbackScore) -> Unit = {},
     onBack: () -> Unit,
     onSwipeDismiss: () -> Unit,
@@ -1587,26 +1595,42 @@ internal fun MobilePlayer(
             }
 
             Column(Modifier.fillMaxSize()) {
-                Row(
+                Box(
                     Modifier
                         .fillMaxWidth()
                         .height(56.dp)
                         .graphicsLayer { alpha = playerContentAlpha }
                         .padding(horizontal = 20.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                    contentAlignment = Alignment.CenterStart,
                 ) {
-                    Row(Modifier.width(132.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier.size(44.dp).clickable(onClick = { requestPlayerCollapse() }).semantics { contentDescription = "Back" },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            PhoebeIconView(PhoebeIcon.ChevronDown, tint = PhoebeUi.primaryText, modifier = Modifier.size(24.dp))
-                        }
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.CenterStart)
+                            .size(44.dp)
+                            .clickable(onClick = { requestPlayerCollapse() })
+                            .semantics { contentDescription = "Back" },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        PhoebeIconView(PhoebeIcon.ChevronDown, tint = PhoebeUi.primaryText, modifier = Modifier.size(24.dp))
                     }
-                    Spacer(Modifier.weight(1f))
-                    SectionLabel("Now Playing", PhoebeUi.secondaryText)
-                    Spacer(Modifier.weight(1f))
-                    Row(Modifier.width(132.dp), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+
+                    Row(
+                        modifier = Modifier.align(Alignment.Center),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        VisualizerPresetButton(
+                            selected = visualizerPreset,
+                            onSelected = onVisualizerPreset,
+                        )
+                        SectionLabel("Now Playing", PhoebeUi.secondaryText)
+                        Spacer(Modifier.width(44.dp))
+                    }
+
+                    Row(
+                        modifier = Modifier.align(Alignment.CenterEnd),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         TransportIcon(PhoebeIcon.Lyrics, "Lyrics", onLyrics)
                         TransportIcon(PhoebeIcon.Equalizer, "Equalizer", { equalizerOpen = true }, active = equalizerProfile.enabled)
                         if (!isDesktopPlatform() || castState.isAvailable || castState.isConnected) {
@@ -1684,109 +1708,187 @@ internal fun MobilePlayer(
                                         alpha = 1f - sheetProgress
                                     },
                             ) {
-                                Box(
-                                    Modifier
-                                        .size(artworkSize)
+                                val artworkShape = RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp, bottomStart = 0.dp, bottomEnd = 0.dp)
+
+                                SwipeableMobileArtwork(
+                                    track = track,
+                                    nextTrack = upNext.firstOrNull(),
+                                    previousTrack = previousTrack,
+                                    onSkipQueueBy = onSkipQueueBy,
+                                    modifier = Modifier
+                                        .width(artworkSize)
                                         .align(Alignment.Start)
-                                        .onGloballyPositioned { coordinates ->
-                                            artworkTransition?.apply {
-                                                fullArtworkTrackId = track.id
-                                                fullArtworkBounds = coordinates.boundsInRoot()
-                                            }
-                                        }
                                         .graphicsLayer {
-                                            alpha = if (artworkMovesInOverlay) 0f else 1f
+                                            alpha = if (artworkMovesInOverlay) 0f else playerContentAlpha
                                         },
-                                ) {
-                                    val artworkLoadsEnabled = inheritedArtworkLoadingEnabled &&
-                                        playerArtworkLoadingEnabled
-                                    CompositionLocalProvider(
-                                        LocalArtworkLoadingEnabled provides artworkLoadsEnabled,
+                                ) { t ->
+                                    val useBlurredArtworkChrome =
+                                        visualizerPreset == NowPlayingVisualizerPreset.Artwork && blurredArtworkAppearance
+                                    val artworkContentShape = if (visualizerPreset == NowPlayingVisualizerPreset.Artwork && !blurredArtworkAppearance) {
+                                        RoundedCornerShape(10.dp)
+                                    } else {
+                                        artworkShape
+                                    }
+                                    val metadataOverlap = if (useBlurredArtworkChrome) {
+                                        MobilePlayerReflectionOverlap
+                                    } else {
+                                        0.dp
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(artworkSize + metadataReserve)
+                                            .clip(RoundedCornerShape(10.dp)),
                                     ) {
-                                        SwipeableMobileArtwork(
-                                            track = track,
-                                            nextTrack = upNext.firstOrNull(),
-                                            previousTrack = previousTrack,
-                                            onSkipQueueBy = onSkipQueueBy,
-                                            modifier = Modifier.fillMaxSize(),
-                                            maxDecodeDimension = HeroArtworkMaxDecodeDimension,
-                                        ) {
-                                            AudioQualityBadge(
-                                                track = track,
-                                                onArtwork = true,
-                                                modifier = Modifier
-                                                    .align(Alignment.TopEnd)
-                                                    .padding(12.dp),
-                                            )
-                                            if (showFeedbackActions) {
-                                                Row(
-                                                    modifier = Modifier
-                                                        .align(Alignment.BottomEnd)
-                                                        .padding(12.dp)
-                                                        .clip(RoundedCornerShape(999.dp))
-                                                        .background(PhoebeUi.canvasBackground.copy(alpha = 0.72f))
-                                                        .padding(horizontal = 6.dp, vertical = 5.dp),
-                                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                ) {
-                                                    if (showLikeControl) {
-                                                        LikeButton(
-                                                            liked = likeActions.isLiked(track),
-                                                            enabled = true,
-                                                            onClick = { likeActions.onToggleLiked(track) },
-                                                        )
+                                        Box(
+                                            Modifier
+                                                .size(artworkSize)
+                                                .align(Alignment.TopStart)
+                                                .onGloballyPositioned { coordinates ->
+                                                    if (t.id == track.id) {
+                                                        artworkTransition?.apply {
+                                                            fullArtworkTrackId = track.id
+                                                            fullArtworkBounds = coordinates.boundsInRoot()
+                                                        }
                                                     }
-                                                    if (showListenBrainzFeedback) {
-                                                        ListenBrainzFeedbackControls(
-                                                            target = listenBrainzFeedbackTarget,
-                                                            onFeedback = onListenBrainzFeedback,
-                                                            horizontalVotes = true,
-                                                            showVoteBorders = false,
+                                                }
+                                                .clip(artworkContentShape),
+                                        ) {
+                                            val artworkLoadsEnabled = inheritedArtworkLoadingEnabled &&
+                                                playerArtworkLoadingEnabled
+                                            if (visualizerPreset == NowPlayingVisualizerPreset.Artwork) {
+                                                CompositionLocalProvider(
+                                                    LocalArtworkLoadingEnabled provides artworkLoadsEnabled,
+                                                ) {
+                                                    FlippableSongArtwork(
+                                                        track = t,
+                                                        modifier = Modifier
+                                                            .fillMaxSize()
+                                                            .mobileArtworkBottomFade(metadataOverlap),
+                                                        maxDecodeDimension = HeroArtworkMaxDecodeDimension,
+                                                        shape = artworkContentShape,
+                                                    ) {
+                                                        MobileNowPlayingOverlayActions(
+                                                            track = t,
+                                                            showFeedbackActions = showFeedbackActions,
+                                                            showLikeControl = showLikeControl,
+                                                            likeActions = likeActions,
+                                                            showListenBrainzFeedback = showListenBrainzFeedback,
+                                                            listenBrainzFeedbackTarget = listenBrainzFeedbackTarget,
+                                                            onListenBrainzFeedback = onListenBrainzFeedback,
                                                         )
                                                     }
                                                 }
+                                            } else {
+                                                CompositionLocalProvider(
+                                                    LocalContinuousMotionEnabled provides playerMotionEnabled,
+                                                ) {
+                                                    NowPlayingVisualizerSurface(
+                                                        preset = visualizerPreset,
+                                                        track = t,
+                                                        audioAnalysis = audioAnalysis,
+                                                        isPlaying = isPlaying,
+                                                        positionMs = positionMs,
+                                                        modifier = Modifier.fillMaxSize(),
+                                                    )
+                                                }
+                                                MobileNowPlayingOverlayActions(
+                                                    track = t,
+                                                    showFeedbackActions = showFeedbackActions,
+                                                    showLikeControl = showLikeControl,
+                                                    likeActions = likeActions,
+                                                    showListenBrainzFeedback = showListenBrainzFeedback,
+                                                    listenBrainzFeedbackTarget = listenBrainzFeedbackTarget,
+                                                    onListenBrainzFeedback = onListenBrainzFeedback,
+                                                )
                                             }
                                         }
-                                    }
-                                }
-                                Spacer(Modifier.height(20.dp))
-                                Column(Modifier.graphicsLayer { alpha = playerContentAlpha }) {
-                                    CompositionLocalProvider(
-                                        LocalContinuousMotionEnabled provides playerMotionEnabled,
-                                    ) {
-                                        AutoScrollingText(
-                                            track.title,
-                                            color = PhoebeUi.primaryText,
-                                            fontSize = 22.sp,
-                                            fontWeight = FontWeight.Black,
-                                        )
-                                        AutoScrollingText(
-                                            track.artist,
-                                            color = PhoebeUi.secondaryText,
-                                            fontSize = 15.sp,
-                                            modifier = Modifier.clickable(enabled = track.artist.isNotBlank()) {
-                                                trackNavigationActions.onOpenArtistForTrack(track)
-                                            },
-                                        )
-                                        if (track.album.isNotBlank()) {
-                                            AutoScrollingText(
-                                                track.album,
-                                                color = PhoebeUi.mutedText,
-                                                fontSize = 13.sp,
-                                                modifier = Modifier.clickable {
-                                                    trackNavigationActions.onOpenAlbumForTrack(track)
-                                                },
-                                            )
+
+                                        Box(
+                                            modifier = Modifier
+                                                .width(artworkSize)
+                                                .height(metadataReserve + metadataOverlap)
+                                                .align(Alignment.BottomStart)
+                                        ) {
+                                            val metadataUsesArtworkChrome = useBlurredArtworkChrome
+                                            val metadataTitleColor = if (metadataUsesArtworkChrome) {
+                                                Color.White
+                                            } else {
+                                                PhoebeUi.primaryText
+                                            }
+                                            val metadataArtistColor = if (metadataUsesArtworkChrome) {
+                                                Color.White.copy(alpha = 0.82f)
+                                            } else {
+                                                PhoebeUi.secondaryText
+                                            }
+                                            val metadataAlbumColor = if (metadataUsesArtworkChrome) {
+                                                Color.White.copy(alpha = 0.65f)
+                                            } else {
+                                                PhoebeUi.mutedText
+                                            }
+                                            if (useBlurredArtworkChrome) {
+                                                MobileArtworkReflection(
+                                                    track = t,
+                                                    artworkSize = artworkSize,
+                                                    blendOverlap = metadataOverlap,
+                                                    modifier = Modifier.matchParentSize(),
+                                                )
+                                                MobileArtworkMetadataScrim(
+                                                    blendOverlap = metadataOverlap,
+                                                    modifier = Modifier.matchParentSize(),
+                                                )
+                                            } else if (visualizerPreset != NowPlayingVisualizerPreset.Artwork) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .matchParentSize()
+                                                        .background(PhoebeUi.panel.copy(alpha = 0.85f))
+                                                )
+                                            }
+                                            Column(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(horizontal = 16.dp)
+                                                    .padding(top = metadataOverlap + 12.dp, bottom = 12.dp)
+                                            ) {
+                                                CompositionLocalProvider(
+                                                    LocalContinuousMotionEnabled provides playerMotionEnabled,
+                                                ) {
+                                                    AutoScrollingText(
+                                                        t.title,
+                                                        color = metadataTitleColor,
+                                                        fontSize = 20.sp,
+                                                        fontWeight = FontWeight.Black,
+                                                    )
+                                                    AutoScrollingText(
+                                                        t.artist,
+                                                        color = metadataArtistColor,
+                                                        fontSize = 14.sp,
+                                                        modifier = Modifier.clickable(enabled = t.artist.isNotBlank()) {
+                                                            trackNavigationActions.onOpenArtistForTrack(t)
+                                                        },
+                                                    )
+                                                    if (t.album.isNotBlank()) {
+                                                        AutoScrollingText(
+                                                            t.album,
+                                                            color = metadataAlbumColor,
+                                                            fontSize = 12.sp,
+                                                            modifier = Modifier.clickable {
+                                                                trackNavigationActions.onOpenAlbumForTrack(t)
+                                                            },
+                                                        )
+                                                    }
+                                                }
+                                                if (remotePlaybackTarget != null) {
+                                                    Text(
+                                                        "Music Assistant: $remotePlaybackTarget",
+                                                        color = PhoebeUi.accentLight,
+                                                        fontSize = 11.sp,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                    )
+                                                }
+                                            }
                                         }
-                                    }
-                                    if (remotePlaybackTarget != null) {
-                                        Text(
-                                            "Music Assistant: $remotePlaybackTarget",
-                                            color = PhoebeUi.accentLight,
-                                            fontSize = 12.sp,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
                                     }
                                 }
                             }
@@ -1869,6 +1971,201 @@ internal fun MobilePlayer(
                     onRemoveUpNext = onRemoveUpNext,
                     onOpenTrackDetail = onOpenSongDetail,
                     listState = upNextListState,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MobileArtworkReflection(
+    track: Track,
+    artworkSize: Dp,
+    blendOverlap: Dp,
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier.clipToBounds()) {
+        MobileArtworkReflectionLayer(
+            track = track,
+            artworkSize = artworkSize,
+            blendOverlap = blendOverlap,
+        )
+    }
+}
+
+private fun Modifier.mobileArtworkBottomFade(fadeHeight: Dp): Modifier {
+    if (fadeHeight <= 0.dp) return this
+    return this
+        .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
+        .drawWithContent {
+            drawContent()
+            val fadeStart = (1f - fadeHeight.toPx() / size.height).coerceIn(0f, 1f)
+            drawRect(
+                brush = Brush.verticalGradient(
+                    colorStops = arrayOf(
+                        0.00f to Color.White,
+                        (fadeStart * 0.92f).coerceIn(0f, 1f) to Color.White,
+                        fadeStart to Color.White.copy(alpha = 0.96f),
+                        (fadeStart + 0.34f).coerceAtMost(0.96f) to Color.White.copy(alpha = 0.30f),
+                        1.00f to Color.Transparent,
+                    ),
+                    startY = 0f,
+                    endY = size.height,
+                ),
+                blendMode = BlendMode.DstIn,
+            )
+        }
+}
+
+@Composable
+private fun MobileArtworkMetadataScrim(
+    blendOverlap: Dp,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier.drawBehind {
+            val overlapStop = (blendOverlap.toPx() / size.height).coerceIn(0f, 0.72f)
+            val brush = if (overlapStop > 0f) {
+                Brush.verticalGradient(
+                    colorStops = arrayOf(
+                        0.00f to Color.Transparent,
+                        (overlapStop * 0.55f) to Color.Black.copy(alpha = 0.10f),
+                        overlapStop to Color.Black.copy(alpha = 0.26f),
+                        1.00f to Color.Black.copy(alpha = 0.56f),
+                    ),
+                    startY = 0f,
+                    endY = size.height,
+                )
+            } else {
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color.Black.copy(alpha = 0.25f),
+                        Color.Black.copy(alpha = 0.55f),
+                    ),
+                    startY = 0f,
+                    endY = size.height,
+                )
+            }
+            drawRect(brush)
+        },
+    )
+}
+
+@Composable
+private fun BoxScope.MobileArtworkReflectionLayer(
+    track: Track,
+    artworkSize: Dp,
+    blendOverlap: Dp,
+) {
+    Box(
+        modifier = Modifier
+            .matchParentSize()
+            .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
+            .drawWithContent {
+                drawContent()
+                val overlapStop = (blendOverlap.toPx() / size.height).coerceIn(0f, 0.72f)
+                val reflectionMask = if (overlapStop > 0f) {
+                    Brush.verticalGradient(
+                        colorStops = arrayOf(
+                            0.00f to Color.Transparent,
+                            (overlapStop * 0.55f) to Color.White.copy(alpha = 0.28f),
+                            overlapStop to Color.White.copy(alpha = 0.92f),
+                            (overlapStop + 0.22f).coerceAtMost(0.78f) to Color.White.copy(alpha = 0.52f),
+                            0.88f to Color.White.copy(alpha = 0.10f),
+                            1.00f to Color.Transparent,
+                        ),
+                        startY = 0f,
+                        endY = size.height,
+                    )
+                } else {
+                    Brush.verticalGradient(
+                        colorStops = arrayOf(
+                            0.00f to Color.White.copy(alpha = 0.96f),
+                            0.18f to Color.White.copy(alpha = 0.80f),
+                            0.48f to Color.White.copy(alpha = 0.34f),
+                            0.78f to Color.White.copy(alpha = 0.08f),
+                            1.00f to Color.Transparent,
+                        ),
+                        startY = 0f,
+                        endY = size.height,
+                    )
+                }
+                drawRect(
+                    brush = reflectionMask,
+                    blendMode = BlendMode.DstIn,
+                )
+            },
+    ) {
+        val reflectionModifier = Modifier
+            .size(artworkSize)
+            .align(Alignment.TopCenter)
+            .graphicsLayer {
+                scaleY = -1f
+            }
+            .hazeEffect {
+                inputScale = HazeInputScale.Auto
+                blurEffect {
+                    blurRadius = 34.dp
+                    progressive = HazeProgressive.verticalGradient(
+                        startIntensity = 0f,
+                        endIntensity = 1f,
+                    )
+                    noiseFactor = 0f
+                }
+            }
+
+        TrackArtworkImage(
+            track = track,
+            modifier = reflectionModifier,
+            shape = RectangleShape,
+            elevated = false,
+            maxDecodeDimension = HeroArtworkMaxDecodeDimension,
+            alignment = Alignment.BottomCenter,
+        )
+    }
+}
+
+@Composable
+private fun BoxScope.MobileNowPlayingOverlayActions(
+    track: Track,
+    showFeedbackActions: Boolean,
+    showLikeControl: Boolean,
+    likeActions: LikeActions,
+    showListenBrainzFeedback: Boolean,
+    listenBrainzFeedbackTarget: ListenBrainzFeedbackTarget,
+    onListenBrainzFeedback: (ListenBrainzFeedbackScore) -> Unit,
+) {
+    AudioQualityBadge(
+        track = track,
+        onArtwork = true,
+        modifier = Modifier
+            .align(Alignment.TopEnd)
+            .padding(12.dp),
+    )
+    if (showFeedbackActions) {
+        Row(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(12.dp)
+                .clip(RoundedCornerShape(999.dp))
+                .background(PhoebeUi.canvasBackground.copy(alpha = 0.72f))
+                .padding(horizontal = 6.dp, vertical = 5.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (showLikeControl) {
+                LikeButton(
+                    liked = likeActions.isLiked(track),
+                    enabled = true,
+                    onClick = { likeActions.onToggleLiked(track) },
+                )
+            }
+            if (showListenBrainzFeedback) {
+                ListenBrainzFeedbackControls(
+                    target = listenBrainzFeedbackTarget,
+                    onFeedback = onListenBrainzFeedback,
+                    horizontalVotes = true,
+                    showVoteBorders = false,
                 )
             }
         }

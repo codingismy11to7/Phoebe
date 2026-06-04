@@ -109,6 +109,36 @@ class RealAudioPlaybackInstrumentedTest {
     }
 
     @Test
+    fun repeatedMedia3StartsDoNotLeaveLoadedTrackPaused() = runBlocking {
+        assumeRealAudioTestsEnabled()
+        val diagnostics = RecordingPlaybackDiagnostics()
+        val player = AndroidAudioPlayer(diagnostics)
+        try {
+            val first = fixtureTrack(copyAssetFixture("wikimedia-example.mp3"), durationMs = 10_000, id = "repeat-first")
+            val second = fixtureTrack(copyAssetFixture("mdn-t-rex-roar-cc0.mp3"), durationMs = 2_500, id = "repeat-second")
+            val queue = listOf(first, second)
+
+            repeat(16) { attempt ->
+                val index = attempt % queue.size
+                val requested = queue[index]
+                player.play(queue, index)
+
+                val started = waitUntil(timeoutMs = 8_000L) {
+                    val state = player.state.value
+                    state.currentTrack?.id == requested.id &&
+                        (state.isPlaying || state.positionMs > 250L || diagnostics.hasPlayingEvent(PlaybackEnginePath.Media3))
+                }
+                assertTrue(
+                    started,
+                    "Attempt $attempt loaded ${requested.id} without starting. state=${player.state.value}",
+                )
+            }
+        } finally {
+            player.releaseForTests()
+        }
+    }
+
+    @Test
     fun media3CrossfadeRampsVolumesCommitsAndKeepsAdvancing() = runBlocking {
         assumeRealAudioTestsEnabled()
         val diagnostics = RecordingPlaybackDiagnostics()

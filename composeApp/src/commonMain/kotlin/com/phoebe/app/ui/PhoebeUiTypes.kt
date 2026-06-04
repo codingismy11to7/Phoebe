@@ -236,6 +236,7 @@ internal enum class PhoebeIcon {
     Grid,
     Close,
     Check,
+    Visualizer,
 }
 
 /** When showing tracks outside Library (e.g. Search), show all optional metadata columns. */

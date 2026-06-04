@@ -64,6 +64,7 @@ import com.phoebe.app.domain.AppSettings
 import com.phoebe.app.domain.HomeSection
 import com.phoebe.app.domain.ListenBrainzCredentialStorageStatus
 import com.phoebe.app.domain.LibraryUiPreferences
+import com.phoebe.app.domain.NowPlayingVisualizerPreset
 import com.phoebe.app.domain.PersonalMixPreferences
 import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.providerLabel
@@ -104,6 +105,8 @@ internal fun SettingsDesktopView(
     onScanLibraryOnLaunch: (Boolean) -> Unit,
     onNotifyWhenDownloadFinishes: (Boolean) -> Unit,
     onPersistEqualizerSettings: (Boolean) -> Unit = {},
+    onVisualizerPreset: (NowPlayingVisualizerPreset) -> Unit = {},
+    onBlurredArtworkAppearance: (Boolean) -> Unit = {},
     onHomeSections: (List<HomeSection>) -> Unit,
     onPersonalMix: (PersonalMixPreferences) -> Unit,
     onGridColumns: (Int) -> Unit,
@@ -165,6 +168,10 @@ internal fun SettingsDesktopView(
                         onTintChange,
                         homeScreenLayoutMode,
                         onHomeScreenLayoutModeChange,
+                        appSettings.nowPlayingVisualizerPreset,
+                        onVisualizerPreset,
+                        appSettings.blurredArtworkAppearance,
+                        onBlurredArtworkAppearance,
                     )
                     SettingsCategory.AudioPlayback -> AudioPlaybackSettingsCard(
                         settings = appSettings,
@@ -223,6 +230,8 @@ internal fun SettingsMobileView(
     onScanLibraryOnLaunch: (Boolean) -> Unit,
     onNotifyWhenDownloadFinishes: (Boolean) -> Unit,
     onPersistEqualizerSettings: (Boolean) -> Unit = {},
+    onVisualizerPreset: (NowPlayingVisualizerPreset) -> Unit = {},
+    onBlurredArtworkAppearance: (Boolean) -> Unit = {},
     onHomeSections: (List<HomeSection>) -> Unit,
     onPersonalMix: (PersonalMixPreferences) -> Unit,
     onGridColumns: (Int) -> Unit,
@@ -266,6 +275,11 @@ internal fun SettingsMobileView(
             onTintChange,
             homeScreenLayoutMode,
             onHomeScreenLayoutModeChange,
+            appSettings.nowPlayingVisualizerPreset,
+            onVisualizerPreset,
+            appSettings.blurredArtworkAppearance,
+            onBlurredArtworkAppearance,
+            compact = true,
         )
         SectionLabel("LIBRARY", PhoebeUi.accentLight)
         GridSettingsCard(libraryUi.gridColumns, onGridColumns, compact = true)
@@ -340,6 +354,11 @@ private fun AppearanceSettingsCard(
     onTintChange: (String) -> Unit,
     homeScreenLayoutMode: HomeScreenLayoutMode,
     onHomeScreenLayoutModeChange: (HomeScreenLayoutMode) -> Unit,
+    nowPlayingVisualizerPreset: NowPlayingVisualizerPreset,
+    onVisualizerPreset: (NowPlayingVisualizerPreset) -> Unit,
+    blurredArtworkAppearance: Boolean,
+    onBlurredArtworkAppearance: (Boolean) -> Unit,
+    compact: Boolean = false,
 ) {
     SettingsCard {
         Text("Appearance", color = PhoebeUi.primaryText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
@@ -365,11 +384,40 @@ private fun AppearanceSettingsCard(
             )
         }
         Spacer(Modifier.height(18.dp))
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Blurred artwork appearance", color = PhoebeUi.primaryText, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                Text("Use the soft reflected artwork panel in fullscreen Now Playing", color = PhoebeUi.secondaryText, fontSize = 12.sp)
+            }
+            Switch(
+                checked = blurredArtworkAppearance,
+                onCheckedChange = onBlurredArtworkAppearance,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = PhoebeUi.accentLight,
+                    uncheckedThumbColor = Color.White,
+                    uncheckedTrackColor = PhoebeUi.progressTrack,
+                ),
+            )
+        }
+        Spacer(Modifier.height(18.dp))
         Text("Mobile Home layout", color = PhoebeUi.primaryText, fontSize = 14.sp, fontWeight = FontWeight.Medium)
         Spacer(Modifier.height(10.dp))
         HomeLayoutModeControl(
             selected = homeScreenLayoutMode,
             onSelected = onHomeScreenLayoutModeChange,
+        )
+        Spacer(Modifier.height(18.dp))
+        Text("Now Playing visualizer", color = PhoebeUi.primaryText, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.height(10.dp))
+        VisualizerPresetSelector(
+            selected = nowPlayingVisualizerPreset,
+            onSelected = onVisualizerPreset,
+            compact = compact,
         )
         Spacer(Modifier.height(18.dp))
         Text("Tint", color = PhoebeUi.primaryText, fontSize = 14.sp, fontWeight = FontWeight.Medium)

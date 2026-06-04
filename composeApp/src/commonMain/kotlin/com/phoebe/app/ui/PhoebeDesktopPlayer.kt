@@ -72,6 +72,8 @@ internal fun DesktopPlayer(
     val equalizerProfile = playbackState.equalizerProfile
     val persistEqualizerSettings = playbackState.persistEqualizerSettings
     val equalizerRemoteUnavailable = playbackState.equalizerRemoteUnavailable
+    val visualizerPreset = playbackState.visualizerPreset
+    val audioAnalysis = playbackState.audioAnalysis
     val homeUiState = browseState.homeUiState
     val playHistory = browseState.playHistory
     val searchQuery = browseState.searchQuery
@@ -152,6 +154,7 @@ internal fun DesktopPlayer(
     val onEqualizerGain = playbackActions.onEqualizerGain
     val onEqualizerReset = playbackActions.onEqualizerReset
     val onPersistEqualizerSettings = playbackActions.onPersistEqualizerSettings
+    val onVisualizerPreset = playbackActions.onVisualizerPreset
     val onListenBrainzFeedback = playbackActions.onListenBrainzFeedback
     val onPlayQueue = playbackActions.onPlayQueue
     val onClearQueue = playbackActions.onClearQueue
@@ -186,6 +189,8 @@ internal fun DesktopPlayer(
     val onScanLibraryOnLaunch = settingsActions.onScanLibraryOnLaunch
     val onNotifyWhenDownloadFinishes = settingsActions.onNotifyWhenDownloadFinishes
     val onPersistEqualizerSettingsFromSettings = settingsActions.onPersistEqualizerSettings
+    val onVisualizerPresetFromSettings = settingsActions.onVisualizerPreset
+    val onBlurredArtworkAppearance = settingsActions.onBlurredArtworkAppearance
     val onDownloadDirectory = settingsActions.onDownloadDirectory
     val onDeleteAllDownloads = settingsActions.onDeleteAllDownloads
     val onUseLightAppearanceChange = settingsActions.onUseLightAppearanceChange
@@ -258,7 +263,9 @@ internal fun DesktopPlayer(
                                     ) { targetRoute ->
                                         val targetResolution = resolvePhoebeRoute(targetRoute, catalog, track)
                                         val missingRoute = targetResolution as? PhoebeRouteResolution.Missing
-                                        val targetScreen = (targetResolution as? PhoebeRouteResolution.Resolved)?.screen ?: AppScreen.Home
+                                        val targetScreenRaw = (targetResolution as? PhoebeRouteResolution.Resolved)?.screen ?: AppScreen.Home
+                                        // When Artwork is selected, Player screen should not occupy the panel — show existing content instead
+                                        val targetScreen = if (targetScreenRaw == AppScreen.Player && !visualizerPreset.isVisualizer) AppScreen.Home else targetScreenRaw
                                         if (missingRoute != null) {
                                             MissingRouteFallback(
                                                 title = missingRoute.title,
@@ -451,6 +458,15 @@ internal fun DesktopPlayer(
                                     onBack = onPopDetail,
                                     modifier = Modifier.fillMaxSize(),
                                 )
+                                AppScreen.Player -> DesktopNowPlayingVisualizerView(
+                                    track = track,
+                                    preset = visualizerPreset,
+                                    audioAnalysis = audioAnalysis,
+                                    isPlaying = isPlaying,
+                                    positionMs = positionMs,
+                                    onPreset = onVisualizerPreset,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
                                 else -> when {
                                     section == BrowseSection.Home && selectedPlaylistId == null -> {
                                         val homeListState = RetainedLazyListStates.remember("desktop-home")
@@ -551,6 +567,8 @@ internal fun DesktopPlayer(
                                         onScanLibraryOnLaunch = onScanLibraryOnLaunch,
                                         onNotifyWhenDownloadFinishes = onNotifyWhenDownloadFinishes,
                                         onPersistEqualizerSettings = onPersistEqualizerSettingsFromSettings,
+                                        onVisualizerPreset = onVisualizerPresetFromSettings,
+                                        onBlurredArtworkAppearance = onBlurredArtworkAppearance,
                                         onHomeSections = onHomeSections,
                                         onPersonalMix = onPersonalMix,
                                         onGridColumns = onGridColumns,
@@ -633,6 +651,7 @@ internal fun DesktopPlayer(
                             equalizerProfile = equalizerProfile,
                             persistEqualizerSettings = persistEqualizerSettings,
                             equalizerRemoteUnavailable = equalizerRemoteUnavailable,
+                            visualizerPreset = visualizerPreset,
                             compact = compact,
                             lyricsVisible = section == BrowseSection.Lyrics && selectedPlaylistId == null,
                             upNextVisible = showQueue && desktopUpNextExpanded,
@@ -650,6 +669,7 @@ internal fun DesktopPlayer(
                             onEqualizerGain = onEqualizerGain,
                             onEqualizerReset = onEqualizerReset,
                             onPersistEqualizerSettings = onPersistEqualizerSettings,
+                            onVisualizerPreset = onVisualizerPreset,
                             onListenBrainzFeedback = onListenBrainzFeedback,
                             onToggleUpNext = { desktopUpNextExpanded = !desktopUpNextExpanded },
                             onCast = onCast,

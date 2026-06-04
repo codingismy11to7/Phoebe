@@ -69,7 +69,8 @@ CREATE TABLE TrackParentRow (
     parentId TEXT NOT NULL,
     trackId TEXT NOT NULL,
     position INTEGER NOT NULL,
-    PRIMARY KEY (parentId, trackId)
+    playlistItemId INTEGER,
+    PRIMARY KEY (parentId, position)
 );
 
 CREATE INDEX TrackParentRow_parent_position ON TrackParentRow(parentId, position);
@@ -143,7 +144,7 @@ selectTrackDateAddedForIds:
 SELECT id, dateAddedMs FROM TrackRow WHERE id IN :ids;
 
 selectTrackParents:
-SELECT parentId, trackId, position FROM TrackParentRow ORDER BY parentId, position;
+SELECT parentId, trackId, position, playlistItemId FROM TrackParentRow ORDER BY parentId, position;
 
 selectCollectionTags:
 SELECT * FROM CollectionTagRow;
@@ -198,7 +199,7 @@ INSERT OR REPLACE INTO TrackRow(
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 upsertTrackParent:
-INSERT OR REPLACE INTO TrackParentRow(parentId, trackId, position) VALUES (?, ?, ?);
+INSERT OR REPLACE INTO TrackParentRow(parentId, trackId, position, playlistItemId) VALUES (?, ?, ?, ?);
 
 upsertCollectionTag:
 INSERT OR REPLACE INTO CollectionTagRow(target, facet, itemId, value) VALUES (?, ?, ?, ?);

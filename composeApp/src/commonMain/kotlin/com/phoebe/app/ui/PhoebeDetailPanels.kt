@@ -109,6 +109,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
@@ -426,6 +427,7 @@ internal fun FlippableSongArtwork(
     modifier: Modifier = Modifier,
     artworkModifier: Modifier = Modifier,
     radius: Dp = 10.dp,
+    shape: Shape = RoundedCornerShape(radius),
     maxDecodeDimension: Int = ListArtworkMaxDecodeDimension,
     frontOverlay: @Composable BoxScope.() -> Unit = {},
 ) {
@@ -435,7 +437,6 @@ internal fun FlippableSongArtwork(
         animationSpec = tween(durationMillis = 520, easing = FastOutSlowInEasing),
         label = "songArtworkFlip",
     )
-    val shape = RoundedCornerShape(radius)
     val density = LocalDensity.current
 
     Box(
@@ -449,8 +450,8 @@ internal fun FlippableSongArtwork(
     ) {
         if (rotation <= 90f) {
             TrackArtworkImage(
-                track,
-                Modifier
+                track = track,
+                modifier = Modifier
                     .fillMaxSize()
                     .then(artworkModifier)
                     .combinedClickable(
@@ -458,6 +459,7 @@ internal fun FlippableSongArtwork(
                         onLongClick = { showingDetails = true },
                     ),
                 radius = radius,
+                shape = shape,
                 maxDecodeDimension = maxDecodeDimension,
             )
             frontOverlay()
@@ -478,7 +480,7 @@ internal fun FlippableSongArtwork(
 private fun SongArtworkDetailBack(
     track: Track,
     modifier: Modifier,
-    shape: RoundedCornerShape,
+    shape: Shape,
 ) {
     val nowMs = LocalNowMs.current
     val playHistory = LocalPlayHistory.current
@@ -2160,7 +2162,7 @@ internal fun PlaylistDetailPanel(
                             showLeadingHandle = reorderEnabled,
                         )
                     }
-                    itemsIndexed(displayTracks, key = { _, t -> t.id }, contentType = { _, _ -> "playlist-track" }) { index, track ->
+                    itemsIndexed(displayTracks, key = { _, t -> t.reorderKey() }, contentType = { _, _ -> "playlist-track" }) { index, track ->
                         SongRow(
                             track = track,
                             selected = false,
@@ -2178,7 +2180,7 @@ internal fun PlaylistDetailPanel(
                         )
                     }
                 } else {
-                    itemsIndexed(displayTracks, key = { _, t -> t.id }, contentType = { _, _ -> "playlist-track" }) { index, track ->
+                    itemsIndexed(displayTracks, key = { _, t -> t.reorderKey() }, contentType = { _, _ -> "playlist-track" }) { index, track ->
                         MobileSongRow(
                             track = track,
                             columns = libraryUi.columns,

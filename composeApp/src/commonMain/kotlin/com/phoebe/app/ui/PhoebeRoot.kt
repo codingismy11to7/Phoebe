@@ -312,6 +312,7 @@ private fun PhoebeRootStateHolder(
     val libraries by state.libraries.collectAsState()
     val libraryUi by state.libraryUi.collectAsState()
     val appSettings by state.appSettings.collectAsState()
+    val audioAnalysis by state.audioAnalysis.collectAsState()
     val listenBrainzFeedbackTarget by state.listenBrainzFeedbackTarget.collectAsState()
     val equalizerProfile by state.equalizerProfile.collectAsState()
     val equalizerRemoteUnavailable by state.equalizerRemoteUnavailable.collectAsState()
@@ -644,14 +645,19 @@ private fun PhoebeRootStateHolder(
         if (tracks.isEmpty()) return@playTracksFromMobile
         val collectionMixSeed = navigator.routes.collectionMixSeed()
         val previewIndex = index.coerceIn(0, tracks.lastIndex)
-        pendingMobilePlaybackPreview = PendingMobilePlaybackPreview(tracks, previewIndex)
-        navigator.openPlayer()
         pendingMobilePlaybackJob?.cancel()
-        state.playTracks(
+        pendingMobilePlaybackJob = null
+        val playbackAccepted = state.playTracks(
             tracks = tracks,
             index = index,
             collectionMixSeed = collectionMixSeed,
         )
+        if (!playbackAccepted) {
+            pendingMobilePlaybackPreview = null
+            return@playTracksFromMobile
+        }
+        pendingMobilePlaybackPreview = PendingMobilePlaybackPreview(tracks, previewIndex)
+        navigator.openPlayer()
         pendingMobilePlaybackJob = mobilePlaybackScope.launch {
             delay(1_500L)
             if (pendingMobilePlaybackPreview?.currentTrack?.id == tracks.getOrNull(previewIndex)?.id) {
@@ -1327,6 +1333,8 @@ private fun PhoebeRootStateHolder(
                         onScanLibraryOnLaunch = state::setScanLibraryOnLaunch,
                         onNotifyWhenDownloadFinishes = state::setNotifyWhenDownloadFinishes,
                         onPersistEqualizerSettings = state::setPersistEqualizerSettings,
+                        onVisualizerPreset = state::setNowPlayingVisualizerPreset,
+                        onBlurredArtworkAppearance = state::setBlurredArtworkAppearance,
                         downloadDirectory = downloadDirectory,
                         downloadCount = catalog.downloads.size,
                         defaultDownloadDirectoryLabel = state.defaultDownloadDirectoryLabel,
@@ -1469,6 +1477,8 @@ private fun PhoebeRootStateHolder(
                         equalizerProfile = equalizerProfile,
                         persistEqualizerSettings = appSettings.persistEqualizerSettings,
                         equalizerRemoteUnavailable = equalizerRemoteUnavailable,
+                        visualizerPreset = appSettings.nowPlayingVisualizerPreset,
+                        audioAnalysis = audioAnalysis,
                     ),
                     playbackActions = PlaybackActions(
                         onToggle = state::togglePlayPause,
@@ -1484,6 +1494,18 @@ private fun PhoebeRootStateHolder(
                         onEqualizerGain = state::setEqualizerGain,
                         onEqualizerReset = state::resetEqualizer,
                         onPersistEqualizerSettings = state::setPersistEqualizerSettings,
+                        onVisualizerPreset = { preset ->
+                            state.setNowPlayingVisualizerPreset(preset)
+                            if (preset.isVisualizer) {
+                                if (navigator.currentRoute != PhoebeRoute.Player) {
+                                    navigator.openPlayer()
+                                }
+                            } else {
+                                if (navigator.currentRoute == PhoebeRoute.Player) {
+                                    navigator.pop()
+                                }
+                            }
+                        },
                         onListenBrainzFeedback = state::submitListenBrainzFeedback,
                         onLyrics = {
                             selectedPlaylistId = null
@@ -1637,6 +1659,8 @@ private fun PhoebeRootStateHolder(
                         onScanLibraryOnLaunch = state::setScanLibraryOnLaunch,
                         onNotifyWhenDownloadFinishes = state::setNotifyWhenDownloadFinishes,
                         onPersistEqualizerSettings = state::setPersistEqualizerSettings,
+                        onVisualizerPreset = state::setNowPlayingVisualizerPreset,
+                        onBlurredArtworkAppearance = state::setBlurredArtworkAppearance,
                         onDownloadDirectory = state::setDownloadDirectory,
                         onDeleteAllDownloads = state::deleteAllDownloads,
                         onUseLightAppearanceChange = onUseLightAppearanceChange,
@@ -1873,6 +1897,7 @@ private fun MobilePlayerHost(
 ) {
     val player by appState.player.collectAsState()
     val appSettings by appState.appSettings.collectAsState()
+    val audioAnalysis by appState.audioAnalysis.collectAsState()
     val equalizerProfile by appState.equalizerProfile.collectAsState()
     val equalizerRemoteUnavailable by appState.equalizerRemoteUnavailable.collectAsState()
     val listenBrainzFeedbackTarget by appState.listenBrainzFeedbackTarget.collectAsState()
@@ -1894,6 +1919,9 @@ private fun MobilePlayerHost(
         equalizerProfile = equalizerProfile,
         persistEqualizerSettings = appSettings.persistEqualizerSettings,
         equalizerRemoteUnavailable = equalizerRemoteUnavailable,
+        visualizerPreset = appSettings.nowPlayingVisualizerPreset,
+        blurredArtworkAppearance = appSettings.blurredArtworkAppearance,
+        audioAnalysis = audioAnalysis,
         onToggle = onToggle,
         onPrevious = onPrevious,
         onNext = onNext,
@@ -1912,6 +1940,7 @@ private fun MobilePlayerHost(
         onEqualizerGain = appState::setEqualizerGain,
         onEqualizerReset = appState::resetEqualizer,
         onPersistEqualizerSettings = appState::setPersistEqualizerSettings,
+        onVisualizerPreset = appState::setNowPlayingVisualizerPreset,
         onListenBrainzFeedback = appState::submitListenBrainzFeedback,
         onBack = onBack,
         onSwipeDismiss = onSwipeDismiss,

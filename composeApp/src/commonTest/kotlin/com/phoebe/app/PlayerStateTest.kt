@@ -342,6 +342,28 @@ class PlayerStateTest {
     }
 
     @Test
+    fun forcedStartupBufferingSurvivesPlayableBufferUntilAutoplayConfirmed() {
+        val player = PlatformStateTestPlayer()
+        val tracks = listOf(
+            Track("t1", "One", "Artist", "Album", 60_000, "http://a", ""),
+        )
+
+        player.play(tracks, 0)
+        player.platformPlayback(
+            positionMs = 0L,
+            durationMs = 60_000L,
+            bufferedPositionMs = 20_000L,
+            isPlaying = false,
+            isBuffering = true,
+            forceBuffering = true,
+        )
+
+        assertTrue(player.state.value.isBuffering)
+        assertFalse(player.state.value.isPlaying)
+        assertEquals(20_000L, player.state.value.bufferedPositionMs)
+    }
+
+    @Test
     fun bufferingStateRemainsWhilePlayableBufferIsUnavailable() {
         val player = PlatformStateTestPlayer()
         val tracks = listOf(
@@ -612,6 +634,25 @@ class PlayerStateTest {
     }
 
     @Test
+    fun shuffledStartMarksShuffleWithoutQueueEdit() {
+        val player = QueueEditHookTestPlayer()
+        val tracks = listOf(
+            Track("t1", "One", "Artist", "Album", 60_000, "http://a", ""),
+            Track("t3", "Three", "Artist", "Album", 120_000, "http://c", ""),
+            Track("t2", "Two", "Artist", "Album", 90_000, "http://b", ""),
+        )
+
+        player.playShuffled(tracks, 0)
+
+        assertEquals(tracks[0], player.state.value.currentTrack)
+        assertEquals(listOf("t1", "t3", "t2"), player.state.value.queue.map { it.id })
+        assertTrue(player.state.value.shuffle)
+        assertTrue(player.state.value.isPlaying)
+        assertEquals(-2, player.lastEditedCurrentIndex)
+        assertTrue(player.lastEditedQueue.isEmpty())
+    }
+
+    @Test
     fun clearingQueueNotifiesPlatformToDropFutureItems() {
         val player = QueueEditHookTestPlayer()
         val tracks = listOf(
@@ -843,6 +884,7 @@ private class PlatformStateTestPlayer : SimpleAudioPlayer() {
         bufferedPositionMs: Long,
         isPlaying: Boolean = true,
         isBuffering: Boolean = false,
+        forceBuffering: Boolean = false,
     ) {
         applyPlatformPlayback(
             positionMs = positionMs,
@@ -850,6 +892,7 @@ private class PlatformStateTestPlayer : SimpleAudioPlayer() {
             isPlaying = isPlaying,
             isBuffering = isBuffering,
             bufferedPositionMs = bufferedPositionMs,
+            forceBuffering = forceBuffering,
         )
     }
 

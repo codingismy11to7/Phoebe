@@ -285,6 +285,32 @@ internal fun PhoebeIconView(
                 line(0.22f, 0.52f, 0.42f, 0.72f)
                 line(0.42f, 0.72f, 0.80f, 0.30f)
             }
+            PhoebeIcon.Visualizer -> {
+                val outerRadius = s * 0.42f
+                val strokeW = (s * 0.065f).coerceAtLeast(1.5f)
+                val barW = (s * 0.065f).coerceAtLeast(1.5f)
+                // Draw outer circle
+                drawCircle(
+                    color = tint,
+                    radius = outerRadius,
+                    center = p(0.50f, 0.50f),
+                    style = Stroke(width = strokeW),
+                )
+                // Draw five vertical bars with round caps
+                val spacing = 0.11f
+                val barHeights = listOf(0.26f, 0.42f, 0.56f, 0.42f, 0.26f)
+                repeat(5) { i ->
+                    val x = 0.50f + (i - 2) * spacing
+                    val h = barHeights[i]
+                    drawLine(
+                        color = tint,
+                        start = p(x, 0.50f - h / 2f),
+                        end = p(x, 0.50f + h / 2f),
+                        strokeWidth = barW,
+                        cap = StrokeCap.Round,
+                    )
+                }
+            }
             else -> Unit
         }
     }
@@ -333,5 +359,6 @@ private fun PhoebeIcon.drawableResource(filled: Boolean): DrawableResource? =
         PhoebeIcon.Grid,
         PhoebeIcon.Close,
         PhoebeIcon.Check,
+        PhoebeIcon.Visualizer,
         -> null
     }

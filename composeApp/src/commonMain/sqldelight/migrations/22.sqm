@@ -1,0 +1,20 @@
+DROP INDEX IF EXISTS TrackParentRow_parent_position;
+
+CREATE TABLE TrackParentRow_new (
+    parentId TEXT NOT NULL,
+    trackId TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    playlistItemId INTEGER,
+    PRIMARY KEY (parentId, position)
+);
+
+INSERT INTO TrackParentRow_new(parentId, trackId, position, playlistItemId)
+SELECT parentId, trackId, position, NULL
+FROM TrackParentRow
+ORDER BY parentId, position;
+
+DROP TABLE TrackParentRow;
+
+ALTER TABLE TrackParentRow_new RENAME TO TrackParentRow;
+
+CREATE INDEX TrackParentRow_parent_position ON TrackParentRow(parentId, position);

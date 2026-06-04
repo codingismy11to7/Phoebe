@@ -1,14 +1,26 @@
 package com.phoebe.app.player
 
 import com.phoebe.app.domain.EqualizerProfile
+import com.phoebe.app.domain.AudioAnalysisFrame
 import com.phoebe.app.domain.PlayerState
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+
+private val EmptyAudioAnalysisState = MutableStateFlow(AudioAnalysisFrame.Empty)
 
 interface AudioPlayer {
     val state: StateFlow<PlayerState>
+    val audioAnalysis: StateFlow<AudioAnalysisFrame>
+        get() = EmptyAudioAnalysisState
+
     fun play(queue: List<Track>, startIndex: Int = 0)
+    fun playShuffled(queue: List<Track>, startIndex: Int = 0) {
+        play(queue, startIndex)
+        setShuffle(true)
+    }
+
     fun prepare(queue: List<Track>, startIndex: Int = 0, positionMs: Long = 0L) {
         play(queue, startIndex)
         if (positionMs > 0L) seekTo(positionMs)

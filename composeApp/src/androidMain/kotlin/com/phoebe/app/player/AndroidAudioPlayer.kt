@@ -12,6 +12,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.phoebe.app.AndroidContextHolder
+import com.phoebe.app.domain.AudioAnalysisSource
 import com.phoebe.app.domain.EqualizerProfile
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
@@ -33,6 +34,8 @@ import kotlin.coroutines.resumeWithException
 import kotlin.math.abs
 
 actual fun createAudioPlayer(): AudioPlayer = AndroidAudioPlayerHolder.instance
+
+internal const val AndroidAutoplayConfirmedPositionMs = 250L
 
 internal object AndroidAudioPlayerHolder {
     private val player: AndroidAudioPlayer by lazy { AndroidAudioPlayer() }
@@ -90,6 +93,7 @@ internal class AndroidAudioPlayer(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var controller: MediaController? = null
     private var positionSyncJob: Job? = null
+    private var positionSyncGeneration = -1
     private var platformLoadJob: Job? = null
     private var platformStopJob: Job? = null
     private var seekJob: Job? = null
@@ -139,6 +143,9 @@ internal class AndroidAudioPlayer(
 
     init {
         AndroidPlaybackDiagnostics.diagnostics = diagnostics
+        AndroidAudioAnalysisState.sink = { samples, sampleRateHz ->
+            publishAudioAnalysisPcm(samples, sampleRateHz, AudioAnalysisSource.Pcm)
+        }
         AndroidPlaybackBridge.onSkipNext = { next() }
         AndroidPlaybackBridge.onSkipPrevious = { previous() }
         AndroidPlaybackBridge.hasNextTrack = { hasNextTrack() }
@@ -241,6 +248,7 @@ internal class AndroidAudioPlayer(
         platformLoadJob?.cancel()
         platformLoadJob = null
         stopAndroidCrossfade()
+        stopPositionSyncLoop()
         stopBufferingTimeout()
         stopRetry()
         loadedPlatformQueue = null
@@ -730,7 +738,12 @@ internal class AndroidAudioPlayer(
         stopRetry()
         resetRetries(generation)
         diagnostics.engineSelected(PlaybackEnginePath.Media3)
+        stopPositionSyncLoop()
+        if (playWhenReady) {
+            markPendingAutoplay(generation)
+        }
         platformLoadJob = scope.launch {
+            var shouldSyncAfterMutation = false
             try {
                 startPlaybackService()
                 ensureController()
@@ -761,12 +774,13 @@ internal class AndroidAudioPlayer(
                                     )
                                 }
                             }
-                        if (isPlayRequestCurrent(generation)) {
-                            syncFromController(generation)
-                        }
+                        shouldSyncAfterMutation = isPlayRequestCurrent(generation)
                     } finally {
                         appControllerMutationInProgress = false
                     }
+                }
+                if (shouldSyncAfterMutation) {
+                    syncFromController(generation)
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -899,11 +913,16 @@ internal class AndroidAudioPlayer(
             bufferedPositionMs = bufferedPosition,
             durationMs = durationMs,
         )
-        val autoplayPending = pendingAutoplayGeneration == generation &&
-            playWhenReady &&
-            appState.currentTrack != null &&
-            player.playbackState != Player.STATE_ENDED &&
-            !player.isPlaying
+        val retainPendingAutoplay = shouldRetainPendingAutoplay(
+            pendingGeneration = pendingAutoplayGeneration,
+            generation = generation,
+            playWhenReady = playWhenReady,
+            hasCurrentTrack = appState.currentTrack != null,
+            playerIsPlaying = player.isPlaying,
+            playbackState = player.playbackState,
+            positionMs = controllerPosition,
+        )
+        val autoplayPending = retainPendingAutoplay && !player.isPlaying
         if (autoplayPending) {
             if (!appControllerMutationInProgress) {
                 player.play()
@@ -929,12 +948,13 @@ internal class AndroidAudioPlayer(
                 isBuffering = true,
                 bufferedPositionMs = bufferedPosition,
                 generation = generation,
+                forceBuffering = true,
             )
             startBufferingTimeout(generation)
             startPositionSyncLoop(generation)
             return
         }
-        if (player.isPlaying && pendingAutoplayGeneration == generation) {
+        if (pendingAutoplayGeneration == generation && !retainPendingAutoplay) {
             clearPendingAutoplay()
         }
         val transientPauseDuringAppLoad = playWhenReady && appState.isBuffering && !player.playWhenReady
@@ -943,7 +963,7 @@ internal class AndroidAudioPlayer(
             startPositionSyncLoop(generation)
             return
         }
-        if (!appControllerMutationInProgress) {
+        if (shouldAdoptPlatformPlayIntent(appControllerMutationInProgress, platformTrackId, appState.currentTrack?.id)) {
             adoptPlatformPlayIntent(player.playWhenReady)
         }
         reportPlaybackDiagnostics(
@@ -1010,14 +1030,24 @@ internal class AndroidAudioPlayer(
     }
 
     private fun startPositionSyncLoop(generation: Int) {
-        if (positionSyncJob?.isActive == true) return
+        if (positionSyncJob?.isActive == true) {
+            if (positionSyncGeneration == generation) return
+            stopPositionSyncLoop()
+        }
+        positionSyncGeneration = generation
         positionSyncJob = scope.launch {
-            while (isActive && isPlayRequestCurrent(generation)) {
-                val player = activeLocalPlayer() ?: break
-                delay(positionSyncIntervalMs(player))
-                if (!controllerMatchesAppState(player, generation)) break
-                syncFromController(generation)
-                if (!shouldKeepPlatformSyncing(player, generation)) break
+            try {
+                while (isActive && isPlayRequestCurrent(generation)) {
+                    val player = activeLocalPlayer() ?: break
+                    delay(positionSyncIntervalMs(player))
+                    if (!controllerMatchesAppState(player, generation)) break
+                    syncFromController(generation)
+                    if (!shouldKeepPlatformSyncing(player, generation)) break
+                }
+            } finally {
+                if (positionSyncGeneration == generation) {
+                    positionSyncGeneration = -1
+                }
             }
         }
     }
@@ -1046,6 +1076,7 @@ internal class AndroidAudioPlayer(
     private fun stopPositionSyncLoop() {
         positionSyncJob?.cancel()
         positionSyncJob = null
+        positionSyncGeneration = -1
     }
 
     private suspend fun waitForPlatformSeek(
@@ -1161,6 +1192,7 @@ internal class AndroidAudioPlayer(
                 isBuffering = true,
                 bufferedPositionMs = player.bufferedPosition.coerceAtLeast(positionMs).coerceAtLeast(0L),
                 generation = generation,
+                forceBuffering = true,
             )
             delay(delayMs)
             if (!isPlayRequestCurrent(generation) || !playWhenReady) return@launch
@@ -1238,6 +1270,28 @@ internal class AndroidAudioPlayer(
         const val CrossfadePrepareTimeoutMs = 5_000L
         const val CrossfadeMinimumFadeMs = 500L
     }
+}
+
+internal fun shouldRetainPendingAutoplay(
+    pendingGeneration: Int,
+    generation: Int,
+    playWhenReady: Boolean,
+    hasCurrentTrack: Boolean,
+    playerIsPlaying: Boolean,
+    playbackState: Int,
+    positionMs: Long,
+): Boolean {
+    if (pendingGeneration != generation || !playWhenReady || !hasCurrentTrack) return false
+    if (playbackState == Player.STATE_ENDED) return false
+    return !playerIsPlaying || positionMs < AndroidAutoplayConfirmedPositionMs
+}
+
+internal fun shouldAdoptPlatformPlayIntent(
+    appControllerMutationInProgress: Boolean,
+    platformTrackId: String?,
+    appTrackId: String?,
+): Boolean {
+    return !appControllerMutationInProgress && platformTrackId == appTrackId
 }
 
 private fun String.isHttpUrl(): Boolean =

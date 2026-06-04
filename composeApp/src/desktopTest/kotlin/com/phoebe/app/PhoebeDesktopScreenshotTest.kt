@@ -32,6 +32,7 @@ class PhoebeDesktopScreenshotTest {
             PhoebeScreenshotScenario.Album,
             PhoebeScreenshotScenario.Search,
             PhoebeScreenshotScenario.Player,
+            PhoebeScreenshotScenario.PlayerVisualizer,
             PhoebeScreenshotScenario.Settings,
             PhoebeScreenshotScenario.SignIn,
         ).forEach { scenario ->
@@ -67,6 +68,28 @@ class PhoebeDesktopScreenshotTest {
             waitForIdle()
             onRoot().captureRoboImage(
                 filePath = "src/screenshotTest/roborazzi/desktop-${scenario.name.lowercase()}-light.png",
+            )
+        }
+    }
+
+    @OptIn(ExperimentalTestApi::class, ExperimentalComposeUiApi::class)
+    @Test
+    fun desktopVisualizerPresetsDark() = runDesktopComposeUiTest(width = 1365, height = 900) {
+        listOf(
+            PhoebeScreenshotScenario.PlayerVisualizerAlchemy to "alchemy",
+            PhoebeScreenshotScenario.PlayerVisualizerBattery to "battery",
+            PhoebeScreenshotScenario.PlayerVisualizerBarsAndWaves to "bars-and-waves",
+            PhoebeScreenshotScenario.PlayerVisualizerBlazingColors to "blazing-colors",
+            PhoebeScreenshotScenario.PlayerVisualizerPlenoptic to "plenoptic",
+        ).forEach { (scenario, slug) ->
+            setContent {
+                Box(Modifier.size(1365.dp, 900.dp)) {
+                    PhoebeScreenshotApp(scenario = scenario)
+                }
+            }
+            waitForIdle()
+            onRoot().captureRoboImage(
+                filePath = "src/screenshotTest/roborazzi/desktop-player-visualizer-$slug-dark.png",
             )
         }
     }

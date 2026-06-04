@@ -8,6 +8,7 @@ import com.phoebe.app.domain.AppSettings
 import com.phoebe.app.domain.AppScreen
 import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.ArtistRadioAvailability
+import com.phoebe.app.domain.AudioAnalysisFrame
 import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.CollectionEntry
 import com.phoebe.app.domain.EqualizerProfile
@@ -21,6 +22,7 @@ import com.phoebe.app.domain.LyricsLoadState
 import com.phoebe.app.domain.MediaProviderType
 import com.phoebe.app.domain.MediaSourcesState
 import com.phoebe.app.domain.MusicLibrary
+import com.phoebe.app.domain.NowPlayingVisualizerPreset
 import com.phoebe.app.domain.PersonalMixPreferences
 import com.phoebe.app.domain.PlexRadioStation
 import com.phoebe.app.domain.PlexServer
@@ -61,6 +63,8 @@ internal data class PlaybackUiState(
     val equalizerProfile: EqualizerProfile = EqualizerProfile.Default,
     val persistEqualizerSettings: Boolean = false,
     val equalizerRemoteUnavailable: Boolean = false,
+    val visualizerPreset: NowPlayingVisualizerPreset = NowPlayingVisualizerPreset.Default,
+    val audioAnalysis: AudioAnalysisFrame = AudioAnalysisFrame.Empty,
 )
 
 internal data class PlaybackActions(
@@ -78,6 +82,7 @@ internal data class PlaybackActions(
     val onEqualizerGain: (Int, Float) -> Unit = { _, _ -> },
     val onEqualizerReset: () -> Unit = {},
     val onPersistEqualizerSettings: (Boolean) -> Unit = {},
+    val onVisualizerPreset: (NowPlayingVisualizerPreset) -> Unit = {},
     val onListenBrainzFeedback: (ListenBrainzFeedbackScore) -> Unit = {},
     val onPlayQueue: (Int) -> Unit,
     val onClearQueue: () -> Unit,
@@ -198,6 +203,8 @@ internal data class SettingsActions(
     val onScanLibraryOnLaunch: (Boolean) -> Unit,
     val onNotifyWhenDownloadFinishes: (Boolean) -> Unit,
     val onPersistEqualizerSettings: (Boolean) -> Unit = {},
+    val onVisualizerPreset: (NowPlayingVisualizerPreset) -> Unit = {},
+    val onBlurredArtworkAppearance: (Boolean) -> Unit = {},
     val onDownloadDirectory: (String?) -> Unit,
     val onDeleteAllDownloads: () -> Unit,
     val onUseLightAppearanceChange: (Boolean) -> Unit,

@@ -10,11 +10,19 @@ import com.phoebe.app.domain.DownloadState
 import com.phoebe.app.domain.Track
 import com.phoebe.app.platform.PlatformStorage
 import com.phoebe.app.platform.downloadParallelism
+import com.phoebe.app.testing.albumTracksJson
+import com.phoebe.app.testing.albumsJson
+import com.phoebe.app.testing.artistsJson
+import com.phoebe.app.testing.identityJson
 import com.phoebe.app.testing.newInMemoryPhoebeDatabase
+import com.phoebe.app.testing.playlistAddResponseJson
 import com.phoebe.app.testing.plexCatalogMockEngine
+import com.phoebe.app.testing.playlistsJson
+import com.phoebe.app.testing.playlistTracksJson
 import com.phoebe.app.testing.testHttpClient
 import com.phoebe.app.testing.testPlexSession
 import io.ktor.client.engine.mock.MockEngine
+import io.ktor.client.engine.mock.MockRequestHandleScope
 import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
@@ -118,6 +126,213 @@ class PlexPlaylistEndToEndDesktopTest {
         val tracks = repo.tracksForPlaylist(testPlexSession(), playlist)
 
         assertEquals(listOf("plex:t1", "plex:t2"), tracks.map { it.id })
+    }
+
+    @Test
+    fun movePlaylistTrackSyncsPlexMoveEndpoint() = runTest {
+        var movedItemId: Long? = null
+        var movedAfterItemId: Long? = -1L
+        val (db, sqlDriver) = newInMemoryPhoebeDatabase()
+        driver = sqlDriver
+        val http = testHttpClient(
+            plexCatalogMockEngine(
+                onPlaylistMove = { itemId, afterItemId ->
+                    movedItemId = itemId
+                    movedAfterItemId = afterItemId
+                },
+            ),
+        )
+        val repo = catalogRepository(db, http)
+
+        repo.refreshAggregated(testPlexSession())
+        val playlist = repo.catalog.value.playlists.single()
+        repo.tracksForPlaylist(testPlexSession(), playlist)
+        val moved = repo.movePlaylistTrack(testPlexSession(), playlist, fromIndex = 1, toIndex = 0)
+
+        assertTrue(moved)
+        assertEquals(102L, movedItemId)
+        assertEquals(null, movedAfterItemId)
+        assertEquals(
+            listOf("plex:t2", "plex:t1"),
+            repo.catalog.value.tracksByParent[playlist.id].orEmpty().map { it.id },
+        )
+    }
+
+    @Test
+    fun movePlaylistTrackRollsBackWhenPlexMoveFails() = runTest {
+        val (db, sqlDriver) = newInMemoryPhoebeDatabase()
+        driver = sqlDriver
+        val http = testHttpClient(plexCatalogMockEngine())
+        val repo = catalogRepository(db, http)
+
+        repo.refreshAggregated(testPlexSession())
+        val playlist = repo.catalog.value.playlists.single()
+        repo.tracksForPlaylist(testPlexSession(), playlist)
+        val moved = repo.movePlaylistTrack(testPlexSession(), playlist, fromIndex = 1, toIndex = 0)
+
+        assertFalse(moved)
+        assertEquals(
+            listOf("plex:t1", "plex:t2"),
+            repo.catalog.value.tracksByParent[playlist.id].orEmpty().map { it.id },
+        )
+    }
+
+    @Test
+    fun movePlaylistTrackPersistsWhenPlexMoveSucceedsButImmediateReadbackIsStale() = runTest {
+        var movedItemId: Long? = null
+        val (db, sqlDriver) = newInMemoryPhoebeDatabase()
+        driver = sqlDriver
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/library/sections/1/all" -> if (request.url.parameters["type"] == "10") {
+                    respondJson(albumTracksJson())
+                } else {
+                    respondJson(artistsJson())
+                }
+                "/library/sections/1/albums" -> respondJson(albumsJson())
+                "/playlists" -> respondJson(playlistsJson(trackCount = 2))
+                "/library/metadata/a1/children" -> respondJson(albumTracksJson())
+                "/playlists/p1/items" -> respondJson(playlistTracksJson(listOf(101L, 102L)))
+                "/playlists/p1/items/102/move" -> {
+                    movedItemId = 102L
+                    respondJson(playlistAddResponseJson(leafCount = 2))
+                }
+                "/identity" -> respondJson(identityJson())
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val repo = catalogRepository(db, testHttpClient(engine))
+
+        repo.refreshAggregated(testPlexSession())
+        val playlist = repo.catalog.value.playlists.single()
+        repo.tracksForPlaylist(testPlexSession(), playlist)
+        val moved = repo.movePlaylistTrack(testPlexSession(), playlist, fromIndex = 1, toIndex = 0)
+
+        assertTrue(moved)
+        assertEquals(102L, movedItemId)
+        assertEquals(
+            listOf("plex:t2", "plex:t1"),
+            repo.catalog.value.tracksByParent[playlist.id].orEmpty().map { it.id },
+        )
+        repo.awaitDatabaseIdle()
+        assertEquals(
+            listOf("plex:t2", "plex:t1"),
+            db.catalogQueries.selectTrackParents().awaitAsList()
+                .filter { it.parentId == playlist.id }
+                .map { it.trackId },
+        )
+    }
+
+    @Test
+    fun movePlaylistTrackUsesPlaylistItemIdForDuplicatePlexTracks() = runTest {
+        var movedItemId: Long? = null
+        var movedAfterItemId: Long? = null
+        val (db, sqlDriver) = newInMemoryPhoebeDatabase()
+        driver = sqlDriver
+        var playlistItemIds = listOf(101L, 102L, 103L)
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/library/sections/1/all" -> if (request.url.parameters["type"] == "10") {
+                    respondJson(albumTracksJson())
+                } else {
+                    respondJson(artistsJson())
+                }
+                "/library/sections/1/albums" -> respondJson(albumsJson())
+                "/playlists" -> respondJson(playlistsJson(trackCount = 3))
+                "/library/metadata/a1/children" -> respondJson(albumTracksJson())
+                "/playlists/p1/items" -> respondJson(duplicatePlaylistTracksJson(playlistItemIds))
+                "/playlists/p1/items/101/move" -> {
+                    movedItemId = 101L
+                    movedAfterItemId = request.url.parameters["after"]?.toLongOrNull()
+                    playlistItemIds = listOf(102L, 103L, 101L)
+                    respondJson(playlistAddResponseJson(leafCount = 3))
+                }
+                "/identity" -> respondJson(identityJson())
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val repo = catalogRepository(db, testHttpClient(engine))
+
+        repo.refreshAggregated(testPlexSession())
+        val playlist = repo.catalog.value.playlists.single()
+        repo.tracksForPlaylist(testPlexSession(), playlist)
+        val moved = repo.movePlaylistTrack(testPlexSession(), playlist, fromIndex = 0, toIndex = 2)
+
+        assertTrue(moved)
+        assertEquals(101L, movedItemId)
+        assertEquals(103L, movedAfterItemId)
+        assertEquals(
+            listOf(102L, 103L, 101L),
+            repo.catalog.value.tracksByParent[playlist.id].orEmpty().map { it.playlistItemId },
+        )
+    }
+
+    @Test
+    fun cachedPlexPlaylistTracksKeepPlaylistItemIdsAcrossRestore() = runTest {
+        val (db, sqlDriver) = newInMemoryPhoebeDatabase()
+        driver = sqlDriver
+        val http = testHttpClient(plexCatalogMockEngine())
+        val repo = catalogRepository(db, http)
+
+        repo.refreshAggregated(testPlexSession())
+        val playlist = repo.catalog.value.playlists.single()
+        repo.tracksForPlaylist(testPlexSession(), playlist)
+        repo.awaitDatabaseIdle()
+
+        assertEquals(
+            listOf(101L, 102L),
+            db.catalogQueries.selectTrackParents().awaitAsList()
+                .filter { it.parentId == playlist.id }
+                .map { it.playlistItemId },
+        )
+
+        val restoredRepo = catalogRepository(db, http)
+        restoredRepo.restoreCachedCatalog()
+
+        assertEquals(
+            listOf(101L, 102L),
+            restoredRepo.catalog.value.tracksByParent[playlist.id].orEmpty().map { it.playlistItemId },
+        )
+    }
+
+    @Test
+    fun cachedPlexPlaylistTracksKeepDuplicateEntriesAcrossRestore() = runTest {
+        val (db, sqlDriver) = newInMemoryPhoebeDatabase()
+        driver = sqlDriver
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/library/sections/1/all" -> if (request.url.parameters["type"] == "10") {
+                    respondJson(albumTracksJson())
+                } else {
+                    respondJson(artistsJson())
+                }
+                "/library/sections/1/albums" -> respondJson(albumsJson())
+                "/playlists" -> respondJson(playlistsJson(trackCount = 3))
+                "/library/metadata/a1/children" -> respondJson(albumTracksJson())
+                "/playlists/p1/items" -> respondJson(duplicatePlaylistTracksJson(listOf(101L, 102L, 103L)))
+                "/identity" -> respondJson(identityJson())
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val http = testHttpClient(engine)
+        val repo = catalogRepository(db, http)
+
+        repo.refreshAggregated(testPlexSession())
+        val playlist = repo.catalog.value.playlists.single()
+        repo.tracksForPlaylist(testPlexSession(), playlist)
+        repo.awaitDatabaseIdle()
+
+        val persistedEntries = db.catalogQueries.selectTrackParents().awaitAsList()
+            .filter { it.parentId == playlist.id }
+        assertEquals(listOf("plex:t1", "plex:t2", "plex:t1"), persistedEntries.map { it.trackId })
+        assertEquals(listOf(101L, 102L, 103L), persistedEntries.map { it.playlistItemId })
+
+        val restoredRepo = catalogRepository(db, http)
+        restoredRepo.restoreCachedCatalog()
+        val restoredTracks = restoredRepo.catalog.value.tracksByParent[playlist.id].orEmpty()
+
+        assertEquals(listOf("plex:t1", "plex:t2", "plex:t1"), restoredTracks.map { it.id })
+        assertEquals(listOf(101L, 102L, 103L), restoredTracks.map { it.playlistItemId })
     }
 
     @Test
@@ -791,6 +1006,66 @@ class PlexPlaylistEndToEndDesktopTest {
         assertEquals(DownloadState.Failed, downloaded.state)
         assertEquals(failureReason, downloaded.error)
         assertEquals(null, downloaded.localUri)
+    }
+
+    private fun MockRequestHandleScope.respondJson(content: String) = respond(
+        content = content,
+        status = HttpStatusCode.OK,
+        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+    )
+
+    private fun duplicatePlaylistTracksJson(playlistItemIds: List<Long>): String {
+        val byItemId = mapOf(
+            101L to """
+              {
+                "ratingKey": "t1",
+                "playlistItemID": 101,
+                "title": "Playlist Song One",
+                "grandparentTitle": "Artist One",
+                "parentTitle": "Album One",
+                "duration": 1000,
+                "Media": [
+                  { "Part": [ { "key": "/library/parts/t1/file.mp3", "file": "one.mp3" } ] }
+                ]
+              }
+            """.trimIndent(),
+            102L to """
+              {
+                "ratingKey": "t2",
+                "playlistItemID": 102,
+                "title": "Playlist Song Two",
+                "grandparentTitle": "Artist One",
+                "parentTitle": "Album One",
+                "duration": 2000,
+                "Media": [
+                  { "Part": [ { "key": "/library/parts/t2/file.mp3", "file": "two.mp3" } ] }
+                ]
+              }
+            """.trimIndent(),
+            103L to """
+              {
+                "ratingKey": "t1",
+                "playlistItemID": 103,
+                "title": "Playlist Song One",
+                "grandparentTitle": "Artist One",
+                "parentTitle": "Album One",
+                "duration": 1000,
+                "Media": [
+                  { "Part": [ { "key": "/library/parts/t1/file.mp3", "file": "one.mp3" } ] }
+                ]
+              }
+            """.trimIndent(),
+        )
+        val items = playlistItemIds.mapNotNull { byItemId[it] }.joinToString(",\n")
+        return """
+        {
+          "MediaContainer": {
+            "Metadata": [
+              $items
+            ]
+          }
+        }
+    """.trimIndent()
     }
 
     private fun catalogRepository(db: com.phoebe.app.db.PhoebeDatabase, http: io.ktor.client.HttpClient): CatalogRepository {

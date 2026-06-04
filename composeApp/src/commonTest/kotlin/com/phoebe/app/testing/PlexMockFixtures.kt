@@ -15,8 +15,11 @@ fun plexCatalogMockEngine(
     playlistThumb: String? = null,
     onPlaylistAdd: (() -> Unit)? = null,
     onPlaylistRemove: (() -> Unit)? = null,
+    onPlaylistMove: ((playlistItemId: Long, afterPlaylistItemId: Long?) -> Unit)? = null,
     includeLikedPlaylist: Boolean = false,
-): MockEngine = MockEngine { request ->
+): MockEngine {
+    var playlistItemIds = listOf(101L, 102L)
+    return MockEngine { request ->
     when (request.url.encodedPath) {
         "/library/sections/1/all" -> if (request.url.parameters["type"] == "10") {
             respondPlexJson(albumTracksJson())
@@ -34,7 +37,22 @@ fun plexCatalogMockEngine(
                 onPlaylistAdd?.invoke()
                 respondPlexJson(playlistAddResponseJson(leafCount = playlistTrackCount + 1))
             }
-            else -> respondPlexJson(playlistTracksJson())
+            else -> respondPlexJson(playlistTracksJson(playlistItemIds))
+        }
+        "/playlists/p1/items/101/move",
+        "/playlists/p1/items/102/move",
+        "/playlists/p1/items/103/move"
+        -> {
+            val handler = onPlaylistMove
+            if (handler != null && request.method.value == "PUT") {
+                val itemId = request.url.encodedPath.substringAfterLast("/items/").substringBefore("/").toLong()
+                val afterItemId = request.url.parameters["after"]?.toLongOrNull()
+                playlistItemIds = playlistItemIds.movedAfter(itemId, afterItemId)
+                handler(itemId, afterItemId)
+                respondPlexJson(playlistAddResponseJson(leafCount = playlistTrackCount))
+            } else {
+                respond("", HttpStatusCode.NotFound)
+            }
         }
         "/playlists/p2/items" -> when (request.method.value) {
             "PUT" -> {
@@ -59,6 +77,7 @@ fun plexCatalogMockEngine(
         }
         "/identity" -> respondPlexJson(identityJson())
         else -> respond("", HttpStatusCode.NotFound)
+    }
     }
 }
 
@@ -145,10 +164,9 @@ fun albumTracksJson(): String = """
     }
 """.trimIndent()
 
-fun playlistTracksJson(): String = """
-    {
-      "MediaContainer": {
-        "Metadata": [
+fun playlistTracksJson(playlistItemIds: List<Long> = listOf(101L, 102L)): String {
+    val byItemId = mapOf(
+        101L to """
           {
             "ratingKey": "t1",
             "playlistItemID": 101,
@@ -159,7 +177,9 @@ fun playlistTracksJson(): String = """
             "Media": [
               { "Part": [ { "key": "/library/parts/t1/file.mp3", "file": "one.mp3" } ] }
             ]
-          },
+          }
+        """.trimIndent(),
+        102L to """
           {
             "ratingKey": "t2",
             "playlistItemID": 102,
@@ -171,10 +191,19 @@ fun playlistTracksJson(): String = """
               { "Part": [ { "key": "/library/parts/t2/file.mp3", "file": "two.mp3" } ] }
             ]
           }
+        """.trimIndent(),
+    )
+    val items = playlistItemIds.mapNotNull { byItemId[it] }.joinToString(",\n")
+    return """
+    {
+      "MediaContainer": {
+        "Metadata": [
+          $items
         ]
       }
     }
 """.trimIndent()
+}
 
 fun likedPlaylistTracksJson(): String = """
     {
@@ -214,3 +243,13 @@ fun playlistAddResponseJson(leafCount: Int): String = """
       }
     }
 """.trimIndent()
+
+private fun List<Long>.movedAfter(itemId: Long, afterItemId: Long?): List<Long> {
+    if (itemId !in this) return this
+    val withoutItem = filterNot { it == itemId }.toMutableList()
+    val targetIndex = afterItemId?.let { after ->
+        withoutItem.indexOf(after).takeIf { it >= 0 }?.plus(1)
+    } ?: 0
+    withoutItem.add(targetIndex.coerceIn(0, withoutItem.size), itemId)
+    return withoutItem
+}

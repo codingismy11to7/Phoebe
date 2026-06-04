@@ -1,0 +1,1 @@
+ALTER TABLE AppSettingsRow ADD COLUMN nowPlayingVisualizerPreset TEXT NOT NULL DEFAULT 'Artwork';

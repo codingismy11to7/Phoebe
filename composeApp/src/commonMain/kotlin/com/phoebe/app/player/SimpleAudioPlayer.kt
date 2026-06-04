@@ -1,9 +1,12 @@
 package com.phoebe.app.player
 
+import com.phoebe.app.domain.AudioAnalysisFrame
+import com.phoebe.app.domain.AudioAnalysisSource
 import com.phoebe.app.domain.EqualizerProfile
 import com.phoebe.app.domain.PlayerState
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
+import com.phoebe.app.platform.currentTimeMs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -27,6 +30,9 @@ internal fun hasPlaybackReadyBuffer(
 abstract class SimpleAudioPlayer : AudioPlayer {
     private val mutableState = MutableStateFlow(PlayerState())
     override val state: StateFlow<PlayerState> = mutableState
+    private val mutableAudioAnalysis = MutableStateFlow(AudioAnalysisFrame.Empty)
+    override val audioAnalysis: StateFlow<AudioAnalysisFrame> = mutableAudioAnalysis
+    private val audioAnalysisAccumulator = AudioAnalysisAccumulator()
     private val scope = CoroutineScope(Dispatchers.Default)
     private var progressJob: Job? = null
     private var preferUnityOutputVolume = false
@@ -89,6 +95,7 @@ abstract class SimpleAudioPlayer : AudioPlayer {
 
         playGeneration++
         clearCrossfadeRequestState()
+        resetAudioAnalysis()
         playWhenReady = true
         val generation = playGeneration
         stopProgressTicker()
@@ -115,12 +122,21 @@ abstract class SimpleAudioPlayer : AudioPlayer {
         }
     }
 
+    override fun playShuffled(queue: List<Track>, startIndex: Int) {
+        play(queue, startIndex)
+        val state = mutableState.value
+        if (!state.shuffle) {
+            mutableState.value = state.copy(shuffle = true)
+        }
+    }
+
     override fun prepare(queue: List<Track>, startIndex: Int, positionMs: Long) {
         val previous = mutableState.value
         val index = startIndex.coerceIn(queue.indices)
         val track = queue.getOrNull(index)
         val generation = ++playGeneration
         clearCrossfadeRequestState()
+        resetAudioAnalysis()
         playWhenReady = false
         stopProgressTicker()
         stopCurrentPlaybackImmediately()
@@ -153,6 +169,7 @@ abstract class SimpleAudioPlayer : AudioPlayer {
         val track = queue.getOrNull(index)
         playGeneration++
         clearCrossfadeRequestState()
+        resetAudioAnalysis()
         playWhenReady = false
         stopProgressTicker()
         stopCurrentPlaybackImmediately()
@@ -210,6 +227,7 @@ abstract class SimpleAudioPlayer : AudioPlayer {
         playGeneration++
         playWhenReady = false
         clearCrossfadeRequestState()
+        resetAudioAnalysis()
         stopProgressTicker()
         stopCurrentPlaybackImmediately()
         val volume = mutableState.value.volume
@@ -410,6 +428,7 @@ abstract class SimpleAudioPlayer : AudioPlayer {
         isBuffering: Boolean = false,
         bufferedPositionMs: Long = mutableState.value.bufferedPositionMs,
         generation: Int = playGeneration,
+        forceBuffering: Boolean = false,
     ) {
         if (!isPlayRequestCurrent(generation)) return
         val current = mutableState.value
@@ -423,11 +442,12 @@ abstract class SimpleAudioPlayer : AudioPlayer {
             }
         val effectiveBuffering = isBuffering &&
             playWhenReady &&
-            !hasPlaybackReadyBuffer(
-                positionMs = positionMs,
-                bufferedPositionMs = effectiveBufferedPositionMs,
-                durationMs = effectiveDurationMs,
-            )
+            (forceBuffering ||
+                !hasPlaybackReadyBuffer(
+                    positionMs = positionMs,
+                    bufferedPositionMs = effectiveBufferedPositionMs,
+                    durationMs = effectiveDurationMs,
+                ))
         if (current.positionMs == positionMs &&
             current.bufferedPositionMs == effectiveBufferedPositionMs &&
             current.durationMs == effectiveDurationMs &&
@@ -449,6 +469,36 @@ abstract class SimpleAudioPlayer : AudioPlayer {
             stopProgressTicker()
         }
         maybeStartCrossfade(generation)
+    }
+
+    protected fun publishAudioAnalysis(frame: AudioAnalysisFrame) {
+        mutableAudioAnalysis.value = frame.normalized()
+    }
+
+    protected fun publishAudioAnalysisPcm(
+        samples: FloatArray,
+        sampleRateHz: Float,
+        source: AudioAnalysisSource = AudioAnalysisSource.Pcm,
+        timestampMs: Long = currentTimeMs(),
+    ) {
+        audioAnalysisAccumulator
+            .observePcm(samples, sampleRateHz, timestampMs, source)
+            ?.let(::publishAudioAnalysis)
+    }
+
+    protected fun publishAudioAnalysisMagnitudesDb(
+        magnitudesDb: FloatArray,
+        source: AudioAnalysisSource = AudioAnalysisSource.Spectrum,
+        timestampMs: Long = currentTimeMs(),
+    ) {
+        audioAnalysisAccumulator
+            .observeMagnitudesDb(magnitudesDb, timestampMs, source)
+            ?.let(::publishAudioAnalysis)
+    }
+
+    protected fun resetAudioAnalysis() {
+        audioAnalysisAccumulator.reset()
+        mutableAudioAnalysis.value = AudioAnalysisFrame.Empty.copy(timestampMs = currentTimeMs())
     }
 
     /** Stop audible output immediately when leaving the current track (before the next loads). */

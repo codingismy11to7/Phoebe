@@ -776,6 +776,114 @@ class PlexClientPlaylistEndToEndTest {
     }
 
     @Test
+    fun createStationPlayQueueFetchesExpandedPlayQueueWindow() = runTest {
+        var capturedWindow: String? = null
+        var capturedCenter: String? = null
+        var capturedIncludeBefore: String? = null
+        var capturedIncludeAfter: String? = null
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/playQueues" -> respond(
+                    """{
+                        "MediaContainer": {
+                          "playQueueID": 42,
+                          "playQueueSelectedItemID": 123,
+                          "playQueueTotalCount": 3,
+                          "size": 1,
+                          "Metadata": [
+                            {
+                              "ratingKey": "t1",
+                              "playQueueItemID": 123,
+                              "key": "/library/metadata/t1",
+                              "title": "One",
+                              "type": "track",
+                              "parentTitle": "Radio Album",
+                              "grandparentTitle": "Radio Artist",
+                              "duration": 1000,
+                              "Media": [
+                                { "Part": [ { "key": "/library/parts/t1/file.flac" } ] }
+                              ]
+                            }
+                          ]
+                        }
+                    }""".trimIndent(),
+                    HttpStatusCode.OK,
+                    headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+                "/playQueues/42" -> {
+                    capturedWindow = request.url.parameters["window"]
+                    capturedCenter = request.url.parameters["center"]
+                    capturedIncludeBefore = request.url.parameters["includeBefore"]
+                    capturedIncludeAfter = request.url.parameters["includeAfter"]
+                    respond(
+                        """{
+                            "MediaContainer": {
+                              "playQueueID": 42,
+                              "playQueueTotalCount": 3,
+                              "size": 3,
+                              "Metadata": [
+                                {
+                                  "ratingKey": "t1",
+                                  "playQueueItemID": 123,
+                                  "key": "/library/metadata/t1",
+                                  "title": "One",
+                                  "type": "track",
+                                  "parentTitle": "Radio Album",
+                                  "grandparentTitle": "Radio Artist",
+                                  "duration": 1000,
+                                  "Media": [
+                                    { "Part": [ { "key": "/library/parts/t1/file.flac" } ] }
+                                  ]
+                                },
+                                {
+                                  "ratingKey": "t2",
+                                  "playQueueItemID": 124,
+                                  "key": "/library/metadata/t2",
+                                  "title": "Two",
+                                  "type": "track",
+                                  "parentTitle": "Radio Album",
+                                  "grandparentTitle": "Radio Artist",
+                                  "duration": 1000,
+                                  "Media": [
+                                    { "Part": [ { "key": "/library/parts/t2/file.flac" } ] }
+                                  ]
+                                },
+                                {
+                                  "ratingKey": "t3",
+                                  "playQueueItemID": 125,
+                                  "key": "/library/metadata/t3",
+                                  "title": "Three",
+                                  "type": "track",
+                                  "parentTitle": "Radio Album",
+                                  "grandparentTitle": "Radio Artist",
+                                  "duration": 1000,
+                                  "Media": [
+                                    { "Part": [ { "key": "/library/parts/t3/file.flac" } ] }
+                                  ]
+                                }
+                              ]
+                            }
+                        }""".trimIndent(),
+                        HttpStatusCode.OK,
+                        headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val client = PlexClient(testHttpClient(engine))
+        val server = PlexServer("server", "Plex", "https://plex.example:32400", owned = true)
+
+        val tracks = client.createStationPlayQueue(server, "token", "machine1", "/library/sections/1/stations/library")
+
+        assertEquals(listOf("t1", "t2", "t3"), tracks.map { it.id })
+        assertEquals("200", capturedWindow)
+        assertEquals("123", capturedCenter)
+        assertEquals("1", capturedIncludeBefore)
+        assertEquals("1", capturedIncludeAfter)
+    }
+
+    @Test
     fun createStationPlayQueueBatchHydratesMissingMedia() = runTest {
         val engine = MockEngine { request ->
             when {

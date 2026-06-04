@@ -1,0 +1,47 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Desktop",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "${workspaceFolder}/gradlew",
+      "runtimeArgs": [":composeApp:run"],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Android",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "ADB=\"${ANDROID_HOME:-$HOME/Library/Android/sdk}/platform-tools/adb\"; [ -x \"$ADB\" ] || ADB=adb; ./gradlew :composeApp:installDebug && \"$ADB\" shell monkey -p com.phoebe.app.debug -c android.intent.category.LAUNCHER 1"
+      ],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Web",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "${workspaceFolder}/gradlew",
+      "runtimeArgs": [":composeApp:wasmJsBrowserDevelopmentRun"],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Screenshots",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "./gradlew :composeApp:recordRoborazziDebug && npm run web:screenshots:update"
+      ],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}
