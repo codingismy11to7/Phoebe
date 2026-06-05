@@ -478,7 +478,6 @@ internal fun MobileBrowseShell(
     onSignOut: () -> Unit,
     onAddLocalFolder: (String?) -> Unit,
     onRefreshLibrary: () -> Unit,
-    onRefreshPlayHistory: () -> Unit = {},
     onJellyfinPage: (JellyfinLibraryPageKind, Int) -> Unit = { _, _ -> },
     onLibrarySortBy: (LibrarySortBy) -> Unit,
     onLibraryAscending: (Boolean) -> Unit,
@@ -825,13 +824,6 @@ internal fun MobileBrowseShell(
                         text = { Text("Refresh library") },
                         onClick = {
                             onRefreshLibrary()
-                            menuExpanded = false
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Sync play history") },
-                        onClick = {
-                            onRefreshPlayHistory()
                             menuExpanded = false
                         },
                     )
@@ -1762,7 +1754,9 @@ internal fun MobilePlayer(
                             val showListenBrainzFeedback =
                                 listenBrainzFeedbackTarget.available &&
                                     listenBrainzFeedbackTarget.trackId == track.id
-                            val showLikeControl = likeActions.likesEnabled && track.canTogglePlexLike()
+                            val showArtworkIndicators = !visualizerPreset.isVisualizer
+                            val showLikeControl =
+                                showArtworkIndicators && likeActions.likesEnabled && track.canTogglePlexLike()
                             val showFeedbackActions = showLikeControl || showListenBrainzFeedback
                             val metadataReserve = baseMetadataReserve +
                                 (if (remotePlaybackTarget != null) MobilePlayerRemoteTargetReserve else 0.dp)
@@ -1844,6 +1838,7 @@ internal fun MobilePlayer(
                                                     ) {
                                                         MobileNowPlayingOverlayActions(
                                                             track = t,
+                                                            showAudioQualityBadge = true,
                                                             showFeedbackActions = showFeedbackActions,
                                                             showLikeControl = showLikeControl,
                                                             likeActions = likeActions,
@@ -1868,6 +1863,7 @@ internal fun MobilePlayer(
                                                 }
                                                 MobileNowPlayingOverlayActions(
                                                     track = t,
+                                                    showAudioQualityBadge = false,
                                                     showFeedbackActions = showFeedbackActions,
                                                     showLikeControl = showLikeControl,
                                                     likeActions = likeActions,
@@ -2202,6 +2198,7 @@ private fun BoxScope.MobileArtworkReflectionLayer(
 @Composable
 private fun BoxScope.MobileNowPlayingOverlayActions(
     track: Track,
+    showAudioQualityBadge: Boolean,
     showFeedbackActions: Boolean,
     showLikeControl: Boolean,
     likeActions: LikeActions,
@@ -2209,13 +2206,15 @@ private fun BoxScope.MobileNowPlayingOverlayActions(
     listenBrainzFeedbackTarget: ListenBrainzFeedbackTarget,
     onListenBrainzFeedback: (ListenBrainzFeedbackScore) -> Unit,
 ) {
-    AudioQualityBadge(
-        track = track,
-        onArtwork = true,
-        modifier = Modifier
-            .align(Alignment.TopEnd)
-            .padding(12.dp),
-    )
+    if (showAudioQualityBadge) {
+        AudioQualityBadge(
+            track = track,
+            onArtwork = true,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(12.dp),
+        )
+    }
     if (showFeedbackActions) {
         Row(
             modifier = Modifier

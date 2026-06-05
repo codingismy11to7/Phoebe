@@ -241,15 +241,16 @@ class PlaybackService : MediaLibraryService() {
                     if (searched != null) {
                         return@listenableFuture searched
                     }
-                    val resolved = source.resolveTracks(mediaItems).map { playbackMediaItem(it) }
                     val tracks = source.resolveTracks(mediaItems)
-                    if (tracks.isNotEmpty()) {
-                        AndroidPlaybackBridge.onAdoptQueue?.invoke(
-                            tracks,
-                            startIndex.coerceIn(tracks.indices),
-                            true,
-                        )
+                    if (tracks.isEmpty()) {
+                        throw UnsupportedOperationException("No playable media items resolved for request.")
                     }
+                    val resolved = tracks.map { playbackMediaItem(it) }
+                    AndroidPlaybackBridge.onAdoptQueue?.invoke(
+                        tracks,
+                        startIndex.coerceIn(tracks.indices),
+                        true,
+                    )
                     MediaItemsWithStartPosition(resolved, startIndex, startPositionMs)
                 }
             }

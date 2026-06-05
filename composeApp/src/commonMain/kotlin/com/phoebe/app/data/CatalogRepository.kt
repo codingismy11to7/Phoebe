@@ -793,6 +793,142 @@ class CatalogRepository(
         }
     }
 
+    suspend fun syncLightweightRemoteState(session: PlexSession?) {
+        val currentSession = session ?: return
+        if (currentSession.selectedServer == null || currentSession.selectedLibrary == null) return
+        if (currentSession.token.isBlank()) return
+        refreshMutex.withLock {
+            val remoteShell = when {
+                currentSession.isPlex() -> lightweightPlexShell(currentSession)
+                currentSession.isEmbyFamily() -> lightweightJellyfinShell(currentSession)
+                currentSession.isNavidrome() -> lightweightNavidromeShell(currentSession)
+                else -> CatalogSnapshot()
+            }
+            if (!remoteShell.isNotEmpty()) return@withLock
+            val merged = mergeLightweightRemoteShell(
+                previous = mutableCatalog.value,
+                remotePrefix = currentSession.providerType.catalogPrefix,
+                remoteShell = remoteShell,
+                replaceRemoteShell = currentSession.isPlex(),
+            )
+            if (merged != mutableCatalog.value) {
+                mutableCatalog.value = merged
+                enqueueCatalogDbWrite { persistCatalogShell(merged) }
+            }
+        }
+    }
+
+    private suspend fun lightweightPlexShell(session: PlexSession): CatalogSnapshot {
+        val server = session.selectedServer ?: return CatalogSnapshot()
+        val library = session.selectedLibrary ?: return CatalogSnapshot()
+        val token = session.serverAuthToken() ?: return CatalogSnapshot()
+        PhoebeLog.d("CatalogRepository") { "lightweight sync start → Plex metadata" }
+        runCatching { plexClient.prepareForCatalogRequests(server, token) }
+        return PlexCatalogBuilder(plexClient, httpClient).buildMetadataCatalog(
+            server = server,
+            library = library,
+            token = token,
+            onProgress = null,
+            trace = null,
+        )
+    }
+
+    private suspend fun lightweightJellyfinShell(session: PlexSession): CatalogSnapshot = coroutineScope {
+        val server = session.selectedServer ?: return@coroutineScope CatalogSnapshot()
+        val library = session.selectedLibrary ?: return@coroutineScope CatalogSnapshot()
+        val userId = session.userId?.takeIf { it.isNotBlank() } ?: return@coroutineScope CatalogSnapshot()
+        val token = session.token.takeIf { it.isNotBlank() } ?: return@coroutineScope CatalogSnapshot()
+        val remoteClient = if (session.providerType.catalogPrefix == "emby") embyClient else jellyfinClient
+        val remoteLabel = session.providerType.displayName
+        PhoebeLog.d("CatalogRepository") { "lightweight sync start → $remoteLabel shell" }
+        val artistPageDeferred = async {
+            remoteClient.artistPage(server, library, token, userId, pageIndex = 0)
+        }
+        val albumPageDeferred = async {
+            remoteClient.albumPage(server, library, token, userId, pageIndex = 0)
+        }
+        val playlistsDeferred = async {
+            runCatching { remoteClient.playlists(server, library, token, userId) }.getOrDefault(emptyList())
+        }
+        val artistPage = artistPageDeferred.await()
+        val albumPage = albumPageDeferred.await()
+        val albums = albumPage.items
+        val artists = enrichArtistAlbumCountsOnly(
+            enrichArtistArtwork(artistPage.items, albums),
+            albums,
+        )
+        CatalogSnapshot(
+            artists = artists,
+            albums = albums,
+            playlists = playlistsDeferred.await(),
+            remotePageInfo = CatalogPageInfo(
+                pageSize = albumPage.pageSize,
+                artistTotal = artistPage.total,
+                loadedArtistPages = if (artistPage.items.isNotEmpty()) setOf(0) else emptySet(),
+                albumTotal = albumPage.total,
+                loadedAlbumPages = if (albums.isNotEmpty()) setOf(0) else emptySet(),
+            ),
+        )
+    }
+
+    private suspend fun lightweightNavidromeShell(session: PlexSession): CatalogSnapshot {
+        val server = session.selectedServer ?: return CatalogSnapshot()
+        if (session.userName.isBlank() || session.token.isBlank()) return CatalogSnapshot()
+        PhoebeLog.d("CatalogRepository") { "lightweight sync start → Subsonic shell" }
+        return subsonicClient.quickCatalogShell(server, session.userName, session.token)
+    }
+
+    private fun mergeLightweightRemoteShell(
+        previous: CatalogSnapshot,
+        remotePrefix: String,
+        remoteShell: CatalogSnapshot,
+        replaceRemoteShell: Boolean,
+    ): CatalogSnapshot {
+        val prefixed = CatalogMerge.withPrefix(remotePrefix, remoteShell)
+        val base = if (replaceRemoteShell) {
+            previous.withoutProviderShell(remotePrefix)
+        } else {
+            previous
+        }
+        return if (replaceRemoteShell) {
+            CatalogMerge.merge(base, prefixed).copy(
+                downloads = previous.downloads,
+                tracksByParent = mergeTrackParents(base.tracksByParent, prefixed.tracksByParent),
+            )
+        } else {
+            base.copy(
+                artists = mergeItemsById(base.artists, prefixed.artists) { it.id },
+                albums = mergeItemsById(base.albums, prefixed.albums) { it.id },
+                playlists = mergeItemsById(base.playlists, prefixed.playlists) { it.id },
+                tracksByParent = mergeTrackParents(base.tracksByParent, prefixed.tracksByParent),
+                collectionValues = mergeItemsById(base.collectionValues, prefixed.collectionValues) {
+                    "${it.target}:${it.facet}:${it.value}"
+                },
+                collectionValueLoads = mergeItemsById(base.collectionValueLoads, prefixed.collectionValueLoads) {
+                    "${it.target}:${it.facet}"
+                },
+                collectionTags = mergeItemsById(base.collectionTags, prefixed.collectionTags) {
+                    "${it.target}:${it.facet}:${it.itemId}:${it.value}"
+                },
+                downloads = previous.downloads,
+                remotePageInfo = prefixed.remotePageInfo.takeIf { it.hasAny } ?: base.remotePageInfo,
+            )
+        }
+    }
+
+    private inline fun <T> mergeItemsById(
+        existing: List<T>,
+        incoming: List<T>,
+        id: (T) -> String,
+    ): List<T> {
+        if (incoming.isEmpty()) return existing
+        if (existing.isEmpty()) return incoming.distinctBy(id)
+        val merged = LinkedHashMap<String, T>(existing.size + incoming.size)
+        existing.forEach { item -> merged[id(item)] = item }
+        incoming.forEach { item -> merged[id(item)] = item }
+        return merged.values.toList()
+    }
+
     suspend fun refreshLocalFoldersOnly(session: PlexSession?) {
         PhoebeLog.d("CatalogRepository") {
             "refreshLocalFoldersOnly start → localFolders=${mediaSourcesRepository.state.value.localFolders.count { it.enabled }}"
@@ -2161,7 +2297,11 @@ class CatalogRepository(
                 mood = album.mood ?: previousAlbums[album.id]?.mood,
                 style = album.style ?: previousAlbums[album.id]?.style,
                 rating = album.rating ?: previousAlbums[album.id]?.rating,
-                favorite = album.favorite || previousAlbums[album.id]?.favorite == true,
+                favorite = if (album.id.startsWith("plex:")) {
+                    album.favorite
+                } else {
+                    album.favorite || previousAlbums[album.id]?.favorite == true
+                },
             )
         }
         val previousArtists = previous.artists.associateBy { it.id }
@@ -7387,6 +7527,16 @@ private fun CatalogSnapshot.withoutLocalFolderCatalog(): CatalogSnapshot =
         collectionTags = collectionTags.filterNot { it.itemId.isLocalFolderCatalogId() },
         collectionValueLoads = collectionValueLoads,
     )
+
+private fun CatalogSnapshot.withoutProviderShell(prefix: String): CatalogSnapshot {
+    val providerPrefix = "$prefix:"
+    return copy(
+        artists = artists.filterNot { it.id.startsWith(providerPrefix) },
+        albums = albums.filterNot { it.id.startsWith(providerPrefix) },
+        playlists = playlists.filterNot { it.id.startsWith(providerPrefix) },
+        collectionTags = collectionTags.filterNot { it.itemId.startsWith(providerPrefix) },
+    )
+}
 
 private fun String.isLocalPlaylistId(): Boolean = startsWith(LOCAL_PLAYLIST_ID_PREFIX)
 

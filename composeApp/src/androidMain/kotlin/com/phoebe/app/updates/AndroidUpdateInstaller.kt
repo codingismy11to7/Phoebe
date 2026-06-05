@@ -33,9 +33,7 @@ private class AndroidUpdateInstaller : PlatformUpdateInstaller {
     ): UpdateInstallResult = withContext(Dispatchers.IO) {
         val asset = update.asset ?: return@withContext openReleasePage(update)
         val context = AndroidContextHolder.application
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-            !context.packageManager.canRequestPackageInstalls()
-        ) {
+        if (!context.packageManager.canRequestPackageInstalls()) {
             openUnknownAppSourcesSettings(context)
             return@withContext UpdateInstallResult.RequiresUserAction(
                 "Allow Phoebe to install unknown apps, then tap the update arrow again.",
