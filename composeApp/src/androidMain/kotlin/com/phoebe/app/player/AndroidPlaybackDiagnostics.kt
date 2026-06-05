@@ -69,20 +69,24 @@ internal object AndroidEqualizerState {
     var profile: EqualizerProfile = EqualizerProfile.Default.normalized()
 }
 
+internal object AndroidAudioAnalysisState {
+    @Volatile
+    var sink: ((FloatArray, Float) -> Unit)? = null
+}
+
 @OptIn(UnstableApi::class)
 internal fun Player.applyPhoebeAudioOffloadPreference(
     profile: EqualizerProfile = AndroidEqualizerState.profile,
 ) {
-    val offloadMode = if (GraphicEqualizerProcessor.isActive(profile)) {
-        TrackSelectionParameters.AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_DISABLED
-    } else {
-        TrackSelectionParameters.AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_ENABLED
-    }
+    // Audio offload bypasses custom AudioProcessors (including analysis + EQ processors),
+    // so we always keep it disabled to ensure live visualizer data and EQ remain functional.
     trackSelectionParameters = trackSelectionParameters
         .buildUpon()
         .setAudioOffloadPreferences(
             TrackSelectionParameters.AudioOffloadPreferences.Builder()
-                .setAudioOffloadMode(offloadMode)
+                .setAudioOffloadMode(
+                    TrackSelectionParameters.AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_DISABLED,
+                )
                 .build(),
         )
         .build()
@@ -103,6 +107,7 @@ private class PhoebeRenderersFactory(
             .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
             .setAudioProcessors(
                 buildList<AudioProcessor> {
+                    add(AndroidAudioAnalysisAudioProcessor(AndroidAudioAnalysisState))
                     add(AndroidEqualizerAudioProcessor(AndroidEqualizerState))
                     if (diagnostics !== PlaybackDiagnostics.None) {
                         add(DiagnosticAudioProcessor(diagnostics, engine))
@@ -110,6 +115,36 @@ private class PhoebeRenderersFactory(
                 }.toTypedArray(),
             )
             .build()
+}
+
+private class AndroidAudioAnalysisAudioProcessor(
+    private val analysisState: AndroidAudioAnalysisState,
+) : BaseAudioProcessor() {
+    override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
+        return if (Util.isEncodingLinearPcm(inputAudioFormat.encoding)) {
+            inputAudioFormat
+        } else {
+            AudioProcessor.AudioFormat.NOT_SET
+        }
+    }
+
+    override fun queueInput(inputBuffer: ByteBuffer) {
+        val remaining = inputBuffer.remaining()
+        if (remaining <= 0) return
+        analysisState.sink?.let { sink ->
+            val probe = inputBuffer.asReadOnlyBuffer()
+            media3PcmSamples(
+                buffer = probe,
+                encoding = inputAudioFormat.encoding,
+                channelCount = inputAudioFormat.channelCount,
+            )?.let { samples ->
+                sink(samples, inputAudioFormat.sampleRate.toFloat())
+            }
+        }
+        val output = replaceOutputBuffer(remaining)
+        output.put(inputBuffer)
+        output.flip()
+    }
 }
 
 private class AndroidEqualizerAudioProcessor(
@@ -263,6 +298,41 @@ private fun media3PcmRms(
         frameOffset += frameSize
     }
     return if (sampleCount == 0L) 0.0 else kotlin.math.sqrt(sumSquares / sampleCount.toDouble())
+}
+
+private fun media3PcmSamples(
+    buffer: ByteBuffer,
+    encoding: Int,
+    channelCount: Int,
+    maxSamples: Int = 2048,
+): FloatArray? {
+    val sampleBytes = media3SampleBytes(encoding) ?: return null
+    val channels = channelCount.coerceAtLeast(1)
+    val frameSize = sampleBytes * channels
+    if (frameSize <= 0) return null
+    val start = buffer.position()
+    val end = buffer.limit()
+    val frameCount = ((end - start) / frameSize).coerceAtLeast(0)
+    val totalSamples = frameCount * channels
+    if (totalSamples <= 0) return null
+    val stride = (totalSamples / maxSamples.coerceAtLeast(1)).coerceAtLeast(1)
+    val outputSize = ((totalSamples + stride - 1) / stride).coerceAtMost(maxSamples.coerceAtLeast(1))
+    val output = FloatArray(outputSize)
+    var frameOffset = start
+    var sampleOrdinal = 0
+    var outputIndex = 0
+    while (frameOffset + frameSize <= end && outputIndex < output.size) {
+        var sampleOffset = frameOffset
+        repeat(channels) {
+            if (sampleOrdinal % stride == 0 && outputIndex < output.size) {
+                output[outputIndex++] = media3NormalizedSample(buffer, sampleOffset, encoding).toFloat()
+            }
+            sampleOrdinal++
+            sampleOffset += sampleBytes
+        }
+        frameOffset += frameSize
+    }
+    return if (outputIndex == output.size) output else output.copyOf(outputIndex)
 }
 
 private fun media3SampleBytes(encoding: Int): Int? =

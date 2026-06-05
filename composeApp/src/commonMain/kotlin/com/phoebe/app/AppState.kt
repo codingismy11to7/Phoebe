@@ -1,6 +1,7 @@
 package com.phoebe.app
 
 import com.phoebe.app.domain.Album
+import com.phoebe.app.domain.AudioAnalysisFrame
 import com.phoebe.app.domain.AppSettings
 import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.CatalogSnapshot
@@ -16,6 +17,7 @@ import com.phoebe.app.domain.LibraryTab
 import com.phoebe.app.domain.LyricsLoadState
 import com.phoebe.app.domain.MediaProviderType
 import com.phoebe.app.domain.MusicLibrary
+import com.phoebe.app.domain.NowPlayingVisualizerPreset
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.PlayerQueueSnapshot
 import com.phoebe.app.domain.PlayerState
@@ -143,6 +145,7 @@ class AppState(
             else -> audio
         }
     }.stateIn(scope, SharingStarted.Eagerly, dependencies.audioPlayer.state.value)
+    val audioAnalysis: StateFlow<AudioAnalysisFrame> = dependencies.audioPlayer.audioAnalysis
     val shellPlayback: StateFlow<ShellPlaybackState> = player
         .map { playback ->
             ShellPlaybackState(
@@ -1157,7 +1160,7 @@ class AppState(
             return@launch
         }
         mutableDecadeMixNotice.value = null
-        playTracks(firstTracks, 0)
+        if (!playTracks(firstTracks, 0)) return@launch
         requestNavigation(AppNavigationRequest.Player)
         mutableMessage.value = "Playing ${firstTracks.size} songs from the ${decade}s."
         scope.launch {
@@ -1205,8 +1208,9 @@ class AppState(
                 surfaceTransientNotice("No songs found for ${station.title}.")
                 return@launch
             }
-            playTracks(tracks, 0)
-            requestNavigation(AppNavigationRequest.Player)
+            if (playTracks(tracks, 0)) {
+                requestNavigation(AppNavigationRequest.Player)
+            }
         } finally {
             mutableRadioStartingIds.update { it - radioId }
         }
@@ -1238,9 +1242,10 @@ class AppState(
                 return@launch
             }
             mutableArtistRadioAvailability.update { it + (artist.id to ArtistRadioAvailability.Available) }
-            playTracks(tracks, 0)
-            requestNavigation(AppNavigationRequest.Player)
-            mutableMessage.value = "Playing ${artist.title} Radio."
+            if (playTracks(tracks, 0)) {
+                requestNavigation(AppNavigationRequest.Player)
+                mutableMessage.value = "Playing ${artist.title} Radio."
+            }
         } finally {
             mutableRadioStartingIds.update { it - artist.id }
         }
@@ -1273,10 +1278,10 @@ class AppState(
             mutableMessage.value = "${playlist.title} has no songs to shuffle."
             return@launch
         }
-        playTracks(tracks.shuffled(), 0)
-        dependencies.audioPlayer.setShuffle(true)
-        requestNavigation(AppNavigationRequest.Player)
-        mutableMessage.value = "Shuffling ${playlist.title}."
+        if (playTracks(tracks.shuffled(), 0, shuffleEnabled = true)) {
+            requestNavigation(AppNavigationRequest.Player)
+            mutableMessage.value = "Shuffling ${playlist.title}."
+        }
     }
 
     fun clearDecadeMixNotice() {
@@ -1287,48 +1292,56 @@ class AppState(
         tracks: List<Track>,
         index: Int = 0,
         collectionMixSeed: CollectionMixSeed? = null,
-    ) {
+        shuffleEnabled: Boolean = false,
+    ): Boolean {
         collectionMixGeneration++
         val playbackTracks = tracks.withFreshPlaybackUrls(session.value)
-        val track = playbackTracks.getOrNull(index)
+        if (playbackTracks.isEmpty()) return false
+        val startIndex = index.coerceIn(playbackTracks.indices)
+        val track = playbackTracks[startIndex]
         if (dependencies.castController.state.value.isConnected) {
             mutableMusicAssistantRemotePlayback.value = null
             val support = dependencies.castController.canLoadQueue(playbackTracks)
             if (!support.isSupported) {
                 mutableMessage.value = support.message ?: "This queue can't be cast to Chromecast."
-                return
+                return false
             }
-            dependencies.castController.loadQueue(playbackTracks, index)
-            return
+            dependencies.castController.loadQueue(playbackTracks, startIndex)
+            return true
         }
-        if (session.value.isMusicAssistant() && track?.localUri.isNullOrBlank() && track?.streamUrl.isNullOrBlank()) {
-            val musicAssistantTrack = track ?: return
+        if (session.value.isMusicAssistant() && track.localUri.isNullOrBlank() && track.streamUrl.isBlank()) {
+            val musicAssistantTrack = track
             scope.launch {
                 mutableMessage.value = "Starting ${musicAssistantTrack.title} in Music Assistant..."
                 runCatching {
-                    dependencies.providerRegistry.adapterFor(session.value)?.playRemote(session.value!!, playbackTracks, index)
+                    dependencies.providerRegistry.adapterFor(session.value)?.playRemote(session.value!!, playbackTracks, startIndex)
                 }.onSuccess { target ->
                     if (target.isNullOrBlank()) {
                         mutableMessage.value = "Couldn't find a Music Assistant player for ${musicAssistantTrack.title}."
                         return@onSuccess
                     }
-                    mutableMusicAssistantRemotePlayback.value = MusicAssistantRemotePlayback(playbackTracks, index, target)
+                    mutableMusicAssistantRemotePlayback.value = MusicAssistantRemotePlayback(playbackTracks, startIndex, target)
                     mutableMessage.value = "Playing ${musicAssistantTrack.title} on Music Assistant: $target."
                 }.onFailure { error ->
                     mutableMessage.value = error.message ?: "Couldn't start Music Assistant playback."
                 }
             }
-            return
+            return true
         }
-        if (track != null && !track.hasPlayableSource()) {
+        if (!track.hasPlayableSource()) {
             surfaceTransientNotice("Couldn't find a playable stream for ${track.title}. Try refreshing the library.")
-            return
+            return false
         }
         mutableMusicAssistantRemotePlayback.value = null
-        dependencies.audioPlayer.play(playbackTracks, index)
+        if (shuffleEnabled) {
+            dependencies.audioPlayer.playShuffled(playbackTracks, startIndex)
+        } else {
+            dependencies.audioPlayer.play(playbackTracks, startIndex)
+        }
         collectionMixSeed?.toCollectionMix()?.let { mix ->
             scheduleCollectionMix(mix, playbackTracks.map { it.id }.toSet())
         }
+        return true
     }
 
     private fun scheduleCollectionMix(mix: CollectionMix, queuedTrackIds: Set<String>) {
@@ -1550,6 +1563,14 @@ class AppState(
 
     fun setNotifyWhenDownloadFinishes(enabled: Boolean) = scope.launch {
         dependencies.appSettingsRepository.setNotifyWhenDownloadFinishes(enabled)
+    }
+
+    fun setNowPlayingVisualizerPreset(preset: NowPlayingVisualizerPreset) = scope.launch {
+        dependencies.appSettingsRepository.setNowPlayingVisualizerPreset(preset)
+    }
+
+    fun setBlurredArtworkAppearance(enabled: Boolean) = scope.launch {
+        dependencies.appSettingsRepository.setBlurredArtworkAppearance(enabled)
     }
 
     fun connectListenBrainz(userToken: String) = scope.launch {

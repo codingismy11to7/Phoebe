@@ -76,6 +76,37 @@ class ArtistCountsTest {
     }
 
     @Test
+    fun enrichArtistArtworkUsesExactMatchesWithoutFuzzyScanning() {
+        val artists = List(1_000) { index ->
+            Artist(id = "artist-$index", title = "Artist $index")
+        }
+        val unrelatedAlbums = List(4_000) { index ->
+            Album(
+                id = "unrelated-$index",
+                title = "Unrelated $index",
+                artist = "Someone Else $index",
+                thumbUrl = "https://example/unrelated-$index.jpg",
+            )
+        }
+        val exactAlbums = artists.mapIndexed { index, artist ->
+            Album(
+                id = "album-$index",
+                title = "Album $index",
+                artist = artist.title,
+                thumbUrl = "https://example/$index.jpg",
+            )
+        }
+
+        val elapsed = measureTime {
+            val enriched = enrichArtistArtwork(artists, unrelatedAlbums + exactAlbums)
+            assertEquals("https://example/0.jpg", enriched.first().thumbUrl)
+            assertEquals("https://example/999.jpg", enriched.last().thumbUrl)
+        }
+
+        assertTrue(elapsed.inWholeMilliseconds < 500, "expected exact artwork path to stay fast, took ${elapsed.inWholeMilliseconds}ms")
+    }
+
+    @Test
     fun enrichArtistAlbumCountsOnlyPreservesServerCountsWithoutScanning() {
         val artists = List(100) { index ->
             Artist(id = "a$index", title = "Artist $index", albumCount = index + 1)

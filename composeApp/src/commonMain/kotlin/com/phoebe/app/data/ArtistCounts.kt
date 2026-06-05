@@ -67,15 +67,46 @@ internal fun enrichArtistArtwork(artists: List<Artist>, albums: List<Album>): Li
                 }
             }
     }
+    val artistTitlesNeedingFuzzy = artists
+        .asSequence()
+        .filter { it.thumbUrl.isNullOrBlank() }
+        .map { it.title.trim() }
+        .filter { it.isNotEmpty() }
+        .filter { it.lowercase() !in thumbByAlbumArtist }
+        .distinctBy { it.lowercase() }
+        .toList()
+    val fuzzyThumbByArtist = if (artistTitlesNeedingFuzzy.isEmpty()) {
+        emptyMap()
+    } else {
+        buildFuzzyArtistArtwork(artistTitlesNeedingFuzzy, albums)
+    }
     return artists.map { artist ->
         if (!artist.thumbUrl.isNullOrBlank()) {
             artist
         } else {
-            val exact = thumbByAlbumArtist[artist.title.trim().lowercase()]
-            val fuzzy = albums.firstOrNull { albumMatchesArtist(it, artist.title) && !it.thumbUrl.isNullOrBlank() }?.thumbUrl
-            artist.copy(thumbUrl = exact ?: fuzzy)
+            val key = artist.title.trim().lowercase()
+            artist.copy(thumbUrl = thumbByAlbumArtist[key] ?: fuzzyThumbByArtist[key])
         }
     }
+}
+
+private fun buildFuzzyArtistArtwork(
+    artistTitles: List<String>,
+    albums: List<Album>,
+): Map<String, String> {
+    val unresolved = artistTitles.associateBy { it.lowercase() }.toMutableMap()
+    val resolved = LinkedHashMap<String, String>()
+    for (album in albums) {
+        val thumbUrl = album.thumbUrl?.takeIf { it.isNotBlank() } ?: continue
+        for ((key, title) in unresolved.toList()) {
+            if (albumMatchesArtist(album, title)) {
+                resolved[key] = thumbUrl
+                unresolved.remove(key)
+            }
+        }
+        if (unresolved.isEmpty()) break
+    }
+    return resolved
 }
 
 /** Prefer real API artist ids over legacy synthetic `album-artist-*` entries. */

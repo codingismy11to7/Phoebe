@@ -47,6 +47,8 @@ class RevisionMigrationDesktopTest {
 
         val settings = database.appSettingsQueries.selectCurrent().awaitAsOne()
         assertTrue(settings.listenBrainzSettings.contains("\"enabled\":false"))
+        assertEquals("Artwork", settings.nowPlayingVisualizerPreset)
+        assertEquals(1L, settings.blurredArtworkAppearance)
         assertEquals(PhoebeDatabase.Schema.version, readUserVersion(dbFile))
         assertEquals("18", revFile.readText().trim())
     }
@@ -112,6 +114,17 @@ class RevisionMigrationDesktopTest {
                     ) VALUES (1, 0, 0, 0, 0, '{"enabled":false,"bandCount":10,"gainsDb":[]}')
                     """.trimIndent(),
                 )
+                statement.execute(
+                    """
+                    CREATE TABLE TrackParentRow (
+                        parentId TEXT NOT NULL,
+                        trackId TEXT NOT NULL,
+                        position INTEGER NOT NULL,
+                        PRIMARY KEY (parentId, trackId)
+                    )
+                    """.trimIndent(),
+                )
+                statement.execute("CREATE INDEX TrackParentRow_parent_position ON TrackParentRow(parentId, position)")
                 statement.execute("PRAGMA user_version = 21")
             }
         }

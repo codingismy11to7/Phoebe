@@ -5,6 +5,7 @@ import com.phoebe.app.db.PhoebeDatabase
 import com.phoebe.app.domain.AppSettings
 import com.phoebe.app.domain.EqualizerProfile
 import com.phoebe.app.domain.ListenBrainzSettings
+import com.phoebe.app.domain.NowPlayingVisualizerPreset
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -70,6 +71,18 @@ class AppSettingsRepository(
         }
     }
 
+    suspend fun setNowPlayingVisualizerPreset(preset: NowPlayingVisualizerPreset) {
+        updateAndSave { current ->
+            current.copy(nowPlayingVisualizerPreset = preset)
+        }
+    }
+
+    suspend fun setBlurredArtworkAppearance(enabled: Boolean) {
+        updateAndSave { current ->
+            current.copy(blurredArtworkAppearance = enabled)
+        }
+    }
+
     suspend fun setListenBrainzSettings(settings: ListenBrainzSettings) {
         updateAndSave { current ->
             current.copy(listenBrainz = settings.normalized())
@@ -96,6 +109,8 @@ class AppSettingsRepository(
                     notifyWhenDownloadFinishes = normalized.notifyWhenDownloadFinishes.toDb(),
                     persistEqualizerSettings = normalized.persistEqualizerSettings.toDb(),
                     equalizerProfile = json.encodeToString(normalized.equalizerProfile),
+                    nowPlayingVisualizerPreset = normalized.nowPlayingVisualizerPreset.name,
+                    blurredArtworkAppearance = normalized.blurredArtworkAppearance.toDb(),
                     listenBrainzSettings = json.encodeToString(normalized.listenBrainz),
                 )
                 mutableState.value = normalized
@@ -110,6 +125,8 @@ class AppSettingsRepository(
             notifyWhenDownloadFinishes = notifyWhenDownloadFinishes.toBool(),
             persistEqualizerSettings = persistEqualizerSettings.toBool(),
             equalizerProfile = decodeEqualizerProfile(equalizerProfile),
+            nowPlayingVisualizerPreset = NowPlayingVisualizerPreset.fromStoredName(nowPlayingVisualizerPreset),
+            blurredArtworkAppearance = blurredArtworkAppearance.toBool(),
             listenBrainz = decodeListenBrainzSettings(listenBrainzSettings),
         ).normalized()
 

@@ -58,6 +58,7 @@ data class PlexMediaContainer(
     val leafCountRequested: Int? = null,
     @SerialName("playQueueID") val playQueueId: Long? = null,
     @SerialName("playQueueSelectedItemID") val playQueueSelectedItemId: Long? = null,
+    @SerialName("playQueueTotalCount") val playQueueTotalCount: Int? = null,
     @SerialName("Hub") val hubs: List<PlexHubDto> = emptyList(),
     @SerialName("Stations") val stations: List<PlexStationDto> = emptyList(),
     @SerialName("Directory") val directories: List<PlexDirectoryDto> = emptyList(),

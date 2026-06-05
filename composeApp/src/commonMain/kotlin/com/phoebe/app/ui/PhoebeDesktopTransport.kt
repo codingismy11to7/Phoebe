@@ -142,6 +142,7 @@ import com.phoebe.app.domain.EqualizerProfile
 import com.phoebe.app.domain.LocalFolderMediaSourceConfig
 import com.phoebe.app.domain.MediaSourcesState
 import com.phoebe.app.domain.MusicLibrary
+import com.phoebe.app.domain.NowPlayingVisualizerPreset
 import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.Playlist
@@ -183,6 +184,7 @@ internal fun DesktopTransport(
     equalizerProfile: EqualizerProfile = EqualizerProfile.Default,
     persistEqualizerSettings: Boolean = false,
     equalizerRemoteUnavailable: Boolean = false,
+    visualizerPreset: NowPlayingVisualizerPreset = NowPlayingVisualizerPreset.Default,
     compact: Boolean,
     lyricsVisible: Boolean = false,
     upNextVisible: Boolean,
@@ -200,6 +202,7 @@ internal fun DesktopTransport(
     onEqualizerGain: (Int, Float) -> Unit = { _, _ -> },
     onEqualizerReset: () -> Unit = {},
     onPersistEqualizerSettings: (Boolean) -> Unit = {},
+    onVisualizerPreset: (NowPlayingVisualizerPreset) -> Unit = {},
     onListenBrainzFeedback: (ListenBrainzFeedbackScore) -> Unit = {},
     onToggleUpNext: () -> Unit,
     onCast: () -> Unit,
@@ -422,6 +425,7 @@ internal fun DesktopTransport(
                         { transportOptionsOpen = true },
                         active = (showCastControls && castState.isConnected) ||
                             equalizerProfile.enabled ||
+                            visualizerPreset.isVisualizer ||
                             lyricsVisible ||
                             upNextVisible,
                     )
@@ -432,6 +436,7 @@ internal fun DesktopTransport(
                         volume = volume,
                         castState = castState,
                         equalizerEnabled = equalizerProfile.enabled,
+                        visualizerPreset = visualizerPreset,
                         lyricsVisible = lyricsVisible,
                         upNextVisible = upNextVisible,
                         upNextToggleEnabled = upNextToggleEnabled,
@@ -439,6 +444,7 @@ internal fun DesktopTransport(
                         onVolume = onVolume,
                         onCast = onCast,
                         onEqualizer = { equalizerOpen = true },
+                        onVisualizerPreset = onVisualizerPreset,
                         onLyrics = onLyrics,
                         onToggleUpNext = onToggleUpNext,
                     )
@@ -457,6 +463,10 @@ internal fun DesktopTransport(
                     "Equalizer",
                     { equalizerOpen = true },
                     active = equalizerProfile.enabled,
+                )
+                VisualizerPresetButton(
+                    selected = visualizerPreset,
+                    onSelected = onVisualizerPreset,
                 )
                 TransportIcon(
                     PhoebeIcon.Lyrics,
@@ -722,6 +732,7 @@ private fun PlaybackOptionsMenu(
     volume: Float,
     castState: CastState,
     equalizerEnabled: Boolean,
+    visualizerPreset: NowPlayingVisualizerPreset,
     lyricsVisible: Boolean,
     upNextVisible: Boolean,
     upNextToggleEnabled: Boolean,
@@ -729,6 +740,7 @@ private fun PlaybackOptionsMenu(
     onVolume: (Float) -> Unit,
     onCast: () -> Unit,
     onEqualizer: () -> Unit,
+    onVisualizerPreset: (NowPlayingVisualizerPreset) -> Unit,
     onLyrics: () -> Unit,
     onToggleUpNext: () -> Unit,
 ) {
@@ -771,6 +783,17 @@ private fun PlaybackOptionsMenu(
                 onDismiss()
             },
         )
+        NowPlayingVisualizerPreset.entries.forEach { preset ->
+            PlaybackOptionsMenuItem(
+                icon = if (preset == NowPlayingVisualizerPreset.Artwork) PhoebeIcon.Music else PhoebeIcon.Visualizer,
+                text = preset.label,
+                active = preset == visualizerPreset,
+                onClick = {
+                    onVisualizerPreset(preset)
+                    onDismiss()
+                },
+            )
+        }
         PlaybackOptionsMenuItem(
             icon = PhoebeIcon.Lyrics,
             text = if (lyricsVisible) "Hide Lyrics" else "Show Lyrics",

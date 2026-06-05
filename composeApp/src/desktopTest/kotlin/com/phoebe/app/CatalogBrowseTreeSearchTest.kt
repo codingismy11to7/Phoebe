@@ -115,11 +115,11 @@ class CatalogBrowseTreeSearchTest {
             dateAddedMs = 100,
             parentAlbumId = "album-bright",
         )
-        db.catalogQueries.upsertTrackParent("album-quiet", "track-moon", 0)
-        db.catalogQueries.upsertTrackParent("album-quiet", "track-river", 1)
-        db.catalogQueries.upsertTrackParent("album-bright", "track-sun", 0)
-        db.catalogQueries.upsertTrackParent("playlist-night", "track-river", 0)
-        db.catalogQueries.upsertTrackParent("playlist-night", "track-moon", 1)
+        db.catalogQueries.upsertTrackParent("album-quiet", "track-moon", 0, null)
+        db.catalogQueries.upsertTrackParent("album-quiet", "track-river", 1, null)
+        db.catalogQueries.upsertTrackParent("album-bright", "track-sun", 0, null)
+        db.catalogQueries.upsertTrackParent("playlist-night", "track-river", 0, null)
+        db.catalogQueries.upsertTrackParent("playlist-night", "track-moon", 1, null)
         return db
     }
 

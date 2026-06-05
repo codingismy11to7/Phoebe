@@ -136,6 +136,8 @@ import com.phoebe.app.AppState
 import com.phoebe.app.data.catalogAlbumsForArtist
 import com.phoebe.app.data.catalogTracksForArtist
 import com.phoebe.app.data.defaultPlexRadioStations
+import com.phoebe.app.domain.AudioAnalysisFrame
+import com.phoebe.app.domain.AudioAnalysisSource
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.AppSettings
 import com.phoebe.app.domain.AppScreen
@@ -154,6 +156,7 @@ import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.LocalFolderMediaSourceConfig
 import com.phoebe.app.domain.MediaSourcesState
 import com.phoebe.app.domain.MusicLibrary
+import com.phoebe.app.domain.NowPlayingVisualizerPreset
 import com.phoebe.app.domain.PlexRadioStation
 import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.PlexSession
@@ -200,11 +203,38 @@ internal enum class PhoebeScreenshotScenario {
     Song,
     Search,
     Player,
+    PlayerBlurredArtworkOn,
+    PlayerBlurredArtworkOff,
+    PlayerVisualizer,
+    PlayerVisualizerAlchemy,
+    PlayerVisualizerBattery,
+    PlayerVisualizerBarsAndWaves,
+    PlayerVisualizerBlazingColors,
+    PlayerVisualizerPlenoptic,
     PlayerUpNextExpanded,
     Settings,
     SignIn,
     SignInProviders,
 }
+
+private val ScreenshotAudioAnalysisFrame = AudioAnalysisFrame(
+    amplitude = 0.68f,
+    bands = List(32) { index -> (0.14f + ((index * 37) % 100) / 125f).coerceIn(0f, 1f) },
+    timestampMs = 1_800_000_000_000L,
+    source = AudioAnalysisSource.Pcm,
+)
+
+private fun PhoebeScreenshotScenario.visualizerPreset(): NowPlayingVisualizerPreset =
+    when (this) {
+        PhoebeScreenshotScenario.PlayerVisualizer,
+        PhoebeScreenshotScenario.PlayerVisualizerBarsAndWaves,
+        -> NowPlayingVisualizerPreset.BarsAndWaves
+        PhoebeScreenshotScenario.PlayerVisualizerAlchemy -> NowPlayingVisualizerPreset.Alchemy
+        PhoebeScreenshotScenario.PlayerVisualizerBattery -> NowPlayingVisualizerPreset.Battery
+        PhoebeScreenshotScenario.PlayerVisualizerBlazingColors -> NowPlayingVisualizerPreset.BlazingColors
+        PhoebeScreenshotScenario.PlayerVisualizerPlenoptic -> NowPlayingVisualizerPreset.Plenoptic
+        else -> NowPlayingVisualizerPreset.Default
+    }
 
 @Composable
 internal fun PhoebeScreenshotApp(
@@ -303,6 +333,13 @@ internal fun PhoebeDesktopScreenshotScenario(
         PhoebeScreenshotScenario.SignIn,
         PhoebeScreenshotScenario.SignInProviders,
         -> AppScreen.SignIn
+        PhoebeScreenshotScenario.PlayerVisualizer,
+        PhoebeScreenshotScenario.PlayerVisualizerAlchemy,
+        PhoebeScreenshotScenario.PlayerVisualizerBattery,
+        PhoebeScreenshotScenario.PlayerVisualizerBarsAndWaves,
+        PhoebeScreenshotScenario.PlayerVisualizerBlazingColors,
+        PhoebeScreenshotScenario.PlayerVisualizerPlenoptic,
+        -> AppScreen.Player
         else -> AppScreen.Home
     }
     val section = when (scenario) {
@@ -318,6 +355,7 @@ internal fun PhoebeDesktopScreenshotScenario(
         )
         else -> fixture.libraryUi
     }
+    val visualizerPreset = scenario.visualizerPreset()
     DesktopPlayer(
         shellState = DesktopShellState(
             screen = screen,
@@ -350,6 +388,8 @@ internal fun PhoebeDesktopScreenshotScenario(
             track = fixture.currentTrack,
             upNext = fixture.upNext,
             currentIndex = 0,
+            visualizerPreset = visualizerPreset,
+            audioAnalysis = if (visualizerPreset.isVisualizer) ScreenshotAudioAnalysisFrame else AudioAnalysisFrame.Empty,
         ),
         playbackActions = PlaybackActions(
             onToggle = {},
@@ -608,6 +648,14 @@ internal fun PhoebeMobileScreenshotScenario(
                 onAlbum = {},
             )
             PhoebeScreenshotScenario.Player,
+            PhoebeScreenshotScenario.PlayerBlurredArtworkOn,
+            PhoebeScreenshotScenario.PlayerBlurredArtworkOff,
+            PhoebeScreenshotScenario.PlayerVisualizer,
+            PhoebeScreenshotScenario.PlayerVisualizerAlchemy,
+            PhoebeScreenshotScenario.PlayerVisualizerBattery,
+            PhoebeScreenshotScenario.PlayerVisualizerBarsAndWaves,
+            PhoebeScreenshotScenario.PlayerVisualizerBlazingColors,
+            PhoebeScreenshotScenario.PlayerVisualizerPlenoptic,
             PhoebeScreenshotScenario.PlayerUpNextExpanded,
             -> MobilePlayer(
                 track = fixture.currentTrack,
@@ -618,6 +666,13 @@ internal fun PhoebeMobileScreenshotScenario(
                 positionMs = 96_000L,
                 bufferedPositionMs = 172_000L,
                 currentIndex = 0,
+                visualizerPreset = scenario.visualizerPreset(),
+                audioAnalysis = if (scenario.visualizerPreset().isVisualizer) {
+                    ScreenshotAudioAnalysisFrame
+                } else {
+                    AudioAnalysisFrame.Empty
+                },
+                blurredArtworkAppearance = scenario != PhoebeScreenshotScenario.PlayerBlurredArtworkOff,
                 onToggle = {},
                 onPrevious = {},
                 onNext = {},

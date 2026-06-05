@@ -490,9 +490,79 @@ class PlexClient(
                 null
             } ?: continue
             apiBaseCache[server.id] = base
-            return response.mediaContainer.metadata
+            return expandedPlayQueueMetadata(base, token, response.mediaContainer)
         }
         throw lastError ?: IllegalStateException("Plex radio returned no playable songs.")
+    }
+
+    private suspend fun expandedPlayQueueMetadata(
+        base: String,
+        token: String,
+        initial: PlexMediaContainer,
+    ): List<PlexMetadataDto> {
+        val playQueueId = initial.playQueueId ?: return initial.metadata.cappedPlayQueueMetadata()
+        val totalCount = initial.playQueueTotalCount ?: initial.totalSize
+        val requestedWindow = (totalCount ?: PlexPlayQueueDefaultWindowSize)
+            .coerceAtLeast(initial.metadata.size)
+            .coerceAtLeast(PlexPlayQueueDefaultWindowSize)
+            .coerceAtMost(PlexPlayQueueMaxWindowSize)
+        if (requestedWindow <= initial.metadata.size) return initial.metadata.cappedPlayQueueMetadata()
+        val expanded = runCatching {
+            fetchPlayQueueWindow(
+                base = base,
+                token = token,
+                playQueueId = playQueueId,
+                centerItemId = initial.playQueueSelectedItemId,
+                window = requestedWindow,
+                includeBefore = true,
+                includeAfter = true,
+            )
+        }.onFailure { error ->
+            if (error is CancellationException) throw error
+            PhoebeLog.d("PlexClient") {
+                "expanded playQueue fetch failed for $playQueueId: ${error.message}"
+            }
+        }.getOrNull()
+        val expandedMetadata = expanded?.mediaContainer?.metadata.orEmpty()
+        return when {
+            expandedMetadata.size > initial.metadata.size -> expandedMetadata.cappedPlayQueueMetadata()
+            expandedMetadata.isNotEmpty() && initial.metadata.isEmpty() -> expandedMetadata.cappedPlayQueueMetadata()
+            else -> initial.metadata.cappedPlayQueueMetadata()
+        }
+    }
+
+    private fun List<PlexMetadataDto>.cappedPlayQueueMetadata(): List<PlexMetadataDto> =
+        take(PlexPlayQueueMaxWindowSize)
+
+    private suspend fun fetchPlayQueueWindow(
+        base: String,
+        token: String,
+        playQueueId: Long,
+        centerItemId: Long?,
+        window: Int,
+        includeBefore: Boolean,
+        includeAfter: Boolean,
+    ): PlexMediaContainerResponse {
+        val response = httpClient.get("$base/playQueues/$playQueueId") {
+            plexTimelineAuth(token)
+            header(HttpHeaders.Accept, "application/json")
+            parameter("window", window)
+            parameter("includeBefore", if (includeBefore) 1 else 0)
+            parameter("includeAfter", if (includeAfter) 1 else 0)
+            centerItemId?.let { parameter("center", it) }
+        }
+        val body = response.bodyAsText()
+        if (!response.status.isSuccess()) {
+            error("Plex play queue window failed (${response.status.value}): ${body.take(200)}")
+        }
+        return runCatching {
+            PlexJson.decodeFromString(PlexMediaContainerResponse.serializer(), body)
+        }.getOrElse { error ->
+            PhoebeLog.d("PlexClient") {
+                "playQueue window decode failed for $playQueueId: ${error.message}; body=${body.take(400)}"
+            }
+            throw IllegalStateException("Plex play queue response was unreadable: ${error.message}", error)
+        }
     }
 
     private suspend fun hydratePlayQueueTracks(
@@ -1183,16 +1253,25 @@ class PlexClient(
         playlistItemId: Long,
         afterPlaylistItemId: Long?,
     ) {
-        val response = withReachableBase(server) { base ->
-            httpClient.put("$base/playlists/$playlistRatingKey/items/$playlistItemId/move") {
+        withReachableBase(server) { base ->
+            val response = httpClient.put("$base/playlists/$playlistRatingKey/items/$playlistItemId/move") {
                 plexServerAuth(token)
                 header(HttpHeaders.Accept, "application/json")
                 if (afterPlaylistItemId != null) {
                     parameter("after", afterPlaylistItemId)
                 }
             }
+            val body = response.bodyAsText()
+            if (!response.status.isSuccess()) {
+                PhoebeLog.d("PlexClient") {
+                    "movePlaylistItem failed via $base for 'playlist/$playlistRatingKey/item/$playlistItemId' -> HTTP ${response.status.value}: $body"
+                }
+                error("Plex movePlaylistItem failed (${response.status.value}) via $base: $body")
+            }
+            PhoebeLog.v("PlexClient") {
+                "movePlaylistItem ok via $base for 'playlist/$playlistRatingKey/item/$playlistItemId' (${response.status.value}): ${body.take(400)}"
+            }
         }
-        parsePlaylistResponse(response, "movePlaylistItem", "playlist/$playlistRatingKey/item/$playlistItemId")
     }
 
     suspend fun rateItem(
@@ -1957,6 +2036,8 @@ class PlexClient(
     companion object {
         const val LibraryIdentifier = "com.plexapp.plugins.library"
         const val PlayQueueMetadataBatchSize = 25
+        private const val PlexPlayQueueDefaultWindowSize = 200
+        private const val PlexPlayQueueMaxWindowSize = 200
         const val ClientIdentifier = "phoebe-compose-multiplatform"
         const val FavoriteArtistsCollection = "Favorite Artists"
         const val FavoriteAlbumsCollection = "Favorite Albums"

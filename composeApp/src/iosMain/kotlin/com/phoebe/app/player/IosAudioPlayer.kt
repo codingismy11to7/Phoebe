@@ -80,6 +80,7 @@ import platform.MediaToolbox.MTAudioProcessingTapRefVar
 import platform.MediaToolbox.kMTAudioProcessingTapCallbacksVersion_0
 import platform.MediaToolbox.kMTAudioProcessingTapCreationFlag_PostEffects
 import platform.darwin.NSEC_PER_SEC
+import com.phoebe.app.domain.AudioAnalysisSource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -470,7 +471,9 @@ private class IosAudioPlayer(
         audioTrack: AVAssetTrack,
         profile: EqualizerProfile,
     ): IosEqualizerTap? {
-        val tap = IosEqualizerTap(profile.normalized())
+        val tap = IosEqualizerTap(profile.normalized()) { samples, sampleRateHz ->
+            publishAudioAnalysisPcm(samples, sampleRateHz, AudioAnalysisSource.Pcm)
+        }
         val tapRef = createEqualizerProcessingTap(tap)
         if (tapRef == null) {
             PhoebeLog.d("IosAudioPlayer") { "equalizer audio tap creation failed" }
@@ -645,6 +648,7 @@ private class IosAudioPlayer(
 @OptIn(ExperimentalForeignApi::class)
 private class IosEqualizerTap(
     initialProfile: EqualizerProfile,
+    private val analysisSink: (FloatArray, Float) -> Unit,
 ) {
     @Volatile
     private var profile: EqualizerProfile = initialProfile.normalized()
@@ -673,6 +677,7 @@ private class IosEqualizerTap(
 
     fun process(bufferList: AudioBufferList, frameCount: Int) {
         val currentFormat = format ?: return
+        publishAnalysis(bufferList, frameCount, currentFormat)
         val currentProfile = profile
         if (!GraphicEqualizerProcessor.isActive(currentProfile)) {
             processor = null
@@ -698,6 +703,43 @@ private class IosEqualizerTap(
             processor ?: return
         }
         processFloatBuffers(bufferList, frameCount, currentFormat, currentProcessor)
+    }
+
+    private fun publishAnalysis(
+        bufferList: AudioBufferList,
+        frameCount: Int,
+        format: IosEqualizerAudioFormat,
+        maxSamples: Int = 2048,
+    ) {
+        if (!format.isFloat32) return
+        val numberBuffers = bufferList.mNumberBuffers.toInt().coerceAtLeast(0)
+        if (numberBuffers <= 0 || frameCount <= 0) return
+        val estimatedSamples = (frameCount * format.channelCount.coerceAtLeast(1)).coerceAtLeast(1)
+        val stride = (estimatedSamples / maxSamples.coerceAtLeast(1)).coerceAtLeast(1)
+        val outputSize = ((estimatedSamples + stride - 1) / stride).coerceAtMost(maxSamples.coerceAtLeast(1))
+        val output = FloatArray(outputSize)
+        var sampleOrdinal = 0
+        var outputIndex = 0
+        for (bufferIndex in 0 until numberBuffers) {
+            val buffer = bufferList.mBuffers[bufferIndex]
+            val data = buffer.mData?.reinterpret<FloatVar>() ?: continue
+            val bufferChannels = buffer.mNumberChannels.toInt().coerceAtLeast(1)
+            val availableSamples = (buffer.mDataByteSize / Float.SIZE_BYTES.toUInt()).toInt()
+            val samples = if (format.isNonInterleaved) {
+                frameCount.coerceAtMost(availableSamples)
+            } else {
+                (frameCount * bufferChannels).coerceAtMost(availableSamples)
+            }
+            for (sampleIndex in 0 until samples) {
+                if (sampleOrdinal % stride == 0 && outputIndex < output.size) {
+                    output[outputIndex++] = data[sampleIndex].coerceIn(-1f, 1f)
+                }
+                sampleOrdinal++
+            }
+        }
+        if (outputIndex > 0) {
+            analysisSink(if (outputIndex == output.size) output else output.copyOf(outputIndex), format.sampleRateHz)
+        }
     }
 
     private fun processFloatBuffers(

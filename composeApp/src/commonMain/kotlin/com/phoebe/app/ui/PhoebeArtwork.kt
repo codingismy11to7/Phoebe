@@ -101,6 +101,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
@@ -195,13 +196,14 @@ internal fun ArtworkImage(
     thumbUrl: String?,
     modifier: Modifier = Modifier,
     radius: Dp = 10.dp,
+    shape: Shape = RoundedCornerShape(radius),
     elevated: Boolean = true,
     maxDecodeDimension: Int = ListArtworkMaxDecodeDimension,
     fallbackThumbUrl: String? = null,
     artworkStaggerMs: Long = 0L,
+    alignment: Alignment = Alignment.Center,
 ) {
     val imageState = rememberRemoteImageState(thumbUrl, maxDecodeDimension, fallbackThumbUrl, artworkStaggerMs)
-    val shape = RoundedCornerShape(radius)
     val imageModifier = when {
         !elevated || prefersReducedArtworkEffects() -> modifier.clip(shape)
         else -> modifier
@@ -216,6 +218,7 @@ internal fun ArtworkImage(
                     bitmap = state.image,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
+                    alignment = alignment,
                     modifier = imageModifier,
                 )
             }
@@ -224,14 +227,15 @@ internal fun ArtworkImage(
                     bitmap = state.image,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
+                    alignment = alignment,
                     modifier = imageModifier,
                 )
             }
             RemoteImageLoadState.Loading -> {
-                ArtworkLoadingSlot(modifier, radius, elevated = elevated)
+                ArtworkLoadingSlot(modifier, radius, shape = shape, elevated = elevated)
             }
             RemoteImageLoadState.Missing -> {
-                AlbumArtwork(seed, modifier, radius, elevated = elevated)
+                AlbumArtwork(seed, modifier, radius, shape = shape, elevated = elevated)
             }
         }
     }
@@ -242,19 +246,23 @@ internal fun TrackArtworkImage(
     track: Track,
     modifier: Modifier = Modifier,
     radius: Dp = 10.dp,
+    shape: Shape = RoundedCornerShape(radius),
     elevated: Boolean = true,
     maxDecodeDimension: Int = ListArtworkMaxDecodeDimension,
     artworkStaggerMs: Long = 0L,
+    alignment: Alignment = Alignment.Center,
 ) {
     ArtworkImage(
         seed = track.album,
         thumbUrl = track.localArtworkUri,
         modifier = modifier,
         radius = radius,
+        shape = shape,
         elevated = elevated,
         maxDecodeDimension = maxDecodeDimension,
         fallbackThumbUrl = track.thumbUrl,
         artworkStaggerMs = artworkStaggerMs,
+        alignment = alignment,
     )
 }
 
@@ -603,9 +611,9 @@ internal fun AlbumArtwork(
     seed: String,
     modifier: Modifier = Modifier,
     radius: Dp = 10.dp,
+    shape: Shape = RoundedCornerShape(radius),
     elevated: Boolean = true,
 ) {
-    val shape = RoundedCornerShape(radius)
     if (!elevated || prefersReducedArtworkEffects()) {
         Box(
             modifier
@@ -663,9 +671,9 @@ internal fun AlbumArtwork(
 private fun ArtworkLoadingSlot(
     modifier: Modifier = Modifier,
     radius: Dp = 10.dp,
+    shape: Shape = RoundedCornerShape(radius),
     elevated: Boolean = true,
 ) {
-    val shape = RoundedCornerShape(radius)
     val borderTrackColor = Color.White.copy(alpha = 0.05f)
     val borderProgressColor = PhoebeUi.accentLight.copy(alpha = 0.86f)
     val slotModifier = when {

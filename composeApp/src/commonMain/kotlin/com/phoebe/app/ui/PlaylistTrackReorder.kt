@@ -44,7 +44,7 @@ internal class PlaylistTrackReorderState {
     var tracks by mutableStateOf<List<Track>>(emptyList())
         private set
 
-    var draggingTrackId by mutableStateOf<String?>(null)
+    var draggingTrackKey by mutableStateOf<String?>(null)
         private set
 
     private var sourceTracks: List<Track> = emptyList()
@@ -55,16 +55,16 @@ internal class PlaylistTrackReorderState {
     private var dragStartIndex: Int? = null
     private var dragCurrentIndex: Int? = null
     private var pointerOffsetInDraggedItemPx: Float = 0f
-    private var committedTrackIds: List<String>? = null
+    private var committedTrackKeys: List<String>? = null
     private var committedUntilMs: Long = 0L
     private var dragOffsetPx by mutableFloatStateOf(0f)
     private var pointerYRoot by mutableFloatStateOf(Float.NaN)
     private var listBounds by mutableStateOf<Rect?>(null)
-    private val itemTopByTrackId = hashMapOf<String, Float>()
-    private val itemHeightByTrackId = hashMapOf<String, Float>()
+    private val itemTopByTrackKey = hashMapOf<String, Float>()
+    private val itemHeightByTrackKey = hashMapOf<String, Float>()
 
     val isDragging: Boolean
-        get() = draggingTrackId != null
+        get() = draggingTrackKey != null
 
     fun update(
         sourceTracks: List<Track>,
@@ -79,17 +79,17 @@ internal class PlaylistTrackReorderState {
         this.autoScrollEdgePx = autoScrollEdgePx.coerceAtLeast(1f)
         this.onMove = onMove
         if (!isDragging) {
-            val committedIds = committedTrackIds
-            if (committedIds == null) {
+            val committedKeys = committedTrackKeys
+            if (committedKeys == null) {
                 tracks = sourceTracks
             } else {
-                val sourceIds = sourceTracks.map { it.id }
+                val sourceKeys = sourceTracks.map { it.reorderKey() }
                 if (
-                    sourceIds == committedIds ||
-                    sourceIds.toSet() != committedIds.toSet() ||
+                    sourceKeys == committedKeys ||
+                    sourceKeys.toSet() != committedKeys.toSet() ||
                     currentTimeMs() >= committedUntilMs
                 ) {
-                    committedTrackIds = null
+                    committedTrackKeys = null
                     tracks = sourceTracks
                 }
             }
@@ -102,33 +102,36 @@ internal class PlaylistTrackReorderState {
     fun listModifier(): Modifier =
         Modifier.onGloballyPositioned { listBounds = it.boundsInRoot() }
 
-    fun itemModifier(track: Track): Modifier {
-        val isDraggingTrack = draggingTrackId == track.id
+    fun itemModifier(track: Track): Modifier = itemModifier(track.reorderKey())
+
+    private fun itemModifier(trackKey: String): Modifier {
+        val isDraggingTrack = draggingTrackKey == trackKey
         val visualOffset = if (isDraggingTrack) dragOffsetPx else 0f
         return Modifier
             .offset { IntOffset(0, visualOffset.roundToInt()) }
             .onGloballyPositioned { coordinates ->
                 val bounds = coordinates.boundsInRoot()
-                itemTopByTrackId[track.id] = bounds.top - visualOffset
-                itemHeightByTrackId[track.id] = bounds.height
+                itemTopByTrackKey[trackKey] = bounds.top - visualOffset
+                itemHeightByTrackKey[trackKey] = bounds.height
             }
             .zIndex(if (isDraggingTrack) 2f else 0f)
     }
 
     fun startDrag(track: Track, index: Int, pointerRoot: Offset) {
         if (!enabled || index !in tracks.indices) return
-        draggingTrackId = track.id
+        val trackKey = track.reorderKey()
+        draggingTrackKey = trackKey
         dragStartIndex = index
         dragCurrentIndex = index
         dragOffsetPx = 0f
         pointerYRoot = pointerRoot.y
-        val rowTop = itemTopByTrackId[track.id] ?: (pointerRoot.y - rowStepPx / 2f)
-        val rowHeight = itemHeightByTrackId[track.id] ?: rowStepPx
+        val rowTop = itemTopByTrackKey[trackKey] ?: (pointerRoot.y - rowStepPx / 2f)
+        val rowHeight = itemHeightByTrackKey[trackKey] ?: rowStepPx
         pointerOffsetInDraggedItemPx = (pointerRoot.y - rowTop).coerceIn(0f, rowHeight)
     }
 
     fun drag(pointerRoot: Offset, dragDeltaY: Float) {
-        if (!enabled || draggingTrackId == null) return
+        if (!enabled || draggingTrackKey == null) return
         pointerYRoot = pointerRoot.y
         if (!syncDragOffsetToPointer()) {
             dragOffsetPx += dragDeltaY
@@ -140,7 +143,7 @@ internal class PlaylistTrackReorderState {
         val from = dragStartIndex
         val to = dragCurrentIndex
         if (from != null && to != null && from != to) {
-            committedTrackIds = tracks.map { it.id }
+            committedTrackKeys = tracks.map { it.reorderKey() }
             committedUntilMs = currentTimeMs() + PlaylistTrackReorderCommitHoldMs
         }
         resetDrag(restoreSource = false)
@@ -190,18 +193,18 @@ internal class PlaylistTrackReorderState {
     }
 
     private fun syncDragOffsetToPointer(): Boolean {
-        val draggingId = draggingTrackId ?: return false
-        val rowTop = itemTopByTrackId[draggingId] ?: return false
+        val draggingKey = draggingTrackKey ?: return false
+        val rowTop = itemTopByTrackKey[draggingKey] ?: return false
         if (!pointerYRoot.isFinite()) return false
         dragOffsetPx = pointerYRoot - pointerOffsetInDraggedItemPx - rowTop
         return true
     }
 
     private fun settleDraggedIndex() {
-        val draggingId = draggingTrackId ?: return
+        val draggingKey = draggingTrackKey ?: return
         var currentIndex = dragCurrentIndex ?: return
-        if (tracks.getOrNull(currentIndex)?.id != draggingId) {
-            currentIndex = tracks.indexOfFirst { it.id == draggingId }
+        if (tracks.getOrNull(currentIndex)?.reorderKey() != draggingKey) {
+            currentIndex = tracks.indexOfFirst { it.reorderKey() == draggingKey }
             if (currentIndex < 0) return
             dragCurrentIndex = currentIndex
         }
@@ -235,21 +238,21 @@ internal class PlaylistTrackReorderState {
 
     private fun moveStepPx(from: Int, to: Int): Float {
         if (from == to || from !in tracks.indices || to !in tracks.indices) return rowStepPx
-        val fromTop = itemTopByTrackId[tracks[from].id]
-        val toTop = itemTopByTrackId[tracks[to].id]
+        val fromTop = itemTopByTrackKey[tracks[from].reorderKey()]
+        val toTop = itemTopByTrackKey[tracks[to].reorderKey()]
         val measured = if (fromTop != null && toTop != null) abs(toTop - fromTop) else null
         return measured?.takeIf { it > 1f } ?: rowStepPx
     }
 
     private fun resetDrag(restoreSource: Boolean) {
-        draggingTrackId = null
+        draggingTrackKey = null
         dragStartIndex = null
         dragCurrentIndex = null
         pointerOffsetInDraggedItemPx = 0f
         dragOffsetPx = 0f
         pointerYRoot = Float.NaN
         if (restoreSource) {
-            committedTrackIds = null
+            committedTrackKeys = null
             tracks = sourceTracks
         }
     }
@@ -273,9 +276,9 @@ internal fun rememberPlaylistTrackReorderState(
         autoScrollEdgePx = with(density) { PlaylistTrackReorderAutoScrollEdge.toPx() },
         onMove = latestOnMove,
     )
-    val draggingTrackId = state.draggingTrackId
-    LaunchedEffect(draggingTrackId, enabled, listState) {
-        if (draggingTrackId != null && enabled) {
+    val draggingTrackKey = state.draggingTrackKey
+    LaunchedEffect(draggingTrackKey, enabled, listState) {
+        if (draggingTrackKey != null && enabled) {
             state.autoScroll(listState)
         }
     }
@@ -321,3 +324,6 @@ private fun <T> List<T>.moved(from: Int, to: Int): List<T> {
     copy.add(to, item)
     return copy
 }
+
+internal fun Track.reorderKey(): String =
+    playlistItemId?.let { "playlist-item:$it" } ?: id

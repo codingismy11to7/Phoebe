@@ -1,6 +1,7 @@
 package com.phoebe.app.player
 
 import com.phoebe.app.data.PlexClient
+import com.phoebe.app.domain.AudioAnalysisSource
 import com.phoebe.app.domain.EqualizerProfile
 import com.phoebe.app.domain.Track
 import com.phoebe.app.platform.PhoebeLog
@@ -1073,6 +1074,9 @@ internal class DesktopAudioPlayer(
             format = playback.stream.format,
             processor = playback.equalizerProcessor,
         )
+        pcmFloatSamples(buffer, length, playback.stream.format)?.let { samples ->
+            publishAudioAnalysisPcm(samples, playback.stream.format.sampleRate, AudioAnalysisSource.Pcm)
+        }
         val written = playback.line.write(buffer, 0, length).coerceAtLeast(0)
         playback.writtenPcmBytes += written.toLong()
         if (!playback.reportedEnergy) {
@@ -1543,6 +1547,7 @@ internal class DesktopAudioPlayer(
                 mediaPlayer.audioSpectrumNumBands = 64
                 mediaPlayer.audioSpectrumThreshold = -80
                 mediaPlayer.audioSpectrumListener = AudioSpectrumListener { _, _, magnitudes, _ ->
+                    publishAudioAnalysisMagnitudesDb(magnitudes, AudioAnalysisSource.Spectrum)
                     val maxMagnitude = magnitudes.maxOrNull() ?: return@AudioSpectrumListener
                     val rms = Math.pow(10.0, maxMagnitude.toDouble() / 20.0)
                     if (rms.isFinite() && rms > 0.0) {
@@ -1788,6 +1793,9 @@ internal class DesktopAudioPlayer(
     private fun copyPcmStreamForDiagnostics(stream: AudioInputStream): AudioInputStream {
         val format = stream.format
         val bytes = stream.use { it.readAllBytes() }
+        pcmFloatSamples(bytes, bytes.size, format)?.let { samples ->
+            publishAudioAnalysisPcm(samples, format.sampleRate, AudioAnalysisSource.Pcm)
+        }
         val rms = pcmRms(bytes, format)
         if (rms > 0.0 && rms.isFinite()) {
             diagnostics.decodedAudioEnergy(PlaybackEnginePath.SampledClip, rms)
@@ -1856,6 +1864,41 @@ private fun pcmRms(bytes: ByteArray, format: AudioFormat): Double {
         frameOffset += frameSize
     }
     return if (sampleCount == 0L) 0.0 else Math.sqrt(sumSquares / sampleCount.toDouble())
+}
+
+private fun pcmFloatSamples(
+    bytes: ByteArray,
+    length: Int,
+    format: AudioFormat,
+    maxSamples: Int = 2048,
+): FloatArray? {
+    val safeLength = length.coerceIn(0, bytes.size)
+    val frameSize = format.frameSize.takeIf { it > 0 } ?: return null
+    val channels = format.channels.takeIf { it > 0 } ?: return null
+    val sampleBytes = ((format.sampleSizeInBits + 7) / 8).takeIf { it in 1..4 } ?: return null
+    val frameCount = safeLength / frameSize
+    val totalSamples = frameCount * channels
+    if (totalSamples <= 0) return null
+    val stride = (totalSamples / maxSamples.coerceAtLeast(1)).coerceAtLeast(1)
+    val outputSize = ((totalSamples + stride - 1) / stride).coerceAtMost(maxSamples.coerceAtLeast(1))
+    val output = FloatArray(outputSize)
+    var frameOffset = 0
+    var sampleOrdinal = 0
+    var outputIndex = 0
+    while (frameOffset + frameSize <= safeLength && outputIndex < output.size) {
+        var sampleOffset = frameOffset
+        repeat(channels) {
+            if (sampleOffset + sampleBytes <= frameOffset + frameSize) {
+                if (sampleOrdinal % stride == 0 && outputIndex < output.size) {
+                    output[outputIndex++] = normalizedPcmSample(bytes, sampleOffset, sampleBytes, format).toFloat()
+                }
+                sampleOrdinal++
+            }
+            sampleOffset += sampleBytes
+        }
+        frameOffset += frameSize
+    }
+    return if (outputIndex == output.size) output else output.copyOf(outputIndex)
 }
 
 private fun AudioFormat.durationMsForPcmBytes(bytes: Long): Long {

@@ -383,6 +383,8 @@ data class AppSettings(
     val notifyWhenDownloadFinishes: Boolean = false,
     val persistEqualizerSettings: Boolean = false,
     val equalizerProfile: EqualizerProfile = EqualizerProfile.Default,
+    val nowPlayingVisualizerPreset: NowPlayingVisualizerPreset = NowPlayingVisualizerPreset.Default,
+    val blurredArtworkAppearance: Boolean = true,
     val listenBrainz: ListenBrainzSettings = ListenBrainzSettings(),
 ) {
     fun normalized(): AppSettings =

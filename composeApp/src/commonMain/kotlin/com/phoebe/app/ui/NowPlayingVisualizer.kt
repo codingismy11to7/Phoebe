@@ -1,0 +1,676 @@
+package com.phoebe.app.ui
+
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.phoebe.app.domain.AudioAnalysisFrame
+import com.phoebe.app.domain.AudioAnalysisSource
+import com.phoebe.app.domain.NowPlayingVisualizerPreset
+import com.phoebe.app.domain.Track
+import com.phoebe.app.platform.currentTimeMs
+import com.phoebe.app.player.AudioAnalysisAccumulator
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.min
+import kotlin.math.sin
+import kotlin.math.sqrt
+
+private const val VisualizerFrameStaleMs = 900L
+private const val FullTurn = (PI * 2.0).toFloat()
+
+@Composable
+internal fun NowPlayingVisualizerSurface(
+    preset: NowPlayingVisualizerPreset,
+    track: Track?,
+    audioAnalysis: AudioAnalysisFrame,
+    isPlaying: Boolean,
+    positionMs: Long,
+    modifier: Modifier = Modifier,
+    desktopArtworkConstrained: Boolean = false,
+) {
+    if (preset == NowPlayingVisualizerPreset.Artwork) {
+        if (desktopArtworkConstrained) {
+            // On desktop, don't fill the whole panel — center at natural size
+            Box(modifier, contentAlignment = Alignment.Center) {
+                if (track != null) {
+                    TrackArtworkImage(track, Modifier.wrapContentSize(), elevated = true)
+                } else {
+                    EmptyNowPlayingArtworkSlot(Modifier.wrapContentSize(), glyphSp = 52.sp)
+                }
+            }
+        } else {
+            if (track != null) {
+                TrackArtworkImage(track, modifier.fillMaxSize(), elevated = true)
+            } else {
+                EmptyNowPlayingArtworkSlot(modifier.fillMaxSize(), glyphSp = 52.sp)
+            }
+        }
+        return
+    }
+
+    val motionEnabled = LocalContinuousMotionEnabled.current && isPlaying
+    val phase = if (motionEnabled) {
+        val transition = rememberInfiniteTransition(label = "visualizer-motion")
+        val cycle by transition.animateFloat(
+            initialValue = 0f,
+            targetValue = FullTurn,
+            animationSpec = infiniteRepeatable(tween(7_200, easing = LinearEasing)),
+            label = "visualizer-phase",
+        )
+        cycle
+    } else {
+        (positionMs.coerceAtLeast(0L).toFloat() / 900f) % FullTurn
+    }
+    val frame = remember(audioAnalysis, track?.id, isPlaying, positionMs) {
+        val freshRealFrame = audioAnalysis.source != AudioAnalysisSource.None &&
+            audioAnalysis.bands.isNotEmpty() &&
+            currentTimeMs() - audioAnalysis.timestampMs <= VisualizerFrameStaleMs
+        if (freshRealFrame) {
+            audioAnalysis.normalized()
+        } else {
+            AudioAnalysisAccumulator.fallbackFrame(
+                seed = track?.id ?: track?.title.orEmpty(),
+                positionMs = positionMs,
+                isPlaying = isPlaying,
+                timestampMs = currentTimeMs(),
+            )
+        }
+    }
+
+    Canvas(
+        modifier
+            .clipToBounds()
+            .background(Brush.radialGradient(preset.backgroundColors(), radius = 900f))
+            .semantics { contentDescription = "${preset.label} visualizer" },
+    ) {
+        drawRect(Color.Black.copy(alpha = 0.18f))
+        when (preset) {
+            NowPlayingVisualizerPreset.Alchemy -> drawAlchemy(frame, phase)
+            NowPlayingVisualizerPreset.Battery -> drawBattery(frame, phase)
+            NowPlayingVisualizerPreset.BarsAndWaves -> drawBarsAndWaves(frame, phase)
+            NowPlayingVisualizerPreset.BlazingColors -> drawBlazingColors(frame, phase)
+            NowPlayingVisualizerPreset.Plenoptic -> drawPlenoptic(frame, phase)
+            NowPlayingVisualizerPreset.Artwork -> Unit
+        }
+    }
+}
+
+@Composable
+internal fun VisualizerPresetButton(
+    selected: NowPlayingVisualizerPreset,
+    onSelected: (NowPlayingVisualizerPreset) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box(modifier) {
+        TransportIcon(
+            icon = PhoebeIcon.Visualizer,
+            description = "Visualizer",
+            onClick = { expanded = true },
+            active = selected.isVisualizer,
+        )
+        VisualizerPresetDropdown(
+            expanded = expanded,
+            selected = selected,
+            onSelected = {
+                onSelected(it)
+                expanded = false
+            },
+            onDismiss = { expanded = false },
+        )
+    }
+}
+
+@Composable
+internal fun VisualizerPresetDropdown(
+    expanded: Boolean,
+    selected: NowPlayingVisualizerPreset,
+    onSelected: (NowPlayingVisualizerPreset) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        NowPlayingVisualizerPreset.entries.forEach { preset ->
+            DropdownMenuItem(
+                text = {
+                    Column {
+                        Text(
+                            preset.label,
+                            color = if (preset == selected) PhoebeUi.accentLight else PhoebeUi.primaryText,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (preset.familyLabel != preset.label) {
+                            Text(preset.familyLabel, color = PhoebeUi.mutedText, fontSize = 11.sp)
+                        }
+                    }
+                },
+                leadingIcon = {
+                    PhoebeIconView(
+                        if (preset == NowPlayingVisualizerPreset.Artwork) PhoebeIcon.Music else PhoebeIcon.Visualizer,
+                        tint = if (preset == selected) PhoebeUi.accentLight else PhoebeUi.secondaryText,
+                        modifier = Modifier.size(17.dp),
+                    )
+                },
+                onClick = { onSelected(preset) },
+            )
+        }
+    }
+}
+
+@Composable
+internal fun VisualizerPresetSelector(
+    selected: NowPlayingVisualizerPreset,
+    onSelected: (NowPlayingVisualizerPreset) -> Unit,
+    compact: Boolean = false,
+) {
+    val rowSize = if (compact) 2 else 4
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        NowPlayingVisualizerPreset.entries.chunked(rowSize).forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                row.forEach { preset ->
+                    val active = preset == selected
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(if (compact) 42.dp else 46.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (active) PhoebeUi.accent.copy(alpha = 0.16f) else PhoebeUi.subtleFill)
+                            .border(
+                                androidx.compose.foundation.BorderStroke(
+                                    1.dp,
+                                    if (active) PhoebeUi.accent.copy(alpha = 0.36f) else PhoebeUi.border,
+                                ),
+                                RoundedCornerShape(8.dp),
+                            )
+                            .clickable { onSelected(preset) }
+                            .padding(horizontal = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        PhoebeIconView(
+                            if (preset == NowPlayingVisualizerPreset.Artwork) PhoebeIcon.Music else PhoebeIcon.Visualizer,
+                            tint = if (active) PhoebeUi.accentLight else PhoebeUi.secondaryText,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Text(
+                            preset.label,
+                            color = if (active) PhoebeUi.accentLight else PhoebeUi.secondaryText,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                repeat(rowSize - row.size) {
+                    Box(Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun DesktopNowPlayingVisualizerView(
+    track: Track?,
+    preset: NowPlayingVisualizerPreset,
+    audioAnalysis: AudioAnalysisFrame,
+    isPlaying: Boolean,
+    positionMs: Long,
+    onPreset: (NowPlayingVisualizerPreset) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier.padding(horizontal = 28.dp, vertical = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Now Playing", color = PhoebeUi.primaryText, fontSize = 24.sp, fontWeight = FontWeight.Black)
+                Text(
+                    track?.let { "${it.title} • ${it.artist}" } ?: "Choose a song to begin",
+                    color = PhoebeUi.secondaryText,
+                    fontSize = 13.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            VisualizerPresetButton(selected = preset, onSelected = onPreset)
+        }
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .clip(RoundedCornerShape(8.dp))
+                .border(androidx.compose.foundation.BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(8.dp)),
+        ) {
+            NowPlayingVisualizerSurface(
+                preset = preset,
+                track = track,
+                audioAnalysis = audioAnalysis,
+                isPlaying = isPlaying,
+                positionMs = positionMs,
+                modifier = Modifier.fillMaxSize(),
+                desktopArtworkConstrained = true,
+            )
+        }
+    }
+}
+
+// ─── Alchemy ─────────────────────────────────────────────────────────────────
+// Organic flowing orbs + sinusoidal energy lines — each distinct colour family
+private fun DrawScope.drawAlchemy(frame: AudioAnalysisFrame, phase: Float) {
+    val colors = NowPlayingVisualizerPreset.Alchemy.visualColors()
+    val amp = frame.amplitude.coerceIn(0f, 1f)
+
+    // Large swirling orbs driven by individual FFT bands
+    repeat(12) { index ->
+        val band = frame.band(index * 2)
+        val angle = phase * (0.18f + index * 0.022f) + index * 0.524f
+        val orbitX = 0.42f - 0.30f * index.toFloat() / 12f
+        val radius = size.minDimension * (0.14f + band * 0.32f + amp * 0.06f)
+        val center = Offset(
+            size.width * (0.5f + cosF(angle) * (0.18f + orbitX * 0.06f)),
+            size.height * (0.5f + sinF(angle * 1.3f) * (0.14f + amp * 0.10f)),
+        )
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    colors[index % colors.size].copy(alpha = 0.55f + band * 0.30f),
+                    colors[(index + 2) % colors.size].copy(alpha = 0.0f),
+                ),
+                center = center,
+                radius = radius.coerceAtLeast(1f),
+            ),
+            radius = radius,
+            center = center,
+        )
+    }
+
+    // Flowing energy lines across the canvas
+    repeat(6) { lineIndex ->
+        val yBase = size.height * (0.12f + lineIndex * 0.155f)
+        val path = Path()
+        path.moveTo(0f, yBase)
+        val steps = 32
+        for (step in 0..steps) {
+            val x = size.width * step / steps
+            val band = frame.band(step + lineIndex * 2)
+            val wave1 = sinF(phase * 1.1f + step * 0.52f + lineIndex * 0.8f)
+            val wave2 = cosF(phase * 0.65f + step * 0.28f)
+            val y = yBase + (wave1 * 0.7f + wave2 * 0.3f) * size.height * (0.04f + band * 0.09f)
+            path.lineTo(x, y)
+        }
+        drawPath(
+            path,
+            Brush.horizontalGradient(
+                listOf(
+                    colors[(lineIndex) % colors.size].copy(alpha = 0.0f),
+                    colors[(lineIndex + 1) % colors.size].copy(alpha = 0.70f + frame.band(lineIndex) * 0.20f),
+                    colors[(lineIndex + 2) % colors.size].copy(alpha = 0.0f),
+                ),
+            ),
+            style = Stroke(width = (1.8f + frame.band(lineIndex * 3) * 3.5f).dp.toPx()),
+        )
+    }
+
+    // Pulsing core
+    val coreRadius = size.minDimension * (0.04f + amp * 0.06f)
+    val coreCenter = Offset(size.width * 0.5f, size.height * 0.5f)
+    drawCircle(
+        color = colors[0].copy(alpha = 0.55f + amp * 0.40f),
+        radius = coreRadius,
+        center = coreCenter,
+    )
+}
+
+// ─── Battery ─────────────────────────────────────────────────────────────────
+private fun DrawScope.drawBattery(frame: AudioAnalysisFrame, phase: Float) {
+    val colors = NowPlayingVisualizerPreset.Battery.visualColors()
+    val amp = frame.amplitude.coerceIn(0f, 1f)
+    repeat(7) { index ->
+        val band = frame.band(index * 2)
+        val scale = 0.22f + index * 0.055f + band * 0.08f + amp * 0.08f
+        val rotation = phase * (0.25f + index * 0.035f) + index
+        val cx = size.width * (0.5f + cosF(rotation) * 0.18f)
+        val cy = size.height * (0.52f + sinF(rotation * 0.82f) * 0.14f)
+        val w = size.minDimension * scale
+        val h = w * (0.38f + band * 0.28f)
+        val skew = w * 0.22f * sinF(rotation)
+        val path = Path().apply {
+            moveTo(cx - w / 2f + skew, cy - h / 2f)
+            lineTo(cx + w / 2f + skew, cy - h / 2f)
+            lineTo(cx + w / 2f - skew, cy + h / 2f)
+            lineTo(cx - w / 2f - skew, cy + h / 2f)
+            close()
+        }
+        drawPath(
+            path,
+            colors[index % colors.size].copy(alpha = 0.18f + band * 0.24f),
+            style = Stroke(width = (1.4f + band * 3f).dp.toPx()),
+        )
+    }
+    repeat(4) { index ->
+        val y = size.height * (0.24f + index * 0.16f)
+        drawLine(
+            colors[(index + 2) % colors.size].copy(alpha = 0.28f + amp * 0.25f),
+            Offset(size.width * 0.15f, y + sinF(phase + index) * 24f),
+            Offset(size.width * 0.85f, y + cosF(phase * 0.8f + index) * 24f),
+            strokeWidth = (1.5f + frame.band(index) * 3f).dp.toPx(),
+        )
+    }
+}
+
+// ─── Bars & Waves ────────────────────────────────────────────────────────────
+// Bold vertical bars from the bottom with a centred waveform overlay
+private fun DrawScope.drawBarsAndWaves(frame: AudioAnalysisFrame, phase: Float) {
+    val colors = NowPlayingVisualizerPreset.BarsAndWaves.visualColors()
+    val bands = frame.bands.ifEmpty { List(64) { 0.12f } }
+    val slots = min(80, bands.size.coerceAtLeast(32))
+    val slotWidth = size.width / slots
+    val barW = slotWidth * 0.62f
+    val baseline = size.height * 0.78f
+
+    // Draw vertical bars from the baseline up
+    for (index in 0 until slots) {
+        val band = frame.band(index)
+        val barHeight = baseline * (0.06f + band * 0.88f).coerceAtLeast(0.04f)
+        val x = index * slotWidth + slotWidth * 0.19f
+        val topY = baseline - barHeight
+
+        // Gradient fill from a warm accent at top to a cool accent lower
+        val barColor1 = colors[index % colors.size]
+        val barColor2 = colors[(index + 1) % colors.size]
+        drawRoundRect(
+            brush = Brush.verticalGradient(
+                colors = listOf(
+                    barColor1.copy(alpha = 0.85f + band * 0.15f),
+                    barColor2.copy(alpha = 0.40f + band * 0.35f),
+                    barColor2.copy(alpha = 0.12f),
+                ),
+                startY = topY,
+                endY = baseline,
+            ),
+            topLeft = Offset(x, topY),
+            size = Size(barW, barHeight),
+            cornerRadius = CornerRadius(barW * 0.40f, barW * 0.40f),
+        )
+
+        // Bright tip highlight
+        val tipH = (barW * 0.55f).coerceAtMost(barHeight * 0.15f).coerceAtLeast(2f)
+        drawRoundRect(
+            color = barColor1.copy(alpha = 0.90f + band * 0.10f),
+            topLeft = Offset(x, topY),
+            size = Size(barW, tipH),
+            cornerRadius = CornerRadius(barW * 0.40f, barW * 0.40f),
+        )
+    }
+
+    // Reflective mirror bars (faded, inverted) below baseline
+    for (index in 0 until slots) {
+        val band = frame.band(index)
+        val mirrorH = baseline * (0.06f + band * 0.88f) * 0.28f
+        val x = index * slotWidth + slotWidth * 0.19f
+        drawRoundRect(
+            color = colors[index % colors.size].copy(alpha = 0.12f + band * 0.10f),
+            topLeft = Offset(x, baseline),
+            size = Size(barW, mirrorH),
+            cornerRadius = CornerRadius(barW * 0.40f, barW * 0.40f),
+        )
+    }
+
+    // Centred waveform ribbon over the bars
+    val mid = size.height * 0.40f
+    repeat(2) { mirror ->
+        val path = Path()
+        path.moveTo(0f, mid)
+        for (step in 0..slots) {
+            val x = size.width * step / slots
+            val band = frame.band(step)
+            val wave = sinF(phase * 1.6f + step * 0.38f)
+            val y = mid + wave * size.height * (0.04f + band * 0.10f) * if (mirror == 0) 1f else -1f
+            path.lineTo(x, y)
+        }
+        drawPath(
+            path,
+            Brush.horizontalGradient(
+                listOf(
+                    colors[0].copy(alpha = 0.0f),
+                    colors[(mirror + 1) % colors.size].copy(alpha = 0.88f),
+                    colors[(mirror + 2) % colors.size].copy(alpha = 0.88f),
+                    colors[0].copy(alpha = 0.0f),
+                ),
+            ),
+            style = Stroke(width = 2.6.dp.toPx(), cap = StrokeCap.Round),
+        )
+    }
+}
+
+// ─── Blazing Colors ──────────────────────────────────────────────────────────
+// Upward-rising fire columns with ember particles and heat shimmer
+private fun DrawScope.drawBlazingColors(frame: AudioAnalysisFrame, phase: Float) {
+    val colors = NowPlayingVisualizerPreset.BlazingColors.visualColors()
+    val amp = frame.amplitude.coerceIn(0f, 1f)
+    val bands = frame.bands.ifEmpty { List(32) { 0.2f } }
+    val columns = min(48, bands.size.coerceAtLeast(24))
+    val colW = size.width / columns
+
+    // Flame columns — tall tapered vertical brushes
+    for (col in 0 until columns) {
+        val band = frame.band(col)
+        val flameH = size.height * (0.25f + band * 0.72f + amp * 0.03f)
+        val x = col * colW + colW * 0.1f
+        val w = colW * 0.80f
+        val flickerOffset = sinF(phase * 2.4f + col * 0.43f) * size.width * 0.008f
+        drawRoundRect(
+            brush = Brush.verticalGradient(
+                colorStops = arrayOf(
+                    0.00f to colors[0].copy(alpha = 0.0f),
+                    0.30f to colors[1].copy(alpha = 0.20f + band * 0.20f),
+                    0.60f to colors[2].copy(alpha = 0.55f + band * 0.30f),
+                    0.85f to colors[3].copy(alpha = 0.80f + band * 0.18f),
+                    1.00f to colors[4].copy(alpha = 0.92f),
+                ),
+                startY = size.height - flameH,
+                endY = size.height,
+            ),
+            topLeft = Offset(x + flickerOffset, size.height - flameH),
+            size = Size(w, flameH),
+            cornerRadius = CornerRadius(w * 0.50f, w * 0.50f),
+        )
+    }
+
+    // Ember particles floating upward — deterministic from band + phase
+    val particleCount = 80
+    repeat(particleCount) { p ->
+        val seed = (p * 137 + 31) % columns
+        val band = frame.band(seed)
+        val t = ((phase * 0.6f + p * 0.073f) % FullTurn) / FullTurn  // 0..1 loop
+        val rising = 1f - t  // 1 at bottom, 0 at top
+        val flameTopFraction = (0.25f + band * 0.72f)
+        val px = (seed + 0.5f) * colW + sinF(phase + p * 0.41f) * colW * 1.2f
+        val py = size.height * (1f - flameTopFraction * (1f - rising) - (1f - rising) * 0.3f)
+        val radius = (1.5f + band * 3.5f + amp * 2f) * (0.3f + rising * 0.7f)
+        val alpha = (0.55f + band * 0.40f) * rising.coerceIn(0f, 1f)
+        val colorIdx = (p * 3) % colors.size
+        drawCircle(
+            color = colors[colorIdx].copy(alpha = alpha),
+            radius = radius.dp.toPx(),
+            center = Offset(px, py),
+        )
+    }
+
+    // Base glow at the bottom
+    val glowRadius = size.width * (0.3f + amp * 0.2f)
+    drawCircle(
+        brush = Brush.radialGradient(
+            colors = listOf(
+                colors[4].copy(alpha = 0.55f + amp * 0.35f),
+                colors[3].copy(alpha = 0.25f),
+                Color.Transparent,
+            ),
+            center = Offset(size.width * 0.5f, size.height),
+            radius = glowRadius,
+        ),
+        radius = glowRadius,
+        center = Offset(size.width * 0.5f, size.height),
+    )
+
+    // Heat shimmer lines near mid-canvas
+    repeat(3) { lineIdx ->
+        val yLine = size.height * (0.25f + lineIdx * 0.12f + amp * 0.08f)
+        val path = Path()
+        path.moveTo(0f, yLine)
+        val steps = 40
+        for (step in 0..steps) {
+            val x = size.width * step / steps
+            val shim = sinF(phase * 3.5f + step * 0.55f + lineIdx * 1.1f)
+            path.lineTo(x, yLine + shim * 6f * amp)
+        }
+        drawPath(
+            path,
+            colors[(lineIdx + 2) % colors.size].copy(alpha = 0.18f + amp * 0.20f),
+            style = Stroke(width = 1.4.dp.toPx()),
+        )
+    }
+}
+
+// ─── Plenoptic ───────────────────────────────────────────────────────────────
+private fun DrawScope.drawPlenoptic(frame: AudioAnalysisFrame, phase: Float) {
+    val colors = NowPlayingVisualizerPreset.Plenoptic.visualColors()
+    val center = Offset(size.width / 2f, size.height / 2f)
+    val amp = frame.amplitude.coerceIn(0f, 1f)
+    repeat(6) { ring ->
+        val ringRadius = size.minDimension * (0.11f + ring * 0.065f + amp * 0.05f)
+        val count = 8 + ring * 4
+        repeat(count) { index ->
+            val band = frame.band(index + ring * 3)
+            val angle = phase * (0.16f + ring * 0.018f) + index * FullTurn / count
+            val dot = Offset(
+                center.x + cosF(angle) * ringRadius,
+                center.y + sinF(angle) * ringRadius,
+            )
+            val r = size.minDimension * (0.006f + band * 0.018f)
+            drawCircle(
+                color = colors[(index + ring) % colors.size].copy(alpha = 0.32f + band * 0.44f),
+                radius = r,
+                center = dot,
+            )
+            drawLine(
+                color = colors[ring % colors.size].copy(alpha = 0.08f + band * 0.16f),
+                start = center,
+                end = dot,
+                strokeWidth = 1.dp.toPx(),
+            )
+        }
+        drawCircle(
+            color = colors[ring % colors.size].copy(alpha = 0.08f + amp * 0.10f),
+            radius = ringRadius,
+            center = center,
+            style = Stroke(width = 1.dp.toPx()),
+        )
+    }
+}
+
+// ─── Color palettes ──────────────────────────────────────────────────────────
+private fun NowPlayingVisualizerPreset.backgroundColors(): List<Color> =
+    when (this) {
+        NowPlayingVisualizerPreset.Alchemy -> listOf(Color(0xFF0E2B42), Color(0xFF1A0A30), Color(0xFF05070D))
+        NowPlayingVisualizerPreset.Battery -> listOf(Color(0xFF122520), Color(0xFF121827), Color(0xFF05070D))
+        NowPlayingVisualizerPreset.BarsAndWaves -> listOf(Color(0xFF0D1A2E), Color(0xFF111827), Color(0xFF05070D))
+        NowPlayingVisualizerPreset.BlazingColors -> listOf(Color(0xFF280A00), Color(0xFF1A0500), Color(0xFF05070D))
+        NowPlayingVisualizerPreset.Plenoptic -> listOf(Color(0xFF1A1233), Color(0xFF092B34), Color(0xFF05070D))
+        NowPlayingVisualizerPreset.Artwork -> listOf(Color.Transparent, Color.Transparent)
+    }
+
+private fun NowPlayingVisualizerPreset.visualColors(): List<Color> =
+    when (this) {
+        NowPlayingVisualizerPreset.Alchemy -> listOf(
+            Color(0xFF38D9A9), Color(0xFF74C0FC), Color(0xFFE599F7),
+            Color(0xFFFFD43B), Color(0xFFFF6B6B), Color(0xFF4DABF7),
+        )
+        NowPlayingVisualizerPreset.Battery -> listOf(
+            Color(0xFF94D82D), Color(0xFF15AABF), Color(0xFFFFD43B), Color(0xFFCED4DA),
+        )
+        NowPlayingVisualizerPreset.BarsAndWaves -> listOf(
+            Color(0xFF4DABF7), Color(0xFF9775FA), Color(0xFF63E6BE), Color(0xFFFFD43B),
+        )
+        NowPlayingVisualizerPreset.BlazingColors -> listOf(
+            // tip → mid → base (cool to white-hot)
+            Color(0xFFFF2200), // deep red tip
+            Color(0xFFFF6600), // orange
+            Color(0xFFFF9900), // amber
+            Color(0xFFFFCC00), // gold
+            Color(0xFFFFFFAA), // near-white core
+        )
+        NowPlayingVisualizerPreset.Plenoptic -> listOf(
+            Color(0xFFE599F7), Color(0xFF66D9E8), Color(0xFFFFD43B), Color(0xFFFF8787),
+        )
+        NowPlayingVisualizerPreset.Artwork -> listOf(Color(0xFF74C0FC))
+    }
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+private fun AudioAnalysisFrame.band(index: Int): Float {
+    if (bands.isEmpty()) return amplitude.coerceIn(0f, 1f)
+    return bands[index.floorMod(bands.size)].coerceIn(0f, 1f)
+}
+
+private fun sinF(value: Float): Float = sin(value.toDouble()).toFloat()
+
+private fun cosF(value: Float): Float = cos(value.toDouble()).toFloat()
+
+private fun Int.floorMod(divisor: Int): Int =
+    ((this % divisor) + divisor) % divisor

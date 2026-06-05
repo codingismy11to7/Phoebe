@@ -113,7 +113,7 @@ class CatalogRepositoryRefreshDesktopTest {
                 rating = null,
                 parentAlbumId = "local_lf-old:album:1",
             )
-            db.catalogQueries.upsertTrackParent("local_lf-old:album:1", "local_lf-old:track:1", 0L)
+            db.catalogQueries.upsertTrackParent("local_lf-old:album:1", "local_lf-old:track:1", 0L, null)
         }
         val engine = MockEngine { respond("", HttpStatusCode.NotFound) }
         val http = testHttpClient(engine)
@@ -313,7 +313,7 @@ class CatalogRepositoryRefreshDesktopTest {
                 rating = null,
                 parentAlbumId = null,
             )
-            db.catalogQueries.upsertTrackParent("plex:a1", "plex:old", 0)
+            db.catalogQueries.upsertTrackParent("plex:a1", "plex:old", 0, null)
         }
 
         val childrenStarted = CompletableDeferred<Unit>()
@@ -381,7 +381,7 @@ class CatalogRepositoryRefreshDesktopTest {
                 rating = null,
                 parentAlbumId = null,
             )
-            db.catalogQueries.upsertTrackParent("plex:a1", "plex:t1", 0)
+            db.catalogQueries.upsertTrackParent("plex:a1", "plex:t1", 0, null)
         }
         val engine = MockEngine { request ->
             when (request.url.encodedPath) {
@@ -480,7 +480,7 @@ class CatalogRepositoryRefreshDesktopTest {
                 rating = null,
                 parentAlbumId = null,
             )
-            db.catalogQueries.upsertTrackParent("plex:a1", "plex:t1", 0)
+            db.catalogQueries.upsertTrackParent("plex:a1", "plex:t1", 0, null)
             db.catalogQueries.upsertCollectionValue("Albums", "Mood", "Angry", "999", null, "album.mood", 0)
         }
         val engine = MockEngine { request ->
@@ -868,7 +868,7 @@ class CatalogRepositoryRefreshDesktopTest {
                 rating = null,
                 parentAlbumId = null,
             )
-            db.catalogQueries.upsertTrackParent("plex:p1", "plex:t1", 0)
+            db.catalogQueries.upsertTrackParent("plex:p1", "plex:t1", 0, null)
         }
         var playlistFetches = 0
         val engine = MockEngine { request ->
@@ -1031,7 +1031,7 @@ class CatalogRepositoryRefreshDesktopTest {
                 rating = null,
                 parentAlbumId = "plex:a1",
             )
-            db.catalogQueries.upsertTrackParent("plex:a1", "plex:t1", 0)
+            db.catalogQueries.upsertTrackParent("plex:a1", "plex:t1", 0, null)
         }
         val engine = MockEngine { respond("", HttpStatusCode.NotFound) }
         val http = testHttpClient(engine)
@@ -1325,7 +1325,7 @@ class CatalogRepositoryRefreshDesktopTest {
                 rating = null,
                 parentAlbumId = "album-1",
             )
-            db.catalogQueries.upsertTrackParent("jellyfin:album-1", "jellyfin:track-old", 0)
+            db.catalogQueries.upsertTrackParent("jellyfin:album-1", "jellyfin:track-old", 0, null)
         }
         val engine = MockEngine { request ->
             when (request.url.encodedPath) {

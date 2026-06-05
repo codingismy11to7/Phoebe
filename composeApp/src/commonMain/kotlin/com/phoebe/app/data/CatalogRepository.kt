@@ -222,14 +222,20 @@ class CatalogRepository(
 
     suspend fun awaitDatabaseIdle() {
         while (true) {
-            val pending = pendingCatalogDbWritesMutex.withLock { pendingCatalogDbWrites.toList() }
-            if (pending.isNotEmpty()) {
-                pending.joinAll()
-                continue
-            }
+            awaitPendingCatalogDbWrites()
             databaseWriteGate.withWrite { }
             val queuedDuringGate = pendingCatalogDbWritesMutex.withLock { pendingCatalogDbWrites.isNotEmpty() }
             if (!queuedDuringGate) return
+        }
+    }
+
+    private suspend fun awaitPendingCatalogDbWrites(excluding: Job? = null) {
+        while (true) {
+            val pending = pendingCatalogDbWritesMutex.withLock {
+                pendingCatalogDbWrites.filter { it !== excluding }
+            }
+            if (pending.isEmpty()) return
+            pending.joinAll()
         }
     }
 
@@ -263,6 +269,7 @@ class CatalogRepository(
     }
 
     private suspend fun runCatalogDbWrite(block: suspend () -> Unit) {
+        awaitPendingCatalogDbWrites(excluding = currentCoroutineContext()[Job])
         databaseWriteGate.withWrite { block() }
     }
 
@@ -737,6 +744,13 @@ class CatalogRepository(
         }
         try {
             if (persistSnapshot) {
+                mutableCatalogSyncState.value = CatalogSyncState(
+                    phase = CatalogSyncPhase.Persisting,
+                    message = "Saving library…",
+                    loadedAlbums = mutableCatalog.value.albums.size,
+                    loadedTracks = mutableCatalog.value.tracksByParent.values.sumOf { it.size },
+                    blocking = false,
+                )
                 syncTrace.disk("awaitPendingCatalogDbWrites") {
                     awaitCatalogDbWrites()
                 }
@@ -2220,6 +2234,14 @@ class CatalogRepository(
         val item = copy.removeAt(from)
         copy.add(to, item)
         return copy
+    }
+
+    private fun List<Track>.indexOfPlaylistEntry(track: Track): Int {
+        track.playlistItemId?.let { playlistItemId ->
+            val index = indexOfFirst { it.playlistItemId == playlistItemId }
+            if (index >= 0) return index
+        }
+        return indexOfFirst { it.id == track.id }
     }
 
     private fun mergeTrackLists(existing: List<Track>, incoming: List<Track>): List<Track> {
@@ -3944,18 +3966,7 @@ class CatalogRepository(
         val machineId = resolveMachineIdentifier(server, token)
         return plexClient.createStationPlayQueue(server, token, machineId, station.key)
             .map { it.withPlexPrefix() }
-            .also { tracks ->
-                if (tracks.isNotEmpty()) {
-                    persistenceScope.launch {
-                        runCatching { publishIndexedPlexTracks(tracks) }
-                            .onFailure { error ->
-                                PhoebeLog.d("CatalogRepository") {
-                                    "radio track publish failed: ${error.message}"
-                                }
-                            }
-                    }
-                }
-            }
+            .also { tracks -> publishRadioTracksInBackground(tracks) }
     }
 
     suspend fun playArtistRadio(session: PlexSession?, artist: Artist): List<Track> {
@@ -4693,7 +4704,7 @@ class CatalogRepository(
         }
         if (fromIndex !in existing.indices || toIndex !in existing.indices) return false
 
-        val movedTrackId = existing[fromIndex].id
+        val movedTrack = existing[fromIndex]
         val updated = existing.moved(fromIndex, toIndex)
         pendingPlaylistPrependedTrackIds.remove(playlistId)
         publish(
@@ -4703,21 +4714,37 @@ class CatalogRepository(
                 },
                 tracksByParent = snapshot.tracksByParent + (playlistId to updated),
             ),
-            persist = true,
+            persist = false,
         )
-        syncMovedPlaylistTrack(
+        runCatalogDbWrite { persistPlaylistTracks(mutableCatalog.value, playlistId) }
+        val synced = syncMovedPlaylistTrack(
             session = session,
             playlist = playlist,
-            movedTrackId = movedTrackId,
+            movedTrack = movedTrack,
             updatedTracks = updated,
         )
-        return true
+        if (!synced && !playlist.isLocalPlaylist()) {
+            val current = mutableCatalog.value
+            val originalPlaylist = snapshot.playlists.firstOrNull { it.id == playlistId }
+            publish(
+                current.copy(
+                    playlists = current.playlists.map {
+                        if (it.id == playlistId) originalPlaylist ?: it.copy(trackCount = existing.size) else it
+                    },
+                    tracksByParent = current.tracksByParent + (playlistId to existing),
+                ),
+                persist = false,
+            )
+            runCatalogDbWrite { persistPlaylistTracks(mutableCatalog.value, playlistId) }
+            return false
+        }
+        return synced
     }
 
     private suspend fun syncMovedPlaylistTrack(
         session: PlexSession?,
         playlist: Playlist,
-        movedTrackId: String,
+        movedTrack: Track,
         updatedTracks: List<Track>,
     ): Boolean {
         if (playlist.isLocalPlaylist()) return true
@@ -4727,11 +4754,11 @@ class CatalogRepository(
             val server = session.selectedServer ?: return false
             val token = session.serverAuthToken() ?: return false
             val playlistRating = plexRatingKey(playlist.id) ?: return false
-            val movedIndex = updatedTracks.indexOfFirst { it.id == movedTrackId }
+            val movedIndex = updatedTracks.indexOfPlaylistEntry(movedTrack)
             if (movedIndex < 0) return false
-            val movedItemId = updatedTracks[movedIndex].playlistItemId ?: return false
+            val movedItemId = movedTrack.playlistItemId ?: updatedTracks[movedIndex].playlistItemId ?: return false
             val afterItemId = updatedTracks.getOrNull(movedIndex - 1)?.playlistItemId
-            return runCatching {
+            val moved = runCatching {
                 plexClient.movePlaylistItem(
                     server = server,
                     token = token,
@@ -4742,12 +4769,14 @@ class CatalogRepository(
             }.onFailure { error ->
                 PhoebeLog.d("CatalogRepository") { "movePlaylistTrack Plex sync failed for '${playlist.title}': ${error.message}" }
             }.isSuccess
+            if (!moved) return false
+            return true
         }
         if (session?.providerType?.catalogPrefix != remotePrefix || session.supportsRemotePlaylists() != true) return false
         if (session.isEmbyFamily()) {
             val server = session.selectedServer ?: return false
             val userId = session.userId ?: return false
-            val movedIndex = updatedTracks.indexOfFirst { it.id == movedTrackId }
+            val movedIndex = updatedTracks.indexOfPlaylistEntry(movedTrack)
             if (movedIndex < 0) return false
             val remoteClient = if (remotePrefix == "emby") embyClient else jellyfinClient
             return runCatching {
@@ -4756,7 +4785,7 @@ class CatalogRepository(
                     token = session.token,
                     userId = userId,
                     playlistId = playlist.id.removePrefix("$remotePrefix:"),
-                    itemId = movedTrackId.removePrefix("$remotePrefix:"),
+                    itemId = movedTrack.id.removePrefix("$remotePrefix:"),
                     newIndex = movedIndex,
                 )
             }.onFailure { error ->
@@ -6472,10 +6501,12 @@ class CatalogRepository(
                 }
                 database.catalogQueries.deleteTrackParentsForParent(parentId)
                 mergedTrackIds.forEachIndexed { index, trackId ->
+                    val mergedTrack = parentTracks.firstOrNull { it.id == trackId }
                     database.catalogQueries.upsertTrackParent(
                         parentId = parentId,
                         trackId = trackId,
                         position = index.toLong(),
+                        playlistItemId = mergedTrack?.playlistItemId,
                     )
                 }
             }
@@ -6529,6 +6560,7 @@ class CatalogRepository(
                         parentId = parentId,
                         trackId = track.id,
                         position = index.toLong(),
+                        playlistItemId = track.playlistItemId,
                     )
                 }
             }
@@ -6653,6 +6685,7 @@ class CatalogRepository(
                     parentId = playlistId,
                     trackId = track.id,
                     position = index.toLong(),
+                    playlistItemId = track.playlistItemId,
                 )
             }
         }
@@ -6717,6 +6750,7 @@ class CatalogRepository(
                         parentId = parentId,
                         trackId = track.id,
                         position = index.toLong(),
+                        playlistItemId = track.playlistItemId,
                     )
                 }
             }
@@ -6927,6 +6961,7 @@ class CatalogRepository(
                         parentId = parentId,
                         trackId = track.id,
                         position = index.toLong(),
+                        playlistItemId = track.playlistItemId,
                     )
                 }
             }
@@ -7083,7 +7118,9 @@ class CatalogRepository(
             .groupBy { it.parentId }
             .mapValues { (_, entries) ->
                 entries.sortedBy { it.position }
-                    .mapNotNull { tracksById[it.trackId] }
+                    .mapNotNull { entry ->
+                        tracksById[entry.trackId]?.copy(playlistItemId = entry.playlistItemId)
+                    }
             }
         val downloads = database.downloadsQueries.selectAll().awaitAsList().map { row -> row.toDownloadItem() }
         return CatalogSnapshot(
@@ -7160,6 +7197,18 @@ class CatalogRepository(
      */
     private fun Track.withPlexPrefix(): Track =
         if (id.startsWith("plex:")) this else copy(id = "plex:$id")
+
+    private fun publishRadioTracksInBackground(tracks: List<Track>) {
+        if (tracks.isEmpty()) return
+        persistenceScope.launch {
+            runCatching { publishIndexedPlexTracks(tracks) }
+                .onFailure { error ->
+                    PhoebeLog.d("CatalogRepository") {
+                        "radio track publish failed: ${error.message}"
+                    }
+                }
+        }
+    }
 
     private fun Track.withJellyfinPrefix(): Track =
         if (id.startsWith("jellyfin:")) this else copy(

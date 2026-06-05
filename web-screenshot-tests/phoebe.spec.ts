@@ -20,6 +20,15 @@ const coreScenarios = [
 ] as const;
 
 const lightScenarios = ['Home', 'Library', 'Search', 'Player'] as const;
+const phoneLightScenarios = [
+  ['PlayerBlurredArtworkOn', 'player-blurred-artwork-on'],
+  ['PlayerBlurredArtworkOff', 'player-blurred-artwork-off'],
+  ['PlayerVisualizerAlchemy', 'player-visualizer-alchemy'],
+  ['PlayerVisualizerBattery', 'player-visualizer-battery'],
+  ['PlayerVisualizerBarsAndWaves', 'player-visualizer-bars-and-waves'],
+  ['PlayerVisualizerBlazingColors', 'player-visualizer-blazing-colors'],
+  ['PlayerVisualizerPlenoptic', 'player-visualizer-plenoptic'],
+] as const;
 
 for (const scenario of coreScenarios) {
   test(`web ${scenario} dark`, async ({ page }) => {
@@ -41,8 +50,23 @@ for (const scenario of lightScenarios) {
   });
 }
 
-async function openScenario(page: Page, scenario: string, theme: 'dark' | 'light') {
-  await page.setViewportSize({ width: 1365, height: 900 });
+for (const [scenario, slug] of phoneLightScenarios) {
+  test(`web phone ${scenario} light`, async ({ page }) => {
+    await openScenario(page, scenario, 'light', { width: 430, height: 932 });
+    await expect(page).toHaveScreenshot(`web-phone-${slug}-light.png`, {
+      animations: 'disabled',
+      fullPage: true,
+    });
+  });
+}
+
+async function openScenario(
+  page: Page,
+  scenario: string,
+  theme: 'dark' | 'light',
+  viewport = { width: 1365, height: 900 },
+) {
+  await page.setViewportSize(viewport);
   await page.goto(`/?screenshot=${scenario}&theme=${theme}`, { waitUntil: 'domcontentloaded' });
   await page.locator('canvas').waitFor({ state: 'visible', timeout: 60_000 });
   await page.waitForTimeout(750);

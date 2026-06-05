@@ -31,6 +31,7 @@ robolectric = "4.16.1"
 roborazzi = "1.60.0"
 sentryGradle = "6.7.0"
 sentryKmp = "0.26.0"
+haze = "2.0.0-alpha02"
 
 [libraries]
 compose-runtime = { module = "org.jetbrains.compose.runtime:runtime", version.ref = "compose" }
@@ -39,6 +40,7 @@ compose-material3 = { module = "org.jetbrains.compose.material3:material3", vers
 compose-components-resources = { module = "org.jetbrains.compose.components:components-resources", version.ref = "compose" }
 compose-ui-test-junit4 = { module = "org.jetbrains.compose.ui:ui-test-junit4", version.ref = "compose" }
 jetbrains-navigation3-ui = { module = "org.jetbrains.androidx.navigation3:navigation3-ui", version.ref = "multiplatform-nav3-ui" }
+haze-blur = { module = "dev.chrisbanes.haze:haze-blur", version.ref = "haze" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
 androidx-fragment = { module = "androidx.fragment:fragment", version.ref = "fragment" }
 androidx-documentfile = { module = "androidx.documentfile:documentfile", version.ref = "documentfile" }

@@ -65,7 +65,7 @@ class DatabaseWiperDesktopTest {
                     rating = null,
                     parentAlbumId = "album",
                 )
-                database.catalogQueries.upsertTrackParent("album", "track", 0L)
+                database.catalogQueries.upsertTrackParent("album", "track", 0L, null)
                 database.catalogQueries.upsertCollectionValue("Albums", "Genre", "Rock", "genre=1", null, null, 1L)
                 database.catalogQueries.upsertCollectionTag("Albums", "Genre", "album", "Rock")
                 database.catalogQueries.upsertCollectionValueLoad("Albums", "Genre")

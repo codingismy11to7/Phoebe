@@ -33,6 +33,7 @@ class PhoebeAndroidPhoneScreenshotTest {
     @Test fun phoneSongDark() = capturePhone("song", PhoebeScreenshotScenario.Song)
     @Test fun phoneSearchDark() = capturePhone("search", PhoebeScreenshotScenario.Search)
     @Test fun phonePlayerDark() = capturePhone("player", PhoebeScreenshotScenario.Player)
+    @Test fun phonePlayerVisualizerDark() = capturePhone("player-visualizer", PhoebeScreenshotScenario.PlayerVisualizer)
     @Test fun phonePlayerUpNextExpandedDark() = capturePhone("player-upnext-expanded", PhoebeScreenshotScenario.PlayerUpNextExpanded)
     @Test fun phoneSettingsDark() = capturePhone("settings", PhoebeScreenshotScenario.Settings)
     @Test fun phoneSignInDark() = capturePhone("signin", PhoebeScreenshotScenario.SignIn)
@@ -49,6 +50,13 @@ class PhoebeAndroidPhoneScreenshotTest {
     @Test fun phoneLibraryLight() = capturePhone("library", PhoebeScreenshotScenario.Library, useLightAppearance = true)
     @Test fun phoneSearchLight() = capturePhone("search", PhoebeScreenshotScenario.Search, useLightAppearance = true)
     @Test fun phonePlayerLight() = capturePhone("player", PhoebeScreenshotScenario.Player, useLightAppearance = true)
+    @Test fun phonePlayerBlurredArtworkOnLight() = capturePhone("player-blurred-artwork-on", PhoebeScreenshotScenario.PlayerBlurredArtworkOn, useLightAppearance = true)
+    @Test fun phonePlayerBlurredArtworkOffLight() = capturePhone("player-blurred-artwork-off", PhoebeScreenshotScenario.PlayerBlurredArtworkOff, useLightAppearance = true)
+    @Test fun phonePlayerVisualizerAlchemyLight() = capturePhone("player-visualizer-alchemy", PhoebeScreenshotScenario.PlayerVisualizerAlchemy, useLightAppearance = true)
+    @Test fun phonePlayerVisualizerBatteryLight() = capturePhone("player-visualizer-battery", PhoebeScreenshotScenario.PlayerVisualizerBattery, useLightAppearance = true)
+    @Test fun phonePlayerVisualizerBarsAndWavesLight() = capturePhone("player-visualizer-bars-and-waves", PhoebeScreenshotScenario.PlayerVisualizerBarsAndWaves, useLightAppearance = true)
+    @Test fun phonePlayerVisualizerBlazingColorsLight() = capturePhone("player-visualizer-blazing-colors", PhoebeScreenshotScenario.PlayerVisualizerBlazingColors, useLightAppearance = true)
+    @Test fun phonePlayerVisualizerPlenopticLight() = capturePhone("player-visualizer-plenoptic", PhoebeScreenshotScenario.PlayerVisualizerPlenoptic, useLightAppearance = true)
     @Test fun phonePlayerUpNextExpandedLight() = capturePhone("player-upnext-expanded", PhoebeScreenshotScenario.PlayerUpNextExpanded, useLightAppearance = true)
 }
 

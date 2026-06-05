@@ -224,7 +224,7 @@ internal fun TrackList(
                         showLeadingHandle = reorderEnabled || LocalPlaylistDragEnabled.current,
                     )
                 }
-                itemsIndexed(displayTracks, key = { _, track -> track.id }, contentType = { _, _ -> "track" }) { index, track ->
+                itemsIndexed(displayTracks, key = { _, track -> track.reorderKey() }, contentType = { _, _ -> "track" }) { index, track ->
                     SongRow(
                         track = track,
                         selected = false,
@@ -242,7 +242,7 @@ internal fun TrackList(
                     )
                 }
             } else {
-                itemsIndexed(displayTracks, key = { _, track -> track.id }, contentType = { _, _ -> "track" }) { index, track ->
+                itemsIndexed(displayTracks, key = { _, track -> track.reorderKey() }, contentType = { _, _ -> "track" }) { index, track ->
                     ContentTrackRow(
                         track = track,
                         libraryColumns = libraryColumns,
