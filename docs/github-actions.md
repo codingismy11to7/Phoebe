@@ -215,7 +215,7 @@ Useful links:
 
 macOS signing and notarization:
 
-- `MACOS_CERTIFICATE_BASE64`: base64-encoded Developer ID Application `.p12` certificate
+- `MACOS_CERTIFICATE_BASE64`: base64-encoded `.p12` containing both Developer ID Application and Developer ID Installer identities
 - `MACOS_CERTIFICATE_PASSWORD`
 - `MACOS_DEVELOPER_IDENTITY`: certificate identity, for example `Developer ID Application: Name (TEAMID)`
 - `MACOS_KEYCHAIN_PASSWORD`: a random password used only for the temporary CI keychain

@@ -66,7 +66,9 @@ fun providerValue(name: String, envName: String): String? =
 
 fun String.asJpackageMacSigningUserName(): String =
     removePrefix("Developer ID Application: ")
+        .removePrefix("Developer ID Installer: ")
         .removePrefix("3rd Party Mac Developer Application: ")
+        .removePrefix("3rd Party Mac Developer Installer: ")
 
 val javaFxClassifier = when {
     System.getProperty("os.name").startsWith("Mac", ignoreCase = true) &&

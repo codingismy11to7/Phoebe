@@ -390,7 +390,18 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "${MACOS_KEYCHAIN_PASSWORD}" "${keychain_path}"
 
           jpackage_signing_identity="${MACOS_DEVELOPER_IDENTITY#Developer ID Application: }"
+          jpackage_signing_identity="${jpackage_signing_identity#Developer ID Installer: }"
           jpackage_signing_identity="${jpackage_signing_identity#3rd Party Mac Developer Application: }"
+          jpackage_signing_identity="${jpackage_signing_identity#3rd Party Mac Developer Installer: }"
+          identity_list="$(security find-identity -v "${keychain_path}")"
+          if ! grep -Fq "Developer ID Application: ${jpackage_signing_identity}" <<< "${identity_list}"; then
+            echo "::error::MACOS_CERTIFICATE_BASE64 must include the Developer ID Application identity named by MACOS_DEVELOPER_IDENTITY"
+            exit 1
+          fi
+          if ! grep -Fq "Developer ID Installer: ${jpackage_signing_identity}" <<< "${identity_list}"; then
+            echo "::error::MACOS_CERTIFICATE_BASE64 must include the matching Developer ID Installer identity for .pkg packaging"
+            exit 1
+          fi
 
           {
             echo "compose.desktop.mac.sign=true"
