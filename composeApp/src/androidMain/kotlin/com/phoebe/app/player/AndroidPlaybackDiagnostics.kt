@@ -35,7 +35,7 @@ internal object AndroidPlaybackDiagnostics {
                 diagnostics = diagnostics,
                 engine = engine,
             ),
-        ).setLoadControl(PhoebeLoadControlConfig.create())
+        ).setLoadControl(PhoebeLoadControlConfig.create(engine))
     }
 
     fun reset() {
@@ -45,24 +45,51 @@ internal object AndroidPlaybackDiagnostics {
 
 @OptIn(UnstableApi::class)
 internal object PhoebeLoadControlConfig {
-    const val MinBufferMs = 60_000
-    const val MaxBufferMs = 300_000
-    const val BufferForPlaybackMs = 1_000
+    const val MainMinBufferMs = 15_000
+    const val MainMaxBufferMs = 90_000
+    const val MainTargetBufferBytes = 6 * 1024 * 1024
+    const val CrossfadeMinBufferMs = 2_000
+    const val CrossfadeMaxBufferMs = 12_000
+    const val CrossfadeTargetBufferBytes = 1 * 1024 * 1024
+    const val BufferForPlaybackMs = 750
     const val BufferForPlaybackAfterRebufferMs = 2_000
-    const val TargetBufferBytes = 12 * 1024 * 1024
 
-    fun create(): DefaultLoadControl =
+    fun create(engine: PlaybackEnginePath): DefaultLoadControl =
+        create(profileFor(engine))
+
+    fun profileFor(engine: PlaybackEnginePath): PhoebeLoadControlProfile =
+        if (engine == PlaybackEnginePath.Media3Crossfade) {
+            PhoebeLoadControlProfile(
+                minBufferMs = CrossfadeMinBufferMs,
+                maxBufferMs = CrossfadeMaxBufferMs,
+                targetBufferBytes = CrossfadeTargetBufferBytes,
+            )
+        } else {
+            PhoebeLoadControlProfile(
+                minBufferMs = MainMinBufferMs,
+                maxBufferMs = MainMaxBufferMs,
+                targetBufferBytes = MainTargetBufferBytes,
+            )
+        }
+
+    private fun create(profile: PhoebeLoadControlProfile): DefaultLoadControl =
         DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                MinBufferMs,
-                MaxBufferMs,
+                profile.minBufferMs,
+                profile.maxBufferMs,
                 BufferForPlaybackMs,
                 BufferForPlaybackAfterRebufferMs,
             )
-            .setTargetBufferBytes(TargetBufferBytes)
+            .setTargetBufferBytes(profile.targetBufferBytes)
             .setPrioritizeTimeOverSizeThresholds(false)
             .build()
 }
+
+internal data class PhoebeLoadControlProfile(
+    val minBufferMs: Int,
+    val maxBufferMs: Int,
+    val targetBufferBytes: Int,
+)
 
 internal object AndroidEqualizerState {
     @Volatile
@@ -72,6 +99,9 @@ internal object AndroidEqualizerState {
 internal object AndroidAudioAnalysisState {
     @Volatile
     var sink: ((FloatArray, Float) -> Unit)? = null
+
+    @Volatile
+    var shouldSample: (() -> Boolean)? = null
 }
 
 @OptIn(UnstableApi::class)
@@ -131,7 +161,8 @@ private class AndroidAudioAnalysisAudioProcessor(
     override fun queueInput(inputBuffer: ByteBuffer) {
         val remaining = inputBuffer.remaining()
         if (remaining <= 0) return
-        analysisState.sink?.let { sink ->
+        val sink = analysisState.sink
+        if (sink != null && analysisState.shouldSample?.invoke() != false) {
             val probe = inputBuffer.asReadOnlyBuffer()
             media3PcmSamples(
                 buffer = probe,

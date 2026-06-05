@@ -77,7 +77,7 @@ class AudioAnalysisAccumulator(
         )
     }
 
-    private fun canPublish(timestampMs: Long): Boolean =
+    internal fun canPublish(timestampMs: Long): Boolean =
         lastPublishedAtMs == Long.MIN_VALUE ||
             timestampMs - lastPublishedAtMs >= minPublishIntervalMs ||
             timestampMs < lastPublishedAtMs

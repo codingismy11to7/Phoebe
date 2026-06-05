@@ -257,6 +257,14 @@ internal fun PhoebeIconView(
                 drawRoundRect(tint, topLeft = Offset(s * 0.32f, s * 0.22f), size = Size(s * 0.12f, s * 0.56f), cornerRadius = CornerRadius(s * 0.04f, s * 0.04f))
                 drawRoundRect(tint, topLeft = Offset(s * 0.56f, s * 0.22f), size = Size(s * 0.12f, s * 0.56f), cornerRadius = CornerRadius(s * 0.04f, s * 0.04f))
             }
+            PhoebeIcon.Edit -> {
+                line(0.24f, 0.76f, 0.36f, 0.64f)
+                line(0.36f, 0.64f, 0.70f, 0.30f)
+                line(0.70f, 0.30f, 0.78f, 0.38f)
+                line(0.78f, 0.38f, 0.44f, 0.72f)
+                line(0.44f, 0.72f, 0.24f, 0.76f)
+                line(0.63f, 0.37f, 0.71f, 0.45f)
+            }
             PhoebeIcon.More -> {
                 drawCircle(tint, radius = s * 0.045f, center = p(0.28f, 0.50f))
                 drawCircle(tint, radius = s * 0.045f, center = p(0.50f, 0.50f))
@@ -354,6 +362,7 @@ private fun PhoebeIcon.drawableResource(filled: Boolean): DrawableResource? =
         PhoebeIcon.PlaylistPlay,
         PhoebeIcon.Play,
         PhoebeIcon.Pause,
+        PhoebeIcon.Edit,
         PhoebeIcon.More,
         PhoebeIcon.ActiveDot,
         PhoebeIcon.Grid,

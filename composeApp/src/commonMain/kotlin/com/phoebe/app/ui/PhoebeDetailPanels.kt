@@ -526,6 +526,7 @@ private fun SongActionRow(
     onDownload: (Track) -> Unit,
     onOpenLyrics: (Track) -> Unit,
 ) {
+    val metadataEditorActions = LocalMetadataEditorActions.current
     if (scrollable) {
         LazyRow(
             modifier = Modifier.fillMaxWidth(),
@@ -535,6 +536,11 @@ private fun SongActionRow(
             item("play") { SongActionButton(PhoebeIcon.Play, "Play", Modifier.playTrackTarget(track), onPlay) }
             item("up-next") { SongActionButton(PhoebeIcon.Queue, "Up Next") { onAddToUpNext(track) } }
             item("lyrics") { SongActionButton(PhoebeIcon.Lyrics, "Lyrics") { onOpenLyrics(track) } }
+            item("edit-metadata") {
+                SongActionButton(PhoebeIcon.Edit, "Edit Metadata") {
+                    metadataEditorActions.onRequestEdit(track)
+                }
+            }
             item("download") { DownloadActionButton("Download", listOf(track)) { onDownload(track) } }
         }
     } else {
@@ -545,6 +551,9 @@ private fun SongActionRow(
             SongActionButton(PhoebeIcon.Play, "Play", Modifier.playTrackTarget(track), onPlay)
             SongActionButton(PhoebeIcon.Queue, "Up Next") { onAddToUpNext(track) }
             SongActionButton(PhoebeIcon.Lyrics, "Lyrics") { onOpenLyrics(track) }
+            SongActionButton(PhoebeIcon.Edit, "Edit Metadata") {
+                metadataEditorActions.onRequestEdit(track)
+            }
             DownloadActionButton("Download", listOf(track)) { onDownload(track) }
         }
     }

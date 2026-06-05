@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -73,6 +74,7 @@ private val MobileLibraryToolbarToContentGap = 10.dp
 private val MobileLibraryLoadingStripHeight = 16.dp
 private val MobileLibraryPaginationHeight = 36.dp
 private val MobileLibraryContentGap = 8.dp
+private val MobileArtistGridArtworkMaxSize = 112.dp
 
 @Composable
 internal fun LibraryMobileView(
@@ -482,10 +484,13 @@ private fun MobileArtistCard(
             artist.title,
             artist.thumbUrl,
             Modifier
-                .size(112.dp)
+                .widthIn(max = MobileArtistGridArtworkMaxSize)
+                .fillMaxWidth()
+                .aspectRatio(1f)
                 .sharedArtworkTransition("artist:${artist.id}")
                 .clip(CircleShape),
-            radius = 56.dp,
+            radius = 999.dp,
+            shape = CircleShape,
             elevated = false,
         )
         Text(
