@@ -30,6 +30,32 @@ val phoebeDebugDistribution = providers.gradleProperty("phoebe.debugDistribution
     .map(String::toBoolean)
     .orElse(false)
 
+val phoebeBuildInfoOutput = layout.buildDirectory.dir("generated/phoebeBuildInfo/kotlin")
+val generatePhoebeBuildInfo = tasks.register("generatePhoebeBuildInfo") {
+    val outputDir = phoebeBuildInfoOutput
+    inputs.property("versionName", phoebeVersionName)
+    inputs.property("versionCode", phoebeVersionCode)
+    inputs.property("githubOwner", "j-roskopf")
+    inputs.property("githubRepo", "Phoebe")
+    outputs.dir(outputDir)
+    doLast {
+        val file = outputDir.get().file("com/phoebe/app/platform/PhoebeBuildInfo.kt").asFile
+        file.parentFile.mkdirs()
+        file.writeText(
+            """
+            package com.phoebe.app.platform
+
+            object PhoebeBuildInfo {
+                const val versionName: String = "${phoebeVersionName.get()}"
+                const val versionCode: Int = ${phoebeVersionCode.get()}
+                const val githubOwner: String = "j-roskopf"
+                const val githubRepo: String = "Phoebe"
+            }
+            """.trimIndent() + "\n",
+        )
+    }
+}
+
 val phoebeRealAudioTests = providers.gradleProperty("phoebe.realAudioTests")
     .orElse(providers.environmentVariable("PHOEBE_REAL_AUDIO_TESTS"))
     .map(String::toBoolean)
@@ -125,6 +151,9 @@ kotlin {
 
 
     sourceSets {
+        val commonMain by getting {
+            kotlin.srcDir(phoebeBuildInfoOutput)
+        }
         val commonTest by getting
         val desktopMain by getting
         val desktopTest by getting
@@ -383,7 +412,7 @@ compose.desktop {
             configurationFiles.from(project.file("desktop-release.pro"))
         }
         nativeDistributions {
-            targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
+            targetFormats(TargetFormat.Dmg, TargetFormat.Pkg, TargetFormat.Msi, TargetFormat.Deb)
             modules("java.instrument", "java.management", "java.net.http", "java.sql", "jdk.jfr", "jdk.unsupported")
             packageName = if (phoebeDebugDistribution.get()) "Phoebe Debug" else "Phoebe"
             packageVersion = phoebeVersionName.get()
@@ -424,6 +453,12 @@ compose.desktop {
                 iconFile.set(iconsDir.file("icon.png").asFile)
             }
         }
+    }
+}
+
+tasks.configureEach {
+    if (name.startsWith("compile") && name.contains("Kotlin")) {
+        dependsOn(generatePhoebeBuildInfo)
     }
 }
 

@@ -403,6 +403,7 @@ jobs:
         run: >
           ./gradlew
           :composeApp:packageReleaseDmg
+          :composeApp:packageReleasePkg
           -Pphoebe.versionName=${{ needs.version.outputs.version }}
 
       - name: Print macOS packaging logs
@@ -424,28 +425,32 @@ jobs:
       - name: Notarize macOS package
         shell: bash
         run: |
-          dmg="$(find composeApp/build -name '*.dmg' -print -quit)"
-          if [[ -z "${dmg}" ]]; then
-            echo "::error::Could not find DMG to notarize"
+          mapfile -t mac_artifacts < <(find composeApp/build \( -name '*.dmg' -o -name '*.pkg' \) -print | sort)
+          if (( ${#mac_artifacts[@]} == 0 )); then
+            echo "::error::Could not find macOS artifacts to notarize"
             exit 1
           fi
-          xcrun notarytool submit "${dmg}" \
-            --apple-id "${APPLE_ID}" \
-            --password "${APPLE_APP_SPECIFIC_PASSWORD}" \
-            --team-id "${APPLE_TEAM_ID}" \
-            --wait
-          xcrun stapler staple "${dmg}"
+          for artifact in "${mac_artifacts[@]}"; do
+            xcrun notarytool submit "${artifact}" \
+              --apple-id "${APPLE_ID}" \
+              --password "${APPLE_APP_SPECIFIC_PASSWORD}" \
+              --team-id "${APPLE_TEAM_ID}" \
+              --wait
+            xcrun stapler staple "${artifact}"
+          done
 
       - name: Collect macOS release artifacts
         shell: bash
         run: |
           mkdir -p release-artifacts
           dmg="$(find composeApp/build -name '*.dmg' -print -quit)"
-          if [[ -z "${dmg}" ]]; then
-            echo "::error::Could not find macOS DMG release artifact"
+          pkg="$(find composeApp/build -name '*.pkg' -print -quit)"
+          if [[ -z "${dmg}" || -z "${pkg}" ]]; then
+            echo "::error::Could not find macOS DMG and PKG release artifacts"
             exit 1
           fi
           cp "${dmg}" "release-artifacts/Phoebe-${VERSION}.dmg"
+          cp "${pkg}" "release-artifacts/Phoebe-${VERSION}.pkg"
         env:
           VERSION: ${{ needs.version.outputs.version }}
 
@@ -488,6 +493,7 @@ jobs:
             release-artifacts/**/*.flatpak
             release-artifacts/**/*.msi
             release-artifacts/**/*.dmg
+            release-artifacts/**/*.pkg
 
   web-pages-deploy:
     name: Deploy web to GitHub Pages

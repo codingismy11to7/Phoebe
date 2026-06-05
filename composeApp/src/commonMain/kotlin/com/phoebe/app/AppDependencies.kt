@@ -40,6 +40,9 @@ import com.phoebe.app.player.SystemVolumeController
 import com.phoebe.app.player.createAudioPlayer
 import com.phoebe.app.player.createCastController
 import com.phoebe.app.player.createSystemVolumeController
+import com.phoebe.app.updates.GitHubReleaseUpdateRepository
+import com.phoebe.app.updates.PlatformUpdateInstaller
+import com.phoebe.app.updates.createPlatformUpdateInstaller
 
 class AppDependencies(
     val database: PhoebeDatabase,
@@ -64,6 +67,8 @@ class AppDependencies(
     val castController: CastController,
     val systemVolume: SystemVolumeController,
     val downloadNotifier: DownloadNotifier,
+    val updateRepository: GitHubReleaseUpdateRepository,
+    val updateInstaller: PlatformUpdateInstaller,
     /** File-backed on desktop; NSUserDefaults keys on iOS; etc. Used for lightweight UI prefs. */
     val platformStorage: PlatformStorage,
 ) {
@@ -102,6 +107,7 @@ class AppDependencies(
                 ),
             )
             val storage = PlatformStorage()
+            val updateInstaller = createPlatformUpdateInstaller()
             val secureCredentialStore = createSecureCredentialStore()
             val database = createPhoebeDatabase()
             val databaseWriteGate = DatabaseWriteGate()
@@ -188,6 +194,11 @@ class AppDependencies(
                 castController = castController,
                 systemVolume = createSystemVolumeController(),
                 downloadNotifier = DownloadNotifier(),
+                updateRepository = GitHubReleaseUpdateRepository(
+                    httpClient = httpClient,
+                    installer = updateInstaller,
+                ),
+                updateInstaller = updateInstaller,
                 platformStorage = storage,
             )
         }

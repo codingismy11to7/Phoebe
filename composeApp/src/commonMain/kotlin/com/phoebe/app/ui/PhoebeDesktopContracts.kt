@@ -34,6 +34,7 @@ import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.defaultCollectionEntries
 import com.phoebe.app.player.CastState
 import com.phoebe.app.platform.SecureCredentialAvailability
+import com.phoebe.app.updates.AppUpdateState
 
 internal data class DesktopShellState(
     val screen: AppScreen,
@@ -47,6 +48,7 @@ internal data class DesktopShellState(
     val showQueue: Boolean,
     val compact: Boolean,
     val busy: Boolean,
+    val updateState: AppUpdateState = AppUpdateState.Idle,
 )
 
 internal data class PlaybackUiState(
@@ -144,6 +146,7 @@ internal data class BrowseActions(
     val onLibrarySortBy: (LibrarySortBy) -> Unit,
     val onLibraryAscending: (Boolean) -> Unit,
     val onLibraryColumns: (LibraryColumnVisibility) -> Unit,
+    val onInstallUpdate: () -> Unit = {},
 )
 
 internal data class AuthSetupState(

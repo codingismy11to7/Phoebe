@@ -199,6 +199,7 @@ import com.phoebe.app.platform.isDesktopPlatform
 import com.phoebe.app.platform.prefersReducedArtworkEffects
 import com.phoebe.app.platform.supportsPredictiveBack
 import com.phoebe.app.telemetry.Telemetry
+import com.phoebe.app.updates.AvailableUpdate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -299,6 +300,8 @@ private fun PhoebeRootStateHolder(
     val librariesLoading by state.librariesLoading.collectAsState()
     val message by state.message.collectAsState()
     val playbackSnackbar by state.playbackSnackbar.collectAsState()
+    val appUpdateState by state.appUpdateState.collectAsState()
+    val pendingUpdateInstallConfirmation by state.pendingUpdateInstallConfirmation.collectAsState()
     val decadeMixNotice by state.decadeMixNotice.collectAsState()
     val radioStations by state.radioStations.collectAsState()
     val radioStartingIds by state.radioStartingIds.collectAsState()
@@ -1351,6 +1354,8 @@ private fun PhoebeRootStateHolder(
                         onListenBrainzSubmitNowPlaying = state::setListenBrainzSubmitNowPlaying,
                         onListenBrainzSubmitListens = state::setListenBrainzSubmitListens,
                         onListenBrainzSubmitCurrentTrackFeedback = state::setListenBrainzSubmitCurrentTrackFeedback,
+                        appUpdateState = appUpdateState,
+                        onInstallUpdate = state::installAvailableUpdate,
                         showBottomChrome = false,
                     )
                     }
@@ -1463,6 +1468,7 @@ private fun PhoebeRootStateHolder(
                         showQueue = wideDesktop,
                         compact = !wideDesktop,
                         busy = busy,
+                        updateState = appUpdateState,
                     ),
                     playbackState = PlaybackUiState(
                         shellPlayback = shellPlayback,
@@ -1605,6 +1611,7 @@ private fun PhoebeRootStateHolder(
                         onLibrarySortBy = state::setLibrarySortBy,
                         onLibraryAscending = state::setLibrarySortAscending,
                         onLibraryColumns = state::setLibraryColumns,
+                        onInstallUpdate = state::installAvailableUpdate,
                     ),
                     authSetupState = AuthSetupState(
                         appMessage = message,
@@ -1732,6 +1739,13 @@ private fun PhoebeRootStateHolder(
             onDismiss = state::dismissPlaybackSnackbar,
             modifier = Modifier.align(Alignment.BottomCenter),
         )
+        pendingUpdateInstallConfirmation?.let { update ->
+            UpdateInstallConfirmationDialog(
+                update = update,
+                onDismiss = { state.respondToUpdateInstallConfirmation(false) },
+                onConfirm = { state.respondToUpdateInstallConfirmation(true) },
+            )
+        }
             }
     }
     // Drag-ghost overlay — must be the LAST child of the wrapper Box so it draws above the
@@ -1784,6 +1798,72 @@ private fun PlaybackFailureSnackbar(
                 )
                 TextButton(onClick = onDismiss) {
                     Text("Dismiss")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun UpdateInstallConfirmationDialog(
+    update: AvailableUpdate,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Column(
+            Modifier
+                .padding(horizontal = 24.dp, vertical = 24.dp)
+                .widthIn(min = 320.dp, max = 460.dp)
+                .shadow(elevation = 30.dp, shape = RoundedCornerShape(18.dp), clip = false)
+                .clip(RoundedCornerShape(18.dp))
+                .background(PhoebeUi.modalSurface)
+                .border(BorderStroke(1.dp, PhoebeUi.accentLight.copy(alpha = 0.20f)), RoundedCornerShape(18.dp))
+                .padding(horizontal = 22.dp, vertical = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Image(
+                    painter = painterResource(Res.drawable.phoebe_icon_rounded),
+                    contentDescription = null,
+                    modifier = Modifier.size(46.dp).clip(RoundedCornerShape(10.dp)),
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        "Install Phoebe ${update.versionName}?",
+                        color = PhoebeUi.primaryText,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        "The update is downloaded and verified.",
+                        color = PhoebeUi.secondaryText,
+                        fontSize = 13.sp,
+                    )
+                }
+            }
+            Text(
+                "Phoebe will close and open the installer. After the installer finishes, Phoebe will relaunch when the platform allows it.",
+                color = PhoebeUi.secondaryText,
+                fontSize = 13.sp,
+                lineHeight = 19.sp,
+            )
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = onDismiss) {
+                    Text("Not now", color = PhoebeUi.secondaryText)
+                }
+                TextButton(onClick = onConfirm) {
+                    Text("Close and install", color = PhoebeUi.accentLight, fontWeight = FontWeight.Bold)
                 }
             }
         }

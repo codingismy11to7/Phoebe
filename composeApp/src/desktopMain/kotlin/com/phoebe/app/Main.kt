@@ -38,6 +38,7 @@ import javax.imageio.ImageIO
 import javax.swing.RootPaneContainer
 
 fun main(args: Array<String>) {
+    configureDesktopApplicationName()
     configureSandboxedNativeLibraries()
     if (runDesktopPlaybackSmokeIfRequested(args)) return
 
@@ -55,15 +56,24 @@ fun main(args: Array<String>) {
         } else {
             "icon$debugSuffix.png"
         }
-        val icon = BitmapPainter(loadDesktopResourceImage(iconResource).toComposeImageBitmap())
+        val iconImage = remember(iconResource) { loadDesktopResourceImage(iconResource) }
+        val icon = remember(iconImage) { BitmapPainter(iconImage.toComposeImageBitmap()) }
+        DisposableEffect(iconImage) {
+            applyDesktopApplicationIcon(iconImage)
+            onDispose {}
+        }
         var useLightAppearance by remember { mutableStateOf(false) }
         Window(
             onCloseRequest = ::exitApplication,
-            title = if (isMacOs || useCustomWindowsTitleBar) "" else appDisplayName(),
+            title = if (useCustomWindowsTitleBar) "" else appDisplayName(),
             state = windowState,
             icon = icon,
             undecorated = useCustomWindowsTitleBar,
         ) {
+            DisposableEffect(window, iconImage) {
+                window.iconImages = listOf(iconImage)
+                onDispose {}
+            }
             RegisterDesktopWindowKeyDispatcher(window)
             ApplyDesktopWindowChrome()
             Column(Modifier.fillMaxSize()) {
@@ -86,6 +96,12 @@ fun main(args: Array<String>) {
             }
         }
     }
+}
+
+private fun configureDesktopApplicationName() {
+    val displayName = appDisplayName()
+    System.setProperty("apple.awt.application.name", displayName)
+    System.setProperty("com.apple.mrj.application.apple.menu.about.name", displayName)
 }
 
 private fun loadDesktopResourceImage(resourcePath: String) =
@@ -126,6 +142,22 @@ private fun applyMacDockIcon(debug: Boolean) {
         applicationClass
             .getMethod("setDockIconImage", Image::class.java)
             .invoke(application, dockImage)
+    }
+}
+
+private fun applyDesktopApplicationIcon(iconImage: Image) {
+    runCatching {
+        if (java.awt.Taskbar.isTaskbarSupported()) {
+            java.awt.Taskbar.getTaskbar().iconImage = iconImage
+        }
+    }
+    if (!isMacOs()) return
+    runCatching {
+        val applicationClass = Class.forName("com.apple.eawt.Application")
+        val application = applicationClass.getMethod("getApplication").invoke(null)
+        applicationClass
+            .getMethod("setDockIconImage", Image::class.java)
+            .invoke(application, iconImage)
     }
 }
 

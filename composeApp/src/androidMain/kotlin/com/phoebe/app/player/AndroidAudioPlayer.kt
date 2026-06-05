@@ -871,6 +871,7 @@ internal class AndroidAudioPlayer(
         queue.getOrNull(targetIndex)?.let { updateOptimisticLocalBufferedPosition(it, generation) }
         if (shouldPlay && playWhenReady) {
             markPendingAutoplay(generation)
+            player.playWhenReady = true
             player.play()
             startPositionSyncLoop(generation)
         }
@@ -990,9 +991,21 @@ internal class AndroidAudioPlayer(
             playbackState = player.playbackState,
             positionMs = controllerPosition,
         )
-        val autoplayPending = retainPendingAutoplay && !player.isPlaying
+        val recoverUnconfirmedAutoplay = shouldRecoverUnconfirmedAutoplay(
+            playWhenReady = playWhenReady,
+            hasCurrentTrack = appState.currentTrack != null,
+            playerIsPlaying = player.isPlaying,
+            playbackState = player.playbackState,
+            positionMs = controllerPosition,
+            controllerMatchesAppState = controllerMatchesAppState(player, generation),
+        )
+        val autoplayPending = (retainPendingAutoplay || recoverUnconfirmedAutoplay) && !player.isPlaying
         if (autoplayPending) {
+            if (pendingAutoplayGeneration != generation) {
+                markPendingAutoplay(generation)
+            }
             if (!appControllerMutationInProgress) {
+                player.playWhenReady = true
                 player.play()
             }
             val autoplayElapsedMs = SystemClock.elapsedRealtime() - pendingAutoplayStartedAtMs
@@ -1352,6 +1365,22 @@ internal fun shouldRetainPendingAutoplay(
     if (pendingGeneration != generation || !playWhenReady || !hasCurrentTrack) return false
     if (playbackState == Player.STATE_ENDED) return false
     return !playerIsPlaying || positionMs < AndroidAutoplayConfirmedPositionMs
+}
+
+internal fun shouldRecoverUnconfirmedAutoplay(
+    playWhenReady: Boolean,
+    hasCurrentTrack: Boolean,
+    playerIsPlaying: Boolean,
+    playbackState: Int,
+    positionMs: Long,
+    controllerMatchesAppState: Boolean,
+): Boolean {
+    return playWhenReady &&
+        hasCurrentTrack &&
+        !playerIsPlaying &&
+        playbackState != Player.STATE_ENDED &&
+        positionMs < AndroidAutoplayConfirmedPositionMs &&
+        controllerMatchesAppState
 }
 
 internal fun shouldAdoptPlatformPlayIntent(

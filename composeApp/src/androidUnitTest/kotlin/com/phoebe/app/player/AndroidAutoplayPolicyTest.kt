@@ -67,6 +67,44 @@ class AndroidAutoplayPolicyTest {
     }
 
     @Test
+    fun loadedPausedTrackStillRecoversWhenPlayIntentIsUnconfirmed() {
+        assertTrue(
+            shouldRecoverUnconfirmedAutoplay(
+                playWhenReady = true,
+                hasCurrentTrack = true,
+                playerIsPlaying = false,
+                playbackState = Player.STATE_READY,
+                positionMs = 0L,
+                controllerMatchesAppState = true,
+            ),
+        )
+    }
+
+    @Test
+    fun unconfirmedAutoplayRecoveryDoesNotOverridePauseOrEndedPlayback() {
+        assertFalse(
+            shouldRecoverUnconfirmedAutoplay(
+                playWhenReady = false,
+                hasCurrentTrack = true,
+                playerIsPlaying = false,
+                playbackState = Player.STATE_READY,
+                positionMs = 0L,
+                controllerMatchesAppState = true,
+            ),
+        )
+        assertFalse(
+            shouldRecoverUnconfirmedAutoplay(
+                playWhenReady = true,
+                hasCurrentTrack = true,
+                playerIsPlaying = false,
+                playbackState = Player.STATE_ENDED,
+                positionMs = 0L,
+                controllerMatchesAppState = true,
+            ),
+        )
+    }
+
+    @Test
     fun adoptPlatformPlayIntentOnlyWhenTracksMatchAndNoMutationInProgress() {
         assertTrue(
             shouldAdoptPlatformPlayIntent(

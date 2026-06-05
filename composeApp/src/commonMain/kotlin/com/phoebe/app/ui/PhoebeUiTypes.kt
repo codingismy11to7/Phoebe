@@ -238,6 +238,7 @@ internal enum class PhoebeIcon {
     Close,
     Check,
     Visualizer,
+    Update,
 }
 
 /** When showing tracks outside Library (e.g. Search), show all optional metadata columns. */

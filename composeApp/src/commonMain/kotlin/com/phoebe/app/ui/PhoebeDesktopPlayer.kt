@@ -241,6 +241,8 @@ internal fun DesktopPlayer(
                         onToggleLocalFolder = onToggleLocalFolder,
                         onRefreshLibrary = onRefreshLibrary,
                         onRefreshPlayHistory = onRefreshPlayHistory,
+                        appUpdateState = shellState.updateState,
+                        onInstallUpdate = browseActions.onInstallUpdate,
                     )
                     Column(Modifier.weight(1f).fillMaxHeight()) {
                         Row(Modifier.weight(1f).fillMaxWidth()) {
