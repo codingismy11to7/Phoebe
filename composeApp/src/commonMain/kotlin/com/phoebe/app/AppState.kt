@@ -67,9 +67,13 @@ import com.phoebe.app.platform.PhoebeLog
 import com.phoebe.app.platform.currentTimeMs
 import com.phoebe.app.platform.discoverJellyfinServers as discoverJellyfinServersOnNetwork
 import com.phoebe.app.platform.openExternalUrl
+import com.phoebe.app.updates.AppUpdateState
+import com.phoebe.app.updates.AvailableUpdate
+import com.phoebe.app.updates.UpdateInstallResult
 import io.ktor.http.Url
 import io.ktor.http.encodeURLParameter
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -203,6 +207,13 @@ class AppState(
     val recentSearchItems = dependencies.searchHistoryRepository.items
     val defaultDownloadDirectoryLabel: String = dependencies.platformStorage.defaultDownloadDirectoryLabel()
 
+    private val mutableAppUpdateState = MutableStateFlow<AppUpdateState>(AppUpdateState.Idle)
+    val appUpdateState: StateFlow<AppUpdateState> = mutableAppUpdateState.asStateFlow()
+    private val mutablePendingUpdateInstallConfirmation = MutableStateFlow<AvailableUpdate?>(null)
+    val pendingUpdateInstallConfirmation: StateFlow<AvailableUpdate?> =
+        mutablePendingUpdateInstallConfirmation.asStateFlow()
+    private var pendingUpdateInstallConfirmationResponse: CompletableDeferred<Boolean>? = null
+
     private val mutableNavigationRequests = MutableSharedFlow<AppNavigationRequest>(
         replay = 1,
         extraBufferCapacity = 32,
@@ -304,6 +315,7 @@ class AppState(
             dependencies.audioPlayer.setCrossfadeDurationMs(appSettings.value.crossfadeSeconds * 1_000L)
             dependencies.playHistoryRepository.restore()
             mutableDownloadDirectory.value = dependencies.platformStorage.readDownloadDirectory()
+            checkForUpdatesInBackground()
             requestNavigation(defaultBrowseRequest(session.value))
             if (session.value?.token?.isNotBlank() == true && session.value?.selectedServer == null) {
                 refreshServers()
@@ -352,6 +364,25 @@ class AppState(
         surfaceCastMessages()
         dependencies.plexPlaybackReporter.start(scope)
         dependencies.listenBrainzPlaybackReporter.start(scope)
+    }
+
+    private fun checkForUpdatesInBackground() {
+        scope.launch {
+            if (mutableAppUpdateState.value is AppUpdateState.Installing) return@launch
+            mutableAppUpdateState.value = AppUpdateState.Checking
+            runCatching {
+                dependencies.updateRepository.checkForUpdate()
+            }.onSuccess { update ->
+                mutableAppUpdateState.value = if (update == null) {
+                    AppUpdateState.Current
+                } else {
+                    AppUpdateState.Available(update)
+                }
+            }.onFailure { error ->
+                PhoebeLog.d("Update") { "release check failed: ${error.message}" }
+                mutableAppUpdateState.value = AppUpdateState.Failed(error.message ?: "Couldn't check for updates.")
+            }
+        }
     }
 
     private fun bindAppSettingsToPlayback() {
@@ -1571,6 +1602,73 @@ class AppState(
 
     fun setBlurredArtworkAppearance(enabled: Boolean) = scope.launch {
         dependencies.appSettingsRepository.setBlurredArtworkAppearance(enabled)
+    }
+
+    fun installAvailableUpdate() = scope.launch {
+        val update = when (val state = mutableAppUpdateState.value) {
+            is AppUpdateState.Available -> state.update
+            is AppUpdateState.Failed -> state.lastKnownUpdate
+            is AppUpdateState.Installing -> return@launch
+            else -> null
+        } ?: return@launch
+
+        val initialMessage = "Downloading Phoebe ${update.versionName}..."
+        mutableAppUpdateState.value = AppUpdateState.Installing(update, initialMessage)
+        mutableMessage.value = initialMessage
+        mutablePlaybackSnackbar.value = initialMessage
+        runCatching {
+            dependencies.updateInstaller.install(
+                update = update,
+                onProgress = { progress ->
+                    mutableAppUpdateState.value = AppUpdateState.Installing(
+                        update = update,
+                        message = progress.message,
+                        progress = progress.fraction,
+                    )
+                },
+                confirmInstall = { readyUpdate ->
+                    mutableAppUpdateState.value = AppUpdateState.Installing(
+                        update = update,
+                        message = "Ready to install Phoebe ${readyUpdate.versionName}.",
+                        progress = 1f,
+                    )
+                    requestUpdateInstallConfirmation(readyUpdate)
+                },
+            )
+        }.onSuccess { result ->
+            mutableMessage.value = result.message
+            mutablePlaybackSnackbar.value = result.message
+            mutableAppUpdateState.value = when (result) {
+                is UpdateInstallResult.Started -> AppUpdateState.Installing(update, result.message)
+                is UpdateInstallResult.OpenedReleasePage,
+                is UpdateInstallResult.RequiresUserAction,
+                -> AppUpdateState.Available(update)
+            }
+        }.onFailure { error ->
+            val message = error.message ?: "Couldn't install the update."
+            mutableMessage.value = message
+            mutablePlaybackSnackbar.value = message
+            mutableAppUpdateState.value = AppUpdateState.Failed(message, update)
+        }
+    }
+
+    fun respondToUpdateInstallConfirmation(install: Boolean) {
+        pendingUpdateInstallConfirmationResponse?.complete(install)
+    }
+
+    private suspend fun requestUpdateInstallConfirmation(update: AvailableUpdate): Boolean {
+        pendingUpdateInstallConfirmationResponse?.complete(false)
+        val response = CompletableDeferred<Boolean>()
+        pendingUpdateInstallConfirmationResponse = response
+        mutablePendingUpdateInstallConfirmation.value = update
+        return try {
+            response.await()
+        } finally {
+            if (pendingUpdateInstallConfirmationResponse === response) {
+                pendingUpdateInstallConfirmationResponse = null
+                mutablePendingUpdateInstallConfirmation.value = null
+            }
+        }
     }
 
     fun connectListenBrainz(userToken: String) = scope.launch {

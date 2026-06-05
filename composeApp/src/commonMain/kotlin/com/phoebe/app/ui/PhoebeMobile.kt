@@ -199,6 +199,7 @@ import com.phoebe.app.platform.currentTimeMs
 import com.phoebe.app.platform.isDesktopPlatform
 import com.phoebe.app.platform.prefersReducedArtworkEffects
 import com.phoebe.app.platform.SecureCredentialAvailability
+import com.phoebe.app.updates.AppUpdateState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -218,6 +219,7 @@ private const val MobilePlayerContinuousMotionDelayMs = 240L
 internal val MobileToolbarChromeHeight = 56.dp
 internal val MobileBottomNavChromeHeight = 68.dp
 internal val MobileMiniPlayerChromeHeight = 66.dp
+internal val PhoebeUpdateBlue = Color(0xFF3B82F6)
 internal val MobileChromeScrollGap = 12.dp
 private val MobilePlayerMetadataReserveWithAlbum = 104.dp
 private val MobilePlayerMetadataReserveWithoutAlbum = 84.dp
@@ -350,6 +352,7 @@ internal fun MobileScreenToolbar(
     onMenuExpandedChange: (Boolean) -> Unit,
     menuContent: @Composable () -> Unit,
     showMenu: Boolean = true,
+    menuTint: Color = PhoebeUi.primaryText,
 ) {
     Row(
         Modifier
@@ -395,7 +398,7 @@ internal fun MobileScreenToolbar(
             ) {
                 PhoebeIconView(
                     PhoebeIcon.More,
-                    tint = PhoebeUi.primaryText,
+                    tint = menuTint,
                     modifier = Modifier.size(22.dp),
                 )
                 DropdownMenu(
@@ -509,12 +512,22 @@ internal fun MobileBrowseShell(
     onListenBrainzSubmitNowPlaying: (Boolean) -> Unit = {},
     onListenBrainzSubmitListens: (Boolean) -> Unit = {},
     onListenBrainzSubmitCurrentTrackFeedback: (Boolean) -> Unit = {},
+    appUpdateState: AppUpdateState = AppUpdateState.Idle,
+    onInstallUpdate: () -> Unit = {},
     initialExpandedPhoneSection: PhoneHomeAccordionSection? = null,
     homeListState: LazyListState? = null,
     showBottomChrome: Boolean = true,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     val pickLocalFolder = rememberPickLocalFolder(onPicked = onAddLocalFolder)
+    val availableUpdate = when (val updateState = appUpdateState) {
+        is AppUpdateState.Available -> updateState.update
+        is AppUpdateState.Installing -> updateState.update
+        is AppUpdateState.Failed -> updateState.lastKnownUpdate
+        else -> null
+    }
+    val installingUpdateState = appUpdateState as? AppUpdateState.Installing
+    val updateInstalling = installingUpdateState != null
     val toolbarTitle = when {
         section == BrowseSection.Settings -> "Settings"
         selectedPlaylistId != null -> "Playlist"
@@ -750,8 +763,37 @@ internal fun MobileBrowseShell(
                 },
                 menuExpanded = menuExpanded,
                 onMenuExpandedChange = { menuExpanded = it },
-                showMenu = !(section == BrowseSection.Settings && selectedPlaylistId == null),
+                showMenu = availableUpdate != null || !(section == BrowseSection.Settings && selectedPlaylistId == null),
+                menuTint = if (availableUpdate != null) PhoebeUpdateBlue else PhoebeUi.primaryText,
                 menuContent = {
+                    if (availableUpdate != null) {
+                        DropdownMenuItem(
+                            text = {
+                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    if (installingUpdateState != null) {
+                                        MobileUpdateProgressRing(
+                                            progress = installingUpdateState.progress,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                    } else {
+                                        PhoebeIconView(PhoebeIcon.Update, tint = PhoebeUpdateBlue, modifier = Modifier.size(18.dp))
+                                    }
+                                    Text(
+                                        if (installingUpdateState != null) {
+                                            updateMenuProgressLabel(installingUpdateState)
+                                        } else {
+                                            "Update to ${availableUpdate.versionName}"
+                                        },
+                                    )
+                                }
+                            },
+                            onClick = {
+                                if (!updateInstalling) onInstallUpdate()
+                                menuExpanded = false
+                            },
+                            enabled = !updateInstalling,
+                        )
+                    }
                     val userName = session?.userName
                     if (userName != null) {
                         DropdownMenuItem(
@@ -827,6 +869,38 @@ internal fun MobileBrowseShell(
                     .zIndex(2f),
             )
         }
+    }
+}
+
+@Composable
+private fun MobileUpdateProgressRing(
+    progress: Float?,
+    modifier: Modifier = Modifier,
+) {
+    if (progress == null) {
+        CircularProgressIndicator(
+            modifier = modifier,
+            color = PhoebeUpdateBlue,
+            strokeWidth = 2.dp,
+            trackColor = PhoebeUpdateBlue.copy(alpha = 0.16f),
+        )
+    } else {
+        CircularProgressIndicator(
+            progress = { progress.coerceIn(0f, 1f) },
+            modifier = modifier,
+            color = PhoebeUpdateBlue,
+            strokeWidth = 2.dp,
+            trackColor = PhoebeUpdateBlue.copy(alpha = 0.16f),
+        )
+    }
+}
+
+private fun updateMenuProgressLabel(state: AppUpdateState.Installing): String {
+    val progress = state.progress
+    return if (progress != null && state.message.contains("Downloading", ignoreCase = true)) {
+        "Downloading ${(progress.coerceIn(0f, 1f) * 100).toInt()}%"
+    } else {
+        state.message
     }
 }
 

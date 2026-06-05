@@ -160,6 +160,7 @@ import com.phoebe.app.domain.supportsPlexPlaylists
 import com.phoebe.app.platform.createPlatformHttpClient
 import com.phoebe.app.platform.currentTimeMs
 import com.phoebe.app.platform.prefersReducedArtworkEffects
+import com.phoebe.app.updates.AppUpdateState
 import kotlinx.coroutines.delay
 import com.phoebe.app.sources.rememberPickLocalFolder
 import io.ktor.client.HttpClient
@@ -188,6 +189,8 @@ internal fun Sidebar(
     onToggleLocalFolder: (String, Boolean) -> Unit,
     onRefreshLibrary: () -> Unit,
     onRefreshPlayHistory: () -> Unit,
+    appUpdateState: AppUpdateState = AppUpdateState.Idle,
+    onInstallUpdate: () -> Unit = {},
 ) {
     var profileExpanded by remember { mutableStateOf(false) }
     val pickLocalFolder = rememberPickLocalFolder(onPicked = onAddLocalFolder)
@@ -198,6 +201,14 @@ internal fun Sidebar(
     val remoteSourceLabel = if (remoteSignedIn) "$providerName — streaming library" else "Streaming provider — Plex or Jellyfin"
     val catalogSyncInProgress = LocalCatalogSyncInProgress.current
     val showPlaylistRefreshBar = remoteSignedIn && catalogSyncInProgress
+    val availableUpdate = when (val updateState = appUpdateState) {
+        is AppUpdateState.Available -> updateState.update
+        is AppUpdateState.Installing -> updateState.update
+        is AppUpdateState.Failed -> updateState.lastKnownUpdate
+        else -> null
+    }
+    val installingUpdateState = appUpdateState as? AppUpdateState.Installing
+    val updateInstalling = installingUpdateState != null
     val likedSongsPlaylist = playlistActions.playlists.firstOrNull { it.isLikedSongsPlaylist() }
         ?: if (playlistActions.playlistsEnabled) {
             Playlist(id = PENDING_LIKED_SONGS_PLAYLIST_ID, title = LIKED_SONGS_PLAYLIST_TITLE, trackCount = 0)
@@ -217,7 +228,26 @@ internal fun Sidebar(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             BrandMark(size = 28.dp)
-            Text("Phoebe", color = PhoebeUi.primaryText, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text("Phoebe", color = PhoebeUi.primaryText, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            if (availableUpdate != null) {
+                Box(
+                    Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(PhoebeUpdateBlue.copy(alpha = if (updateInstalling) 0.10f else 0.16f))
+                        .clickable(enabled = !updateInstalling, onClick = onInstallUpdate),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (installingUpdateState != null) {
+                        UpdateProgressRing(
+                            progress = installingUpdateState.progress,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    } else {
+                        PhoebeIconView(PhoebeIcon.Update, tint = PhoebeUpdateBlue, modifier = Modifier.size(18.dp))
+                    }
+                }
+            }
         }
 
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -401,6 +431,29 @@ internal fun Sidebar(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun UpdateProgressRing(
+    progress: Float?,
+    modifier: Modifier = Modifier,
+) {
+    if (progress == null) {
+        CircularProgressIndicator(
+            modifier = modifier,
+            color = PhoebeUpdateBlue,
+            strokeWidth = 2.dp,
+            trackColor = PhoebeUpdateBlue.copy(alpha = 0.16f),
+        )
+    } else {
+        CircularProgressIndicator(
+            progress = { progress.coerceIn(0f, 1f) },
+            modifier = modifier,
+            color = PhoebeUpdateBlue,
+            strokeWidth = 2.dp,
+            trackColor = PhoebeUpdateBlue.copy(alpha = 0.16f),
+        )
     }
 }
 

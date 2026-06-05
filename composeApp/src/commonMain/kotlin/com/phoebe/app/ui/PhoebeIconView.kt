@@ -319,6 +319,12 @@ internal fun PhoebeIconView(
                     )
                 }
             }
+            PhoebeIcon.Update -> {
+                line(0.50f, 0.22f, 0.50f, 0.76f)
+                line(0.27f, 0.44f, 0.50f, 0.22f)
+                line(0.73f, 0.44f, 0.50f, 0.22f)
+                line(0.26f, 0.80f, 0.74f, 0.80f)
+            }
             else -> Unit
         }
     }
@@ -369,5 +375,6 @@ private fun PhoebeIcon.drawableResource(filled: Boolean): DrawableResource? =
         PhoebeIcon.Close,
         PhoebeIcon.Check,
         PhoebeIcon.Visualizer,
+        PhoebeIcon.Update,
         -> null
     }
