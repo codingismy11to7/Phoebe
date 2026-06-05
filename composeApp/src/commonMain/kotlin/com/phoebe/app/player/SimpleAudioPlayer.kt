@@ -475,6 +475,9 @@ abstract class SimpleAudioPlayer : AudioPlayer {
         mutableAudioAnalysis.value = frame.normalized()
     }
 
+    protected fun canPublishAudioAnalysis(timestampMs: Long = currentTimeMs()): Boolean =
+        audioAnalysisAccumulator.canPublish(timestampMs)
+
     protected fun publishAudioAnalysisPcm(
         samples: FloatArray,
         sampleRateHz: Float,

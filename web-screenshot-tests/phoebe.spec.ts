@@ -29,6 +29,9 @@ const phoneLightScenarios = [
   ['PlayerVisualizerBlazingColors', 'player-visualizer-blazing-colors'],
   ['PlayerVisualizerPlenoptic', 'player-visualizer-plenoptic'],
 ] as const;
+const phoneDarkScenarios = [
+  ['LibraryFiveColumnGrid', 'library-five-column-grid'],
+] as const;
 
 for (const scenario of coreScenarios) {
   test(`web ${scenario} dark`, async ({ page }) => {
@@ -54,6 +57,16 @@ for (const [scenario, slug] of phoneLightScenarios) {
   test(`web phone ${scenario} light`, async ({ page }) => {
     await openScenario(page, scenario, 'light', { width: 430, height: 932 });
     await expect(page).toHaveScreenshot(`web-phone-${slug}-light.png`, {
+      animations: 'disabled',
+      fullPage: true,
+    });
+  });
+}
+
+for (const [scenario, slug] of phoneDarkScenarios) {
+  test(`web phone ${scenario} dark`, async ({ page }) => {
+    await openScenario(page, scenario, 'dark', { width: 430, height: 932 });
+    await expect(page).toHaveScreenshot(`web-phone-${slug}-dark.png`, {
       animations: 'disabled',
       fullPage: true,
     });

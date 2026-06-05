@@ -231,6 +231,7 @@ internal enum class PhoebeIcon {
     Download,
     Repeat,
     Drag,
+    Edit,
     More,
     ActiveDot,
     Grid,

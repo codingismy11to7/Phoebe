@@ -65,6 +65,17 @@ class AudioAnalysisAccumulatorTest {
     }
 
     @Test
+    fun canPublishExposesThrottleWithoutAllocatingSamples() {
+        val accumulator = AudioAnalysisAccumulator(bandCount = 8, minPublishIntervalMs = 50)
+        val samples = FloatArray(128) { 0.25f }
+
+        assertTrue(accumulator.canPublish(1_000L))
+        assertNotNull(accumulator.observePcm(samples, sampleRateHz = 44_100f, timestampMs = 1_000L))
+        assertEquals(false, accumulator.canPublish(1_020L))
+        assertTrue(accumulator.canPublish(1_050L))
+    }
+
+    @Test
     fun fallbackFramesAreDeterministicForSameSeedAndPosition() {
         val first = AudioAnalysisAccumulator.fallbackFrame(
             seed = "track-1",

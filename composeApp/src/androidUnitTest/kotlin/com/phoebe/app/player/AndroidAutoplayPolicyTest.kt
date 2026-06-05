@@ -108,4 +108,43 @@ class AndroidAutoplayPolicyTest {
             ),
         )
     }
+
+    @Test
+    fun activeCrossfadeCancelsOnlyForExternalControllerPause() {
+        assertTrue(
+            shouldCancelAndroidCrossfadeForControllerPause(
+                crossfadeTransitionActive = true,
+                playWhenReady = true,
+                controllerPlayWhenReady = false,
+                appControllerMutationInProgress = false,
+            ),
+        )
+
+        assertFalse(
+            shouldCancelAndroidCrossfadeForControllerPause(
+                crossfadeTransitionActive = true,
+                playWhenReady = true,
+                controllerPlayWhenReady = false,
+                appControllerMutationInProgress = true,
+            ),
+        )
+
+        assertFalse(
+            shouldCancelAndroidCrossfadeForControllerPause(
+                crossfadeTransitionActive = false,
+                playWhenReady = true,
+                controllerPlayWhenReady = false,
+                appControllerMutationInProgress = false,
+            ),
+        )
+
+        assertFalse(
+            shouldCancelAndroidCrossfadeForControllerPause(
+                crossfadeTransitionActive = true,
+                playWhenReady = false,
+                controllerPlayWhenReady = false,
+                appControllerMutationInProgress = false,
+            ),
+        )
+    }
 }

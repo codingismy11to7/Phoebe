@@ -2,11 +2,13 @@ package com.phoebe.app.ui
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
@@ -177,6 +179,37 @@ class PlaybackClickTargetDesktopTest {
         onNodeWithTag(PlaybackTestTags.playTrack(track.id)).performClick()
 
         assertTrue(played)
+    }
+
+    @OptIn(ExperimentalTestApi::class, ExperimentalComposeUiApi::class)
+    @Test
+    fun phoneSongDetailEditMetadataButtonInvokesEditorRequest() = runDesktopComposeUiTest(width = 430, height = 760) {
+        val track = playbackTracks().first()
+        var requestedTrack: Track? = null
+
+        setContent {
+            PhoebeTheme {
+                Box(Modifier.size(430.dp, 760.dp)) {
+                    CompositionLocalProvider(
+                        LocalMetadataEditorActions provides MetadataEditorActions(
+                            onRequestEdit = { requestedTrack = it },
+                        ),
+                    ) {
+                        SongDetailPanel(
+                            track = track,
+                            onBack = {},
+                            onPlay = {},
+                            onAddToUpNext = {},
+                            onDownload = {},
+                        )
+                    }
+                }
+            }
+        }
+
+        onNodeWithText("Edit Metadata").performClick()
+
+        assertEquals(track.id, assertNotNull(requestedTrack).id)
     }
 
     @OptIn(ExperimentalTestApi::class, ExperimentalComposeUiApi::class)

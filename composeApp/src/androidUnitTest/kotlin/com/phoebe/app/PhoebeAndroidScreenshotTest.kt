@@ -27,6 +27,7 @@ class PhoebeAndroidPhoneScreenshotTest {
     @Test fun phoneFavoriteAlbumsDark() = capturePhone("favorite-albums", PhoebeScreenshotScenario.FavoriteAlbums)
     @Test fun phoneArtistRadioDark() = capturePhone("artist-radio", PhoebeScreenshotScenario.ArtistRadio)
     @Test fun phoneLibraryDark() = capturePhone("library", PhoebeScreenshotScenario.Library)
+    @Test fun phoneLibraryFiveColumnGridDark() = capturePhone("library-five-column-grid", PhoebeScreenshotScenario.LibraryFiveColumnGrid)
     @Test fun phonePlaylistDark() = capturePhone("playlist", PhoebeScreenshotScenario.Playlist)
     @Test fun phoneArtistDark() = capturePhone("artist", PhoebeScreenshotScenario.Artist)
     @Test fun phoneAlbumDark() = capturePhone("album", PhoebeScreenshotScenario.Album)

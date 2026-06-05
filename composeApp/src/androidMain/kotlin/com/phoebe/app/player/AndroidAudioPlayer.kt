@@ -101,6 +101,7 @@ internal class AndroidAudioPlayer(
     private var retryJob: Job? = null
     private var crossfadeJob: Job? = null
     private var crossfadePlayer: ExoPlayer? = null
+    private var crossfadeIncomingPlayer: ExoPlayer? = null
     private var crossfadeGeneration = -1
     private var crossfadeOwnedTrackId: String? = null
     private var retryGeneration = -1
@@ -146,6 +147,7 @@ internal class AndroidAudioPlayer(
         AndroidAudioAnalysisState.sink = { samples, sampleRateHz ->
             publishAudioAnalysisPcm(samples, sampleRateHz, AudioAnalysisSource.Pcm)
         }
+        AndroidAudioAnalysisState.shouldSample = { canPublishAudioAnalysis() }
         AndroidPlaybackBridge.onSkipNext = { next() }
         AndroidPlaybackBridge.onSkipPrevious = { previous() }
         AndroidPlaybackBridge.hasNextTrack = { hasNextTrack() }
@@ -200,6 +202,8 @@ internal class AndroidAudioPlayer(
                 controller = null
             }
             appContext.stopService(Intent(appContext, PlaybackService::class.java))
+            AndroidAudioAnalysisState.sink = null
+            AndroidAudioAnalysisState.shouldSample = null
             AndroidPlaybackDiagnostics.reset()
         }
     }
@@ -279,6 +283,9 @@ internal class AndroidAudioPlayer(
     override fun pause() {
         clearPendingAutoplay()
         scope.launch {
+            if (crossfadeIncomingPlayer != null) {
+                cancelAndroidCrossfadeTransition()
+            }
             val ownedPlayer = ownedCrossfadePlayer()
             if (ownedPlayer != null) {
                 ownedPlayer.pause()
@@ -315,6 +322,9 @@ internal class AndroidAudioPlayer(
         val generation = activePlayGeneration
         val targetPositionMs = positionMs.coerceAtLeast(0L)
         seekJob = scope.launch {
+            if (crossfadeIncomingPlayer != null) {
+                cancelAndroidCrossfadeTransition()
+            }
             val ownedPlayer = ownedCrossfadePlayer()
             if (ownedPlayer != null) {
                 if (!isPlayRequestCurrent(generation)) return@launch
@@ -388,6 +398,8 @@ internal class AndroidAudioPlayer(
         if (ownedOutgoing == null && controller == null) return false
         crossfadeGeneration = generation
         crossfadeJob?.cancel()
+        crossfadeIncomingPlayer?.release()
+        crossfadeIncomingPlayer = null
         crossfadeJob = scope.launch {
             var incoming: ExoPlayer? = null
             var incomingOwnedByPlayback = false
@@ -406,10 +418,11 @@ internal class AndroidAudioPlayer(
                     .build()
                 incoming.volume = 0f
                 incoming.setMediaItem(playbackMediaItem(track, inAppPlayback = true))
+                crossfadeIncomingPlayer = incoming
                 incoming.prepare()
                 incoming.play()
                 if (!waitUntilReady(incoming, generation, CrossfadePrepareTimeoutMs)) return@launch
-                if (!isPlayRequestCurrent(generation)) return@launch
+                if (!isAndroidCrossfadeTransitionCurrent(generation, incoming)) return@launch
                 if (outgoingOwnedByPlayback == null && activeLocalPlayer() !== outgoing) return@launch
                 if (outgoingOwnedByPlayback != null && crossfadePlayer !== outgoingOwnedByPlayback) return@launch
 
@@ -421,26 +434,36 @@ internal class AndroidAudioPlayer(
                     .coerceAtMost(durationMs)
                     .coerceAtLeast(CrossfadeMinimumFadeMs)
                 fadeVolumes(outgoing, incoming, fadeDurationMs, baseVolume, generation)
-                if (!isPlayRequestCurrent(generation)) return@launch
+                if (!isAndroidCrossfadeTransitionCurrent(generation, incoming)) return@launch
                 if (outgoingOwnedByPlayback == null && activeLocalPlayer() !== outgoing) return@launch
                 if (outgoingOwnedByPlayback != null && crossfadePlayer !== outgoingOwnedByPlayback) return@launch
 
                 if (outgoingOwnedByPlayback != null) {
+                    incoming.volume = effectiveOutputVolume()
+                    incomingOwnedByPlayback = true
+                    crossfadeIncomingPlayer = null
+                    crossfadePlayer = incoming
+                    crossfadeOwnedTrackId = track.id
                     outgoing.pause()
                     outgoing.volume = 0f
                     outgoingOwnedByPlayback.release()
                 } else {
                     controllerMutex.withLock {
-                        if (!isPlayRequestCurrent(generation) || activeLocalPlayer() !== outgoing) return@withLock
+                        if (!isAndroidCrossfadeTransitionCurrent(generation, incoming) ||
+                            activeLocalPlayer() !== outgoing
+                        ) {
+                            return@withLock
+                        }
+                        incoming.volume = effectiveOutputVolume()
+                        incomingOwnedByPlayback = true
+                        crossfadeIncomingPlayer = null
+                        crossfadePlayer = incoming
+                        crossfadeOwnedTrackId = track.id
                         outgoing.pause()
                         outgoing.volume = 0f
                     }
                 }
-                if (!isPlayRequestCurrent(generation)) return@launch
-                incoming.volume = effectiveOutputVolume()
-                incomingOwnedByPlayback = true
-                crossfadePlayer = incoming
-                crossfadeOwnedTrackId = track.id
+                if (!isPlayRequestCurrent(generation) || crossfadePlayer !== incoming) return@launch
                 adoptCrossfadeTarget(queue, targetIndex, incoming.currentPosition.coerceAtLeast(0L), generation)
                 diagnostics.crossfadeCommitted(PlaybackEnginePath.Media3Crossfade, track.id)
                 updateOptimisticLocalBufferedPosition(track, generation)
@@ -454,7 +477,7 @@ internal class AndroidAudioPlayer(
                 AndroidPlaybackBridge.suppressServiceEndedCallback = false
                 if (!incomingOwnedByPlayback) {
                     incoming?.release()
-                    if (crossfadePlayer === incoming) crossfadePlayer = null
+                    if (crossfadeIncomingPlayer === incoming) crossfadeIncomingPlayer = null
                 }
                 if (crossfadeGeneration == generation) crossfadeGeneration = -1
             }
@@ -478,6 +501,8 @@ internal class AndroidAudioPlayer(
     private fun forceLocalPlaybackPaused() {
         cancelPlayIntent()
         clearPendingAutoplay()
+        cancelAndroidCrossfadeTransition()
+        ownedCrossfadePlayer()?.pause()
         stopPositionSyncLoop()
         stopBufferingTimeout()
         val current = state.value
@@ -629,6 +654,8 @@ internal class AndroidAudioPlayer(
         crossfadeGeneration = -1
         crossfadeOwnedTrackId = null
         AndroidPlaybackBridge.suppressServiceEndedCallback = false
+        crossfadeIncomingPlayer?.release()
+        crossfadeIncomingPlayer = null
         crossfadePlayer?.release()
         crossfadePlayer = null
     }
@@ -636,9 +663,26 @@ internal class AndroidAudioPlayer(
     private fun ownedCrossfadePlayer(): ExoPlayer? =
         crossfadePlayer?.takeIf { crossfadeOwnedTrackId != null }
 
+    private fun cancelAndroidCrossfadeTransition() {
+        crossfadeJob?.cancel()
+        crossfadeJob = null
+        crossfadeGeneration = -1
+        AndroidPlaybackBridge.suppressServiceEndedCallback = false
+        crossfadeIncomingPlayer?.release()
+        crossfadeIncomingPlayer = null
+        crossfadePlayer?.volume = effectiveOutputVolume()
+        activeLocalPlayer()?.volume = effectiveOutputVolume()
+    }
+
+    private fun isAndroidCrossfadeTransitionCurrent(generation: Int, incoming: Player): Boolean =
+        isPlayRequestCurrent(generation) &&
+            crossfadeGeneration == generation &&
+            crossfadeIncomingPlayer === incoming &&
+            playWhenReady
+
     private suspend fun waitUntilReady(player: Player, generation: Int, timeoutMs: Long): Boolean {
         var waitedMs = 0L
-        while (waitedMs < timeoutMs && isPlayRequestCurrent(generation)) {
+        while (waitedMs < timeoutMs && isPlayRequestCurrent(generation) && playWhenReady) {
             if (player.playbackState == Player.STATE_READY && player.playWhenReady) return true
             if (player.playbackState == Player.STATE_ENDED) return false
             delay(50)
@@ -656,7 +700,7 @@ internal class AndroidAudioPlayer(
     ) {
         val stepDelayMs = (durationMs / CrossfadeSteps).coerceAtLeast(16L)
         repeat(CrossfadeSteps) { index ->
-            if (!isPlayRequestCurrent(generation)) return
+            if (!isPlayRequestCurrent(generation) || !playWhenReady) return
             val progress = (index + 1).toFloat() / CrossfadeSteps.toFloat()
             val outgoingVolume = (baseVolume * (1f - progress)).coerceIn(0f, 1f)
             val incomingVolume = (baseVolume * progress).coerceIn(0f, 1f)
@@ -860,6 +904,32 @@ internal class AndroidAudioPlayer(
         if (!isPlayRequestCurrent(generation)) return
         if (crossfadePlayer != null && crossfadeOwnedTrackId != null) return
         val player = activeLocalPlayer() ?: return
+        val controllerPosition = player.currentPosition.coerceAtLeast(0L)
+        val durationMs = player.duration.coerceAtLeast(0L)
+        val crossfadeTransitionActive = crossfadeIncomingPlayer != null && crossfadeGeneration == generation
+        if (crossfadeTransitionActive) {
+            if (shouldCancelAndroidCrossfadeForControllerPause(
+                    crossfadeTransitionActive = crossfadeTransitionActive,
+                    playWhenReady = playWhenReady,
+                    controllerPlayWhenReady = player.playWhenReady,
+                    appControllerMutationInProgress = appControllerMutationInProgress,
+                )
+            ) {
+                cancelPlayIntent()
+                clearPendingAutoplay()
+                cancelAndroidCrossfadeTransition()
+                applyPlatformPlayback(
+                    positionMs = controllerPosition,
+                    durationMs = durationMs,
+                    isPlaying = false,
+                    isBuffering = false,
+                    bufferedPositionMs = player.bufferedPosition.coerceAtLeast(controllerPosition).coerceAtLeast(0L),
+                    generation = generation,
+                )
+                stopPositionSyncLoop()
+            }
+            return
+        }
         var appState = state.value
         val controllerIndex = player.currentMediaItemIndex
         val loaded = loadedPlatformQueue
@@ -890,8 +960,6 @@ internal class AndroidAudioPlayer(
                 }
             }
         }
-        val controllerPosition = player.currentPosition.coerceAtLeast(0L)
-        val durationMs = player.duration.coerceAtLeast(0L)
         if (isWaitingForPlatformSeek(appState.currentTrack?.id, controllerPosition, durationMs, generation)) {
             startPositionSyncLoop(generation)
             return
@@ -1292,6 +1360,18 @@ internal fun shouldAdoptPlatformPlayIntent(
     appTrackId: String?,
 ): Boolean {
     return !appControllerMutationInProgress && platformTrackId == appTrackId
+}
+
+internal fun shouldCancelAndroidCrossfadeForControllerPause(
+    crossfadeTransitionActive: Boolean,
+    playWhenReady: Boolean,
+    controllerPlayWhenReady: Boolean,
+    appControllerMutationInProgress: Boolean,
+): Boolean {
+    return crossfadeTransitionActive &&
+        playWhenReady &&
+        !controllerPlayWhenReady &&
+        !appControllerMutationInProgress
 }
 
 private fun String.isHttpUrl(): Boolean =

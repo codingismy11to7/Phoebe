@@ -194,6 +194,7 @@ internal enum class PhoebeScreenshotScenario {
     FavoriteArtists,
     FavoriteAlbums,
     Library,
+    LibraryFiveColumnGrid,
     Playlist,
     Artist,
     ArtistRadio,
@@ -343,23 +344,32 @@ internal fun PhoebeDesktopScreenshotScenario(
         else -> AppScreen.Home
     }
     val section = when (scenario) {
-        PhoebeScreenshotScenario.Library -> BrowseSection.Library
+        PhoebeScreenshotScenario.Library,
+        PhoebeScreenshotScenario.LibraryFiveColumnGrid,
+        -> BrowseSection.Library
         PhoebeScreenshotScenario.Playlist -> BrowseSection.Library
         PhoebeScreenshotScenario.Search -> BrowseSection.Search
         PhoebeScreenshotScenario.Settings -> BrowseSection.Settings
         else -> BrowseSection.Home
     }
     val libraryUi = when (scenario) {
+        PhoebeScreenshotScenario.LibraryFiveColumnGrid -> fixture.libraryUi.copy(
+            gridColumns = LibraryUiPreferences.MaxGridColumns,
+        )
         PhoebeScreenshotScenario.HomePlayedRows -> fixture.libraryUi.copy(
             homeSections = listOf(HomeSection.Played, HomeSection.Random),
         )
         else -> fixture.libraryUi
     }
+    val catalog = when (scenario) {
+        PhoebeScreenshotScenario.LibraryFiveColumnGrid -> fixture.catalog.withFiveColumnGridArtists(fixture.nowMs)
+        else -> fixture.catalog
+    }
     val visualizerPreset = scenario.visualizerPreset()
     DesktopPlayer(
         shellState = DesktopShellState(
             screen = screen,
-            catalog = fixture.catalog,
+            catalog = catalog,
             catalogRefreshing = false,
             session = fixture.session,
             mediaSources = fixture.mediaSources,
@@ -406,7 +416,7 @@ internal fun PhoebeDesktopScreenshotScenario(
         ),
         browseState = BrowseUiState(
             homeUiState = deriveHomeUiState(
-                fixture.catalog,
+                catalog,
                 fixture.playHistory,
                 randomArtistSeed = 7,
                 randomAlbumSeed = 11,
@@ -509,6 +519,16 @@ internal fun PhoebeMobileScreenshotScenario(
     fixture: PhoebeScreenshotFixtureData,
     modifier: Modifier = Modifier,
 ) {
+    val catalog = if (scenario == PhoebeScreenshotScenario.LibraryFiveColumnGrid) {
+        fixture.catalog.withFiveColumnGridArtists(fixture.nowMs)
+    } else {
+        fixture.catalog
+    }
+    val libraryUi = if (scenario == PhoebeScreenshotScenario.LibraryFiveColumnGrid) {
+        fixture.libraryUi.copy(gridColumns = LibraryUiPreferences.MaxGridColumns)
+    } else {
+        fixture.libraryUi
+    }
     Box(
         modifier
             .background(PhoebeUi.shellTop)
@@ -556,8 +576,8 @@ internal fun PhoebeMobileScreenshotScenario(
                 modifier = Modifier.fillMaxSize(),
             )
             PhoebeScreenshotScenario.FavoriteArtists -> FavoriteArtistsMobileView(
-                catalog = fixture.catalog,
-                libraryUi = fixture.libraryUi,
+                catalog = catalog,
+                libraryUi = libraryUi,
                 onLibrarySortBy = {},
                 onLibraryAscending = {},
                 onLibraryColumns = {},
@@ -566,8 +586,8 @@ internal fun PhoebeMobileScreenshotScenario(
                 modifier = Modifier.fillMaxSize(),
             )
             PhoebeScreenshotScenario.FavoriteAlbums -> FavoriteAlbumsMobileView(
-                catalog = fixture.catalog,
-                libraryUi = fixture.libraryUi,
+                catalog = catalog,
+                libraryUi = libraryUi,
                 onLibrarySortBy = {},
                 onLibraryAscending = {},
                 onLibraryColumns = {},
@@ -579,8 +599,8 @@ internal fun PhoebeMobileScreenshotScenario(
             PhoebeScreenshotScenario.ArtistRadio,
             -> ArtistDetailPanel(
                 artist = fixture.artist,
-                catalog = fixture.catalog,
-                libraryUi = fixture.libraryUi,
+                catalog = catalog,
+                libraryUi = libraryUi,
                 modifier = Modifier.fillMaxSize(),
                 onBack = {},
                 onAlbum = {},
@@ -599,8 +619,8 @@ internal fun PhoebeMobileScreenshotScenario(
             )
             PhoebeScreenshotScenario.Album -> AlbumDetailPanel(
                 album = fixture.album,
-                catalog = fixture.catalog,
-                libraryUi = fixture.libraryUi,
+                catalog = catalog,
+                libraryUi = libraryUi,
                 modifier = Modifier.fillMaxSize(),
                 onBack = {},
                 onPlayTracks = { _, _ -> },
@@ -620,9 +640,9 @@ internal fun PhoebeMobileScreenshotScenario(
             )
             PhoebeScreenshotScenario.Playlist -> PlaylistDetailPanel(
                 playlist = fixture.playlist,
-                catalog = fixture.catalog,
+                catalog = catalog,
                 catalogRefreshing = false,
-                libraryUi = fixture.libraryUi,
+                libraryUi = libraryUi,
                 modifier = Modifier.fillMaxSize(),
                 onBack = {},
                 onPlayTracks = { _, _ -> },
@@ -633,7 +653,7 @@ internal fun PhoebeMobileScreenshotScenario(
             )
             PhoebeScreenshotScenario.CollectionValues -> CollectionsScreen(
                 entry = CollectionEntry(CollectionTarget.Artists, CollectionFacet.Genre),
-                catalog = fixture.catalog,
+                catalog = catalog,
                 modifier = Modifier.fillMaxSize(),
                 onBack = {},
                 onCollectionValue = { _, _ -> },
@@ -641,7 +661,7 @@ internal fun PhoebeMobileScreenshotScenario(
             PhoebeScreenshotScenario.CollectionItems -> CollectionItemsScreen(
                 entry = CollectionEntry(CollectionTarget.Artists, CollectionFacet.Genre),
                 value = "Dream pop",
-                catalog = fixture.catalog,
+                catalog = catalog,
                 modifier = Modifier.fillMaxSize(),
                 onBack = {},
                 onArtist = {},
@@ -696,7 +716,7 @@ internal fun PhoebeMobileScreenshotScenario(
                 },
             )
             PhoebeScreenshotScenario.HomePlayedRows -> MobileHomeScreen(
-                state = deriveHomeUiState(fixture.catalog, fixture.playHistory, randomArtistSeed = 7, randomAlbumSeed = 11, nowMs = fixture.nowMs),
+                state = deriveHomeUiState(catalog, fixture.playHistory, randomArtistSeed = 7, randomAlbumSeed = 11, nowMs = fixture.nowMs),
                 radioStations = fixture.radioStations,
                 homeSections = listOf(HomeSection.Played, HomeSection.Random),
                 listState = rememberLazyListState(),
@@ -720,11 +740,13 @@ internal fun PhoebeMobileScreenshotScenario(
                 onDownload = {},
             )
             else -> MobileBrowseShell(
-                catalog = fixture.catalog,
+                catalog = catalog,
                 catalogRefreshing = false,
                 session = fixture.session,
                 section = when (scenario) {
-                    PhoebeScreenshotScenario.Library -> BrowseSection.Library
+                    PhoebeScreenshotScenario.Library,
+                    PhoebeScreenshotScenario.LibraryFiveColumnGrid,
+                    -> BrowseSection.Library
                     PhoebeScreenshotScenario.Search -> BrowseSection.Search
                     PhoebeScreenshotScenario.Settings -> BrowseSection.Settings
                     else -> BrowseSection.Home
@@ -732,9 +754,9 @@ internal fun PhoebeMobileScreenshotScenario(
                 selectedPlaylistId = null,
                 searchQuery = if (scenario == PhoebeScreenshotScenario.Search) "moon" else "",
                 libraryFilter = LibraryFilterTab.Artists,
-                libraryUi = fixture.libraryUi,
+                libraryUi = libraryUi,
                 currentTrack = fixture.currentTrack,
-                homeUiState = deriveHomeUiState(fixture.catalog, fixture.playHistory, randomArtistSeed = 7, randomAlbumSeed = 11, nowMs = fixture.nowMs),
+                homeUiState = deriveHomeUiState(catalog, fixture.playHistory, randomArtistSeed = 7, randomAlbumSeed = 11, nowMs = fixture.nowMs),
                 isPlaying = true,
                 homeScreenLayoutMode = if (scenario == PhoebeScreenshotScenario.HomeExpanded) {
                     HomeScreenLayoutMode.Expanded
@@ -795,6 +817,14 @@ internal fun PhoebeMobileScreenshotScenario(
         }
     }
 }
+
+private fun CatalogSnapshot.withFiveColumnGridArtists(nowMs: Long): CatalogSnapshot =
+    copy(
+        artists = artists + listOf(
+            Artist(id = "artist-night", title = "Night Orchard", albumCount = 1, songCount = 3, dateAddedMs = nowMs - 432_000_000L),
+            Artist(id = "artist-silver", title = "Silver Atlas", albumCount = 2, songCount = 5, dateAddedMs = nowMs - 518_400_000L),
+        ),
+    )
 
 @Composable
 private fun MobileHomeAccordionScreenshot(

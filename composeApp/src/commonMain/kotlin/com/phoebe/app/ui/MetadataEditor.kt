@@ -4,6 +4,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -25,6 +27,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -33,6 +36,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -43,6 +51,9 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.TrackMetadataUpdate
+import kotlin.math.roundToInt
+
+private val MetadataEditorDismissDragThreshold = 96.dp
 
 internal data class MetadataEditorActions(
     val onRequestEdit: (Track) -> Unit = {},
@@ -117,46 +128,106 @@ private fun MetadataEditorPanel(
     } else {
         RoundedCornerShape(18.dp)
     }
+    val density = LocalDensity.current
+    val dismissDragThresholdPx = with(density) { MetadataEditorDismissDragThreshold.toPx() }
+    var dragOffsetPx by remember(track.id, compact) { mutableFloatStateOf(0f) }
     Column(
         modifier
+            .then(
+                if (compact) {
+                    Modifier.layout { measurable, constraints ->
+                        val placeable = measurable.measure(constraints)
+                        layout(placeable.width, placeable.height) {
+                            placeable.placeRelative(0, dragOffsetPx.roundToInt())
+                        }
+                    }
+                } else {
+                    Modifier
+                },
+            )
             .clip(shape)
             .background(PhoebeUi.panel)
             .border(BorderStroke(1.dp, PhoebeUi.border), shape)
             .padding(if (compact) 18.dp else 24.dp)
-            .heightIn(max = if (compact) 680.dp else 640.dp)
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(18.dp),
+            .heightIn(max = if (compact) 680.dp else 640.dp),
     ) {
         if (compact) {
             Box(
                 Modifier
-                    .size(width = 42.dp, height = 4.dp)
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(Color.White.copy(alpha = 0.18f))
-                    .align(Alignment.CenterHorizontally),
-            )
-        }
-        MetadataEditorHeader(compact = compact, onDismiss = onDismiss)
-        if (compact) {
-            MetadataEditorArtwork(track, Modifier.fillMaxWidth())
-            MetadataEditorFields(form, onForm)
-            TechnicalMetadata(track)
-        } else {
-            Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                MetadataEditorArtwork(track, Modifier.width(230.dp))
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    MetadataEditorFields(form, onForm)
-                    TechnicalMetadata(track)
-                }
+                    .fillMaxWidth()
+                    .height(28.dp)
+                    .semantics { contentDescription = "Dismiss metadata editor" }
+                    .pointerInput(dismissDragThresholdPx, onDismiss) {
+                        detectVerticalDragGestures(
+                            onVerticalDrag = { change, dragAmount ->
+                                change.consume()
+                                dragOffsetPx = (dragOffsetPx + dragAmount).coerceAtLeast(0f)
+                            },
+                            onDragEnd = {
+                                if (dragOffsetPx >= dismissDragThresholdPx) {
+                                    onDismiss()
+                                } else {
+                                    dragOffsetPx = 0f
+                                }
+                            },
+                            onDragCancel = {
+                                dragOffsetPx = 0f
+                            },
+                        )
+                    }
+                    .clickable {
+                        if (dragOffsetPx >= dismissDragThresholdPx) {
+                            onDismiss()
+                        } else {
+                            dragOffsetPx = 0f
+                        }
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    Modifier
+                        .size(width = 42.dp, height = 4.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(Color.White.copy(alpha = 0.18f)),
+                )
             }
         }
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
-            verticalAlignment = Alignment.CenterVertically,
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .then(if (compact) Modifier.weight(1f, fill = false) else Modifier)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
-            MetadataEditorButton("Cancel", onDismiss, primary = false)
-            MetadataEditorButton("Save Changes", onSave, primary = true, enabled = saveEnabled)
+            MetadataEditorHeader(compact = compact, onDismiss = onDismiss)
+            if (compact) {
+                MetadataEditorArtwork(track, Modifier.fillMaxWidth())
+                MetadataEditorFields(form, onForm)
+                TechnicalMetadata(track)
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                    MetadataEditorArtwork(track, Modifier.width(230.dp))
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        MetadataEditorFields(form, onForm)
+                        TechnicalMetadata(track)
+                    }
+                }
+            }
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                MetadataEditorButton("Cancel", onDismiss, primary = false)
+                MetadataEditorButton("Save Changes", onSave, primary = true, enabled = saveEnabled)
+            }
+            if (compact) {
+                Spacer(
+                    Modifier
+                        .height(6.dp)
+                        .navigationBarsPadding(),
+                )
+            }
         }
     }
 }
