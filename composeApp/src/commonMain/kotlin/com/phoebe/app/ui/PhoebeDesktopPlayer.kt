@@ -173,7 +173,6 @@ internal fun DesktopPlayer(
     val onRemoveLocalFolder = authSetupActions.onRemoveLocalFolder
     val onToggleLocalFolder = authSetupActions.onToggleLocalFolder
     val onRefreshLibrary = authSetupActions.onRefreshLibrary
-    val onRefreshPlayHistory = authSetupActions.onRefreshPlayHistory
     val onJellyfinPage = authSetupActions.onJellyfinPage
     val onSelectServer = authSetupActions.onSelectServer
     val onSelectLibrary = authSetupActions.onSelectLibrary
@@ -240,7 +239,6 @@ internal fun DesktopPlayer(
                         onRemoveLocalFolder = onRemoveLocalFolder,
                         onToggleLocalFolder = onToggleLocalFolder,
                         onRefreshLibrary = onRefreshLibrary,
-                        onRefreshPlayHistory = onRefreshPlayHistory,
                         appUpdateState = shellState.updateState,
                         onInstallUpdate = browseActions.onInstallUpdate,
                     )

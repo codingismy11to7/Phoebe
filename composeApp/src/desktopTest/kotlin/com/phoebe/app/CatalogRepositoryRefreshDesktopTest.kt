@@ -407,6 +407,110 @@ class CatalogRepositoryRefreshDesktopTest {
     }
 
     @Test
+    fun lightweightRemoteSyncUpdatesPlexShellWithoutIndexingTracks() = runTest {
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        db.transaction {
+            db.catalogQueries.upsertArtist("plex:artist1", "Old Artist", null, 1, 0, 0, null, null, null, null, null, 0)
+            db.catalogQueries.upsertAlbum("plex:a1", "Old Album", "Old Artist", null, null, 0, null, null, null, null, null, 0)
+            db.catalogQueries.upsertPlaylist("plex:p1", "Old Playlist", 1, "/playlists/p1/items", null, 0, null, 0)
+            db.catalogQueries.upsertTrack(
+                id = "plex:t1",
+                title = "Cached Song",
+                artist = "Old Artist",
+                album = "Old Album",
+                durationMs = 10,
+                streamUrl = "https://plex.example/t1?X-Plex-Token=token",
+                downloadUrl = "https://plex.example/t1?X-Plex-Token=token&download=1",
+                thumbUrl = null,
+                localArtworkUri = null,
+                localUri = null,
+                year = null,
+                genre = null,
+                mood = null,
+                style = null,
+                filepath = null,
+                audioCodec = null,
+                bitrateKbps = null,
+                dateAddedMs = 41L,
+                rating = null,
+                parentAlbumId = "plex:a1",
+            )
+            db.catalogQueries.upsertTrackParent("plex:a1", "plex:t1", 0, null)
+        }
+        val requestedPaths = mutableListOf<String>()
+        val engine = MockEngine { request ->
+            requestedPaths += request.url.encodedPath + "?" + request.url.encodedQuery
+            when {
+                request.url.encodedPath == "/identity" -> respondJson(identityJson())
+                request.url.encodedPath == "/library/sections/1/all" &&
+                    request.url.parameters["type"] == "10" -> error("Lightweight sync should not index tracks.")
+                request.url.encodedPath.startsWith("/library/metadata/") -> error("Lightweight sync should not load album children.")
+                request.url.encodedPath == "/library/sections/1/all" -> respondJson(favoriteArtistsJson())
+                request.url.encodedPath == "/library/sections/1/albums" -> respondJson(favoriteAlbumsJson())
+                request.url.encodedPath == "/playlists" -> respondJson(playlistsJson(trackCount = 2))
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val http = testHttpClient(engine)
+        val media = MediaSourcesRepository(db, PlatformStorage())
+        val repo = CatalogRepository(
+            plexClient = PlexClient(http),
+            database = db,
+            storage = PlatformStorage(),
+            httpClient = http,
+            mediaSourcesRepository = media,
+        )
+        repo.restoreCachedCatalog()
+
+        repo.syncLightweightRemoteState(testSession())
+
+        assertEquals("Artist One", repo.catalog.value.artists.single { it.id == "plex:artist1" }.title)
+        assertTrue(repo.catalog.value.artists.single { it.id == "plex:artist1" }.favorite)
+        assertEquals("Album One", repo.catalog.value.albums.single { it.id == "plex:a1" }.title)
+        assertTrue(repo.catalog.value.albums.single { it.id == "plex:a1" }.favorite)
+        assertEquals(2, repo.catalog.value.playlists.single { it.id == "plex:p1" }.trackCount)
+        assertEquals(listOf("plex:t1"), repo.catalog.value.tracksByParent["plex:a1"].orEmpty().map { it.id })
+        assertFalse(requestedPaths.any { it.contains("type=10") })
+        assertFalse(requestedPaths.any { it.startsWith("/library/metadata/") })
+    }
+
+    @Test
+    fun fullRefreshClearsStalePlexAlbumFavoriteWhenServerNoLongerReportsIt() = runTest {
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        db.transaction {
+            db.catalogQueries.upsertArtist("plex:artist1", "Artist One", null, 1, 0, 0, null, null, null, null, null, 0)
+            db.catalogQueries.upsertAlbum("plex:a1", "Album One", "Artist One", null, null, 0, null, null, null, null, null, 1)
+        }
+        val engine = MockEngine { request ->
+            when {
+                request.url.encodedPath == "/library/sections/1/all" &&
+                    request.url.parameters["type"] == "10" -> respondJson(trackPageJson())
+                request.url.encodedPath == "/library/sections/1/all" -> respondJson(artistsJson())
+                request.url.encodedPath == "/library/sections/1/albums" -> respondJson(albumsJson())
+                request.url.encodedPath == "/playlists" -> respondJson(playlistsJson(trackCount = 0))
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val http = testHttpClient(engine)
+        val media = MediaSourcesRepository(db, PlatformStorage())
+        val repo = CatalogRepository(
+            plexClient = PlexClient(http),
+            database = db,
+            storage = PlatformStorage(),
+            httpClient = http,
+            mediaSourcesRepository = media,
+        )
+        repo.restoreCachedCatalog()
+        assertTrue(repo.catalog.value.albums.single { it.id == "plex:a1" }.favorite)
+
+        repo.refreshAggregated(testSession())
+
+        assertFalse(repo.catalog.value.albums.single { it.id == "plex:a1" }.favorite)
+    }
+
+    @Test
     fun refreshIndexesPagedTracksIntoAlbumParentsAndRestoresThem() = runTest {
         val (db, d) = newInMemoryPhoebeDatabase()
         driver = d
@@ -1520,6 +1624,38 @@ class CatalogRepositoryRefreshDesktopTest {
           "MediaContainer": {
             "Metadata": [
               { "ratingKey": "a1", "title": "Album One", "parentTitle": "Artist One", "librarySectionID": 1 }
+            ]
+          }
+        }
+    """.trimIndent()
+
+    private fun favoriteArtistsJson(): String = """
+        {
+          "MediaContainer": {
+            "Metadata": [
+              {
+                "ratingKey": "artist1",
+                "type": "artist",
+                "title": "Artist One",
+                "leafCount": 1,
+                "Collection": [ { "tag": "Favorite Artists" } ]
+              }
+            ]
+          }
+        }
+    """.trimIndent()
+
+    private fun favoriteAlbumsJson(): String = """
+        {
+          "MediaContainer": {
+            "Metadata": [
+              {
+                "ratingKey": "a1",
+                "title": "Album One",
+                "parentTitle": "Artist One",
+                "librarySectionID": 1,
+                "Collection": [ { "tag": "Favorite Albums" } ]
+              }
             ]
           }
         }

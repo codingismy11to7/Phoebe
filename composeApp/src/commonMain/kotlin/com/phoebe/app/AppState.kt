@@ -285,6 +285,7 @@ class AppState(
     private val prefetchedAlbumIds = mutableSetOf<String>()
     private var catalogRefreshJob: Job? = null
     private var playHistorySyncJob: Job? = null
+    private var lightweightRemoteSyncJob: Job? = null
     private var downloadedArtworkCacheJob: Job? = null
     private val activeDownloadJobs = mutableSetOf<Job>()
 
@@ -321,11 +322,12 @@ class AppState(
                 refreshServers()
             }
             dependencies.catalogRepository.restoreCachedCatalog()
-            syncRemotePlayHistoryInBackground()
+            syncLightweightRemoteStateInBackground()
             val hasRemoteLibrary = session.value?.selectedLibrary != null
             val hasLocalFolders = mediaSources.value.localFolders.any { it.enabled }
             if (appSettings.value.scanLibraryOnLaunch && (hasRemoteLibrary || hasLocalFolders)) {
                 delay(500)
+                cancelLightweightRemoteSync()
                 if (session.value.isPlex()) {
                     dependencies.sessionRepository.refreshSelectedServerConnections()
                     dependencies.sessionRepository.warmServerConnection()
@@ -764,6 +766,7 @@ class AppState(
 
     fun selectServer(server: PlexServer) = scope.launch {
         cancelRemotePlayHistorySync()
+        cancelLightweightRemoteSync()
         mutableLibraries.value = emptyList()
         mutableLibrariesLoading.value = true
         val resolved = runCatching {
@@ -783,6 +786,7 @@ class AppState(
 
     fun selectLibrary(library: MusicLibrary, jellyfinSyncMode: JellyfinSyncMode? = null) = scope.launch {
         cancelRemotePlayHistorySync()
+        cancelLightweightRemoteSync()
         catalogRefreshJob?.cancel()
         dependencies.catalogRepository.clearActiveSyncProgress()
         if (session.value == null) {
@@ -911,6 +915,23 @@ class AppState(
 
     fun refreshPlayHistory() = startRemotePlayHistorySync(showMessage = true)
 
+    private fun syncLightweightRemoteStateInBackground() {
+        syncRemotePlayHistoryInBackground()
+        val currentSession = session.value
+        if (currentSession?.selectedLibrary == null || currentSession.selectedServer == null) return
+        lightweightRemoteSyncJob?.cancel()
+        lightweightRemoteSyncJob = scope.launch(Dispatchers.Default) {
+            runCatching {
+                dependencies.catalogRepository.syncLightweightRemoteState(currentSession)
+                ensureLikedSongsPlaylistIfPossible()
+                warmPlaylistTracksInBackground()
+            }.onFailure { error ->
+                if (error is CancellationException) throw error
+                PhoebeLog.d("AppState") { "lightweight remote sync failed: ${error.message}" }
+            }
+        }
+    }
+
     private fun syncRemotePlayHistoryInBackground() = startRemotePlayHistorySync(showMessage = false)
 
     private fun startRemotePlayHistorySync(showMessage: Boolean) {
@@ -937,6 +958,11 @@ class AppState(
     private fun cancelRemotePlayHistorySync() {
         playHistorySyncJob?.cancel()
         playHistorySyncJob = null
+    }
+
+    private fun cancelLightweightRemoteSync() {
+        lightweightRemoteSyncJob?.cancel()
+        lightweightRemoteSyncJob = null
     }
 
     private fun cancelCatalogRefresh() {
@@ -2265,10 +2291,13 @@ class AppState(
     fun signOut() {
         val refreshJob = catalogRefreshJob
         val historyJob = playHistorySyncJob
+        val lightweightSyncJob = lightweightRemoteSyncJob
         catalogRefreshJob = null
         playHistorySyncJob = null
+        lightweightRemoteSyncJob = null
         refreshJob?.cancel()
         historyJob?.cancel()
+        lightweightSyncJob?.cancel()
         dependencies.catalogRepository.clearActiveSyncProgress()
         mostPlayedWarmSignature = null
         recentAlbumWarmSignature = null
@@ -2286,6 +2315,7 @@ class AppState(
             val signedOut = runCatching {
                 refreshJob?.cancelAndJoin()
                 historyJob?.cancelAndJoin()
+                lightweightSyncJob?.cancelAndJoin()
                 dependencies.sessionRepository.signOut()
                 dependencies.deleteDatabaseDataForSignOut()
             }.onFailure {

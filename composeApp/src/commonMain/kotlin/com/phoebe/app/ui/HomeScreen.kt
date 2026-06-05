@@ -1091,11 +1091,9 @@ private fun ExpandedFavoritePlaylistsShelf(
     } else {
         ExpandedHomeShelf("FAVORITE PLAYLISTS", action = "View all", onAction = onViewAll, horizontalSpacing = 10.dp) {
             items(displayPlaylists, key = { "favorite-playlist:${it.id}" }, contentType = { "expanded-favorite-playlist" }) { playlist ->
-                FavoriteActionTile(
-                    playlist.title,
-                    "${playlist.trackCount} songs",
-                    PhoebeIcon.Heart,
-                    Modifier.width(214.dp),
+                FavoritePlaylistTile(
+                    playlist = playlist,
+                    modifier = Modifier.width(214.dp),
                     onLongClick = { playlistActions.onShufflePlaylist(playlist) },
                 ) {
                     onPlaylist(playlist)
@@ -1908,11 +1906,9 @@ private fun MobileFavoritePlaylistsSection(
         SectionHeader("FAVORITE PLAYLISTS", if (totalCount > 10) "View all" else null, onViewAll)
         HomeHorizontalCarousel(Modifier.fillMaxWidth()) {
             items(visiblePlaylists, key = { it.id }, contentType = { "mobile-favorite-playlist" }) { playlist ->
-                FavoriteActionTile(
-                    playlist.title,
-                    "${playlist.trackCount} songs",
-                    PhoebeIcon.Heart,
-                    Modifier.width(240.dp),
+                FavoritePlaylistTile(
+                    playlist = playlist,
+                    modifier = Modifier.width(240.dp),
                     onLongClick = { playlistActions.onShufflePlaylist(playlist) },
                 ) {
                     onPlaylist(playlist)
@@ -2154,11 +2150,9 @@ private fun DesktopFavoritePlaylistsPanel(
                 onViewAll = onViewAll,
             ) {
                 items(displayPlaylists, key = { it.id }, contentType = { "favorite-playlist" }) { playlist ->
-                    FavoriteActionTile(
-                        playlist.title,
-                        "${playlist.trackCount} songs",
-                        PhoebeIcon.Heart,
-                        Modifier.width(260.dp),
+                    FavoritePlaylistTile(
+                        playlist = playlist,
+                        modifier = Modifier.width(260.dp),
                         onLongClick = { playlistActions.onShufflePlaylist(playlist) },
                     ) {
                         onPlaylist(playlist)
@@ -2265,15 +2259,51 @@ private fun DesktopFavoriteScrollableRow(
 }
 
 @Composable
-private fun FavoriteActionTile(
-    title: String,
-    subtitle: String,
-    icon: PhoebeIcon,
+private fun FavoritePlaylistTile(
+    playlist: Playlist,
     modifier: Modifier = Modifier,
     onLongClick: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
-    HomeActionCard(title, subtitle, icon, modifier.height(112.dp), onClick = onClick, onLongClick = onLongClick)
+    Row(
+        modifier
+            .height(112.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .background(PhoebeUi.subtleFill)
+            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(8.dp))
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        ArtworkImage(
+            playlist.title,
+            playlist.thumbUrl,
+            Modifier.size(56.dp),
+            radius = 8.dp,
+            elevated = false,
+            maxDecodeDimension = ThumbnailArtworkMaxDecodeDimension,
+        )
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                playlist.title,
+                color = PhoebeUi.primaryText,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                "${playlist.trackCount} songs",
+                color = PhoebeUi.secondaryText,
+                fontSize = 11.sp,
+                lineHeight = 15.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        PhoebeIconView(PhoebeIcon.Forward, tint = PhoebeUi.secondaryText, modifier = Modifier.size(14.dp))
+    }
 }
 
 @Composable

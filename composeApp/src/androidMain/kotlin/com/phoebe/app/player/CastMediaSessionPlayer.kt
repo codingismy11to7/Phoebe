@@ -22,7 +22,8 @@ internal class CastMediaSessionPlayer(
     }
 
     override fun getState(): SimpleBasePlayer.State {
-        val cast = castState ?: return super.getState().withPhoebeQueueNavigationCommands(
+        val delegateState = safeDelegateState()
+        val cast = castState ?: return delegateState.withPhoebeQueueNavigationCommands(
             hasNext = AndroidPlaybackBridge.hasNextTrack?.invoke() == true,
             hasPrevious = AndroidPlaybackBridge.hasPreviousTrack?.invoke() == true,
         )
@@ -33,10 +34,12 @@ internal class CastMediaSessionPlayer(
             .setDurationUs(cast.durationMs.takeIf { it > 0L }?.times(1_000L) ?: C.TIME_UNSET)
             .setIsSeekable(cast.durationMs > 0L)
             .build()
-        return super.getState()
+        return delegateState
             .buildUpon()
             .setPlaylist(listOf(itemData))
             .setCurrentMediaItemIndex(0)
+            .setCurrentAd(C.INDEX_UNSET, C.INDEX_UNSET)
+            .setPlayerError(null)
             .setPlaybackState(
                 when {
                     cast.isBuffering -> Player.STATE_BUFFERING
@@ -91,6 +94,48 @@ internal class CastMediaSessionPlayer(
             return Futures.immediateVoidFuture()
         }
         return super.handleSeek(mediaItemIndex, positionMs, seekCommand)
+    }
+
+    private fun safeDelegateState(): SimpleBasePlayer.State {
+        val player = getPlayer()
+        if (player.hasInvalidEmptyPlaylistSnapshot()) {
+            return player.emptyIdleStateSnapshot()
+        }
+        return try {
+            super.getState()
+        } catch (error: IllegalArgumentException) {
+            if (error.message != EmptyPlaylistStateError) throw error
+            player.emptyIdleStateSnapshot()
+        }
+    }
+
+    private fun Player.hasInvalidEmptyPlaylistSnapshot(): Boolean {
+        val state = playbackState
+        if (state == Player.STATE_IDLE || state == Player.STATE_ENDED) return false
+        return !isCommandAvailable(Player.COMMAND_GET_TIMELINE) || currentTimeline.isEmpty
+    }
+
+    private fun Player.emptyIdleStateSnapshot(): SimpleBasePlayer.State =
+        SimpleBasePlayer.State.Builder()
+            .setAvailableCommands(availableCommands)
+            .setPlayWhenReady(playWhenReady, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
+            .setPlaybackSuppressionReason(playbackSuppressionReason)
+            .setPlaybackState(Player.STATE_IDLE)
+            .setIsLoading(false)
+            .setPlayerError(playerError)
+            .setRepeatMode(repeatMode)
+            .setShuffleModeEnabled(shuffleModeEnabled)
+            .setPlaybackParameters(playbackParameters)
+            .setTrackSelectionParameters(trackSelectionParameters)
+            .setSeekBackIncrementMs(seekBackIncrement)
+            .setSeekForwardIncrementMs(seekForwardIncrement)
+            .setMaxSeekToPreviousPositionMs(maxSeekToPreviousPosition)
+            .setVolume(volume)
+            .setTotalBufferedDurationMs(SimpleBasePlayer.PositionSupplier.ZERO)
+            .build()
+
+    private companion object {
+        private const val EmptyPlaylistStateError = "Empty playlist only allowed in STATE_IDLE or STATE_ENDED"
     }
 }
 
