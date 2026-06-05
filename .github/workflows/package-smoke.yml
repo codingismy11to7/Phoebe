@@ -413,7 +413,7 @@ jobs:
       - name: Smoke test production web playback
         env:
           PHOEBE_WEB_BASE_URL: http://127.0.0.1:8099
-          PHOEBE_WEB_SERVER_COMMAND: python3 -m http.server 8099 --bind 127.0.0.1 --directory composeApp/build/dist/wasmJs/productionExecutable
+          PHOEBE_WEB_SERVER_COMMAND: node .github/scripts/serve-spa.mjs composeApp/build/dist/wasmJs/productionExecutable 8099 127.0.0.1
         run: npm run web:e2e:production
 
       - name: Upload web production playback smoke artifacts
