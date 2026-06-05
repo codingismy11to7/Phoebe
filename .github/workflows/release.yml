@@ -443,7 +443,10 @@ jobs:
       - name: Notarize macOS package
         shell: bash
         run: |
-          mapfile -t mac_artifacts < <(find composeApp/build \( -name '*.dmg' -o -name '*.pkg' \) -print | sort)
+          mac_artifacts=()
+          while IFS= read -r artifact; do
+            mac_artifacts+=("${artifact}")
+          done < <(find composeApp/build \( -name '*.dmg' -o -name '*.pkg' \) -print | sort)
           if (( ${#mac_artifacts[@]} == 0 )); then
             echo "::error::Could not find macOS artifacts to notarize"
             exit 1
