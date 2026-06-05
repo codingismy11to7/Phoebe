@@ -16,7 +16,7 @@ Required GitHub secrets:
 - `APPLE_APP_SPECIFIC_PASSWORD`
 - `APPLE_TEAM_ID`
 
-### 1. Create Developer ID Application And Installer Certificates
+### 1. Create Developer ID Application Certificate
 
 You need a paid Apple Developer Program account.
 
@@ -35,23 +35,25 @@ In Apple Developer:
 3. Choose `Developer ID Application`.
 4. Upload the CSR.
 5. Download the generated `.cer`.
-6. Repeat with `Developer ID Installer`.
-7. Double-click both `.cer` files to install them into Keychain.
+6. Double-click the `.cer` to install it into Keychain.
+
+To also build a macOS `.pkg` release artifact, repeat the certificate creation flow with `Developer ID Installer`.
 
 Apple docs: https://developer.apple.com/help/account/create-certificates/create-developer-id-certificates/
 
-### 2. Export The Certificates As P12
+### 2. Export The Certificate As P12
 
 In Keychain Access:
 
 1. Go to `login -> My Certificates`.
 2. Find `Developer ID Application: Your Name (TEAMID)`.
-3. Find `Developer ID Installer: Your Name (TEAMID)`.
-4. Expand both certificates and confirm a private key is underneath each one.
-5. Select both certificates.
-6. Choose `File -> Export Items`.
-7. Save as `.p12`.
-8. Set a strong export password.
+3. Expand it and confirm a private key is underneath it.
+4. Right-click the certificate.
+5. Choose `Export`.
+6. Save as `.p12`.
+7. Set a strong export password.
+
+If you created a matching `Developer ID Installer` certificate and want CI to build `.pkg` artifacts, select both certificates and export them together as one `.p12`.
 
 Add that export password as:
 
@@ -62,7 +64,7 @@ MACOS_CERTIFICATE_PASSWORD
 ### 3. Encode The P12
 
 ```sh
-base64 -i path/to/developer-id-identities.p12 -o macos-cert-base64.txt
+base64 -i path/to/developer-id-application.p12 -o macos-cert-base64.txt
 ```
 
 Paste the contents of `macos-cert-base64.txt` into:
