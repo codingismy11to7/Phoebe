@@ -22,7 +22,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
@@ -38,6 +40,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -75,6 +78,21 @@ private val MobileLibraryLoadingStripHeight = 16.dp
 private val MobileLibraryPaginationHeight = 36.dp
 private val MobileLibraryContentGap = 8.dp
 private val MobileArtistGridArtworkMaxSize = 112.dp
+private val MobileLibrarySectionIndexBottomPadding = 22.dp
+
+private fun LazyListState.libraryScrollbarState(): LibraryScrollbarState =
+    LibraryScrollbarState(
+        firstVisibleItemIndex = firstVisibleItemIndex,
+        visibleItemsCount = layoutInfo.visibleItemsInfo.size,
+        totalItemsCount = layoutInfo.totalItemsCount,
+    )
+
+private fun LazyGridState.libraryScrollbarState(): LibraryScrollbarState =
+    LibraryScrollbarState(
+        firstVisibleItemIndex = firstVisibleItemIndex,
+        visibleItemsCount = layoutInfo.visibleItemsInfo.size,
+        totalItemsCount = layoutInfo.totalItemsCount,
+    )
 
 @Composable
 internal fun LibraryMobileView(
@@ -153,6 +171,8 @@ internal fun LibraryMobileView(
                     artists = artistPage.items,
                     viewMode = libraryViewMode,
                     gridColumns = libraryUi.gridColumns,
+                    sortBy = sortBy,
+                    ascending = ascending,
                     onArtist = onArtist,
                     contentPadding = listContentPadding,
                 )
@@ -161,12 +181,16 @@ internal fun LibraryMobileView(
                     albums = albumPage.items,
                     viewMode = libraryViewMode,
                     gridColumns = libraryUi.gridColumns,
+                    sortBy = sortBy,
+                    ascending = ascending,
                     onAlbum = onAlbum,
                     contentPadding = listContentPadding,
                 )
                 LibraryFilterTab.Songs -> MobileSongsList(
                     tracks = trackPage.items,
                     columns = libraryUi.columns,
+                    sortBy = sortBy,
+                    ascending = ascending,
                     onPlay = { index -> onPlayTracks(trackPage.items, index) },
                     onAddToUpNext = onAddToUpNext,
                     onDownload = onDownload,
@@ -256,6 +280,8 @@ internal fun FavoriteArtistsMobileView(
             artists = favoriteArtists,
             viewMode = viewMode,
             gridColumns = libraryUi.gridColumns,
+            sortBy = libraryUi.sortBy,
+            ascending = libraryUi.ascending,
             onArtist = onArtist,
         )
     }
@@ -306,6 +332,8 @@ internal fun FavoriteAlbumsMobileView(
             albums = favoriteAlbums,
             viewMode = viewMode,
             gridColumns = libraryUi.gridColumns,
+            sortBy = libraryUi.sortBy,
+            ascending = libraryUi.ascending,
             onAlbum = onAlbum,
         )
     }
@@ -417,6 +445,8 @@ private fun MobileArtistsContent(
     artists: List<Artist>,
     viewMode: LibraryViewMode,
     gridColumns: Int,
+    sortBy: LibrarySortBy,
+    ascending: Boolean,
     onArtist: (Artist) -> Unit,
     contentPadding: PaddingValues = PaddingValues(),
 ) {
@@ -426,33 +456,74 @@ private fun MobileArtistsContent(
         }
         return
     }
+    val indexEntries = remember(artists, sortBy, ascending) {
+        libraryArtistScrollIndex(artists, sortBy, ascending)
+    }
+    val scope = rememberCoroutineScope()
+    val indexScrollDispatcher = rememberLibrarySectionIndexSelectionDispatcher()
     when (viewMode) {
         LibraryViewMode.Grid -> {
             val gridState = RetainedLazyGridStates.remember("library-artists-grid")
-            LazyVerticalGrid(
-                columns = libraryGridCells(gridColumns),
-                state = gridState,
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                contentPadding = contentPadding,
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                items(artists, key = { it.id }, contentType = { "artist-card" }) { artist ->
-                    MobileArtistCard(artist = artist, onArtist = onArtist)
+            val scrolling by remember(gridState) { derivedStateOf { gridState.isScrollInProgress } }
+            Box(Modifier.fillMaxSize()) {
+                LazyVerticalGrid(
+                    columns = libraryGridCells(gridColumns),
+                    state = gridState,
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    contentPadding = contentPadding,
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    items(artists, key = { it.id }, contentType = { "artist-card" }) { artist ->
+                        MobileArtistCard(artist = artist, onArtist = onArtist)
+                    }
                 }
+                LibrarySectionIndex(
+                    entries = indexEntries,
+                    onEntrySelected = { entry ->
+                        indexScrollDispatcher.launch(scope) { gridState.scrollToItem(entry.itemIndex) }
+                    },
+                    mode = LibrarySectionIndexMode.MobileScrollbar,
+                    revealSignal = scrolling,
+                    scrollbarStateProvider = { gridState.libraryScrollbarState() },
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .padding(
+                            top = contentPadding.calculateTopPadding(),
+                            bottom = contentPadding.calculateBottomPadding() + MobileLibrarySectionIndexBottomPadding,
+                        ),
+                )
             }
         }
         LibraryViewMode.List -> {
             val listState = RetainedLazyListStates.remember("library-artists-list")
-            LazyColumn(
-                state = listState,
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-                contentPadding = contentPadding,
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                items(artists, key = { it.id }, contentType = { "artist-row" }) { artist ->
-                    MobileArtistRow(artist = artist, onArtist = onArtist)
+            val scrolling by remember(listState) { derivedStateOf { listState.isScrollInProgress } }
+            Box(Modifier.fillMaxSize()) {
+                LazyColumn(
+                    state = listState,
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    contentPadding = contentPadding,
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    items(artists, key = { it.id }, contentType = { "artist-row" }) { artist ->
+                        MobileArtistRow(artist = artist, onArtist = onArtist)
+                    }
                 }
+                LibrarySectionIndex(
+                    entries = indexEntries,
+                    onEntrySelected = { entry ->
+                        indexScrollDispatcher.launch(scope) { listState.scrollToItem(entry.itemIndex) }
+                    },
+                    mode = LibrarySectionIndexMode.MobileScrollbar,
+                    revealSignal = scrolling,
+                    scrollbarStateProvider = { listState.libraryScrollbarState() },
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .padding(
+                            top = contentPadding.calculateTopPadding(),
+                            bottom = contentPadding.calculateBottomPadding() + MobileLibrarySectionIndexBottomPadding,
+                        ),
+                )
             }
         }
     }
@@ -579,6 +650,8 @@ private fun MobileAlbumsContent(
     albums: List<Album>,
     viewMode: LibraryViewMode,
     gridColumns: Int,
+    sortBy: LibrarySortBy,
+    ascending: Boolean,
     onAlbum: (Album) -> Unit,
     contentPadding: PaddingValues = PaddingValues(),
 ) {
@@ -588,33 +661,74 @@ private fun MobileAlbumsContent(
         }
         return
     }
+    val indexEntries = remember(albums, sortBy, ascending) {
+        libraryAlbumScrollIndex(albums, sortBy, ascending)
+    }
+    val scope = rememberCoroutineScope()
+    val indexScrollDispatcher = rememberLibrarySectionIndexSelectionDispatcher()
     when (viewMode) {
         LibraryViewMode.Grid -> {
             val gridState = RetainedLazyGridStates.remember("library-albums-grid")
-            LazyVerticalGrid(
-                columns = libraryGridCells(gridColumns),
-                state = gridState,
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                contentPadding = contentPadding,
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                items(albums, key = { it.id }, contentType = { "album-card" }) { album ->
-                    MobileAlbumCard(catalog = catalog, album = album, onAlbum = onAlbum)
+            val scrolling by remember(gridState) { derivedStateOf { gridState.isScrollInProgress } }
+            Box(Modifier.fillMaxSize()) {
+                LazyVerticalGrid(
+                    columns = libraryGridCells(gridColumns),
+                    state = gridState,
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    contentPadding = contentPadding,
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    items(albums, key = { it.id }, contentType = { "album-card" }) { album ->
+                        MobileAlbumCard(catalog = catalog, album = album, onAlbum = onAlbum)
+                    }
                 }
+                LibrarySectionIndex(
+                    entries = indexEntries,
+                    onEntrySelected = { entry ->
+                        indexScrollDispatcher.launch(scope) { gridState.scrollToItem(entry.itemIndex) }
+                    },
+                    mode = LibrarySectionIndexMode.MobileScrollbar,
+                    revealSignal = scrolling,
+                    scrollbarStateProvider = { gridState.libraryScrollbarState() },
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .padding(
+                            top = contentPadding.calculateTopPadding(),
+                            bottom = contentPadding.calculateBottomPadding() + MobileLibrarySectionIndexBottomPadding,
+                        ),
+                )
             }
         }
         LibraryViewMode.List -> {
             val listState = RetainedLazyListStates.remember("library-albums-list")
-            LazyColumn(
-                state = listState,
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-                contentPadding = contentPadding,
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                items(albums, key = { it.id }, contentType = { "album-row" }) { album ->
-                    MobileAlbumListRow(catalog = catalog, album = album, onAlbum = onAlbum)
+            val scrolling by remember(listState) { derivedStateOf { listState.isScrollInProgress } }
+            Box(Modifier.fillMaxSize()) {
+                LazyColumn(
+                    state = listState,
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    contentPadding = contentPadding,
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    items(albums, key = { it.id }, contentType = { "album-row" }) { album ->
+                        MobileAlbumListRow(catalog = catalog, album = album, onAlbum = onAlbum)
+                    }
                 }
+                LibrarySectionIndex(
+                    entries = indexEntries,
+                    onEntrySelected = { entry ->
+                        indexScrollDispatcher.launch(scope) { listState.scrollToItem(entry.itemIndex) }
+                    },
+                    mode = LibrarySectionIndexMode.MobileScrollbar,
+                    revealSignal = scrolling,
+                    scrollbarStateProvider = { listState.libraryScrollbarState() },
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .padding(
+                            top = contentPadding.calculateTopPadding(),
+                            bottom = contentPadding.calculateBottomPadding() + MobileLibrarySectionIndexBottomPadding,
+                        ),
+                )
             }
         }
     }
@@ -747,6 +861,8 @@ private fun MobileAlbumListRow(
 private fun MobileSongsList(
     tracks: List<Track>,
     columns: LibraryColumnVisibility,
+    sortBy: LibrarySortBy,
+    ascending: Boolean,
     onPlay: (Int) -> Unit,
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
@@ -759,29 +875,51 @@ private fun MobileSongsList(
         return
     }
     val listState = RetainedLazyListStates.remember("library-songs")
+    val indexEntries = remember(tracks, sortBy, ascending) {
+        libraryTrackScrollIndex(tracks, sortBy, ascending)
+    }
+    val scope = rememberCoroutineScope()
+    val indexScrollDispatcher = rememberLibrarySectionIndexSelectionDispatcher()
     val nowPlaying = LocalNowPlaying.current
     val scrolling by remember(listState) { derivedStateOf { listState.isScrollInProgress } }
     val artworkLoadingEnabled = LocalArtworkLoadingEnabled.current && !scrolling
     CompositionLocalProvider(LocalArtworkLoadingEnabled provides artworkLoadingEnabled) {
-        LazyColumn(
-            state = listState,
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-            contentPadding = contentPadding,
-            modifier = Modifier.fillMaxSize(),
-        ) {
-            items(tracks.size, key = { tracks[it].id }, contentType = { "song-row" }) { index ->
-                val track = tracks[index]
-                MobileSongRow(
-                    track = track,
-                    columns = columns,
-                    isNowPlaying = track.id == nowPlaying.trackId,
-                    nowPlayingIsPlaying = nowPlaying.isPlaying,
-                    nowPlayingIsBuffering = nowPlaying.isBuffering,
-                    onPlay = { onPlay(index) },
-                    onAddToUpNext = { onAddToUpNext(track) },
-                    onDownload = { onDownload(track) },
-                )
+        Box(Modifier.fillMaxSize()) {
+            LazyColumn(
+                state = listState,
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+                contentPadding = contentPadding,
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                items(tracks.size, key = { tracks[it].id }, contentType = { "song-row" }) { index ->
+                    val track = tracks[index]
+                    MobileSongRow(
+                        track = track,
+                        columns = columns,
+                        isNowPlaying = track.id == nowPlaying.trackId,
+                        nowPlayingIsPlaying = nowPlaying.isPlaying,
+                        nowPlayingIsBuffering = nowPlaying.isBuffering,
+                        onPlay = { onPlay(index) },
+                        onAddToUpNext = { onAddToUpNext(track) },
+                        onDownload = { onDownload(track) },
+                    )
+                }
             }
+            LibrarySectionIndex(
+                entries = indexEntries,
+                onEntrySelected = { entry ->
+                    indexScrollDispatcher.launch(scope) { listState.scrollToItem(entry.itemIndex) }
+                },
+                mode = LibrarySectionIndexMode.MobileScrollbar,
+                revealSignal = scrolling,
+                scrollbarStateProvider = { listState.libraryScrollbarState() },
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(
+                        top = contentPadding.calculateTopPadding(),
+                        bottom = contentPadding.calculateBottomPadding() + MobileLibrarySectionIndexBottomPadding,
+                    ),
+            )
         }
     }
 }

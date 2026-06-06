@@ -24,8 +24,13 @@ fun main() {
             if (key.isBlank()) null else key to value
         }
         .toMap()
-    val screenshotScenario = queryParams["screenshot"]
+    val screenshotName = queryParams["screenshot"]
+    val screenshotScenario = screenshotName
         ?.let { raw -> PhoebeScreenshotScenario.entries.firstOrNull { it.name.equals(raw, ignoreCase = true) } }
+    val forceCustomLibraryScrollIndex = screenshotName.equals(
+        PhoebeScreenshotScenario.LibraryScrollbar.name,
+        ignoreCase = true,
+    )
     val useLightAppearance = queryParams["theme"] == "light"
     val e2eMode = queryParams["e2e"]
     ComposeViewport(viewportContainerId = "composeApp") {
@@ -35,6 +40,7 @@ fun main() {
                 PhoebeScreenshotApp(
                     scenario = screenshotScenario,
                     useLightAppearance = useLightAppearance,
+                    forceCustomLibraryScrollIndex = forceCustomLibraryScrollIndex,
                 )
             }
             else -> BrowserRoutedApp()

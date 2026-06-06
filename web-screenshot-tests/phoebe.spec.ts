@@ -32,6 +32,9 @@ const phoneLightScenarios = [
 const phoneDarkScenarios = [
   ['LibraryFiveColumnGrid', 'library-five-column-grid'],
 ] as const;
+const scrollbarScenarios = [
+  ['LibraryScrollbar', 'library-scrollbar'],
+] as const;
 
 for (const scenario of coreScenarios) {
   test(`web ${scenario} dark`, async ({ page }) => {
@@ -73,14 +76,25 @@ for (const [scenario, slug] of phoneDarkScenarios) {
   });
 }
 
+for (const [scenario, slug] of scrollbarScenarios) {
+  test(`web ${scenario} dark`, async ({ page }) => {
+    await openScenario(page, scenario, 'dark', undefined, 1_500);
+    await expect(page).toHaveScreenshot(`web-${slug}-dark.png`, {
+      animations: 'disabled',
+      fullPage: true,
+    });
+  });
+}
+
 async function openScenario(
   page: Page,
   scenario: string,
   theme: 'dark' | 'light',
   viewport = { width: 1365, height: 900 },
+  settleMs = 750,
 ) {
   await page.setViewportSize(viewport);
   await page.goto(`/?screenshot=${scenario}&theme=${theme}`, { waitUntil: 'domcontentloaded' });
   await page.locator('canvas').waitFor({ state: 'visible', timeout: 60_000 });
-  await page.waitForTimeout(750);
+  await page.waitForTimeout(settleMs);
 }

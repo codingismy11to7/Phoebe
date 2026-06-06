@@ -23,8 +23,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -38,9 +40,11 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -224,6 +228,8 @@ internal fun FavoriteArtistsDesktopView(
             artists = visibleArtists,
             viewMode = viewMode,
             gridColumns = libraryUi.gridColumns,
+            sortBy = libraryUi.sortBy,
+            ascending = libraryUi.ascending,
             onArtist = onArtist,
             modifier = Modifier.fillMaxSize(),
         )
@@ -280,6 +286,8 @@ internal fun FavoriteAlbumsDesktopView(
             selectedAlbumId = selectedAlbumId,
             viewMode = viewMode,
             gridColumns = libraryUi.gridColumns,
+            sortBy = libraryUi.sortBy,
+            ascending = libraryUi.ascending,
             onSelect = { selectedAlbumId = it.id },
             onOpen = onAlbum,
             modifier = Modifier.fillMaxSize(),
@@ -558,6 +566,8 @@ internal fun LibraryDesktopView(
                         artists = artistPage.items,
                         viewMode = libraryViewMode,
                         gridColumns = libraryUi.gridColumns,
+                        sortBy = sortBy,
+                        ascending = ascending,
                         onArtist = onArtist,
                         modifier = Modifier.weight(1f).fillMaxWidth(),
                     )
@@ -567,6 +577,8 @@ internal fun LibraryDesktopView(
                         selectedAlbumId = selectedAlbumId,
                         viewMode = libraryViewMode,
                         gridColumns = libraryUi.gridColumns,
+                        sortBy = sortBy,
+                        ascending = ascending,
                         onSelect = { selectedAlbumId = it.id },
                         onOpen = onAlbum,
                         modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -575,6 +587,8 @@ internal fun LibraryDesktopView(
                         tracks = trackPage.items,
                         selectedTrackId = selectedTrackId,
                         columns = libraryUi.columns,
+                        sortBy = sortBy,
+                        ascending = ascending,
                         onSelect = { track ->
                             selectedTrackId = track.id
                             trackPage.items.indexOfFirst { it.id == track.id }
@@ -599,6 +613,8 @@ internal fun LibraryDesktopView(
                             selectedAlbumId = selectedAlbumId,
                             viewMode = libraryViewMode,
                             gridColumns = libraryUi.gridColumns,
+                            sortBy = sortBy,
+                            ascending = ascending,
                             onSelect = { selectedAlbumId = it.id },
                             onOpen = onAlbum,
                             modifier = Modifier.weight(1f).fillMaxHeight(),
@@ -607,6 +623,8 @@ internal fun LibraryDesktopView(
                             tracks = trackPage.items,
                             selectedTrackId = selectedTrackId,
                             columns = libraryUi.columns,
+                            sortBy = sortBy,
+                            ascending = ascending,
                             onSelect = { track ->
                                 selectedTrackId = track.id
                                 trackPage.items.indexOfFirst { it.id == track.id }
@@ -1475,6 +1493,8 @@ private fun ArtistsContent(
     artists: List<Artist>,
     viewMode: LibraryViewMode,
     gridColumns: Int,
+    sortBy: LibrarySortBy,
+    ascending: Boolean,
     onArtist: (Artist) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -1484,31 +1504,91 @@ private fun ArtistsContent(
         }
         return
     }
+    val indexEntries = remember(artists, sortBy, ascending) {
+        libraryArtistScrollIndex(artists, sortBy, ascending)
+    }
+    val scope = rememberCoroutineScope()
+    val indexScrollDispatcher = rememberLibrarySectionIndexSelectionDispatcher()
     when (viewMode) {
-        LibraryViewMode.Grid -> LazyVerticalGrid(
-            columns = libraryGridCells(gridColumns),
-            verticalArrangement = Arrangement.spacedBy(20.dp),
-            horizontalArrangement = Arrangement.spacedBy(18.dp),
-            modifier = modifier,
-        ) {
-            items(artists, key = { it.id }, contentType = { "artist-card" }) { artist ->
-                ArtistCard(
-                    catalog = catalog,
-                    artist = artist,
-                    onArtist = { onArtist(artist) },
+        LibraryViewMode.Grid -> {
+            val gridState = rememberLazyGridState()
+            val revealIndex by remember(gridState) { derivedStateOf { gridState.isScrollInProgress } }
+            val scrollbarState by remember(gridState) {
+                derivedStateOf {
+                    LibraryScrollbarState(
+                        firstVisibleItemIndex = gridState.firstVisibleItemIndex,
+                        visibleItemsCount = gridState.layoutInfo.visibleItemsInfo.size,
+                        totalItemsCount = gridState.layoutInfo.totalItemsCount,
+                    )
+                }
+            }
+            Box(modifier) {
+                LazyVerticalGrid(
+                    columns = libraryGridCells(gridColumns),
+                    state = gridState,
+                    verticalArrangement = Arrangement.spacedBy(20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(18.dp),
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    items(artists, key = { it.id }, contentType = { "artist-card" }) { artist ->
+                        ArtistCard(
+                            catalog = catalog,
+                            artist = artist,
+                            onArtist = { onArtist(artist) },
+                        )
+                    }
+                }
+                LibrarySectionIndex(
+                    entries = indexEntries,
+                    onEntrySelected = { entry ->
+                        indexScrollDispatcher.launch(scope) { gridState.scrollToItem(entry.itemIndex) }
+                    },
+                    mode = LibrarySectionIndexMode.DesktopScrollbar,
+                    revealSignal = revealIndex,
+                    scrollbarState = scrollbarState,
+                    modifier = Modifier.align(Alignment.CenterEnd),
                 )
             }
         }
-        LibraryViewMode.List -> Column(modifier) {
-            ArtistsTableHeader()
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxSize()) {
-                items(artists, key = { it.id }, contentType = { "artist" }) { artist ->
-                    ArtistRow(
-                        catalog = catalog,
-                        artist = artist,
-                        onArtist = { onArtist(artist) },
+        LibraryViewMode.List -> {
+            val listState = rememberLazyListState()
+            val revealIndex by remember(listState) { derivedStateOf { listState.isScrollInProgress } }
+            val scrollbarState by remember(listState) {
+                derivedStateOf {
+                    LibraryScrollbarState(
+                        firstVisibleItemIndex = listState.firstVisibleItemIndex,
+                        visibleItemsCount = listState.layoutInfo.visibleItemsInfo.size,
+                        totalItemsCount = listState.layoutInfo.totalItemsCount,
                     )
                 }
+            }
+            Box(modifier) {
+                Column(Modifier.fillMaxSize()) {
+                    ArtistsTableHeader()
+                    LazyColumn(
+                        state = listState,
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        items(artists, key = { it.id }, contentType = { "artist" }) { artist ->
+                            ArtistRow(
+                                catalog = catalog,
+                                artist = artist,
+                                onArtist = { onArtist(artist) },
+                            )
+                        }
+                    }
+                }
+                LibrarySectionIndex(
+                    entries = indexEntries,
+                    onEntrySelected = { entry ->
+                        indexScrollDispatcher.launch(scope) { listState.scrollToItem(entry.itemIndex) }
+                    },
+                    mode = LibrarySectionIndexMode.DesktopScrollbar,
+                    revealSignal = revealIndex,
+                    scrollbarState = scrollbarState,
+                    modifier = Modifier.align(Alignment.CenterEnd),
+                )
             }
         }
     }
@@ -1649,6 +1729,8 @@ private fun AlbumsGrid(
     selectedAlbumId: String?,
     viewMode: LibraryViewMode,
     gridColumns: Int,
+    sortBy: LibrarySortBy,
+    ascending: Boolean,
     onSelect: (Album) -> Unit,
     onOpen: (Album) -> Unit,
     modifier: Modifier = Modifier,
@@ -1659,31 +1741,91 @@ private fun AlbumsGrid(
         }
         return
     }
+    val indexEntries = remember(albums, sortBy, ascending) {
+        libraryAlbumScrollIndex(albums, sortBy, ascending)
+    }
+    val scope = rememberCoroutineScope()
+    val indexScrollDispatcher = rememberLibrarySectionIndexSelectionDispatcher()
     when (viewMode) {
-        LibraryViewMode.Grid -> LazyVerticalGrid(
-            columns = libraryGridCells(gridColumns),
-            verticalArrangement = Arrangement.spacedBy(20.dp),
-            horizontalArrangement = Arrangement.spacedBy(18.dp),
-            modifier = modifier,
-        ) {
-            items(albums, key = { it.id }, contentType = { "album-card" }) { album ->
-                AlbumCard(
-                    catalog = catalog,
-                    album = album,
-                    selected = album.id == selectedAlbumId,
-                    onSelect = { onSelect(album) },
-                    onOpen = { onOpen(album) },
+        LibraryViewMode.Grid -> {
+            val gridState = rememberLazyGridState()
+            val revealIndex by remember(gridState) { derivedStateOf { gridState.isScrollInProgress } }
+            val scrollbarState by remember(gridState) {
+                derivedStateOf {
+                    LibraryScrollbarState(
+                        firstVisibleItemIndex = gridState.firstVisibleItemIndex,
+                        visibleItemsCount = gridState.layoutInfo.visibleItemsInfo.size,
+                        totalItemsCount = gridState.layoutInfo.totalItemsCount,
+                    )
+                }
+            }
+            Box(modifier) {
+                LazyVerticalGrid(
+                    columns = libraryGridCells(gridColumns),
+                    state = gridState,
+                    verticalArrangement = Arrangement.spacedBy(20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(18.dp),
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    items(albums, key = { it.id }, contentType = { "album-card" }) { album ->
+                        AlbumCard(
+                            catalog = catalog,
+                            album = album,
+                            selected = album.id == selectedAlbumId,
+                            onSelect = { onSelect(album) },
+                            onOpen = { onOpen(album) },
+                        )
+                    }
+                }
+                LibrarySectionIndex(
+                    entries = indexEntries,
+                    onEntrySelected = { entry ->
+                        indexScrollDispatcher.launch(scope) { gridState.scrollToItem(entry.itemIndex) }
+                    },
+                    mode = LibrarySectionIndexMode.DesktopScrollbar,
+                    revealSignal = revealIndex,
+                    scrollbarState = scrollbarState,
+                    modifier = Modifier.align(Alignment.CenterEnd),
                 )
             }
         }
-        LibraryViewMode.List -> LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = modifier) {
-            items(albums, key = { it.id }, contentType = { "album-list" }) { album ->
-                AlbumListRow(
-                    catalog = catalog,
-                    album = album,
-                    selected = album.id == selectedAlbumId,
-                    onSelect = { onSelect(album) },
-                    onOpen = { onOpen(album) },
+        LibraryViewMode.List -> {
+            val listState = rememberLazyListState()
+            val revealIndex by remember(listState) { derivedStateOf { listState.isScrollInProgress } }
+            val scrollbarState by remember(listState) {
+                derivedStateOf {
+                    LibraryScrollbarState(
+                        firstVisibleItemIndex = listState.firstVisibleItemIndex,
+                        visibleItemsCount = listState.layoutInfo.visibleItemsInfo.size,
+                        totalItemsCount = listState.layoutInfo.totalItemsCount,
+                    )
+                }
+            }
+            Box(modifier) {
+                LazyColumn(
+                    state = listState,
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    items(albums, key = { it.id }, contentType = { "album-list" }) { album ->
+                        AlbumListRow(
+                            catalog = catalog,
+                            album = album,
+                            selected = album.id == selectedAlbumId,
+                            onSelect = { onSelect(album) },
+                            onOpen = { onOpen(album) },
+                        )
+                    }
+                }
+                LibrarySectionIndex(
+                    entries = indexEntries,
+                    onEntrySelected = { entry ->
+                        indexScrollDispatcher.launch(scope) { listState.scrollToItem(entry.itemIndex) }
+                    },
+                    mode = LibrarySectionIndexMode.DesktopScrollbar,
+                    revealSignal = revealIndex,
+                    scrollbarState = scrollbarState,
+                    modifier = Modifier.align(Alignment.CenterEnd),
                 )
             }
         }
@@ -1834,33 +1976,67 @@ private fun SongsTable(
     tracks: List<Track>,
     selectedTrackId: String?,
     columns: LibraryColumnVisibility,
+    sortBy: LibrarySortBy,
+    ascending: Boolean,
     onSelect: (Track) -> Unit,
     onPlay: (Int) -> Unit,
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier) {
-        SongsTableHeader(columns)
-        if (tracks.isEmpty()) {
-            Box(Modifier.fillMaxSize().padding(top = 24.dp)) {
-                Text("No songs yet.", color = PhoebeUi.mutedText, fontSize = 13.sp)
-            }
-            return
+    val indexEntries = remember(tracks, sortBy, ascending) {
+        libraryTrackScrollIndex(tracks, sortBy, ascending)
+    }
+    val listState = rememberLazyListState()
+    val revealIndex by remember(listState) { derivedStateOf { listState.isScrollInProgress } }
+    val scrollbarState by remember(listState) {
+        derivedStateOf {
+            LibraryScrollbarState(
+                firstVisibleItemIndex = listState.firstVisibleItemIndex,
+                visibleItemsCount = listState.layoutInfo.visibleItemsInfo.size,
+                totalItemsCount = listState.layoutInfo.totalItemsCount,
+            )
         }
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.fillMaxSize()) {
-            itemsIndexed(tracks, key = { _, t -> t.id }, contentType = { _, _ -> "song" }) { index, track ->
-                SongRow(
-                    track = track,
-                    selected = track.id == selectedTrackId,
-                    columns = columns,
-                    onSelect = { onSelect(track) },
-                    onPlay = { onPlay(index) },
-                    onAddToUpNext = { onAddToUpNext(track) },
-                    onDownload = { onDownload(track) },
-                )
+    }
+    val scope = rememberCoroutineScope()
+    val indexScrollDispatcher = rememberLibrarySectionIndexSelectionDispatcher()
+    Box(modifier) {
+        Column(Modifier.fillMaxSize()) {
+            SongsTableHeader(columns)
+            if (tracks.isEmpty()) {
+                Box(Modifier.fillMaxSize().padding(top = 24.dp)) {
+                    Text("No songs yet.", color = PhoebeUi.mutedText, fontSize = 13.sp)
+                }
+            } else {
+                LazyColumn(
+                    state = listState,
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    itemsIndexed(tracks, key = { _, t -> t.id }, contentType = { _, _ -> "song" }) { index, track ->
+                        SongRow(
+                            track = track,
+                            selected = track.id == selectedTrackId,
+                            columns = columns,
+                            onSelect = { onSelect(track) },
+                            onPlay = { onPlay(index) },
+                            onAddToUpNext = { onAddToUpNext(track) },
+                            onDownload = { onDownload(track) },
+                        )
+                    }
+                }
             }
         }
+        LibrarySectionIndex(
+            entries = indexEntries,
+            onEntrySelected = { entry ->
+                indexScrollDispatcher.launch(scope) { listState.scrollToItem(entry.itemIndex) }
+            },
+            mode = LibrarySectionIndexMode.DesktopScrollbar,
+            revealSignal = revealIndex,
+            scrollbarState = scrollbarState,
+            modifier = Modifier.align(Alignment.CenterEnd),
+        )
     }
 }
 
