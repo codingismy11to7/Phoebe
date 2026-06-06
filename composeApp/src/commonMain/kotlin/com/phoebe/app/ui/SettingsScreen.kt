@@ -68,6 +68,7 @@ import com.phoebe.app.domain.NowPlayingVisualizerPreset
 import com.phoebe.app.domain.PersonalMixPreferences
 import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.providerLabel
+import com.phoebe.app.platform.PhoebeBuildInfo
 import com.phoebe.app.platform.SecureCredentialAvailability
 import com.phoebe.app.platform.openExternalUrl
 import com.phoebe.app.platform.rememberPickDownloadDirectory
@@ -85,6 +86,7 @@ internal enum class SettingsCategory(
     Downloads("Downloads", "Manage downloads", PhoebeIcon.Download),
     Appearance("Appearance", "Theme and visuals", PhoebeIcon.Grid),
     Notifications("Notifications", "Manage alerts", PhoebeIcon.Bell),
+    About("About", "Version and links", PhoebeIcon.Settings),
     Advanced("Advanced", "Developer and advanced", PhoebeIcon.More),
 }
 
@@ -206,6 +208,7 @@ internal fun SettingsDesktopView(
                         settings = appSettings,
                         onNotifyWhenDownloadFinishes = onNotifyWhenDownloadFinishes,
                     )
+                    SettingsCategory.About -> AboutSettingsCard()
                     SettingsCategory.Advanced -> GenericPlaceholderCard(category.label)
                 }
             }
@@ -309,6 +312,8 @@ internal fun SettingsMobileView(
             settings = appSettings,
             onNotifyWhenDownloadFinishes = onNotifyWhenDownloadFinishes,
         )
+        SectionLabel("ABOUT", PhoebeUi.accentLight)
+        AboutSettingsCard(compact = true)
     }
 }
 
@@ -1399,6 +1404,83 @@ private fun AccountDetailRow(
 }
 
 @Composable
+private fun AboutSettingsCard(compact: Boolean = false) {
+    SettingsCard {
+        Text("About Phoebe", color = PhoebeUi.primaryText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Text(
+            "Version and project links",
+            color = PhoebeUi.mutedText,
+            fontSize = 12.sp,
+            modifier = Modifier.padding(bottom = if (compact) 10.dp else 14.dp),
+        )
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .background(PhoebeUi.subtleFill)
+                .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(10.dp))
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+        ) {
+            AccountDetailRow(label = "Version", value = PhoebeBuildInfo.versionName)
+            AccountDetailRow(label = "Repository", value = "${PhoebeBuildInfo.githubOwner}/${PhoebeBuildInfo.githubRepo}")
+        }
+        Spacer(Modifier.height(if (compact) 12.dp else 14.dp))
+        AboutLinkRow(
+            title = "Project on GitHub",
+            subtitle = "Source code, releases, and issues",
+            linkLabel = "GitHub",
+            onClick = { openExternalUrl(ProjectGitHubUrl) },
+        )
+        Spacer(Modifier.height(8.dp))
+        AboutLinkRow(
+            title = "Joe Roskopf",
+            subtitle = "Creator of Phoebe",
+            linkLabel = "joetr.com",
+            onClick = { openExternalUrl(CreatorWebsiteUrl) },
+        )
+    }
+}
+
+@Composable
+private fun AboutLinkRow(
+    title: String,
+    subtitle: String,
+    linkLabel: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .background(PhoebeUi.subtleFill)
+            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(10.dp))
+            .padding(horizontal = 12.dp, vertical = 11.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, color = PhoebeUi.primaryText, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Text(
+                subtitle,
+                color = PhoebeUi.secondaryText,
+                fontSize = 12.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Text(
+            linkLabel,
+            color = PhoebeUi.accentLight,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
 private fun GenericPlaceholderCard(title: String, compact: Boolean = false) {
     SettingsCard {
         Text(title, color = PhoebeUi.primaryText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
@@ -1408,6 +1490,8 @@ private fun GenericPlaceholderCard(title: String, compact: Boolean = false) {
 }
 
 private const val ListenBrainzSettingsUrl = "https://listenbrainz.org/settings/"
+private const val ProjectGitHubUrl = "https://github.com/${PhoebeBuildInfo.githubOwner}/${PhoebeBuildInfo.githubRepo}"
+private const val CreatorWebsiteUrl = "https://joetr.com"
 
 @Composable
 private fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {

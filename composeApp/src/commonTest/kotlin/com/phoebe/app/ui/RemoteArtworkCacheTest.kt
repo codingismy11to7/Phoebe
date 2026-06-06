@@ -61,6 +61,18 @@ class RemoteArtworkCacheTest {
     }
 
     @Test
+    fun listArtworkCanReuseLargerCachedImageForSameUrl() {
+        RemoteArtworkCache.configureLimitsForTest(maxEntries = 10, maxEstimatedBytes = Long.MAX_VALUE)
+
+        RemoteArtworkCache.putForTest("art", HeroArtworkMaxDecodeDimension, testImageBitmap(1024, 1024))
+
+        assertEquals(
+            1024,
+            RemoteArtworkCache.cachedRequested("art", ThumbnailArtworkMaxDecodeDimension)?.width,
+        )
+    }
+
+    @Test
     fun displayCacheFallsBackToLowerResolutionPreviewForHeroRequests() {
         RemoteArtworkCache.configureLimitsForTest(maxEntries = 10, maxEstimatedBytes = Long.MAX_VALUE)
 

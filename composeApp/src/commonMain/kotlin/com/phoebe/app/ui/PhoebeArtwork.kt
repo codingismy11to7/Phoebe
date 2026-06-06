@@ -421,6 +421,8 @@ internal object RemoteArtworkCache {
     fun cachedRequested(url: String, maxDecodeDimension: Int, fallbackUrl: String? = null): ImageBitmap? =
         cached(url, maxDecodeDimension)
             ?: fallbackUrl?.let { cached(it, maxDecodeDimension) }
+            ?: cachedListArtworkFromAnyDimension(url, maxDecodeDimension)
+            ?: fallbackUrl?.let { cachedListArtworkFromAnyDimension(it, maxDecodeDimension) }
 
     fun cachedForDisplay(url: String, maxDecodeDimension: Int, fallbackUrl: String? = null): ImageBitmap? {
         cachedRequested(url, maxDecodeDimension, fallbackUrl)?.let { return it }
@@ -531,9 +533,28 @@ internal object RemoteArtworkCache {
         images[key] = image
         estimatedBytesByKey[key] = newBytes
         estimatedBytes += newBytes
-        recentFailures.remove(key)
+        clearFailuresForUrl(key.url)
         touch(key)
         trimToLimits()
+    }
+
+    private fun cachedListArtworkFromAnyDimension(url: String, maxDecodeDimension: Int): ImageBitmap? {
+        val requested = maxDecodeDimension.normalizedDecodeDimension()
+        if (requested > ListArtworkMaxDecodeDimension) return null
+        val candidate = images.keys
+            .asSequence()
+            .filter { it.url == url }
+            .sortedWith(
+                compareBy<CacheKey> { if (it.maxDecodeDimension >= requested) 0 else 1 }
+                    .thenBy { kotlin.math.abs(it.maxDecodeDimension - requested) },
+            )
+            .firstOrNull()
+            ?: return null
+        return cached(candidate)
+    }
+
+    private fun clearFailuresForUrl(url: String) {
+        recentFailures.keys.removeAll { it.url == url }
     }
 
     private fun touch(key: CacheKey) {
