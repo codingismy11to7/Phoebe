@@ -194,6 +194,7 @@ internal enum class PhoebeScreenshotScenario {
     FavoriteArtists,
     FavoriteAlbums,
     Library,
+    LibraryScrollbar,
     LibraryFiveColumnGrid,
     Playlist,
     Artist,
@@ -243,6 +244,7 @@ internal fun PhoebeScreenshotApp(
     useLightAppearance: Boolean = false,
     tintId: String = PhoebeTintOption.Purple.id,
     forceShowQueue: Boolean = false,
+    forceCustomLibraryScrollIndex: Boolean = scenario == PhoebeScreenshotScenario.LibraryScrollbar,
     modifier: Modifier = Modifier,
 ) {
     val fixture = remember { PhoebeScreenshotFixture }
@@ -286,6 +288,7 @@ internal fun PhoebeScreenshotApp(
             LocalDragDrop provides DragDropController(),
             LocalSharedElementTransitionsEnabled provides false,
             LocalContinuousMotionEnabled provides false,
+            LocalLibrarySectionIndexForceScrub provides forceCustomLibraryScrollIndex,
         ) {
             BoxWithConstraints(modifier.fillMaxSize()) {
                 if (maxWidth < 900.dp) {
@@ -345,6 +348,7 @@ internal fun PhoebeDesktopScreenshotScenario(
     }
     val section = when (scenario) {
         PhoebeScreenshotScenario.Library,
+        PhoebeScreenshotScenario.LibraryScrollbar,
         PhoebeScreenshotScenario.LibraryFiveColumnGrid,
         -> BrowseSection.Library
         PhoebeScreenshotScenario.Playlist -> BrowseSection.Library
@@ -745,6 +749,7 @@ internal fun PhoebeMobileScreenshotScenario(
                 session = fixture.session,
                 section = when (scenario) {
                     PhoebeScreenshotScenario.Library,
+                    PhoebeScreenshotScenario.LibraryScrollbar,
                     PhoebeScreenshotScenario.LibraryFiveColumnGrid,
                     -> BrowseSection.Library
                     PhoebeScreenshotScenario.Search -> BrowseSection.Search

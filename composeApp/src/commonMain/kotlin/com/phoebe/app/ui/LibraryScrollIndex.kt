@@ -1,0 +1,685 @@
+package com.phoebe.app.ui
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.phoebe.app.domain.Album
+import com.phoebe.app.domain.Artist
+import com.phoebe.app.domain.LibrarySortBy
+import com.phoebe.app.domain.Track
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlin.math.abs
+
+internal val LibrarySectionIndexWidth = 44.dp
+internal val LocalLibrarySectionIndexForceScrub = compositionLocalOf { false }
+
+private val LibrarySectionIndexHitWidth = 22.dp
+private val LibrarySectionIndexDesktopHitWidth = 44.dp
+private const val MaxVisibleSectionIndexLabels = 28
+private const val SectionIndexInteractionLingerMs = 3_000L
+private const val ActiveSectionIndexLabelMs = 1_100L
+private const val ScrollHintVisibleMs = 650L
+private const val MillisPerDay = 86_400_000L
+private val AlphaLabels = ('A'..'Z').map { it.toString() }
+private val MonthLabels = listOf(
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+)
+
+internal data class LibraryScrollIndexEntry(
+    val label: String,
+    val itemIndex: Int,
+)
+
+internal enum class LibrarySectionIndexMode {
+    DesktopHover,
+    DesktopScrollbar,
+    MobileScrollbar,
+}
+
+internal data class LibraryScrollbarState(
+    val firstVisibleItemIndex: Int,
+    val visibleItemsCount: Int,
+    val totalItemsCount: Int,
+) {
+    val hasScrollableContent: Boolean get() = totalItemsCount > visibleItemsCount && visibleItemsCount > 0
+
+    val thumbSizeFraction: Float
+        get() = if (!hasScrollableContent) {
+            1f
+        } else {
+            (visibleItemsCount.toFloat() / totalItemsCount.toFloat()).coerceIn(0.08f, 0.72f)
+        }
+
+    val thumbTopFraction: Float
+        get() {
+            if (!hasScrollableContent) return 0f
+            val maxFirstVisible = (totalItemsCount - visibleItemsCount).coerceAtLeast(1)
+            return (firstVisibleItemIndex.toFloat() / maxFirstVisible.toFloat()).coerceIn(0f, 1f)
+    }
+}
+
+internal class LibrarySectionIndexSelectionDispatcher {
+    private var job: Job? = null
+
+    fun launch(scope: CoroutineScope, block: suspend CoroutineScope.() -> Unit) {
+        job?.cancel()
+        job = scope.launch(block = block)
+    }
+}
+
+@Composable
+internal fun rememberLibrarySectionIndexSelectionDispatcher(): LibrarySectionIndexSelectionDispatcher =
+    remember { LibrarySectionIndexSelectionDispatcher() }
+
+@Composable
+internal fun LibrarySectionIndex(
+    entries: List<LibraryScrollIndexEntry>,
+    onEntrySelected: (LibraryScrollIndexEntry) -> Unit,
+    modifier: Modifier = Modifier,
+    mode: LibrarySectionIndexMode = LibrarySectionIndexMode.DesktopHover,
+    revealSignal: Boolean = false,
+    scrollbarState: LibraryScrollbarState? = null,
+    scrollbarStateProvider: (() -> LibraryScrollbarState?)? = null,
+) {
+    if (entries.map { it.itemIndex }.distinct().size < 2) return
+
+    var activeEntry by remember(entries) { mutableStateOf<LibraryScrollIndexEntry?>(null) }
+    var scrubbing by remember(entries) { mutableStateOf(false) }
+    var hovering by remember(entries) { mutableStateOf(false) }
+    var interactionLingerVisible by remember(entries) { mutableStateOf(false) }
+    var hintVisible by remember(entries) { mutableStateOf(false) }
+    var lastSelectedItemIndex by remember(entries) { mutableStateOf<Int?>(null) }
+    var suppressNextExitLinger by remember(entries) { mutableStateOf(false) }
+    val scrollbarMode = mode != LibrarySectionIndexMode.DesktopHover
+    val mobileMode = mode == LibrarySectionIndexMode.MobileScrollbar
+    val forceScrub = LocalLibrarySectionIndexForceScrub.current
+    val shouldShowScrollHint = revealSignal && !forceScrub
+
+    LaunchedEffect(shouldShowScrollHint, forceScrub) {
+        if (scrollbarMode && shouldShowScrollHint) {
+            hintVisible = true
+        } else if (scrollbarMode && !scrubbing && !hovering && !forceScrub) {
+            delay(ScrollHintVisibleMs)
+            hintVisible = false
+        }
+    }
+
+    LaunchedEffect(hovering, scrubbing, interactionLingerVisible, mode) {
+        if (!mobileMode && interactionLingerVisible && !hovering && !scrubbing) {
+            delay(SectionIndexInteractionLingerMs)
+            interactionLingerVisible = false
+            activeEntry = null
+            if (scrollbarMode && shouldShowScrollHint) hintVisible = true
+        }
+    }
+
+    LaunchedEffect(activeEntry, scrubbing, hovering, interactionLingerVisible) {
+        if (activeEntry != null && !scrubbing && !hovering && !interactionLingerVisible) {
+            delay(ActiveSectionIndexLabelMs)
+            activeEntry = null
+        }
+    }
+
+    fun entryAt(y: Float, height: Int): LibraryScrollIndexEntry? {
+        if (height <= 0) return null
+        val index = ((y.coerceIn(0f, height.toFloat()) / height) * entries.size)
+            .toInt()
+            .coerceIn(0, entries.lastIndex)
+        return entries[index]
+    }
+
+    fun previewAt(y: Float, height: Int) {
+        val entry = entryAt(y, height)
+        if (entry != activeEntry) activeEntry = entry
+    }
+
+    fun selectEntry(entry: LibraryScrollIndexEntry) {
+        activeEntry = entry
+        if (lastSelectedItemIndex != entry.itemIndex) {
+            lastSelectedItemIndex = entry.itemIndex
+            onEntrySelected(entry)
+        }
+    }
+
+    fun selectAt(y: Float, height: Int) {
+        entryAt(y, height)?.let(::selectEntry)
+    }
+
+    BoxWithConstraints(
+        modifier
+            .width(LibrarySectionIndexWidth)
+            .fillMaxHeight()
+    ) {
+        val compactDateLabels = entries.any { it.label.length > 4 }
+        val minLabelStep = if (compactDateLabels) 22.dp else 13.dp
+        val maxVisibleLabels = remember(maxHeight, minLabelStep, entries.size) {
+            val estimated = if (maxHeight.value.isFinite()) {
+                (maxHeight / minLabelStep).toInt()
+            } else {
+                MaxVisibleSectionIndexLabels
+            }
+            estimated.coerceIn(2, MaxVisibleSectionIndexLabels).coerceAtMost(entries.size)
+        }
+        val visibleEntries = remember(entries, maxVisibleLabels) {
+            entries.sampleForRailLabels(maxVisibleLabels)
+        }
+        val entryIndexes = remember(entries) {
+            entries.withIndex().associate { it.value to it.index }
+        }
+        val forcedActiveEntry = if (forceScrub) {
+            remember(entries) { entries.getOrNull(entries.size / 2) ?: entries.firstOrNull() }
+        } else {
+            null
+        }
+        val displayedActiveEntry = activeEntry ?: forcedActiveEntry
+        val activeLabel = displayedActiveEntry?.label
+        val activeEntryIndex = displayedActiveEntry?.let { entryIndexes[it] } ?: -1
+        val labelsVisible = when (mode) {
+            LibrarySectionIndexMode.DesktopHover -> hovering || scrubbing || interactionLingerVisible || forceScrub
+            LibrarySectionIndexMode.DesktopScrollbar -> hovering || scrubbing || interactionLingerVisible || forceScrub
+            LibrarySectionIndexMode.MobileScrollbar -> scrubbing || forceScrub
+        }
+        val previewBubbleVisible = displayedActiveEntry != null && (scrubbing || forceScrub)
+        val railHeight = if (maxHeight.value.isFinite()) maxHeight else 160.dp
+
+        AnimatedVisibility(
+            visible = scrollbarMode && hintVisible && !labelsVisible,
+            modifier = Modifier.fillMaxSize(),
+            enter = fadeIn(animationSpec = tween(120)) + slideInHorizontally(initialOffsetX = { it / 2 }),
+            exit = fadeOut(animationSpec = tween(180)) + slideOutHorizontally(targetOffsetX = { it / 2 }),
+        ) {
+            val thumbColor = PhoebeUi.secondaryText.copy(alpha = 0.46f)
+            val provider = scrollbarStateProvider
+            if (provider != null) {
+                Canvas(Modifier.fillMaxSize()) {
+                    val state = provider()
+                    val thumbWidth = 3.dp.toPx()
+                    val minThumbHeight = 28.dp.toPx()
+                    val fallbackThumbHeight = 74.dp.toPx()
+                    val railHeight = size.height
+                    val thumbHeight = if (state?.hasScrollableContent == true) {
+                        (railHeight * state.thumbSizeFraction).coerceIn(minThumbHeight, railHeight)
+                    } else {
+                        fallbackThumbHeight.coerceAtMost(railHeight)
+                    }
+                    val thumbTop = if (state?.hasScrollableContent == true) {
+                        (railHeight - thumbHeight) * state.thumbTopFraction
+                    } else {
+                        (railHeight - thumbHeight) / 2f
+                    }
+                    drawRoundRect(
+                        color = thumbColor,
+                        topLeft = Offset(size.width - thumbWidth, thumbTop),
+                        size = Size(thumbWidth, thumbHeight),
+                        cornerRadius = CornerRadius(thumbWidth / 2f, thumbWidth / 2f),
+                    )
+                }
+            } else {
+                Box(
+                    Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.TopEnd,
+                ) {
+                    val state = scrollbarState
+                    val thumbHeight = if (state?.hasScrollableContent == true) {
+                        (railHeight * state.thumbSizeFraction).coerceIn(28.dp, railHeight)
+                    } else {
+                        74.dp.coerceAtMost(railHeight)
+                    }
+                    val thumbTop = if (state?.hasScrollableContent == true) {
+                        (railHeight - thumbHeight) * state.thumbTopFraction
+                    } else {
+                        (railHeight - thumbHeight) / 2f
+                    }
+                    Box(
+                        Modifier
+                            .offset(y = thumbTop)
+                            .width(3.dp)
+                            .height(thumbHeight)
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(thumbColor),
+                    )
+                }
+            }
+        }
+
+        if (forceScrub && labelsVisible) {
+            SectionIndexLabels(
+                visibleEntries = visibleEntries,
+                activeLabel = activeLabel,
+                activeEntryIndex = activeEntryIndex,
+                entryIndexes = entryIndexes,
+                mobileMode = mobileMode,
+                onEntryClick = { entry ->
+                    suppressNextExitLinger = true
+                    interactionLingerVisible = false
+                    selectEntry(entry)
+                },
+            )
+        } else {
+            AnimatedVisibility(
+                visible = labelsVisible,
+                modifier = Modifier.fillMaxSize(),
+                enter = fadeIn(animationSpec = tween(120)) + slideInHorizontally(initialOffsetX = { it / 2 }),
+                exit = fadeOut(animationSpec = tween(180)) + slideOutHorizontally(targetOffsetX = { it / 2 }),
+            ) {
+                SectionIndexLabels(
+                    visibleEntries = visibleEntries,
+                    activeLabel = activeLabel,
+                    activeEntryIndex = activeEntryIndex,
+                    entryIndexes = entryIndexes,
+                    mobileMode = mobileMode,
+                    onEntryClick = { entry ->
+                        suppressNextExitLinger = true
+                        interactionLingerVisible = false
+                        selectEntry(entry)
+                    },
+                )
+            }
+        }
+
+        if (forceScrub && previewBubbleVisible) {
+            displayedActiveEntry.let { entry ->
+                SectionIndexPreviewBubble(
+                    entry = entry,
+                    modifier = Modifier.align(Alignment.CenterStart).offset(x = (-112).dp),
+                )
+            }
+        } else {
+            AnimatedVisibility(
+                visible = previewBubbleVisible,
+                modifier = Modifier.align(Alignment.CenterStart).offset(x = (-112).dp),
+                enter = fadeIn(animationSpec = tween(110)) +
+                    scaleIn(initialScale = 0.86f, animationSpec = tween(160)) +
+                    slideInHorizontally(initialOffsetX = { it / 3 }, animationSpec = tween(160)),
+                exit = fadeOut(animationSpec = tween(160)) +
+                    scaleOut(targetScale = 0.92f, animationSpec = tween(160)) +
+                    slideOutHorizontally(targetOffsetX = { it / 4 }, animationSpec = tween(160)),
+            ) {
+                displayedActiveEntry?.let { entry ->
+                    SectionIndexPreviewBubble(entry = entry)
+                }
+            }
+        }
+
+        Box(
+            Modifier
+                .align(Alignment.CenterEnd)
+                .width(
+                    if (mode == LibrarySectionIndexMode.MobileScrollbar) {
+                        LibrarySectionIndexHitWidth
+                    } else {
+                        LibrarySectionIndexDesktopHitWidth
+                    },
+                )
+                .fillMaxHeight()
+                .semantics { contentDescription = "Library section index" }
+                .then(
+                    if (mode != LibrarySectionIndexMode.MobileScrollbar) {
+                        Modifier.pointerInput(entries) {
+                            awaitPointerEventScope {
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    when (event.type) {
+                                        PointerEventType.Enter, PointerEventType.Move -> {
+                                            hovering = true
+                                            interactionLingerVisible = false
+                                            hintVisible = false
+                                            event.changes.firstOrNull()?.let { change ->
+                                                previewAt(change.position.y, size.height)
+                                            }
+                                        }
+                                        PointerEventType.Exit -> {
+                                            hovering = false
+                                            if (!scrubbing) {
+                                                if (suppressNextExitLinger) {
+                                                    suppressNextExitLinger = false
+                                                    interactionLingerVisible = false
+                                                    activeEntry = null
+                                                } else {
+                                                    interactionLingerVisible = true
+                                                }
+                                                if (scrollbarMode && shouldShowScrollHint) hintVisible = true
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        Modifier
+                    },
+                )
+                .then(
+                    if (mobileMode) {
+                        Modifier.pointerInput(entries) {
+                            awaitPointerEventScope {
+                                while (true) {
+                                    val down = awaitPointerEvent()
+                                        .changes
+                                        .firstOrNull { it.pressed }
+                                        ?: continue
+                                    scrubbing = true
+                                    suppressNextExitLinger = false
+                                    interactionLingerVisible = false
+                                    hintVisible = false
+                                    lastSelectedItemIndex = null
+                                    selectAt(down.position.y, size.height)
+                                    down.consume()
+
+                                    while (true) {
+                                        val event = awaitPointerEvent()
+                                        val change = event.changes.firstOrNull() ?: continue
+                                        if (!change.pressed) break
+                                        selectAt(change.position.y, size.height)
+                                        change.consume()
+                                    }
+
+                                    scrubbing = false
+                                    interactionLingerVisible = false
+                                    hintVisible = false
+                                }
+                            }
+                        }
+                    } else {
+                        Modifier
+                            .pointerInput(entries) {
+                                detectTapGestures { offset ->
+                                    suppressNextExitLinger = true
+                                    interactionLingerVisible = false
+                                    selectAt(offset.y, size.height)
+                                }
+                            }
+                            .pointerInput(entries) {
+                                detectDragGestures(
+                                    onDragStart = { offset ->
+                                        scrubbing = true
+                                        suppressNextExitLinger = false
+                                        interactionLingerVisible = false
+                                        hintVisible = true
+                                        lastSelectedItemIndex = null
+                                        selectAt(offset.y, size.height)
+                                    },
+                                    onDragEnd = {
+                                        scrubbing = false
+                                        interactionLingerVisible = true
+                                        hintVisible = false
+                                    },
+                                    onDragCancel = {
+                                        scrubbing = false
+                                        interactionLingerVisible = true
+                                        hintVisible = false
+                                    },
+                                    onDrag = { change, _ ->
+                                        change.consume()
+                                        selectAt(change.position.y, size.height)
+                                    },
+                                )
+                            }
+                    },
+                ),
+        )
+    }
+}
+
+@Composable
+private fun SectionIndexLabels(
+    visibleEntries: List<LibraryScrollIndexEntry>,
+    activeLabel: String?,
+    activeEntryIndex: Int,
+    entryIndexes: Map<LibraryScrollIndexEntry, Int>,
+    mobileMode: Boolean,
+    onEntryClick: (LibraryScrollIndexEntry) -> Unit,
+) {
+    Column(
+        Modifier.fillMaxSize(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.SpaceBetween,
+    ) {
+        visibleEntries.forEach { entry ->
+            val active = entry.label == activeLabel
+            val distance = if (activeEntryIndex >= 0) {
+                abs((entryIndexes[entry] ?: activeEntryIndex) - activeEntryIndex)
+            } else {
+                Int.MAX_VALUE
+            }
+            val scale = when (distance) {
+                0 -> if (mobileMode) 1f else 2.55f
+                1 -> if (mobileMode) 1f else 1.55f
+                2 -> if (mobileMode) 1f else 1.22f
+                3 -> if (mobileMode) 1f else 1.08f
+                else -> 1f
+            }
+            Text(
+                text = entry.label.railIndexLabel(),
+                color = if (active) PhoebeUi.accentLight else PhoebeUi.secondaryText,
+                fontSize = if (entry.label.length <= 4) 10.sp else 8.sp,
+                lineHeight = if (entry.label.length <= 4) 10.sp else 8.sp,
+                fontWeight = if (active) FontWeight.Black else FontWeight.SemiBold,
+                textAlign = TextAlign.Center,
+                maxLines = if (entry.label.length <= 4) 1 else 2,
+                overflow = TextOverflow.Visible,
+                modifier = Modifier
+                    .graphicsLayer {
+                        scaleX = scale
+                        scaleY = scale
+                        translationX = -(scale - 1f) * 10f
+                    }
+                    .clip(RoundedCornerShape(999.dp))
+                    .clickable { onEntryClick(entry) }
+                    .padding(horizontal = 2.dp, vertical = 1.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SectionIndexPreviewBubble(
+    entry: LibraryScrollIndexEntry,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier
+            .width(104.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(PhoebeUi.accent.copy(alpha = 0.94f))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = entry.label,
+            color = Color.White,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Black,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+internal fun libraryArtistScrollIndex(
+    artists: List<Artist>,
+    sortBy: LibrarySortBy,
+    ascending: Boolean,
+): List<LibraryScrollIndexEntry> =
+    when (sortBy) {
+        LibrarySortBy.DateAdded -> buildGroupedScrollIndex(artists) { monthYearLabelFromEpochMs(it.dateAddedMs) ?: "Unknown" }
+        else -> buildAlphaScrollIndex(artists, ascending) { it.title }
+    }
+
+internal fun libraryAlbumScrollIndex(
+    albums: List<Album>,
+    sortBy: LibrarySortBy,
+    ascending: Boolean,
+): List<LibraryScrollIndexEntry> =
+    when (sortBy) {
+        LibrarySortBy.Artist -> buildAlphaScrollIndex(albums, ascending) { it.artist }
+        LibrarySortBy.Year -> buildGroupedScrollIndex(albums) { it.year?.toString() ?: "Unknown" }
+        LibrarySortBy.DateAdded -> buildGroupedScrollIndex(albums) { monthYearLabelFromEpochMs(it.dateAddedMs) ?: "Unknown" }
+        else -> buildAlphaScrollIndex(albums, ascending) { it.title }
+    }
+
+internal fun libraryTrackScrollIndex(
+    tracks: List<Track>,
+    sortBy: LibrarySortBy,
+    ascending: Boolean,
+): List<LibraryScrollIndexEntry> =
+    when (sortBy) {
+        LibrarySortBy.Album -> buildAlphaScrollIndex(tracks, ascending) { it.album }
+        LibrarySortBy.Artist -> buildAlphaScrollIndex(tracks, ascending) { it.artist }
+        LibrarySortBy.Year -> buildGroupedScrollIndex(tracks) { it.year?.toString() ?: "Unknown" }
+        LibrarySortBy.DateAdded -> buildGroupedScrollIndex(tracks) { monthYearLabelFromEpochMs(it.dateAddedMs) ?: "Unknown" }
+        else -> buildAlphaScrollIndex(tracks, ascending) { it.title }
+    }
+
+internal fun List<LibraryScrollIndexEntry>.sampleForRailLabels(maxVisibleLabels: Int): List<LibraryScrollIndexEntry> {
+    if (size <= maxVisibleLabels) return this
+    val every = ((size + maxVisibleLabels - 1) / maxVisibleLabels).coerceAtLeast(1)
+    return filterIndexed { index, _ -> index == 0 || index == lastIndex || index % every == 0 }
+}
+
+internal fun String.railIndexLabel(): String {
+    val parts = split(' ')
+    if (parts.size == 2 && parts[0].length == 3 && parts[1].length == 4) {
+        return "${parts[0]}\n${parts[1].takeLast(2)}"
+    }
+    return this
+}
+
+private fun <T> buildGroupedScrollIndex(
+    items: List<T>,
+    labelFor: (T) -> String,
+): List<LibraryScrollIndexEntry> {
+    val entries = mutableListOf<LibraryScrollIndexEntry>()
+    var previousLabel: String? = null
+    items.forEachIndexed { index, item ->
+        val label = labelFor(item)
+        if (label != previousLabel) {
+            entries += LibraryScrollIndexEntry(label = label, itemIndex = index)
+            previousLabel = label
+        }
+    }
+    return entries
+}
+
+private fun <T> buildAlphaScrollIndex(
+    items: List<T>,
+    ascending: Boolean,
+    labelFor: (T) -> String,
+): List<LibraryScrollIndexEntry> {
+    if (items.isEmpty()) return emptyList()
+    val labelledItems = items.mapIndexed { index, item ->
+        val label = alphaLabel(labelFor(item))
+        AlphaLabelledItem(label = label, rank = alphaRank(label), itemIndex = index)
+    }
+    val labels = buildList {
+        if (labelledItems.any { it.label == "#" }) add("#")
+        addAll(AlphaLabels)
+    }.let { if (ascending) it else it.asReversed() }
+
+    return labels.map { label ->
+        val rank = alphaRank(label)
+        val target = if (ascending) {
+            labelledItems.firstOrNull { it.rank >= rank } ?: labelledItems.last()
+        } else {
+            labelledItems.firstOrNull { it.rank <= rank } ?: labelledItems.last()
+        }
+        LibraryScrollIndexEntry(label = label, itemIndex = target.itemIndex)
+    }
+}
+
+private data class AlphaLabelledItem(
+    val label: String,
+    val rank: Int,
+    val itemIndex: Int,
+)
+
+private fun alphaLabel(value: String): String {
+    val first = value.trim().firstOrNull()?.uppercaseChar() ?: return "#"
+    return if (first in 'A'..'Z') first.toString() else "#"
+}
+
+private fun alphaRank(label: String): Int =
+    if (label == "#") 0 else (label.firstOrNull()?.uppercaseChar()?.code ?: 'A'.code) - 'A'.code + 1
+
+internal fun monthYearLabelFromEpochMs(epochMs: Long?): String? {
+    if (epochMs == null || epochMs <= 0L) return null
+    val days = floorDiv(epochMs, MillisPerDay)
+    val (year, month) = yearMonthFromEpochDay(days)
+    return "${MonthLabels[month - 1]} $year"
+}
+
+private fun floorDiv(value: Long, divisor: Long): Long =
+    if (value >= 0L) value / divisor else -((-value + divisor - 1L) / divisor)
+
+private fun yearMonthFromEpochDay(epochDay: Long): Pair<Int, Int> {
+    val z = epochDay + 719_468L
+    val era = if (z >= 0L) z / 146_097L else (z - 146_096L) / 146_097L
+    val dayOfEra = z - era * 146_097L
+    val yearOfEra = (dayOfEra - dayOfEra / 1_460L + dayOfEra / 36_524L - dayOfEra / 146_096L) / 365L
+    val dayOfYear = dayOfEra - (365L * yearOfEra + yearOfEra / 4L - yearOfEra / 100L)
+    val monthPrime = (5L * dayOfYear + 2L) / 153L
+    val month = (monthPrime + if (monthPrime < 10L) 3L else -9L).toInt()
+    val year = (yearOfEra + era * 400L + if (month <= 2) 1L else 0L).toInt()
+    return year to month
+}

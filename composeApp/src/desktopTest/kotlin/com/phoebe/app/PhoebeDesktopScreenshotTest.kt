@@ -50,6 +50,20 @@ class PhoebeDesktopScreenshotTest {
 
     @OptIn(ExperimentalTestApi::class, ExperimentalComposeUiApi::class)
     @Test
+    fun desktopLibraryScrollbarDark() = runDesktopComposeUiTest(width = 1365, height = 900) {
+        setContent {
+            Box(Modifier.size(1365.dp, 900.dp)) {
+                PhoebeScreenshotApp(scenario = PhoebeScreenshotScenario.LibraryScrollbar)
+            }
+        }
+        waitForIdle()
+        onRoot().captureRoboImage(
+            filePath = "src/screenshotTest/roborazzi/desktop-library-scrollbar-dark.png",
+        )
+    }
+
+    @OptIn(ExperimentalTestApi::class, ExperimentalComposeUiApi::class)
+    @Test
     fun desktopRepresentativeFlowsLight() = runDesktopComposeUiTest(width = 1365, height = 900) {
         listOf(
             PhoebeScreenshotScenario.Home,
