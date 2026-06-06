@@ -559,7 +559,7 @@ internal fun LibraryDesktopView(
                     pageIndex = it
                 })
             }
-            if (narrowPane || filter == LibraryFilterTab.Artists) {
+            if (narrowPane || filter != LibraryFilterTab.Albums) {
                 when (filter) {
                     LibraryFilterTab.Artists -> ArtistsContent(
                         catalog = catalog,
@@ -606,82 +606,34 @@ internal fun LibraryDesktopView(
                     Modifier.weight(1f).fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(28.dp),
                 ) {
-                    when (filter) {
-                        LibraryFilterTab.Albums -> AlbumsGrid(
-                            catalog = catalog,
-                            albums = albumPage.items,
-                            selectedAlbumId = selectedAlbumId,
-                            viewMode = libraryViewMode,
-                            gridColumns = libraryUi.gridColumns,
-                            sortBy = sortBy,
-                            ascending = ascending,
-                            onSelect = { selectedAlbumId = it.id },
-                            onOpen = onAlbum,
-                            modifier = Modifier.weight(1f).fillMaxHeight(),
-                        )
-                        LibraryFilterTab.Songs -> SongsTable(
-                            tracks = trackPage.items,
-                            selectedTrackId = selectedTrackId,
-                            columns = libraryUi.columns,
-                            sortBy = sortBy,
-                            ascending = ascending,
-                            onSelect = { track ->
-                                selectedTrackId = track.id
-                                trackPage.items.indexOfFirst { it.id == track.id }
-                                    .takeIf { it >= 0 }
-                                    ?.let { index -> onPlayTracks(trackPage.items, index) }
-                            },
-                            onPlay = { index -> onPlayTracks(trackPage.items, index) },
-                            onAddToUpNext = onAddToUpNext,
-                            onDownload = onDownload,
-                            modifier = Modifier.weight(1f).fillMaxHeight(),
-                        )
-                        LibraryFilterTab.Artists -> Unit
-                    }
+                    AlbumsGrid(
+                        catalog = catalog,
+                        albums = albumPage.items,
+                        selectedAlbumId = selectedAlbumId,
+                        viewMode = libraryViewMode,
+                        gridColumns = libraryUi.gridColumns,
+                        sortBy = sortBy,
+                        ascending = ascending,
+                        onSelect = { selectedAlbumId = it.id },
+                        onOpen = onAlbum,
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                    )
                     Column(
                         modifier = Modifier
                             .width(detailWidth)
                             .fillMaxHeight(),
                     ) {
-                        when (filter) {
-                            LibraryFilterTab.Albums -> {
-                                val selected = albumPage.items.firstOrNull { it.id == selectedAlbumId }
-                                    ?: sortedAlbums.firstOrNull { it.id == selectedAlbumId }
-                                if (selected != null) {
-                                    AlbumDetailSidebar(
-                                        album = selected,
-                                        columns = libraryUi.columns,
-                                        catalog = catalog,
-                                        onPlayTrack = { tracks, index -> onPlayTracks(tracks, index) },
-                                    )
-                                } else {
-                                    LibraryEmptyDetail("Select an album to see details.")
-                                }
-                            }
-                            LibraryFilterTab.Songs -> {
-                                val selected = trackPage.items.firstOrNull { it.id == selectedTrackId }
-                                    ?: sortedTracks.firstOrNull { it.id == selectedTrackId }
-                                if (selected != null) {
-                                    SongDetailSidebar(
-                                        track = selected,
-                                        columns = libraryUi.columns,
-                                        onPlay = {
-                                            val idx = trackPage.items.indexOfFirst { it.id == selected.id }
-                                            if (idx >= 0) {
-                                                onPlayTracks(trackPage.items, idx)
-                                            } else {
-                                                val fallback = sortedTracks.indexOfFirst { it.id == selected.id }
-                                                if (fallback >= 0) onPlayTracks(sortedTracks, fallback)
-                                            }
-                                        },
-                                        onAddToPlaylist = { onAddToUpNext(selected) },
-                                        onDownload = { onDownload(selected) },
-                                    )
-                                } else {
-                                    LibraryEmptyDetail("Select a song to see details.")
-                                }
-                            }
-                            LibraryFilterTab.Artists -> Unit
+                        val selected = albumPage.items.firstOrNull { it.id == selectedAlbumId }
+                            ?: sortedAlbums.firstOrNull { it.id == selectedAlbumId }
+                        if (selected != null) {
+                            AlbumDetailSidebar(
+                                album = selected,
+                                columns = libraryUi.columns,
+                                catalog = catalog,
+                                onPlayTrack = { tracks, index -> onPlayTracks(tracks, index) },
+                            )
+                        } else {
+                            LibraryEmptyDetail("Select an album to see details.")
                         }
                     }
                 }

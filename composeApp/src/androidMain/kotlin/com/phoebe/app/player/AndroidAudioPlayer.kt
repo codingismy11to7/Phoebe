@@ -161,6 +161,7 @@ internal class AndroidAudioPlayer(
                 firstAppIndex = 0,
                 itemCount = queue.size,
             )
+            adoptPlatformPlayIntent(playing)
             adoptQueueState(queue, index, playing)
         }
         AndroidPlaybackBridge.onEnsureLocalPlaybackPaused = { forceLocalPlaybackPaused() }
@@ -726,6 +727,7 @@ internal class AndroidAudioPlayer(
         positionSyncJob = scope.launch {
             while (isActive && isPlayRequestCurrent(generation) && crossfadePlayer === player) {
                 val positionMs = player.currentPosition.coerceAtLeast(0L)
+                adoptPlatformPlayIntent(player.playWhenReady)
                 reportPlaybackDiagnostics(
                     engine = PlaybackEnginePath.Media3Crossfade,
                     positionMs = positionMs,
@@ -755,6 +757,7 @@ internal class AndroidAudioPlayer(
     ) {
         if (!isPlayRequestCurrent(generation) || crossfadePlayer !== player) return
         val positionMs = player.currentPosition.coerceAtLeast(0L)
+        adoptPlatformPlayIntent(player.playWhenReady)
         reportPlaybackDiagnostics(
             engine = PlaybackEnginePath.Media3Crossfade,
             positionMs = positionMs,

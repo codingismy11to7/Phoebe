@@ -942,10 +942,17 @@ internal fun MobileSongRow(
     val likeActions = LocalLikeActions.current
     val ratingActions = LocalRatingActions.current
     val downloads = LocalDownloadStatus.current
+    val nowMs = LocalNowMs.current
     val canRate = ratingActions.ratingsEnabled && track.isRemoteLibraryTrack()
     val canLike = likeActions.likesEnabled && track.canTogglePlexLike()
     val liked = likeActions.isLiked(track)
     val downloaded = downloads.isComplete(track)
+    val metadataParts = remember(track, columns, nowMs) {
+        mobileSongMetadataParts(track, columns, nowMs)
+    }
+    val filepath = remember(track.filepath, columns.filepath) {
+        if (columns.filepath) track.filepath?.takeIf { it.isNotBlank() }?.let(::shortenFilepath) ?: "—" else null
+    }
     Row(
         modifier
             .fillMaxWidth()
@@ -1019,17 +1026,35 @@ internal fun MobileSongRow(
                     )
                 }
             }
-            if (columns.rating && canRate) {
+            if (columns.rating) {
                 RatingStars(
                     rating = ratingActions.ratingFor(track),
-                    enabled = true,
+                    enabled = canRate,
                     onRating = { ratingActions.onRateTrack(track, it) },
                     starSize = 11.dp,
                     gap = 0.dp,
                 )
             }
+            metadataParts.forEach { metadataPart ->
+                MobileSongRowText(
+                    metadataPart,
+                    color = PhoebeUi.mutedText,
+                    fontSize = 10.sp,
+                    lineHeight = 12.sp,
+                )
+            }
+            if (filepath != null) {
+                MobileSongRowText(
+                    "Path $filepath",
+                    color = PhoebeUi.mutedText,
+                    fontSize = 10.sp,
+                    lineHeight = 12.sp,
+                )
+            }
         }
-        Text(formatMinutesSeconds(track.durationMs), color = PhoebeUi.mutedText, fontSize = 11.sp)
+        if (columns.duration) {
+            Text(formatMinutesSeconds(track.durationMs), color = PhoebeUi.mutedText, fontSize = 11.sp)
+        }
         if (columns.favorite) {
             LikeButton(
                 liked = liked,
@@ -1069,6 +1094,20 @@ internal fun MobileSongRow(
             )
         }
     }
+}
+
+private fun mobileSongMetadataParts(
+    track: Track,
+    columns: LibraryColumnVisibility,
+    nowMs: Long,
+): List<String> = buildList {
+    if (columns.year) add("Year ${track.year?.toString() ?: "—"}")
+    if (columns.genre) add("Genre ${track.genre?.takeIf { it.isNotBlank() } ?: "—"}")
+    if (columns.audioCodec) add("Codec ${track.audioCodec?.uppercase()?.takeIf { it.isNotBlank() } ?: "—"}")
+    if (columns.bitrate) add("Bitrate ${displayBitrateLabel(track)}")
+    if (columns.sampleRate) add("Sample ${displaySampleRateLabel(track)}")
+    if (columns.fileType) add("Type ${displayFileTypeLabel(track)}")
+    if (columns.dateAdded) add("Added ${track.dateAddedMs?.let { formatLastPlayed(it, nowMs) } ?: "—"}")
 }
 
 @Composable
