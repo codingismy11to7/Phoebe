@@ -80,6 +80,8 @@ interface MusicProviderAdapter {
 
     suspend fun reportPlayback(session: PlexSession, track: Track, positionMs: Long, isPaused: Boolean, event: JellyfinPlaybackEvent) {}
 
+    suspend fun markPlayed(session: PlexSession, track: Track, playedAtMs: Long) {}
+
     suspend fun radioStation(session: PlexSession, artist: Artist): PlexRadioStation? = null
 
     suspend fun playArtistRadio(session: PlexSession, artist: Artist): List<Track> = emptyList()

@@ -229,7 +229,7 @@ jobs:
         run: ./scripts/fetch-test-audio.sh
 
       - name: Build release APK
-        run: ./gradlew :composeApp:assembleRelease
+        run: ./gradlew :androidApp:assembleRelease
 
       - name: Smoke test release APK playback
         uses: reactivecircus/android-emulator-runner@v2

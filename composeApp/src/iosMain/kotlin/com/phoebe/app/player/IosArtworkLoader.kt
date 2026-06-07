@@ -3,6 +3,7 @@ package com.phoebe.app.player
 import com.phoebe.app.platform.createPlatformHttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.get
+import kotlinx.cinterop.BetaInteropApi
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.usePinned
@@ -74,7 +75,7 @@ private fun UIImage.downscaled(maxDimension: Double): UIImage {
     return image ?: this
 }
 
-@OptIn(ExperimentalForeignApi::class)
+@OptIn(BetaInteropApi::class, ExperimentalForeignApi::class)
 private fun ByteArray.toNSData(): NSData = usePinned { pinned ->
     NSData.create(bytes = pinned.addressOf(0), length = size.toULong())
 }

@@ -19,7 +19,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -42,6 +45,8 @@ class PlexPlaybackReporter(
     private var lastPlayQueueSignature: String? = null
     private var failedPlayQueueSignature: String? = null
     private var failedPlayQueueRetryAtMs: Long = 0L
+    private val mutablePlayHistoryChanged = MutableSharedFlow<Unit>(replay = 1, extraBufferCapacity = 1)
+    val playHistoryChanged: SharedFlow<Unit> = mutablePlayHistoryChanged.asSharedFlow()
 
     fun start(scope: CoroutineScope) {
         start(scope, includePeriodicTimeline = true)
@@ -51,6 +56,55 @@ class PlexPlaybackReporter(
         scope.launch { watchPlaybackState() }
         if (includePeriodicTimeline) {
             scope.launch { periodicTimelineWhilePlaying() }
+        }
+    }
+
+    suspend fun markPlayed(track: Track, playedAtMs: Long) {
+        if (!track.isRemoteLibraryTrack()) return
+        val sess = session.value
+        if (sess.isEmbyFamily()) {
+            val server = sess?.selectedServer ?: return
+            val prefix = sess.providerType.catalogPrefix
+            runCatching {
+                val adapter = providerRegistry.adapterFor(sess)
+                if (adapter != null && prefix != "jellyfin") {
+                    adapter.markPlayed(sess, track, playedAtMs)
+                } else {
+                    jellyfinClient.markPlayed(
+                        server = server,
+                        token = sess.token,
+                        userId = sess.userId ?: return@runCatching,
+                        itemId = track.id.removePrefix("$prefix:"),
+                    )
+                }
+                notifyPlayHistoryChanged()
+            }.onFailure { e ->
+                if (e is CancellationException) throw e
+                PhoebeLog.d("PlexPlaybackReporter") { "${sess.providerType.name} mark played failed: ${e.message}" }
+            }
+            return
+        }
+        if (sess != null && !sess.isPlex()) {
+            runCatching {
+                val adapter = providerRegistry.adapterFor(sess) ?: return@runCatching
+                adapter.markPlayed(sess, track, playedAtMs)
+                notifyPlayHistoryChanged()
+            }.onFailure { e ->
+                if (e is CancellationException) throw e
+                PhoebeLog.d("PlexPlaybackReporter") { "${sess.providerType.name} mark played failed: ${e.message}" }
+            }
+            return
+        }
+
+        val ratingKey = plexRatingKey(track.id) ?: return
+        val server = sess?.selectedServer ?: return
+        val token = sess.serverAuthToken() ?: return
+        runCatching {
+            plexClient.markPlayed(server = server, token = token, ratingKey = ratingKey)
+            notifyPlayHistoryChanged()
+        }.onFailure { e ->
+            if (e is CancellationException) throw e
+            PhoebeLog.d("PlexPlaybackReporter") { "Plex mark played failed: ${e.message}" }
         }
     }
 
@@ -203,6 +257,7 @@ class PlexPlaybackReporter(
                 } else {
                     jellyfinClient.reportPlayback(server, sess.token, track.id.removePrefix("$prefix:"), timeMs, isPaused = false, event = JellyfinPlaybackEvent.Stop)
                 }
+                notifyPlayHistoryChanged()
             }.onFailure { e ->
                 if (e is CancellationException) throw e
             }
@@ -211,6 +266,7 @@ class PlexPlaybackReporter(
         if (sess != null && !sess.isPlex()) {
             runCatching {
                 providerRegistry.adapterFor(sess)?.reportPlayback(sess, track, timeMs, isPaused = false, event = JellyfinPlaybackEvent.Stop)
+                notifyPlayHistoryChanged()
             }.onFailure { e ->
                 if (e is CancellationException) throw e
             }
@@ -231,10 +287,15 @@ class PlexPlaybackReporter(
                 continuing = continuing,
                 playQueueItemId = playQueueItemByRatingKey[ratingKey],
             )
+            notifyPlayHistoryChanged()
         }.onFailure { e ->
             if (e is CancellationException) throw e
             PhoebeLog.d("PlexPlaybackReporter") { "stopped timeline failed: ${e.message}" }
         }
+    }
+
+    private fun notifyPlayHistoryChanged() {
+        mutablePlayHistoryChanged.tryEmit(Unit)
     }
 
     private suspend fun reportTimeline(

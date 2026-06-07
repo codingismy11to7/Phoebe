@@ -20,6 +20,7 @@ import okhttp3.Request
 import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
+import androidx.core.net.toUri
 
 actual fun createPlatformUpdateInstaller(): PlatformUpdateInstaller = AndroidUpdateInstaller()
 
@@ -65,7 +66,7 @@ private class AndroidUpdateInstaller : PlatformUpdateInstaller {
 
 private fun openUnknownAppSourcesSettings(context: Context) {
     val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES)
-        .setData(Uri.parse("package:${context.packageName}"))
+        .setData("package:${context.packageName}".toUri())
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     context.startActivity(intent)
 }

@@ -2,9 +2,11 @@ package com.phoebe.app.ui
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -1299,6 +1301,7 @@ private fun OrderMenuItem(
 internal fun libraryGridCells(columns: Int): GridCells =
     GridCells.Fixed(columns.coerceIn(LibraryUiPreferences.MinGridColumns, LibraryUiPreferences.MaxGridColumns))
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun LibraryToolbarButton(
     icon: PhoebeIcon,
@@ -1308,12 +1311,17 @@ internal fun LibraryToolbarButton(
     iconTint: Color = PhoebeUi.secondaryText,
     enabled: Boolean = true,
     onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
     leadingContent: (@Composable () -> Unit)? = null,
 ) {
     Row(
         modifier
             .clip(RoundedCornerShape(8.dp))
-            .clickable(enabled = enabled, onClick = onClick)
+            .combinedClickable(
+                enabled = enabled,
+                onClick = onClick,
+                onLongClick = onLongClick,
+            )
             .background(Color.White.copy(alpha = 0.04f))
             .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(8.dp))
             .padding(horizontal = 12.dp, vertical = 8.dp),

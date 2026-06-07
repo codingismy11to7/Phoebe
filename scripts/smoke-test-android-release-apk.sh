@@ -3,7 +3,7 @@ set -euo pipefail
 
 mkdir -p smoke-logs
 
-apk="$(find composeApp/build/outputs/apk/release -name '*.apk' -print -quit)"
+apk="$(find androidApp/build/outputs/apk/release -name '*.apk' -print -quit)"
 if [[ -z "${apk}" ]]; then
   echo "::error::Could not find release APK"
   exit 1

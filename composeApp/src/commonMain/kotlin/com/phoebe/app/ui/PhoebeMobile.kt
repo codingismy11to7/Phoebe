@@ -1792,6 +1792,7 @@ internal fun MobilePlayer(
                                 ) { t ->
                                     val useBlurredArtworkChrome =
                                         visualizerPreset == NowPlayingVisualizerPreset.Artwork && blurredArtworkAppearance
+                                    var artworkFlipRotation by remember(t.id) { mutableFloatStateOf(0f) }
                                     val artworkContentShape = if (visualizerPreset == NowPlayingVisualizerPreset.Artwork && !blurredArtworkAppearance) {
                                         RoundedCornerShape(10.dp)
                                     } else {
@@ -1828,13 +1829,15 @@ internal fun MobilePlayer(
                                                 CompositionLocalProvider(
                                                     LocalArtworkLoadingEnabled provides artworkLoadsEnabled,
                                                 ) {
+                                                    val artworkFadeHeight = if (artworkFlipRotation > 90f) 0.dp else metadataOverlap
                                                     FlippableSongArtwork(
                                                         track = t,
                                                         modifier = Modifier
                                                             .fillMaxSize()
-                                                            .mobileArtworkBottomFade(metadataOverlap),
+                                                            .mobileArtworkBottomFade(artworkFadeHeight),
                                                         maxDecodeDimension = HeroArtworkMaxDecodeDimension,
                                                         shape = artworkContentShape,
+                                                        onFlipRotationChange = { artworkFlipRotation = it },
                                                     ) {
                                                         MobileNowPlayingOverlayActions(
                                                             track = t,
@@ -1901,6 +1904,8 @@ internal fun MobilePlayer(
                                                     track = t,
                                                     artworkSize = artworkSize,
                                                     blendOverlap = metadataOverlap,
+                                                    rotationY = artworkFlipRotation,
+                                                    backColor = PhoebeUi.panel,
                                                     modifier = Modifier.matchParentSize(),
                                                 )
                                                 MobileArtworkMetadataScrim(
@@ -2052,6 +2057,8 @@ private fun MobileArtworkReflection(
     track: Track,
     artworkSize: Dp,
     blendOverlap: Dp,
+    rotationY: Float,
+    backColor: Color,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier.clipToBounds()) {
@@ -2059,6 +2066,8 @@ private fun MobileArtworkReflection(
             track = track,
             artworkSize = artworkSize,
             blendOverlap = blendOverlap,
+            rotationY = rotationY,
+            backColor = backColor,
         )
     }
 }
@@ -2126,7 +2135,10 @@ private fun BoxScope.MobileArtworkReflectionLayer(
     track: Track,
     artworkSize: Dp,
     blendOverlap: Dp,
+    rotationY: Float,
+    backColor: Color,
 ) {
+    val density = LocalDensity.current
     Box(
         modifier = Modifier
             .matchParentSize()
@@ -2170,28 +2182,42 @@ private fun BoxScope.MobileArtworkReflectionLayer(
             .size(artworkSize)
             .align(Alignment.TopCenter)
             .graphicsLayer {
+                this.rotationY = rotationY
                 scaleY = -1f
-            }
-            .hazeEffect {
-                inputScale = HazeInputScale.Auto
-                blurEffect {
-                    blurRadius = 34.dp
-                    progressive = HazeProgressive.verticalGradient(
-                        startIntensity = 0f,
-                        endIntensity = 1f,
-                    )
-                    noiseFactor = 0f
-                }
+                cameraDistance = 12f * density.density
             }
 
-        TrackArtworkImage(
-            track = track,
-            modifier = reflectionModifier,
-            shape = RectangleShape,
-            elevated = false,
-            maxDecodeDimension = HeroArtworkMaxDecodeDimension,
-            alignment = Alignment.BottomCenter,
-        )
+        Box(reflectionModifier) {
+            if (rotationY <= 90f) {
+                TrackArtworkImage(
+                    track = track,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .hazeEffect {
+                            inputScale = HazeInputScale.Auto
+                            blurEffect {
+                                blurRadius = 34.dp
+                                progressive = HazeProgressive.verticalGradient(
+                                    startIntensity = 0f,
+                                    endIntensity = 1f,
+                                )
+                                noiseFactor = 0f
+                            }
+                        },
+                    shape = RectangleShape,
+                    elevated = false,
+                    maxDecodeDimension = HeroArtworkMaxDecodeDimension,
+                    alignment = Alignment.BottomCenter,
+                )
+            } else {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .graphicsLayer { this.rotationY = 180f }
+                        .background(backColor),
+                )
+            }
+        }
     }
 }
 

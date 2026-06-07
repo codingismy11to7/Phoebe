@@ -6,10 +6,10 @@ Pull requests targeting `main` run:
 
 - `./gradlew :composeApp:desktopTest` across Linux, macOS, and Windows. Linux and macOS enable `-Pphoebe.realAudioTests=true`; Linux runs under `xvfb-run` with a PulseAudio null sink, while Windows keeps real-audio tests skipped.
 - `./gradlew :composeApp:wasmJsTest`
-- `./gradlew :composeApp:verifyRoborazziDebug`
+- `./gradlew :composeApp:verifyRoborazziAndroidHostTest`
 - `npm run web:screenshots`
-- `./gradlew :composeApp:compileDebugAndroidTestKotlinAndroid`
-- `./gradlew :composeApp:connectedDebugAndroidTest` on a GitHub-hosted Android emulator
+- `./gradlew :composeApp:compileAndroidDeviceTestSources`
+- `./gradlew :composeApp:connectedAndroidDeviceTest` on a GitHub-hosted Android emulator
 - A production-mode Wasm build deployed to the preview GitHub Pages site at `https://phoebe-test.joetr.com/` after web screenshots and Wasm tests pass
 
 Screenshot failures upload Roborazzi and Playwright reports as workflow artifacts so the expected, actual, and diff images can be reviewed from the failed check.
@@ -21,7 +21,7 @@ After pull requests merge, pushes to `main` run the separate **Package Smoke** w
 Update screenshot baselines locally with:
 
 ```sh
-./gradlew :composeApp:recordRoborazziDebug
+./gradlew :composeApp:recordRoborazziAndroidHostTest
 ./gradlew :composeApp:recordRoborazziDesktop
 npm run web:screenshots:update
 ```
@@ -29,7 +29,7 @@ npm run web:screenshots:update
 Verify screenshot baselines locally with:
 
 ```sh
-./gradlew :composeApp:verifyRoborazziDebug
+./gradlew :composeApp:verifyRoborazziAndroidHostTest
 ./gradlew :composeApp:desktopTest
 npm run web:screenshots
 ```

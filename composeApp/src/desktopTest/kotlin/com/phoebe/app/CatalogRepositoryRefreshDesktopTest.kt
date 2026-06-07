@@ -476,6 +476,62 @@ class CatalogRepositoryRefreshDesktopTest {
     }
 
     @Test
+    fun lightweightRemoteSyncKeepsPlaylistFavoriteToggledWhileShellIsInFlight() = runTest {
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        db.transaction {
+            db.catalogQueries.upsertArtist("plex:artist1", "Old Artist", null, 1, 0, 0, null, null, null, null, null, 0)
+            db.catalogQueries.upsertAlbum("plex:a1", "Old Album", "Old Artist", null, null, 0, null, null, null, null, null, 0)
+            db.catalogQueries.upsertPlaylist("plex:p1", "Old Playlist", 1, "/playlists/p1/items", null, 0, null, 0)
+        }
+        val playlistsStarted = CompletableDeferred<Unit>()
+        val releasePlaylists = CompletableDeferred<Unit>()
+        val engine = MockEngine { request ->
+            when {
+                request.url.encodedPath == "/library/sections/1/all" -> respondJson(artistsJson())
+                request.url.encodedPath == "/library/sections/1/albums" -> respondJson(albumsJson())
+                request.url.encodedPath == "/playlists" -> {
+                    playlistsStarted.complete(Unit)
+                    releasePlaylists.await()
+                    respondJson(playlistsJson(trackCount = 2))
+                }
+                request.url.encodedPath == "/UserFavoriteItems/p1" -> respondJson("""{}""")
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val http = testHttpClient(engine)
+        val media = MediaSourcesRepository(db, PlatformStorage())
+        val repo = CatalogRepository(
+            plexClient = PlexClient(http),
+            database = db,
+            storage = PlatformStorage(),
+            httpClient = http,
+            mediaSourcesRepository = media,
+        )
+        repo.restoreCachedCatalog()
+
+        val sync = async { repo.syncLightweightRemoteState(testSession()) }
+        playlistsStarted.await()
+        repo.toggleFavoritePlaylist(testSession(), repo.catalog.value.playlists.single { it.id == "plex:p1" })
+        assertTrue(repo.catalog.value.playlists.single { it.id == "plex:p1" }.favorite)
+
+        releasePlaylists.complete(Unit)
+        sync.await()
+        repo.awaitDatabaseIdle()
+
+        assertTrue(repo.catalog.value.playlists.single { it.id == "plex:p1" }.favorite)
+        val restored = CatalogRepository(
+            plexClient = PlexClient(http),
+            database = db,
+            storage = PlatformStorage(),
+            httpClient = http,
+            mediaSourcesRepository = media,
+        )
+        restored.restoreCachedCatalog()
+        assertTrue(restored.catalog.value.playlists.single { it.id == "plex:p1" }.favorite)
+    }
+
+    @Test
     fun fullRefreshClearsStalePlexAlbumFavoriteWhenServerNoLongerReportsIt() = runTest {
         val (db, d) = newInMemoryPhoebeDatabase()
         driver = d

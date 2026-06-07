@@ -130,6 +130,8 @@ internal fun DesktopPlayer(
     val onPlayPersonalMix = browseActions.onPlayPersonalMix
     val onPopDetail = browseActions.onPopDetail
     val onPlayTracks = browseActions.onPlayTracks
+    val onPlayAllTracks = browseActions.onPlayAllTracks
+    val onShuffleAllTracks = browseActions.onShuffleAllTracks
     val onAddToUpNext = browseActions.onAddToUpNext
     val onDownload = browseActions.onDownload
     val onDownloadArtist = browseActions.onDownloadArtist
@@ -325,6 +327,8 @@ internal fun DesktopPlayer(
                                         onBack = onPopDetail,
                                         onAlbum = onAlbum,
                                         onPlayTracks = onPlayTracks,
+                                        onPlayAllTracks = onPlayAllTracks,
+                                        onShuffleAllTracks = onShuffleAllTracks,
                                         onAddToUpNext = onAddToUpNext,
                                         onDownload = onDownload,
                                         onDownloadArtist = onDownloadArtist,

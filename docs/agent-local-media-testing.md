@@ -4,8 +4,8 @@ This document is for **AI agents and humans** validating Phoebe’s **pluggable 
 
 ## Prerequisites
 
-- Repo root: run **`./scripts/fetch-test-audio.sh`** once (requires **`curl`**; **`ffmpeg`** recommended so the script can derive **WAV / FLAC / M4A** from the Wikimedia Ogg sample and embed consistent tags). Audio lands in  
-  `composeApp/src/commonTest/resources/test-audio/`.
+- Repo root: run **`./scripts/fetch-test-audio.sh`** once (requires **`curl`**; **`ffmpeg`** recommended so the script can derive **WAV / FLAC / M4A** from the Wikimedia Ogg sample and embed consistent tags). Audio lands in
+  `composeApp/src/commonTest/resources/test-audio/` and is mirrored into `composeApp/src/androidDeviceTest/assets/test-audio/` for Android instrumented tests.
 - **Desktop** (recommended first): run the desktop Compose app from the project’s usual entry (e.g. Gradle `run` task for desktop, per your environment).
 
 ## Test fixtures (licenses)
@@ -15,7 +15,7 @@ This document is for **AI agents and humans** validating Phoebe’s **pluggable 
 | `wikimedia-example.mp3` | [Commons:Example.ogg](https://commons.wikimedia.org/wiki/File:Example.ogg) (MP3 transcode) | **CC BY-SA 3.0** (and GFDL per file page; attribute when redistributing). |
 | `wikimedia-example.ogg` | Same file, original Ogg | Same as above. |
 | `wikimedia-example.wav`, `wikimedia-example.flac`, `wikimedia-example.m4a` | Same audio as `wikimedia-example.ogg`, produced locally by **`ffmpeg`** (PCM, FLAC, AAC). | Same license as the Ogg source above. |
-| `mdn-t-rex-roar-cc0.mp3` | [MDN `t-rex-roar.mp3`](https://interactive-examples.mdn.mozilla.net/media/cc0-audio/t-rex-roar.mp3) | **CC0 1.0** (public domain dedication). |
+| `mdn-t-rex-roar-cc0.mp3` | [MDN `t-rex-roar.mp3`](https://interactive-examples.mdn.mozilla.net/media/cc0-audio/t-rex-roar.mp3); if MDN is unreachable, the script derives a short MP3 fallback from `wikimedia-example.ogg` | **CC0 1.0** for the MDN source; the fallback uses the Wikimedia Commons license above. |
 
 Do **not** commit large copyrighted commercial tracks. The script only curls the two upstream URLs above; other formats are derived from the Commons Ogg.
 
@@ -47,7 +47,7 @@ Do **not** commit large copyrighted commercial tracks. The script only curls the
 From the repo root:
 
 - **`./gradlew :composeApp:desktopTest`** — JVM/desktop tests: in-memory SQLDelight, `MediaSourcesRepository`, `CatalogRepository.refreshAggregated` (no Plex session), `PlexClient` with Ktor `MockEngine`, `LocalFolderCatalogBuilder` against a temp folder, and shared `commonTest` cases (e.g. `CatalogMerge`, player state, Plex JSON).
-- **`./gradlew :composeApp:connectedDebugAndroidTest`** — Android **instrumented** tests on a device or emulator (Compose UI smoke for fake playback, `MediaSourcesRepository` against an app-context SQLite DB). Requires a connected device or running AVD.
+- **`./gradlew :composeApp:connectedAndroidDeviceTest`** — Android **instrumented** tests on a device or emulator (Compose UI smoke for fake playback, `MediaSourcesRepository` against an app-context SQLite DB). Requires a connected device or running AVD.
 - **`./gradlew :composeApp:wasmJsTest`** — Runs **common** tests plus wasm test sources in the JS/Wasm test runner (logic that compiles on Wasm; no SQLDelight web worker in these tests).
 - **`npm run web:e2e`** — Playwright browser test against `/?e2e=localLibrary` (indexes wasm test-folder MP3s and verifies playback starts). Requires the wasm dev server (Playwright config starts it automatically).
 

@@ -9,6 +9,7 @@ import io.ktor.client.engine.darwin.Darwin
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.serialization.kotlinx.json.json
+import kotlinx.cinterop.BetaInteropApi
 import kotlinx.cinterop.ExperimentalForeignApi
 import platform.Foundation.NSDate
 import platform.Foundation.NSData
@@ -91,11 +92,13 @@ actual class PlatformStorage actual constructor() {
         NSFileManager.defaultManager.removeItemAtURL(url, error = null)
     }
 
+    @OptIn(BetaInteropApi::class)
     actual suspend fun readUriBytes(uri: String): ByteArray? {
         val url = NSURL.URLWithString(uri) ?: return null
         return NSData.create(contentsOfURL = url)?.toByteArray()
     }
 
+    @OptIn(BetaInteropApi::class)
     actual suspend fun readBytes(name: String): ByteArray? {
         val path = "${storageRootPath()}/$name"
         return NSData.create(contentsOfFile = path)?.toByteArray()
@@ -199,7 +202,7 @@ private fun storageRootPath(): String {
     return if (docs != null) "$docs/$folder" else folder
 }
 
-@OptIn(ExperimentalForeignApi::class)
+@OptIn(BetaInteropApi::class, ExperimentalForeignApi::class)
 private fun ByteArray.toNSData(): NSData = usePinned { pinned ->
     NSData.create(bytes = pinned.addressOf(0), length = size.toULong())
 }

@@ -1,3 +1,5 @@
+@file:androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+
 package com.phoebe.app.player
 
 import android.app.PendingIntent
@@ -38,10 +40,12 @@ class PlaybackService : MediaLibraryService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val servicePlayerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
+            AndroidPlaybackBridge.updateServicePlayerState()
             AndroidPlaybackBridge.onServicePlayerChanged?.invoke()
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
+            AndroidPlaybackBridge.updateServicePlayerState()
             if (playbackState == Player.STATE_ENDED) {
                 if (AndroidPlaybackBridge.suppressServiceEndedCallback) return
                 AndroidPlaybackBridge.onTrackEnded?.invoke()
@@ -51,10 +55,12 @@ class PlaybackService : MediaLibraryService() {
         }
 
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            AndroidPlaybackBridge.updateServicePlayerState()
             AndroidPlaybackBridge.onServicePlayerChanged?.invoke()
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            AndroidPlaybackBridge.updateServicePlayerState()
             AndroidPlaybackBridge.onServicePlayerChanged?.invoke()
             updateLikeButton()
         }
@@ -275,6 +281,10 @@ class PlaybackService : MediaLibraryService() {
             sessionPlayer.updateCastState(state)
             updateLikeButton(state?.track)
         }
+        AndroidPlaybackBridge.onLocalMediaSessionState = { state ->
+            sessionPlayer.updateLocalState(state)
+            updateLikeButton(state?.track)
+        }
         AndroidPlaybackBridge.attachServicePlayer(player, servicePlayerListener)
 
         val openAppIntent = PendingIntent.getActivity(
@@ -306,6 +316,7 @@ class PlaybackService : MediaLibraryService() {
         serviceScope.cancel()
         mediaLibrarySession?.player?.let { player ->
             AndroidPlaybackBridge.onCastMediaSessionState = null
+            AndroidPlaybackBridge.onLocalMediaSessionState = null
             AndroidPlaybackBridge.detachServicePlayer(servicePlayerListener)
             player.release()
         }

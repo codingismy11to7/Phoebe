@@ -136,6 +136,8 @@ internal data class BrowseActions(
     val onPlayPersonalMix: () -> Unit = {},
     val onPopDetail: () -> Unit,
     val onPlayTracks: (List<Track>, Int) -> Unit,
+    val onPlayAllTracks: (List<Track>) -> Unit = { tracks -> onPlayTracks(tracks, 0) },
+    val onShuffleAllTracks: (List<Track>) -> Unit = { tracks -> onPlayTracks(tracks.shuffled(), 0) },
     val onAddToUpNext: (Track) -> Unit,
     val onDownload: (Track) -> Unit,
     val onDownloadArtist: (Artist) -> Unit,

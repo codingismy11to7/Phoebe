@@ -21,6 +21,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -164,7 +165,10 @@ internal class AndroidAudioPlayer(
             adoptPlatformPlayIntent(playing)
             adoptQueueState(queue, index, playing)
         }
-        AndroidPlaybackBridge.onEnsureLocalPlaybackPaused = { forceLocalPlaybackPaused() }
+        AndroidPlaybackBridge.onEnsureLocalPlaybackPaused = { scope.launch { forceLocalPlaybackPaused() } }
+        AndroidPlaybackBridge.onLocalMediaSessionPlay = { resume() }
+        AndroidPlaybackBridge.onLocalMediaSessionPause = { pause() }
+        AndroidPlaybackBridge.onLocalMediaSessionSeekTo = { positionMs -> seekTo(positionMs) }
         scope.launch { ensureController() }
     }
 
@@ -178,6 +182,7 @@ internal class AndroidAudioPlayer(
 
     internal suspend fun releaseForTests() {
         withContext(Dispatchers.Main.immediate) {
+            scope.coroutineContext.cancelChildren()
             platformLoadJob?.cancel()
             platformLoadJob = null
             platformStopJob?.cancel()
@@ -252,7 +257,6 @@ internal class AndroidAudioPlayer(
     override fun stopCurrentPlaybackImmediately() {
         platformLoadJob?.cancel()
         platformLoadJob = null
-        stopAndroidCrossfade()
         stopPositionSyncLoop()
         stopBufferingTimeout()
         stopRetry()
@@ -262,6 +266,7 @@ internal class AndroidAudioPlayer(
         clearPendingAutoplay()
         platformStopJob?.cancel()
         platformStopJob = scope.launch {
+            stopAndroidCrossfade()
             controllerMutex.withLock {
                 activeLocalPlayer()?.run {
                     pause()
@@ -382,7 +387,11 @@ internal class AndroidAudioPlayer(
     override fun applyEqualizer(profile: EqualizerProfile) {
         val normalized = profile.normalized()
         AndroidEqualizerState.profile = normalized
-        AndroidPlaybackBridge.servicePlayer?.applyPhoebeAudioOffloadPreference(normalized)
+        scope.launch {
+            AndroidPlaybackBridge.servicePlayer?.applyPhoebeAudioOffloadPreference(normalized)
+            crossfadePlayer?.applyPhoebeAudioOffloadPreference(normalized)
+            crossfadeIncomingPlayer?.applyPhoebeAudioOffloadPreference(normalized)
+        }
     }
 
     override fun startCrossfadeOnPlatform(
@@ -399,13 +408,13 @@ internal class AndroidAudioPlayer(
         if (ownedOutgoing == null && controller == null) return false
         crossfadeGeneration = generation
         crossfadeJob?.cancel()
-        crossfadeIncomingPlayer?.release()
-        crossfadeIncomingPlayer = null
         crossfadeJob = scope.launch {
             var incoming: ExoPlayer? = null
             var incomingOwnedByPlayback = false
             AndroidPlaybackBridge.suppressServiceEndedCallback = true
             try {
+                crossfadeIncomingPlayer?.release()
+                crossfadeIncomingPlayer = null
                 val outgoingOwnedByPlayback = ownedCrossfadePlayer()
                 val outgoing: Player = outgoingOwnedByPlayback ?: activeLocalPlayer() ?: return@launch
                 diagnostics.crossfadeStarted(
@@ -468,6 +477,7 @@ internal class AndroidAudioPlayer(
                 adoptCrossfadeTarget(queue, targetIndex, incoming.currentPosition.coerceAtLeast(0L), generation)
                 diagnostics.crossfadeCommitted(PlaybackEnginePath.Media3Crossfade, track.id)
                 updateOptimisticLocalBufferedPosition(track, generation)
+                publishLocalMediaSessionState(incoming, track)
                 startCrossfadeOwnedSync(incoming, queue, targetIndex, generation)
             } catch (error: CancellationException) {
                 throw error
@@ -503,11 +513,16 @@ internal class AndroidAudioPlayer(
         cancelPlayIntent()
         clearPendingAutoplay()
         cancelAndroidCrossfadeTransition()
-        ownedCrossfadePlayer()?.pause()
+        val ownedPlayer = ownedCrossfadePlayer()
+        ownedPlayer?.let { player ->
+            player.pause()
+            syncFromCrossfadePlayer(player)
+        }
         stopPositionSyncLoop()
         stopBufferingTimeout()
         val current = state.value
-        val positionMs = AndroidPlaybackBridge.servicePlayer?.currentPosition?.coerceAtLeast(0L)
+        val positionMs = ownedPlayer?.currentPosition?.coerceAtLeast(0L)
+            ?: AndroidPlaybackBridge.servicePlayer?.currentPosition?.coerceAtLeast(0L)
             ?: current.positionMs
         applyPlatformPlayback(
             positionMs = positionMs,
@@ -659,6 +674,7 @@ internal class AndroidAudioPlayer(
         crossfadeIncomingPlayer = null
         crossfadePlayer?.release()
         crossfadePlayer = null
+        clearLocalMediaSessionState()
     }
 
     private fun ownedCrossfadePlayer(): ExoPlayer? =
@@ -734,6 +750,7 @@ internal class AndroidAudioPlayer(
                     durationMs = player.duration.coerceAtLeast(queue.getOrNull(targetIndex)?.durationMs ?: 0L),
                     isPlaying = player.isPlaying,
                 )
+                publishLocalMediaSessionState(player, queue.getOrNull(targetIndex))
                 applyPlatformPlayback(
                     positionMs = positionMs,
                     durationMs = player.duration.coerceAtLeast(queue.getOrNull(targetIndex)?.durationMs ?: 0L),
@@ -764,6 +781,7 @@ internal class AndroidAudioPlayer(
             durationMs = player.duration.coerceAtLeast(state.value.currentTrack?.durationMs ?: 0L),
             isPlaying = player.isPlaying && player.playbackState != Player.STATE_BUFFERING,
         )
+        publishLocalMediaSessionState(player, state.value.currentTrack)
         applyPlatformPlayback(
             positionMs = positionMs,
             durationMs = player.duration.coerceAtLeast(state.value.currentTrack?.durationMs ?: 0L),
@@ -779,7 +797,6 @@ internal class AndroidAudioPlayer(
         platformStopJob?.cancel()
         platformStopJob = null
         pendingPlatformSeek = null
-        stopAndroidCrossfade()
         seekJob?.cancel()
         stopBufferingTimeout()
         stopRetry()
@@ -792,6 +809,7 @@ internal class AndroidAudioPlayer(
         platformLoadJob = scope.launch {
             var shouldSyncAfterMutation = false
             try {
+                stopAndroidCrossfade()
                 startPlaybackService()
                 ensureController()
                 controllerMutex.withLock {
@@ -1305,6 +1323,30 @@ internal class AndroidAudioPlayer(
         retryCount = 0
     }
 
+    private fun publishLocalMediaSessionState(player: Player, track: Track?) {
+        if (crossfadePlayer !== player || crossfadeOwnedTrackId == null) return
+        val currentTrack = track ?: state.value.currentTrack ?: return
+        val positionMs = player.currentPosition.coerceAtLeast(0L)
+        val durationMs = player.duration
+            .takeIf { it > 0L }
+            ?.coerceAtLeast(currentTrack.durationMs)
+            ?: currentTrack.durationMs
+        AndroidPlaybackBridge.onLocalMediaSessionState?.invoke(
+            LocalMediaSessionState(
+                track = currentTrack,
+                isPlaying = player.isPlaying && player.playbackState != Player.STATE_BUFFERING,
+                isBuffering = player.playbackState == Player.STATE_BUFFERING,
+                positionMs = positionMs,
+                bufferedPositionMs = player.bufferedPosition.coerceAtLeast(positionMs).coerceAtLeast(0L),
+                durationMs = durationMs,
+            ),
+        )
+    }
+
+    private fun clearLocalMediaSessionState() {
+        AndroidPlaybackBridge.onLocalMediaSessionState?.invoke(null)
+    }
+
     private fun PlaybackException.isRecoverableStreamError(): Boolean =
         errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
             errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ||
@@ -1325,6 +1367,7 @@ internal class AndroidAudioPlayer(
 
     private suspend fun <T> com.google.common.util.concurrent.ListenableFuture<T>.await(): T =
         suspendCancellableCoroutine { continuation ->
+            continuation.invokeOnCancellation { cancel(false) }
             addListener(
                 {
                     try {

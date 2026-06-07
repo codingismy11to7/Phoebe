@@ -10,9 +10,13 @@ import com.phoebe.app.domain.Track
 
 internal object PlaybackTestTags {
     private const val PlayTrackPrefix = "play-track-"
+    const val PlayAll = "play-all"
 
     fun playTrack(trackId: String): String = "$PlayTrackPrefix$trackId"
 }
+
+internal fun Modifier.playAllTarget(): Modifier =
+    testTag(PlaybackTestTags.PlayAll)
 
 internal fun Modifier.playTrackTarget(track: Track): Modifier =
     testTag(PlaybackTestTags.playTrack(track.id))

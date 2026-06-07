@@ -55,12 +55,14 @@ class EmbyClientTest {
         client.setFavorite(server, "token", "user-1", "item-1", favorite = true)
         client.rateItem(server, "token", "user-1", "item-1", 4f)
         client.reportPlayback(server, "token", "item-1", positionMs = 1_000, isPaused = false, event = JellyfinPlaybackEvent.Progress)
+        client.markPlayed(server, "token", "user-1", "item-1")
 
         assertEquals(
             listOf(
                 "/emby/Users/user-1/FavoriteItems/item-1",
                 "/emby/Users/user-1/Items/item-1/Rating",
                 "/emby/Sessions/Playing/Progress",
+                "/emby/Users/user-1/PlayedItems/item-1",
             ),
             paths,
         )

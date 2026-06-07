@@ -1,5 +1,6 @@
 package com.phoebe.app
 
+import android.annotation.SuppressLint
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -48,6 +49,7 @@ class MainActivity : FragmentActivity() {
         super.onDestroy()
     }
 
+    @SuppressLint("RestrictedApi")
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.action == KeyEvent.ACTION_DOWN) {
             val handled = when (event.keyCode) {

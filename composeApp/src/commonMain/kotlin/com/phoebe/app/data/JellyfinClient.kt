@@ -743,6 +743,17 @@ open class JellyfinClient(
         }
     }
 
+    suspend fun markPlayed(server: PlexServer, token: String, userId: String, itemId: String) {
+        val response = httpClient.post("${server.uri}/Users/$userId/PlayedItems/$itemId") {
+            jellyfinAuth(token)
+        }
+        if (!response.status.isSuccess()) {
+            val details = response.bodyAsText().trim().take(200)
+            val suffix = details.takeIf { it.isNotBlank() }?.let { ": $it" }.orEmpty()
+            error("${family.displayName} mark played failed (${response.status.value})$suffix")
+        }
+    }
+
     private suspend fun tracksForQuery(
         server: PlexServer,
         token: String,

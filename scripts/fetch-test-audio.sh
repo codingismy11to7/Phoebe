@@ -5,26 +5,63 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="${ROOT}/composeApp/src/commonTest/resources/test-audio"
+ANDROID_DEVICE_TEST_ASSETS="${ROOT}/composeApp/src/androidDeviceTest/assets/test-audio"
 mkdir -p "${OUT}"
 
 echo "Downloading test audio into ${OUT} ..."
 
+download_audio() {
+  local dest="$1"
+  local url="$2"
+  local tmp="${TMPDIR:-/tmp}/phoebe-test-audio-download.$$-$(basename "${dest}")"
+  if curl -fsSL --retry 3 --retry-delay 2 --retry-connrefused --connect-timeout 10 \
+      -o "${tmp}" \
+      "${url}"; then
+    mv "${tmp}" "${dest}"
+    return 0
+  fi
+  rm -f "${tmp}"
+  return 1
+}
+
 # 1) Wikimedia Commons — Example.ogg (MP3 transcode, 180 kbps). License: CC BY-SA 3.0 (+ GFDL; see file page).
-curl -fsSL --retry 3 --retry-delay 2 \
-  -o "${OUT}/wikimedia-example.mp3" \
+download_audio \
+  "${OUT}/wikimedia-example.mp3" \
   "https://upload.wikimedia.org/wikipedia/commons/transcoded/c/c8/Example.ogg/Example.ogg.mp3"
 sleep 1
 
 # 2) Same work, Ogg Vorbis original (useful to verify .ogg local playback).
-curl -fsSL --retry 3 --retry-delay 2 \
-  -o "${OUT}/wikimedia-example.ogg" \
+download_audio \
+  "${OUT}/wikimedia-example.ogg" \
   "https://upload.wikimedia.org/wikipedia/commons/c/c8/Example.ogg"
 sleep 1
 
 # 3) MDN Web Docs interactive examples — CC0 1.0 Universal (public domain dedication).
-curl -fsSL --retry 3 --retry-delay 2 \
-  -o "${OUT}/mdn-t-rex-roar-cc0.mp3" \
-  "https://interactive-examples.mdn.mozilla.net/media/cc0-audio/t-rex-roar.mp3"
+short_mp3_title="T-Rex Roar"
+short_mp3_artist="MDN / Mozilla (CC0)"
+short_mp3_album="MDN interactive examples"
+if ! download_audio \
+  "${OUT}/mdn-t-rex-roar-cc0.mp3" \
+  "https://interactive-examples.mdn.mozilla.net/media/cc0-audio/t-rex-roar.mp3"; then
+  echo "Warning: MDN audio download failed; deriving short MP3 fixture from wikimedia-example.ogg." >&2
+  if ! command -v ffmpeg >/dev/null 2>&1; then
+    echo "Error: ffmpeg is required to derive the fallback short MP3 fixture." >&2
+    exit 1
+  fi
+  tmp="${TMPDIR:-/tmp}/phoebe-test-audio-mdn-fallback.$$-mdn-t-rex-roar-cc0.mp3"
+  if ffmpeg -y -nostdin -loglevel error \
+      -i "${OUT}/wikimedia-example.ogg" \
+      -map 0:a -t 2.5 -c:a libmp3lame -q:a 4 \
+      "${tmp}" 2>/dev/null && mv "${tmp}" "${OUT}/mdn-t-rex-roar-cc0.mp3"; then
+    short_mp3_title="Example (short MP3 fallback)"
+    short_mp3_artist="Wikimedia Commons"
+    short_mp3_album="Example.ogg (short MP3 fixture)"
+  else
+    rm -f "${tmp}"
+    echo "Error: could not derive fallback short MP3 fixture." >&2
+    exit 1
+  fi
+fi
 
 # 4) WAV / FLAC / M4A — same decoded audio as wikimedia-example.ogg (same Commons license).
 #    Requires ffmpeg. Lets you verify scanning + playback for common lossless / container paths
@@ -100,7 +137,7 @@ embed_test_tags "${OUT}/wikimedia-example.mp3" \
 embed_test_tags "${OUT}/wikimedia-example.ogg" \
   "Example (Ogg original)" "Wikimedia Commons" "Example.ogg (Ogg fixture)"
 embed_test_tags "${OUT}/mdn-t-rex-roar-cc0.mp3" \
-  "T-Rex Roar" "MDN / Mozilla (CC0)" "MDN interactive examples"
+  "${short_mp3_title}" "${short_mp3_artist}" "${short_mp3_album}"
 if [[ -f "${OUT}/wikimedia-example.wav" ]]; then
   embed_test_tags "${OUT}/wikimedia-example.wav" \
     "Example (WAV)" "Wikimedia Commons" "Example.ogg (WAV fixture)"
@@ -117,6 +154,10 @@ fi
 if ! command -v ffmpeg >/dev/null 2>&1; then
   echo "Note: install ffmpeg for derived WAV/FLAC/M4A fixtures and for consistent embedded tags." >&2
 fi
+
+mkdir -p "${ANDROID_DEVICE_TEST_ASSETS}"
+find "${OUT}" -maxdepth 1 -type f ! -name ".gitignore" -exec cp {} "${ANDROID_DEVICE_TEST_ASSETS}/" \;
+echo "Mirrored Android device-test assets into ${ANDROID_DEVICE_TEST_ASSETS}"
 
 echo "Done. Files:"
 ls -la "${OUT}"

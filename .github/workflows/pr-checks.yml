@@ -117,7 +117,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Verify Android screenshots
-        run: ./gradlew :composeApp:verifyRoborazziDebug
+        run: ./gradlew :composeApp:verifyRoborazziAndroidHostTest
 
       - name: Upload Android screenshot artifacts
         if: failure()
@@ -128,7 +128,7 @@ jobs:
           path: |
             composeApp/build/reports/roborazzi/**
             composeApp/build/outputs/roborazzi/**
-            composeApp/build/test-results/testDebugUnitTest/**
+            composeApp/build/test-results/testAndroidHostTest/**
 
   ios-build:
     name: iOS build
@@ -290,7 +290,7 @@ jobs:
           arch: x86_64
           target: google_apis
           disable-animations: true
-          script: ./gradlew :composeApp:connectedDebugAndroidTest -Pphoebe.realAudioTests=true
+          script: ./gradlew :composeApp:connectedAndroidDeviceTest -Pphoebe.realAudioTests=true
 
   web-preview-deploy:
     name: Deploy web preview to GitHub Pages
