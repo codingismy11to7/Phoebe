@@ -409,7 +409,10 @@ compose.desktop {
 }
 
 tasks.configureEach {
-    if (name.startsWith("compile") && name.contains("Kotlin")) {
+    val compileUsesCommonMainSources =
+        name.startsWith("compile") &&
+            (name.contains("Kotlin") || name.startsWith("compileAndroid"))
+    if (compileUsesCommonMainSources) {
         dependsOn(generatePhoebeBuildInfo)
     }
 }

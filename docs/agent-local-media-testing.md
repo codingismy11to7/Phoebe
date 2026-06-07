@@ -15,7 +15,7 @@ This document is for **AI agents and humans** validating Phoebe’s **pluggable 
 | `wikimedia-example.mp3` | [Commons:Example.ogg](https://commons.wikimedia.org/wiki/File:Example.ogg) (MP3 transcode) | **CC BY-SA 3.0** (and GFDL per file page; attribute when redistributing). |
 | `wikimedia-example.ogg` | Same file, original Ogg | Same as above. |
 | `wikimedia-example.wav`, `wikimedia-example.flac`, `wikimedia-example.m4a` | Same audio as `wikimedia-example.ogg`, produced locally by **`ffmpeg`** (PCM, FLAC, AAC). | Same license as the Ogg source above. |
-| `mdn-t-rex-roar-cc0.mp3` | [MDN `t-rex-roar.mp3`](https://interactive-examples.mdn.mozilla.net/media/cc0-audio/t-rex-roar.mp3) | **CC0 1.0** (public domain dedication). |
+| `mdn-t-rex-roar-cc0.mp3` | [MDN `t-rex-roar.mp3`](https://interactive-examples.mdn.mozilla.net/media/cc0-audio/t-rex-roar.mp3); if MDN is unreachable, the script derives a short MP3 fallback from `wikimedia-example.ogg` | **CC0 1.0** for the MDN source; the fallback uses the Wikimedia Commons license above. |
 
 Do **not** commit large copyrighted commercial tracks. The script only curls the two upstream URLs above; other formats are derived from the Commons Ogg.
 
