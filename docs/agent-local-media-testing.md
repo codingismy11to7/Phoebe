@@ -4,8 +4,8 @@ This document is for **AI agents and humans** validating Phoebe’s **pluggable 
 
 ## Prerequisites
 
-- Repo root: run **`./scripts/fetch-test-audio.sh`** once (requires **`curl`**; **`ffmpeg`** recommended so the script can derive **WAV / FLAC / M4A** from the Wikimedia Ogg sample and embed consistent tags). Audio lands in  
-  `composeApp/src/commonTest/resources/test-audio/`.
+- Repo root: run **`./scripts/fetch-test-audio.sh`** once (requires **`curl`**; **`ffmpeg`** recommended so the script can derive **WAV / FLAC / M4A** from the Wikimedia Ogg sample and embed consistent tags). Audio lands in
+  `composeApp/src/commonTest/resources/test-audio/` and is mirrored into `composeApp/src/androidDeviceTest/assets/test-audio/` for Android instrumented tests.
 - **Desktop** (recommended first): run the desktop Compose app from the project’s usual entry (e.g. Gradle `run` task for desktop, per your environment).
 
 ## Test fixtures (licenses)

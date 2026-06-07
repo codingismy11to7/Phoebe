@@ -238,6 +238,7 @@ kotlin {
             implementation(project.dependencies.platform(libs.androidx.compose.bom))
             implementation(libs.androidx.activity.compose)
             implementation("androidx.compose.ui:ui-test-junit4")
+            implementation("androidx.compose.ui:ui-test-manifest")
             implementation(libs.ktor.client.mock)
             implementation(libs.ktor.client.okhttp)
             implementation(libs.ktor.client.content.negotiation)

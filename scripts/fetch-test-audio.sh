@@ -5,6 +5,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="${ROOT}/composeApp/src/commonTest/resources/test-audio"
+ANDROID_DEVICE_TEST_ASSETS="${ROOT}/composeApp/src/androidDeviceTest/assets/test-audio"
 mkdir -p "${OUT}"
 
 echo "Downloading test audio into ${OUT} ..."
@@ -153,6 +154,10 @@ fi
 if ! command -v ffmpeg >/dev/null 2>&1; then
   echo "Note: install ffmpeg for derived WAV/FLAC/M4A fixtures and for consistent embedded tags." >&2
 fi
+
+mkdir -p "${ANDROID_DEVICE_TEST_ASSETS}"
+find "${OUT}" -maxdepth 1 -type f ! -name ".gitignore" -exec cp {} "${ANDROID_DEVICE_TEST_ASSETS}/" \;
+echo "Mirrored Android device-test assets into ${ANDROID_DEVICE_TEST_ASSETS}"
 
 echo "Done. Files:"
 ls -la "${OUT}"
