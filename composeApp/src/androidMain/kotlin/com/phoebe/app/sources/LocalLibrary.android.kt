@@ -3,12 +3,11 @@ package com.phoebe.app.sources
 import android.content.Intent
 import android.media.MediaMetadataRetriever
 import android.net.Uri
-import androidx.activity.ComponentActivity
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
-import androidx.compose.ui.platform.LocalContext
 import androidx.documentfile.provider.DocumentFile
 import com.phoebe.app.AndroidContextHolder
 import kotlinx.coroutines.Dispatchers
@@ -140,7 +139,9 @@ actual object LocalLibraryIO {
 
 @Composable
 actual fun rememberPickLocalFolder(onPicked: (String?) -> Unit): () -> Unit {
-    val activity = LocalContext.current as ComponentActivity
+    val activity = checkNotNull(LocalActivity.current) {
+        "rememberPickLocalFolder must be hosted in an Activity."
+    }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) {
             try {

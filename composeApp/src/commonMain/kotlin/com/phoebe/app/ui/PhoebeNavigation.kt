@@ -8,7 +8,8 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSerializable
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -28,14 +29,12 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation3.runtime.NavBackStack
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.NavKey
-import androidx.navigation3.runtime.serialization.NavBackStackSerializer
 import androidx.navigation3.scene.Scene
 import androidx.navigation3.ui.LocalNavAnimatedContentScope
 import androidx.navigation3.ui.NavDisplay
 import androidx.navigation3.ui.defaultPopTransitionSpec
 import androidx.navigation3.ui.defaultPredictivePopTransitionSpec
 import androidx.navigation3.ui.defaultTransitionSpec
-import androidx.savedstate.serialization.SavedStateConfiguration
 import com.phoebe.app.AppNavigationRequest
 import com.phoebe.app.CollectionMixSeed
 import com.phoebe.app.domain.Album
@@ -47,8 +46,9 @@ import com.phoebe.app.domain.PlayHistoryKind
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.RecentlyAddedKind
 import com.phoebe.app.domain.Track
-import kotlinx.serialization.PolymorphicSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.modules.SerializersModule
 import kotlinx.serialization.modules.polymorphic
 import kotlinx.serialization.modules.subclass
@@ -149,9 +149,29 @@ internal val phoebeRouteSerializersModule = SerializersModule {
     }
 }
 
-internal val phoebeRouteSavedStateConfiguration = SavedStateConfiguration {
+private val phoebeRouteJson = Json {
     serializersModule = phoebeRouteSerializersModule
+    classDiscriminator = "type"
 }
+
+private val phoebeRouteListSerializer = ListSerializer(PhoebeRoute.serializer())
+
+internal fun encodePhoebeRouteBackStack(routes: List<PhoebeRoute>): String =
+    phoebeRouteJson.encodeToString(phoebeRouteListSerializer, routes)
+
+internal fun decodePhoebeRouteBackStack(routesJson: String): NavBackStack<PhoebeRoute> {
+    val routes = phoebeRouteJson
+        .decodeFromString(phoebeRouteListSerializer, routesJson)
+        .ifEmpty { listOf(PhoebeRoute.SignIn) }
+    return NavBackStack<PhoebeRoute>(routes.first()).apply {
+        addAll(routes.drop(1))
+    }
+}
+
+private val PhoebeRouteBackStackSaver = Saver<NavBackStack<PhoebeRoute>, String>(
+    save = { backStack -> encodePhoebeRouteBackStack(backStack) },
+    restore = ::decodePhoebeRouteBackStack,
+)
 
 @Composable
 internal fun MissingRouteFallback(
@@ -279,11 +299,8 @@ internal fun rememberPhoebeNavigator(initialRoute: PhoebeRoute): PhoebeNavigator
 @Composable
 internal fun rememberPhoebeNavigator(initialRoutes: List<PhoebeRoute>): PhoebeNavigator {
     val safeInitialRoutes = initialRoutes.ifEmpty { listOf(PhoebeRoute.SignIn) }
-    val backStack = rememberSerializable(
-        configuration = phoebeRouteSavedStateConfiguration,
-        serializer = NavBackStackSerializer(PolymorphicSerializer(NavKey::class)),
-    ) {
-        NavBackStack<NavKey>(safeInitialRoutes.first()).apply {
+    val backStack = rememberSaveable(saver = PhoebeRouteBackStackSaver) {
+        NavBackStack<PhoebeRoute>(safeInitialRoutes.first()).apply {
             addAll(safeInitialRoutes.drop(1))
         }
     }
@@ -291,14 +308,13 @@ internal fun rememberPhoebeNavigator(initialRoutes: List<PhoebeRoute>): PhoebeNa
 }
 
 internal class PhoebeNavigator(
-    private val backStack: MutableList<NavKey>,
+    private val backStack: MutableList<PhoebeRoute>,
 ) {
-    constructor(initialRoute: PhoebeRoute) : this(mutableStateListOf<NavKey>(initialRoute))
-    @Suppress("UNCHECKED_CAST")
-    constructor(backStack: SnapshotStateList<PhoebeRoute>) : this(backStack as MutableList<NavKey>)
+    constructor(initialRoute: PhoebeRoute) : this(mutableStateListOf(initialRoute))
+    constructor(backStack: SnapshotStateList<PhoebeRoute>) : this(backStack as MutableList<PhoebeRoute>)
 
     val routes: List<PhoebeRoute>
-        get() = backStack.mapNotNull { it as? PhoebeRoute }
+        get() = backStack.toList()
 
     val currentRoute: PhoebeRoute
         get() = routes.lastOrNull() ?: PhoebeRoute.SignIn

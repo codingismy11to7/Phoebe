@@ -1,6 +1,7 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import org.gradle.api.tasks.JavaExec
 import org.gradle.api.tasks.testing.Test
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.io.File
 import java.time.Duration
 
@@ -116,7 +117,7 @@ fun windowsSkikoJvmArgs(): List<String> {
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
-    alias(libs.plugins.androidApplication)
+    alias(libs.plugins.androidKotlinMultiplatformLibrary)
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
     alias(libs.plugins.kotlinSerialization)
@@ -130,7 +131,27 @@ kotlin {
     compilerOptions {
         freeCompilerArgs.add("-Xexpect-actual-classes")
     }
-    androidTarget()
+    android {
+        namespace = "com.phoebe.app"
+        compileSdk = 36
+        minSdk = 26
+        androidResources {
+            enable = true
+        }
+        compilerOptions {
+            jvmTarget.set(JvmTarget.JVM_17)
+        }
+        withHostTest {
+            isIncludeAndroidResources = true
+            isReturnDefaultValues = true
+        }
+        withDeviceTestBuilder {
+            sourceSetTreeName = "test"
+        }.configure {
+            instrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+            instrumentationRunnerArguments["phoebe.realAudioTests"] = phoebeRealAudioTests.get().toString()
+        }
+    }
 
     jvm("desktop")
 
@@ -147,6 +168,7 @@ kotlin {
     listOf(iosArm64(), iosSimulatorArm64()).forEach { iosTarget ->
         iosTarget.binaries.framework {
             baseName = "ComposeApp"
+            binaryOption("bundleId", "com.phoebe.app.ComposeApp")
             isStatic = true
         }
     }
@@ -160,9 +182,12 @@ kotlin {
         val desktopMain by getting
         val desktopTest by getting
         val wasmJsMain by getting
-        val androidUnitTest by getting
-        val androidInstrumentedTest by getting {
-            kotlin.srcDir("src/commonTest/kotlin")
+        val androidHostTest by getting {
+            kotlin.srcDir("src/androidUnitTest/kotlin")
+        }
+        val androidDeviceTest by getting {
+            kotlin.srcDir("src/androidInstrumentedTest/kotlin")
+            resources.srcDir("src/commonTest/resources")
         }
         commonMain.dependencies {
             implementation(libs.compose.runtime)
@@ -202,7 +227,7 @@ kotlin {
             implementation(libs.sqldelight.coroutines.extensions)
             implementation(libs.sqldelight.primitive.adapters)
         }
-        androidInstrumentedTest.dependencies {
+        androidDeviceTest.dependencies {
             implementation(kotlin("test"))
             implementation(libs.junit)
             implementation(libs.coroutines.test)
@@ -226,7 +251,7 @@ kotlin {
             implementation(libs.compose.material3)
             implementation(libs.compose.runtime)
         }
-        androidUnitTest.dependencies {
+        androidHostTest.dependencies {
             implementation(kotlin("test"))
             implementation(libs.junit)
             implementation(libs.androidx.test.core)
@@ -314,81 +339,6 @@ sentry {
     authToken = System.getenv("SENTRY_AUTH_TOKEN")
 }
 
-android {
-    namespace = "com.phoebe.app"
-    compileSdk = 36
-
-    defaultConfig {
-        applicationId = "com.phoebe.app"
-        minSdk = 26
-        targetSdk = 36
-        versionCode = phoebeVersionCode.get()
-        versionName = phoebeVersionName.get()
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        testInstrumentationRunnerArguments["phoebe.realAudioTests"] = phoebeRealAudioTests.get().toString()
-    }
-
-    buildTypes {
-        debug {
-            applicationIdSuffix = ".debug"
-            versionNameSuffix = "-debug"
-        }
-    }
-
-    buildFeatures {
-        buildConfig = true
-    }
-
-    sourceSets {
-        getByName("androidTest") {
-            assets.srcDir("src/commonTest/resources")
-        }
-    }
-
-    testOptions {
-        unitTests {
-            isIncludeAndroidResources = true
-            isReturnDefaultValues = true
-            all {
-                it.systemProperties["robolectric.pixelCopyRenderMode"] = "hardware"
-                it.maxHeapSize = "4096m"
-            }
-        }
-    }
-
-    val releaseStoreFile = providerValue("phoebe.android.signing.storeFile", "PHOEBE_ANDROID_SIGNING_STORE_FILE")
-    val releaseStorePassword = providerValue("phoebe.android.signing.storePassword", "PHOEBE_ANDROID_SIGNING_STORE_PASSWORD")
-    val releaseKeyAlias = providerValue("phoebe.android.signing.keyAlias", "PHOEBE_ANDROID_SIGNING_KEY_ALIAS")
-    val releaseKeyPassword = providerValue("phoebe.android.signing.keyPassword", "PHOEBE_ANDROID_SIGNING_KEY_PASSWORD")
-
-    val hasReleaseSigning =
-        releaseStoreFile != null &&
-            releaseStorePassword != null &&
-            releaseKeyAlias != null &&
-            releaseKeyPassword != null
-
-    if (hasReleaseSigning) {
-        signingConfigs {
-            create("release") {
-                storeFile = file(releaseStoreFile)
-                storePassword = releaseStorePassword
-                keyAlias = releaseKeyAlias
-                keyPassword = releaseKeyPassword
-            }
-        }
-    }
-
-    buildTypes {
-        getByName("release") {
-            signingConfig = if (hasReleaseSigning) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
-            }
-        }
-    }
-}
-
 private val macosLocalNetworkInfoPlistKeys = """
     <key>NSLocalNetworkUsageDescription</key>
     <string>Phoebe connects to Jellyfin, Plex, Emby, and other media servers on your home network.</string>
@@ -462,11 +412,6 @@ tasks.configureEach {
     if (name.startsWith("compile") && name.contains("Kotlin")) {
         dependsOn(generatePhoebeBuildInfo)
     }
-}
-
-dependencies {
-    debugImplementation(platform(libs.androidx.compose.bom))
-    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
 
 val compileMacMediaKeysNative = tasks.register<Exec>("compileMacMediaKeysNative") {
@@ -545,7 +490,7 @@ tasks.withType<Test>().configureEach {
         timeout.set(Duration.ofMinutes(5))
         maxParallelForks = 1
     }
-    if (requestedAnyRoborazzi && name == "testDebugUnitTest") {
+    if (requestedAnyRoborazzi && name == "testAndroidHostTest") {
         filter {
             includeTestsMatching("com.phoebe.app.PhoebeAndroid*ScreenshotTest")
         }

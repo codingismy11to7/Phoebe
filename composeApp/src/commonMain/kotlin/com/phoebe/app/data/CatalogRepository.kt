@@ -100,6 +100,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
@@ -216,6 +217,7 @@ class CatalogRepository(
     private val downloadCancellationMutex = Mutex()
     private val canceledDownloadTrackIds = mutableSetOf<String>()
     private val pendingPlaylistPrependedTrackIds = mutableMapOf<String, List<String>>()
+    private val pendingPlaylistFavoriteOverrides = MutableStateFlow<Map<String, Boolean>>(emptyMap())
     private val persistenceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val pendingCatalogDbWrites = mutableSetOf<Job>()
     private val pendingCatalogDbWritesMutex = Mutex()
@@ -402,6 +404,7 @@ class CatalogRepository(
         publishCatalogSyncState(CatalogSyncState(), force = true)
         mutableTracksLoading.value = emptySet()
         syncedTrackIdsDuringRefresh.clear()
+        pendingPlaylistFavoriteOverrides.value = emptyMap()
     }
 
     /** Clears in-flight sync UI when a refresh job is cancelled (e.g. sign-out or superseded refresh). */
@@ -643,28 +646,29 @@ class CatalogRepository(
                         session = session,
                     )
                 }
+                val reconciledSnapshot = reconciled.snapshot.withPlaylistUserStateFrom(mutableCatalog.value)
                 stalePlaylists = reconciled.stalePlaylists
-                mutableCatalog.value = reconciled.snapshot
+                mutableCatalog.value = reconciledSnapshot
                 syncTrace.disk("persistCatalogShell") {
-                    runCatalogDbWrite { persistCatalogShell(reconciled.snapshot) }
+                    runCatalogDbWrite { persistCatalogShell(reconciledSnapshot) }
                 }
                 if (!backgroundRefresh) {
                     popCatalogRefreshing()
                     foregroundRefreshing = false
                 }
-                val artistCount = reconciled.snapshot.artists.size
+                val artistCount = reconciledSnapshot.artists.size
                 val albumCount = metadataMerged.albums.size
-                val playlistCount = reconciled.snapshot.playlists.size
+                val playlistCount = reconciledSnapshot.playlists.size
                 mutableCatalogSyncState.value = CatalogSyncState(
                     phase = CatalogSyncPhase.LoadingSongs,
                     message = if (backgroundRefresh) "Updating library…" else "Indexing songs…",
                     detail = "$artistCount artists, $albumCount albums, $playlistCount playlists",
                     loadedAlbums = albumCount,
-                    loadedTracks = reconciled.snapshot.tracksByParent.values.sumOf { it.size },
+                    loadedTracks = reconciledSnapshot.tracksByParent.values.sumOf { it.size },
                     totalPlaylists = playlistCount,
                     blocking = false,
                 )
-                warmLikelyClickedContent(session, reconciled.snapshot)
+                warmLikelyClickedContent(session, reconciledSnapshot)
                 yield()
 
                 if (server != null && library != null && token != null) {
@@ -720,8 +724,9 @@ class CatalogRepository(
                 persistSnapshot = finalSnapshot.contentChecksum() != previous.contentChecksum() ||
                     stalePlaylists.isNotEmpty()
                 yield()
-                mutableCatalog.value = finalSnapshot
-                finalSnapshot
+                val finalSnapshotWithUserState = finalSnapshot.withPlaylistUserStateFrom(mutableCatalog.value)
+                mutableCatalog.value = finalSnapshotWithUserState
+                finalSnapshotWithUserState
             } catch (error: Throwable) {
                 if (error is CancellationException) {
                     if (foregroundRefreshing) {
@@ -890,7 +895,7 @@ class CatalogRepository(
         } else {
             previous
         }
-        return if (replaceRemoteShell) {
+        val merged = if (replaceRemoteShell) {
             CatalogMerge.merge(base, prefixed).copy(
                 downloads = previous.downloads,
                 tracksByParent = mergeTrackParents(base.tracksByParent, prefixed.tracksByParent),
@@ -914,6 +919,7 @@ class CatalogRepository(
                 remotePageInfo = prefixed.remotePageInfo.takeIf { it.hasAny } ?: base.remotePageInfo,
             )
         }
+        return merged.withPlaylistUserStateFrom(previous)
     }
 
     private inline fun <T> mergeItemsById(
@@ -1009,11 +1015,13 @@ class CatalogRepository(
                     val localDeferred = startDeferredLocalCatalog(ctx)
                     coroutineScope {
                         val remoteRaw = async { adapter.buildCatalog(session) }.await()
-                        mutableCatalog.value = CatalogMerge.merge(
+                        val remoteMerged = CatalogMerge.merge(
                             CatalogSnapshot(),
                             CatalogMerge.withPrefix(session.providerType.catalogPrefix, remoteRaw),
                             CatalogSnapshot(),
                         ).copy(downloads = previous.downloads)
+                            .withPlaylistUserStateFrom(mutableCatalog.value)
+                        mutableCatalog.value = remoteMerged
                         mutableCatalogSyncState.value = CatalogSyncState(
                             phase = CatalogSyncPhase.LoadingSongs,
                             message = "Loaded ${session.providerType.displayName} library…",
@@ -1021,7 +1029,6 @@ class CatalogRepository(
                             loadedTracks = mutableCatalog.value.tracksByParent.values.sumOf { it.size },
                             blocking = false,
                         )
-                        val remoteMerged = mutableCatalog.value
                         mutableCatalogSyncState.value = CatalogSyncState(
                             phase = CatalogSyncPhase.Persisting,
                             message = "Saving library…",
@@ -1079,11 +1086,13 @@ class CatalogRepository(
                     val localDeferred = startDeferredLocalCatalog(ctx)
                     coroutineScope {
                         val quickRaw = adapter.quickCatalog(session) ?: adapter.buildCatalog(session)
-                        mutableCatalog.value = CatalogMerge.merge(
+                        val remoteMerged = CatalogMerge.merge(
                             CatalogSnapshot(),
                             CatalogMerge.withPrefix(session.providerType.catalogPrefix, quickRaw),
                             CatalogSnapshot(),
                         ).copy(downloads = previous.downloads)
+                            .withPlaylistUserStateFrom(mutableCatalog.value)
+                        mutableCatalog.value = remoteMerged
                         mutableCatalogSyncState.value = CatalogSyncState(
                             phase = CatalogSyncPhase.LoadingSongs,
                             message = "Loaded ${session.providerType.displayName} library…",
@@ -1091,7 +1100,6 @@ class CatalogRepository(
                             loadedTracks = mutableCatalog.value.tracksByParent.values.sumOf { it.size },
                             blocking = false,
                         )
-                        val remoteMerged = mutableCatalog.value
                         mutableCatalogSyncState.value = CatalogSyncState(
                             phase = CatalogSyncPhase.Persisting,
                             message = "Saving library…",
@@ -1185,7 +1193,7 @@ class CatalogRepository(
                                     currentMerged.tracksByParent,
                                     newMerged.tracksByParent,
                                 ),
-                            )
+                            ).withPlaylistUserStateFrom(currentMerged)
                             mutableCatalog.value = merged
                             publishCatalogSyncState(
                                 CatalogSyncState(
@@ -1309,6 +1317,7 @@ class CatalogRepository(
                         if (incrementalPersist) {
                             enqueueCatalogDbWrite { persistCatalogShell(merged) }
                         }
+                        merged = merged.withPlaylistUserStateFrom(mutableCatalog.value)
                         persistAsync(merged)
                         val partialPaged = merged.remotePageInfo.hasUnloadedRemotePages()
                         if (incrementalPersist || partialPaged) {
@@ -1441,7 +1450,7 @@ class CatalogRepository(
                                     currentMerged.tracksByParent,
                                     newMerged.tracksByParent,
                                 ),
-                            )
+                            ).withPlaylistUserStateFrom(currentMerged)
                             mutableCatalog.value = merged
                             mutableCatalogSyncState.value = CatalogSyncState(
                                 phase = if (!publishShell && merged.tracksByParent.isEmpty()) {
@@ -1631,7 +1640,7 @@ class CatalogRepository(
                                 downloads = previous.downloads,
                                 tracksByParent = mutableCatalog.value.tracksByParent,
                             ),
-                        )
+                        ).withPlaylistUserStateFrom(mutableCatalog.value)
                         mutableCatalog.value = merged
                         val quickSync = session?.jellyfinSyncMode == JellyfinSyncMode.Quick
                         if (!quickSync) {
@@ -1798,13 +1807,14 @@ class CatalogRepository(
                 }
             }
 
-            mutableCatalog.value = updated
-            persistAsync(updated)
+            val updatedWithUserState = updated.withPlaylistUserStateFrom(mutableCatalog.value)
+            mutableCatalog.value = updatedWithUserState
+            persistAsync(updatedWithUserState)
             mutableCatalogSyncState.value = CatalogSyncState(
                 phase = CatalogSyncPhase.Complete,
                 message = "Loaded $remoteLabel ${kind.name.lowercase()} page ${pageIndex + 1}.",
-                loadedAlbums = updated.albums.size,
-                loadedTracks = updated.tracksByParent.values.sumOf { it.size },
+                loadedAlbums = updatedWithUserState.albums.size,
+                loadedTracks = updatedWithUserState.tracksByParent.values.sumOf { it.size },
             )
         }
     }
@@ -1835,13 +1845,14 @@ class CatalogRepository(
                     loadedAlbumPages = info.loadedAlbumPages + pageIndex,
                 ),
             )
-            mutableCatalog.value = updated
-            persistAsync(updated)
+            val updatedWithUserState = updated.withPlaylistUserStateFrom(mutableCatalog.value)
+            mutableCatalog.value = updatedWithUserState
+            persistAsync(updatedWithUserState)
             mutableCatalogSyncState.value = CatalogSyncState(
                 phase = CatalogSyncPhase.Complete,
                 message = "Loaded ${session.providerType.name} albums page ${pageIndex + 1}.",
-                loadedAlbums = updated.albums.size,
-                loadedTracks = updated.tracksByParent.values.sumOf { it.size },
+                loadedAlbums = updatedWithUserState.albums.size,
+                loadedTracks = updatedWithUserState.tracksByParent.values.sumOf { it.size },
             )
         }
     }
@@ -2189,18 +2200,19 @@ class CatalogRepository(
             previous = previous,
             session = session,
         )
-        mutableCatalog.value = reconciled.snapshot
-        enqueueCatalogDbWrite { persistCatalogShell(reconciled.snapshot) }
+        val snapshot = reconciled.snapshot.withPlaylistUserStateFrom(mutableCatalog.value)
+        mutableCatalog.value = snapshot
+        enqueueCatalogDbWrite { persistCatalogShell(snapshot) }
         if (!updateSyncState) return
-        val artistCount = reconciled.snapshot.artists.size
-        val albumCount = reconciled.snapshot.albums.size
-        val playlistCount = reconciled.snapshot.playlists.size
+        val artistCount = snapshot.artists.size
+        val albumCount = snapshot.albums.size
+        val playlistCount = snapshot.playlists.size
         mutableCatalogSyncState.value = CatalogSyncState(
             phase = CatalogSyncPhase.LoadingLibrary,
             message = message,
             detail = "$artistCount artists · $albumCount albums · $playlistCount playlists",
             loadedAlbums = albumCount,
-            loadedTracks = reconciled.snapshot.tracksByParent.values.sumOf { it.size },
+            loadedTracks = snapshot.tracksByParent.values.sumOf { it.size },
             totalPlaylists = playlistCount,
             blocking = false,
         )
@@ -2418,6 +2430,21 @@ class CatalogRepository(
             existing.isEmpty() -> incoming.distinctBy { it.id }
             else -> (existing + incoming).distinctBy { it.id }
         }
+
+    private fun CatalogSnapshot.withPlaylistUserStateFrom(source: CatalogSnapshot): CatalogSnapshot {
+        if (playlists.isEmpty()) return this
+        val sourcePlaylists = source.playlists.associateBy { it.id }
+        val favoriteOverrides = pendingPlaylistFavoriteOverrides.value
+        if (sourcePlaylists.isEmpty() && favoriteOverrides.isEmpty()) return this
+        val mergedPlaylists = playlists.map { playlist ->
+            val sourcePlaylist = sourcePlaylists[playlist.id]
+            playlist.copy(
+                rating = playlist.rating ?: sourcePlaylist?.rating,
+                favorite = favoriteOverrides[playlist.id] ?: (playlist.favorite || sourcePlaylist?.favorite == true),
+            )
+        }
+        return copy(playlists = mergedPlaylists)
+    }
 
     private suspend fun removeMissingLocalArtworkReferences(snapshot: CatalogSnapshot): CatalogSnapshot {
         val checked = mutableMapOf<String, Boolean>()
@@ -5177,6 +5204,7 @@ class CatalogRepository(
             }
         }
         val favorite = nextFavorite ?: return FavoriteSyncResult()
+        pendingPlaylistFavoriteOverrides.update { overrides -> overrides + (playlist.id to favorite) }
         publish(snapshot.copy(playlists = playlists), persist = true)
         return syncRemoteFavorite(session, playlist.id, favorite, "playlist '${playlist.title}'").copy(favorite = favorite)
     }
@@ -6505,6 +6533,7 @@ class CatalogRepository(
     }
 
     private suspend fun persistCatalogShell(snapshot: CatalogSnapshot) = withContext(Dispatchers.Default) {
+        val snapshot = snapshot.withPlaylistUserStateFrom(mutableCatalog.value)
         database.transaction {
             snapshot.artists.forEachIndexed { index, artist ->
                 database.catalogQueries.upsertArtist(
@@ -6741,6 +6770,7 @@ class CatalogRepository(
     }
 
     private suspend fun publish(snapshot: CatalogSnapshot, persist: Boolean) {
+        val snapshot = snapshot.withPlaylistUserStateFrom(mutableCatalog.value)
         mutableCatalog.value = snapshot
         if (persist) {
             persistAsync(snapshot)
@@ -6755,6 +6785,7 @@ class CatalogRepository(
 
     /** Persist the entire snapshot off the UI thread. */
     private suspend fun persistAsync(snapshot: CatalogSnapshot) {
+        val snapshot = snapshot.withPlaylistUserStateFrom(mutableCatalog.value)
         withContext(Dispatchers.Default) {
             runCatalogDbWrite {
                 if (snapshot.hasRestorableCatalogContent()) {
@@ -6771,6 +6802,7 @@ class CatalogRepository(
     }
 
     private suspend fun persistPlaylistTracks(snapshot: CatalogSnapshot, playlistId: String) = withContext(Dispatchers.Default) {
+        val snapshot = snapshot.withPlaylistUserStateFrom(mutableCatalog.value)
         val playlist = snapshot.playlists.firstOrNull { it.id == playlistId } ?: return@withContext
         val tracks = snapshot.tracksByParent[playlistId].orEmpty()
         val sortKey = snapshot.playlists.indexOfFirst { it.id == playlistId }.takeIf { it >= 0 } ?: 0

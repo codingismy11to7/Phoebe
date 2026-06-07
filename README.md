@@ -191,10 +191,10 @@ For UI architecture and navigation rules, see [Compose Architecture Guidelines](
 ```bash
 ./gradlew :composeApp:desktopTest
 ./gradlew :composeApp:wasmJsBrowserTest
-./gradlew :composeApp:verifyRoborazziDebug
+./gradlew :composeApp:verifyRoborazziAndroidHostTest
 npm run web:screenshots
-./gradlew :composeApp:compileDebugAndroidTestKotlinAndroid
-./gradlew :composeApp:assembleDebug
+./gradlew :composeApp:compileAndroidDeviceTestSources
+./gradlew :androidApp:assembleDebug
 ./gradlew :composeApp:compileKotlinIosSimulatorArm64
 ```
 
@@ -217,7 +217,7 @@ PR CI runs desktop tests, Wasm tests, Roborazzi screenshot verification, Playwri
 **Android debug APK:**
 
 ```bash
-./gradlew :composeApp:assembleDebug
+./gradlew :androidApp:assembleDebug
 ```
 
 The Android SDK path is set in `local.properties` for this machine and ignored by git.
@@ -246,7 +246,7 @@ Lazy message lambdas avoid string work when logging is disabled.
 
 | Platform | Enabled when |
 |----------|----------------|
-| **Android** | `BuildConfig.DEBUG` (debug APK / `assembleDebug`) |
+| **Android** | App debuggable flag (debug APK / `:androidApp:assembleDebug`) |
 | **iOS** | Xcode **Debug** configuration (`Platform.isDebugBinary`) |
 | **Desktop** | `-Dphoebe.debug=true` (set automatically for `./gradlew :composeApp:run` and desktop tests; off by default in packaged release builds) |
 | **Web (Wasm)** | Dev host (`localhost` / `127.0.0.1`), or `globalThis.PHOEBE_DEBUG = true` in the browser console |

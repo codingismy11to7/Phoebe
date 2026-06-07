@@ -120,6 +120,39 @@ class WebAudioPlayerLifecycleTest {
     }
 
     @Test
+    fun queuedWebAudioPublishesEndedPositionBeforeAdvancing() = runTest {
+        installMockWebAudioElement(mode = "ended-without-final-timeupdate", durationSeconds = 0.25)
+        val diagnostics = RecordingPlaybackDiagnostics()
+        val player = createWebAudioPlayerForTests(diagnostics)
+        try {
+            val first = playbackTrack(
+                id = "web-ended-sync-first",
+                streamUrl = "https://music.example.test/ended-sync-first.mp3",
+                durationMs = 250L,
+            )
+            val second = playbackTrack(
+                id = "web-ended-sync-second",
+                streamUrl = "https://music.example.test/ended-sync-second.mp3",
+                durationMs = 250L,
+            )
+
+            player.play(listOf(first, second), 0)
+
+            assertTrue(
+                waitUntil(timeoutMs = 1_500L) {
+                    player.state.value.currentTrack?.id == second.id &&
+                        diagnostics.progress.contains(first.durationMs)
+                },
+                "Web audio should publish the completed first-track position before advancing; " +
+                    "state=${player.state.value} progress=${diagnostics.progress}",
+            )
+        } finally {
+            player.stopPlayback()
+            restoreMockWebAudioElement()
+        }
+    }
+
+    @Test
     fun webCrossfadeRampsIncomingAudioAndCommitsToNextTrack() = runTest {
         installMockWebAudioElement(mode = "crossfade", durationSeconds = 1.0)
         val diagnostics = RecordingPlaybackDiagnostics()
@@ -431,9 +464,13 @@ class WebAudioPlayerLifecycleTest {
                 if (state.paused) return;
                 const crossfadeTiming = mode === "crossfade" || mode === "crossfade-stale-source-reject";
                 const stepSeconds = crossfadeTiming ? 0.025 : Math.max(0.04, state.duration / 5);
-                state.currentTime = Math.min(state.duration, state.currentTime + stepSeconds);
-                call(audio, audio.ontimeupdate, "timeupdate");
-                if (state.currentTime >= state.duration) {
+                const nextTime = Math.min(state.duration, state.currentTime + stepSeconds);
+                const reachedEnd = nextTime >= state.duration;
+                state.currentTime = nextTime;
+                if (!reachedEnd || mode !== "ended-without-final-timeupdate") {
+                    call(audio, audio.ontimeupdate, "timeupdate");
+                }
+                if (reachedEnd) {
                     clearInterval(state.timer);
                     timers.delete(state.timer);
                     state.timer = null;

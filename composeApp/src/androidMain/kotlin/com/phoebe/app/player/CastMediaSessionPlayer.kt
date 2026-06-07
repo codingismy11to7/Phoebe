@@ -9,59 +9,61 @@ import androidx.media3.common.SimpleBasePlayer
 import androidx.media3.common.util.UnstableApi
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import com.phoebe.app.domain.Track
 
 @OptIn(UnstableApi::class)
 internal class CastMediaSessionPlayer(
     player: Player,
 ) : ForwardingSimpleBasePlayer(player) {
     private var castState: CastMediaSessionState? = null
+    private var localState: LocalMediaSessionState? = null
 
     fun updateCastState(state: CastMediaSessionState?) {
         castState = state
         invalidateState()
     }
 
+    fun updateLocalState(state: LocalMediaSessionState?) {
+        localState = state
+        invalidateState()
+    }
+
     override fun getState(): SimpleBasePlayer.State {
         val delegateState = safeDelegateState()
-        val cast = castState ?: return delegateState.withPhoebeQueueNavigationCommands(
-            hasNext = AndroidPlaybackBridge.hasNextTrack?.invoke() == true,
-            hasPrevious = AndroidPlaybackBridge.hasPreviousTrack?.invoke() == true,
-        )
-        val mediaItem = playbackMediaItem(cast.track, inAppPlayback = true)
-        val itemData = SimpleBasePlayer.MediaItemData.Builder(cast.track.id)
-            .setMediaItem(mediaItem)
-            .setMediaMetadata(mediaItem.mediaMetadata)
-            .setDurationUs(cast.durationMs.takeIf { it > 0L }?.times(1_000L) ?: C.TIME_UNSET)
-            .setIsSeekable(cast.durationMs > 0L)
-            .build()
-        return delegateState
-            .buildUpon()
-            .setPlaylist(listOf(itemData))
-            .setCurrentMediaItemIndex(0)
-            .setCurrentAd(C.INDEX_UNSET, C.INDEX_UNSET)
-            .setPlayerError(null)
-            .setPlaybackState(
-                when {
-                    cast.isBuffering -> Player.STATE_BUFFERING
-                    else -> Player.STATE_READY
-                },
+        castState?.let { cast ->
+            return delegateState.withMediaSessionOverride(
+                track = cast.track,
+                isPlaying = cast.isPlaying,
+                isBuffering = cast.isBuffering,
+                positionMs = cast.positionMs,
+                bufferedPositionMs = cast.durationMs.takeIf { it > 0L } ?: cast.positionMs,
+                durationMs = cast.durationMs,
+                playWhenReadyChangeReason = Player.PLAY_WHEN_READY_CHANGE_REASON_REMOTE,
             )
-            .setPlayWhenReady(
-                cast.isPlaying,
-                Player.PLAY_WHEN_READY_CHANGE_REASON_REMOTE,
-            )
-            .setContentPositionMs(cast.positionMs.coerceAtLeast(0L))
-            .setContentBufferedPositionMs(
-                SimpleBasePlayer.PositionSupplier.getConstant(
-                    cast.durationMs.takeIf { it > 0L } ?: cast.positionMs.coerceAtLeast(0L),
-                ),
-            )
-            .setTotalBufferedDurationMs(SimpleBasePlayer.PositionSupplier.ZERO)
-            .build()
             .withPhoebeQueueNavigationCommands(
                 hasNext = AndroidPlaybackBridge.hasNextTrack?.invoke() == true,
                 hasPrevious = AndroidPlaybackBridge.hasPreviousTrack?.invoke() == true,
             )
+        }
+        localState?.let { local ->
+            return delegateState.withMediaSessionOverride(
+                track = local.track,
+                isPlaying = local.isPlaying,
+                isBuffering = local.isBuffering,
+                positionMs = local.positionMs,
+                bufferedPositionMs = local.bufferedPositionMs,
+                durationMs = local.durationMs,
+                playWhenReadyChangeReason = Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST,
+            )
+            .withPhoebeQueueNavigationCommands(
+                hasNext = AndroidPlaybackBridge.hasNextTrack?.invoke() == true,
+                hasPrevious = AndroidPlaybackBridge.hasPreviousTrack?.invoke() == true,
+            )
+        }
+        return delegateState.withPhoebeQueueNavigationCommands(
+            hasNext = AndroidPlaybackBridge.hasNextTrack?.invoke() == true,
+            hasPrevious = AndroidPlaybackBridge.hasPreviousTrack?.invoke() == true,
+        )
     }
 
     override fun handleSetPlayWhenReady(playWhenReady: Boolean): ListenableFuture<*> {
@@ -70,6 +72,14 @@ internal class CastMediaSessionPlayer(
                 AndroidPlaybackBridge.onCastPlay?.invoke()
             } else {
                 AndroidPlaybackBridge.onCastPause?.invoke()
+            }
+            return Futures.immediateVoidFuture()
+        }
+        if (localState != null) {
+            if (playWhenReady) {
+                AndroidPlaybackBridge.onLocalMediaSessionPlay?.invoke()
+            } else {
+                AndroidPlaybackBridge.onLocalMediaSessionPause?.invoke()
             }
             return Futures.immediateVoidFuture()
         }
@@ -93,7 +103,57 @@ internal class CastMediaSessionPlayer(
             }
             return Futures.immediateVoidFuture()
         }
+        if (localState != null) {
+            when (seekCommand) {
+                Player.COMMAND_SEEK_TO_NEXT,
+                Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
+                -> AndroidPlaybackBridge.onSkipNext?.invoke()
+                Player.COMMAND_SEEK_TO_PREVIOUS,
+                Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
+                -> AndroidPlaybackBridge.onSkipPrevious?.invoke()
+                else -> AndroidPlaybackBridge.onLocalMediaSessionSeekTo?.invoke(positionMs.coerceAtLeast(0L))
+            }
+            return Futures.immediateVoidFuture()
+        }
         return super.handleSeek(mediaItemIndex, positionMs, seekCommand)
+    }
+
+    private fun SimpleBasePlayer.State.withMediaSessionOverride(
+        track: Track,
+        isPlaying: Boolean,
+        isBuffering: Boolean,
+        positionMs: Long,
+        bufferedPositionMs: Long,
+        durationMs: Long,
+        playWhenReadyChangeReason: Int,
+    ): SimpleBasePlayer.State {
+        val mediaItem = playbackMediaItem(track, inAppPlayback = true)
+        val itemData = SimpleBasePlayer.MediaItemData.Builder(track.id)
+            .setMediaItem(mediaItem)
+            .setMediaMetadata(mediaItem.mediaMetadata)
+            .setDurationUs(durationMs.takeIf { it > 0L }?.times(1_000L) ?: C.TIME_UNSET)
+            .setIsSeekable(durationMs > 0L)
+            .build()
+        val position = positionMs.coerceAtLeast(0L)
+        val buffered = bufferedPositionMs
+            .coerceAtLeast(position)
+            .let { if (durationMs > 0L) it.coerceAtMost(durationMs) else it }
+        return buildUpon()
+            .setPlaylist(listOf(itemData))
+            .setCurrentMediaItemIndex(0)
+            .setCurrentAd(C.INDEX_UNSET, C.INDEX_UNSET)
+            .setPlayerError(null)
+            .setPlaybackState(
+                when {
+                    isBuffering -> Player.STATE_BUFFERING
+                    else -> Player.STATE_READY
+                },
+            )
+            .setPlayWhenReady(isPlaying, playWhenReadyChangeReason)
+            .setContentPositionMs(position)
+            .setContentBufferedPositionMs(SimpleBasePlayer.PositionSupplier.getConstant(buffered))
+            .setTotalBufferedDurationMs(SimpleBasePlayer.PositionSupplier.ZERO)
+            .build()
     }
 
     private fun safeDelegateState(): SimpleBasePlayer.State {

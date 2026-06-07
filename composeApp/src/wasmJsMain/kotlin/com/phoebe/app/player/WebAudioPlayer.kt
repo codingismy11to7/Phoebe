@@ -593,6 +593,7 @@ private class WebAudioPlayer(
         }
         eventAudio.onended = {
             if (isCurrentAudioEvent()) {
+                syncEndedPositionFromAudio(generation)
                 next()
             }
         }
@@ -694,6 +695,25 @@ private class WebAudioPlayer(
             isPlaying = !audio.paused && !isBuffering,
             isBuffering = isBuffering,
             bufferedPositionMs = bufferedPositionMs(positionMs, durationMs),
+            generation = generation,
+        )
+    }
+
+    private fun syncEndedPositionFromAudio(generation: Int) {
+        if (!isPlayRequestCurrent(generation)) return
+        val durationMs = webAudioPlaybackDurationMs(
+            currentDurationMs = state.value.durationMs,
+            browserDurationSeconds = audio.duration,
+        )
+        val currentPositionMs = (audio.currentTime * 1000.0).toLong().coerceAtLeast(0L)
+        val endedPositionMs = if (durationMs > 0L) durationMs else currentPositionMs
+        diagnostics.playbackProgress(PlaybackEnginePath.WebAudioElement, endedPositionMs, durationMs)
+        applyPlatformPlayback(
+            positionMs = endedPositionMs,
+            durationMs = durationMs,
+            isPlaying = playWhenReady,
+            isBuffering = false,
+            bufferedPositionMs = endedPositionMs,
             generation = generation,
         )
     }

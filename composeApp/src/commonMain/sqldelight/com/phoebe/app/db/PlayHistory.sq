@@ -115,6 +115,18 @@ AND played_at_ms = ?
 AND source = 'local'
 AND plex_history_key IS NULL;
 
+markLocalPlayAsImportedRemote:
+UPDATE PlayHistoryRow
+SET played_at_ms = ?,
+    source = ?,
+    plex_server_id = ?,
+    plex_history_key = ?,
+    plex_imported_at_ms = ?
+WHERE track_id = ?
+AND played_at_ms = ?
+AND source = 'local'
+AND plex_history_key IS NULL;
+
 selectLastPlayedByArtist:
 SELECT artist, MAX(lastPlayed) AS lastPlayed
 FROM (

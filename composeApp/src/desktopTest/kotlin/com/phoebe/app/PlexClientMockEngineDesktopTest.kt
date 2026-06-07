@@ -80,6 +80,40 @@ class PlexClientMockEngineDesktopTest {
     }
 
     @Test
+    fun markPlayedUsesScrobbleEndpointWithRatingKey() = runBlocking {
+        var capturedMethod: String? = null
+        var capturedPath: String? = null
+        var capturedToken: String? = null
+        var capturedIdentifier: String? = null
+        var capturedKey: String? = null
+        val engine = MockEngine { request ->
+            capturedMethod = request.method.value
+            capturedPath = request.url.encodedPath
+            capturedToken = request.url.parameters["X-Plex-Token"]
+            capturedIdentifier = request.url.parameters["identifier"]
+            capturedKey = request.url.parameters["key"]
+            respond(
+                content = """{"MediaContainer":{"size":0}}""",
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, "application/json"),
+            )
+        }
+        val client = PlexClient(testHttpClient(engine))
+
+        client.markPlayed(
+            server = PlexServer("id", "plex", "https://plex.example:32400", owned = true),
+            token = "secret-token",
+            ratingKey = "123",
+        )
+
+        assertEquals("PUT", capturedMethod)
+        assertEquals("/:/scrobble", capturedPath)
+        assertEquals("secret-token", capturedToken)
+        assertEquals("com.plexapp.plugins.library", capturedIdentifier)
+        assertEquals("123", capturedKey)
+    }
+
+    @Test
     fun reportTimelineRetriesNextBaseAfterConnectionClosed() = runBlocking {
         val attemptedHosts = mutableListOf<String>()
         val engine = MockEngine { request ->

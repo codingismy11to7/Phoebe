@@ -1,4 +1,4 @@
-@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
+@file:OptIn(kotlinx.cinterop.BetaInteropApi::class, kotlinx.cinterop.ExperimentalForeignApi::class)
 
 package com.phoebe.app.platform
 
@@ -45,6 +45,7 @@ private class IosSecureCredentialStore : SecureCredentialStore {
         description = "iOS Keychain",
     )
 
+    @Suppress("UNCHECKED_CAST")
     override suspend fun read(key: SecureCredentialKey): String? {
         val query = keychainQuery(key) + mapOf(
             kSecReturnData to kCFBooleanTrue,
@@ -97,6 +98,7 @@ private val SecureCredentialKey.account: String
         SecureCredentialKey.ListenBrainzUserToken -> "userToken"
     }
 
+@Suppress("UNCHECKED_CAST")
 private inline fun <T> Map<Any?, Any?>.withCfDictionary(block: (CFDictionaryRef) -> T): T {
     val dictionary = NSDictionary.create(dictionary = this)
     val retained = CFBridgingRetain(dictionary) as CFDictionaryRef

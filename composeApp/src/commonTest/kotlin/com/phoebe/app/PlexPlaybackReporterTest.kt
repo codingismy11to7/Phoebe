@@ -22,6 +22,7 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import kotlinx.coroutines.async
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -93,6 +94,81 @@ class PlexPlaybackReporterTest {
     }
 
     @Test
+    fun emitsPlayHistoryChangedAfterSuccessfulStoppedReport() = runTest {
+        val timelineStates = MutableStateFlow<List<String>>(emptyList())
+        val audioPlayer = FakeAudioPlayer()
+        val reporter = newReporter(timelineEngine(timelineStates), audioPlayer)
+        val scopeJob = SupervisorJob(coroutineContext[Job])
+        val scope = CoroutineScope(coroutineContext + scopeJob)
+        val track = plexTrack()
+
+        try {
+            reporter.start(scope, includePeriodicTimeline = false)
+            val changed = async {
+                reporter.playHistoryChanged.first()
+            }
+
+            audioPlayer.mutableState.value = PlayerState(
+                queue = listOf(track),
+                currentIndex = 0,
+                isPlaying = true,
+                positionMs = 1_000L,
+                durationMs = track.durationMs,
+            )
+            advanceUntilIdle()
+            timelineStates.awaitSize(1)
+
+            audioPlayer.mutableState.value = PlayerState(
+                queue = listOf(track),
+                currentIndex = 0,
+                isPlaying = false,
+                positionMs = track.durationMs,
+                durationMs = track.durationMs,
+            )
+            advanceUntilIdle()
+            timelineStates.awaitSize(2)
+
+            withTimeout(2_000L) {
+                changed.await()
+            }
+            assertEquals(listOf("playing", "stopped"), timelineStates.value)
+        } finally {
+            scopeJob.cancelAndJoin()
+        }
+    }
+
+    @Test
+    fun markPlayedPersistsPlexPlayAndEmitsHistoryChanged() = runTest {
+        val requests = MutableStateFlow<List<String>>(emptyList())
+        val keys = MutableStateFlow<List<String>>(emptyList())
+        val audioPlayer = FakeAudioPlayer()
+        val reporter = newReporter(
+            MockEngine { request ->
+                requests.update { it + request.url.encodedPath }
+                when (request.url.encodedPath) {
+                    "/:/scrobble" -> {
+                        keys.update { it + request.url.parameters["key"].orEmpty() }
+                        respondJson("""{"MediaContainer":{"size":0}}""")
+                    }
+                    else -> respond("", HttpStatusCode.NotFound)
+                }
+            },
+            audioPlayer,
+        )
+        val changed = async {
+            reporter.playHistoryChanged.first()
+        }
+
+        reporter.markPlayed(plexTrack(), playedAtMs = 123_000L)
+
+        withTimeout(2_000L) {
+            changed.await()
+        }
+        assertEquals(listOf("/:/scrobble"), requests.value)
+        assertEquals(listOf("123"), keys.value)
+    }
+
+    @Test
     fun reportsStoppedWhenReporterScopeCancelsDuringRemotePlayback() = runTest {
         val timelineStates = MutableStateFlow<List<String>>(emptyList())
         val continuingValues = MutableStateFlow<List<String?>>(emptyList())
@@ -121,6 +197,36 @@ class PlexPlaybackReporterTest {
 
         assertEquals(listOf("playing", "stopped"), timelineStates.value, "requests=${requests.value}")
         assertEquals(listOf(null, "0"), continuingValues.value, "requests=${requests.value}")
+    }
+
+    @Test
+    fun navidromeImmediateMarkDoesNotDuplicateThresholdScrobble() = runTest {
+        val scrobbles = MutableStateFlow<List<Map<String, String>>>(emptyList())
+        val audioPlayer = FakeAudioPlayer()
+        val reporter = newNavidromeReporter(subsonicEngine(scrobbles), audioPlayer)
+        val scopeJob = SupervisorJob(coroutineContext[Job])
+        val scope = CoroutineScope(coroutineContext + scopeJob)
+        val track = navidromeTrack()
+
+        try {
+            reporter.markPlayed(track, playedAtMs = 123_000L)
+            scrobbles.awaitSize(1)
+            reporter.start(scope, includePeriodicTimeline = false)
+
+            audioPlayer.mutableState.value = PlayerState(
+                queue = listOf(track),
+                currentIndex = 0,
+                isPlaying = true,
+                positionMs = 91_000L,
+                durationMs = track.durationMs,
+            )
+            advanceUntilIdle()
+
+            assertEquals(1, scrobbles.value.size)
+            assertEquals("123000", scrobbles.value.single()["time"])
+        } finally {
+            scopeJob.cancelAndJoin()
+        }
     }
 
     @Test

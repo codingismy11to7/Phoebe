@@ -106,6 +106,24 @@ class JellyfinClientTest {
     }
 
     @Test
+    fun markPlayedUsesUserPlayedItemsEndpoint() = runTest {
+        var capturedMethod: HttpMethod? = null
+        var capturedPath: String? = null
+        val engine = MockEngine { request ->
+            capturedMethod = request.method
+            capturedPath = request.url.encodedPath
+            respondJson("""{ "ItemId": "track-1", "Played": true, "PlayCount": 1 }""")
+        }
+        val client = JellyfinClient(testHttpClient(engine))
+        val server = PlexServer("jellyfin:test", "Jellyfin", "https://jellyfin.example", owned = true)
+
+        client.markPlayed(server, "token", "user-1", "track-1")
+
+        assertEquals(HttpMethod.Post, capturedMethod)
+        assertEquals("/Users/user-1/PlayedItems/track-1", capturedPath)
+    }
+
+    @Test
     fun loadsArtistsFromJellyfinAlbumArtistsEndpoint() = runTest {
         val server = PlexServer("jellyfin:test", "Jellyfin", "https://jellyfin.example", owned = true)
         val library = MusicLibrary("music", "Music")

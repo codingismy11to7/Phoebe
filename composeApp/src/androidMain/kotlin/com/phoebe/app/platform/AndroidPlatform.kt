@@ -6,22 +6,21 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.DocumentsContract
 import android.util.Log
-import androidx.activity.ComponentActivity
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
-import androidx.compose.ui.platform.LocalContext
 import androidx.documentfile.provider.DocumentFile
 import androidx.work.WorkManager
 import com.phoebe.app.AndroidContextHolder
-import com.phoebe.app.BuildConfig
 import com.phoebe.app.MainActivity
 import com.phoebe.app.R
 import com.phoebe.app.data.PlexClient
@@ -166,7 +165,7 @@ actual class PlatformStorage actual constructor() {
                 file.takeIf { it.exists() }?.delete()
                 pruneEmptyDownloadParents(parent)
             }
-            else -> null
+            else -> Unit
         }
         Unit
     }
@@ -432,7 +431,9 @@ private const val DownloadNotificationId = 2001
 
 @Composable
 actual fun rememberPickDownloadDirectory(onPicked: (String?) -> Unit): () -> Unit {
-    val activity = LocalContext.current as ComponentActivity
+    val activity = checkNotNull(LocalActivity.current) {
+        "rememberPickDownloadDirectory must be hosted in an Activity."
+    }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) {
             try {
@@ -502,7 +503,8 @@ internal fun cancelPlatformDownloadRunner() {
     WorkManager.getInstance(context).cancelUniqueWork(PhoebeDownloadWorkerName)
 }
 
-actual fun isDebugBuild(): Boolean = BuildConfig.DEBUG
+actual fun isDebugBuild(): Boolean =
+    AndroidContextHolder.application.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
 
 internal actual fun platformLog(tag: String, message: String) {
     Log.d(tag, message)

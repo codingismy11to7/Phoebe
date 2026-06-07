@@ -100,6 +100,7 @@ data class MusicAssistantRemotePlayback(
     val tracks: List<Track>,
     val index: Int,
     val target: String,
+    val shuffle: Boolean = false,
 )
 
 data class CollectionMixSeed(
@@ -144,6 +145,7 @@ class AppState(
                 isPlaying = true,
                 bufferedPositionMs = musicAssistantRemote.tracks.getOrNull(musicAssistantRemote.index)?.durationMs ?: 0L,
                 durationMs = musicAssistantRemote.tracks.getOrNull(musicAssistantRemote.index)?.durationMs ?: 0L,
+                shuffle = musicAssistantRemote.shuffle,
                 volume = audio.volume,
             )
             else -> audio
@@ -285,6 +287,7 @@ class AppState(
     private val prefetchedAlbumIds = mutableSetOf<String>()
     private var catalogRefreshJob: Job? = null
     private var playHistorySyncJob: Job? = null
+    private var providerPlayHistoryRefreshJob: Job? = null
     private var lightweightRemoteSyncJob: Job? = null
     private var downloadedArtworkCacheJob: Job? = null
     private val activeDownloadJobs = mutableSetOf<Job>()
@@ -365,6 +368,7 @@ class AppState(
         surfacePlaybackFailures()
         surfaceCastMessages()
         dependencies.plexPlaybackReporter.start(scope)
+        syncPlayHistoryAfterProviderReports()
         dependencies.listenBrainzPlaybackReporter.start(scope)
     }
 
@@ -457,7 +461,8 @@ class AppState(
      * Each time the audio player transitions to a new track, record a play event
      * so the Library UI can surface "last played" timestamps per artist / album / song.
      * We watch [Track.id] rather than the [PlayerState] object so toggling pause /
-     * seeking doesn't double-record the same play.
+     * seeking doesn't double-record the same play. Remote provider imports later claim
+     * nearby local rows, so the UI gets instant feedback without double-counting after sync.
      */
     private fun recordPlaybackHistory() {
         scope.launch {
@@ -469,8 +474,17 @@ class AppState(
                 }
                 if (track.id == lastRecordedTrackId) return@collect
                 lastRecordedTrackId = track.id
-                runCatching {
-                    dependencies.playHistoryRepository.recordPlay(track, currentTimeMs())
+                val playedAtMs = currentTimeMs()
+                val recorded = runCatching {
+                    dependencies.playHistoryRepository.recordPlay(track, playedAtMs)
+                }.onFailure { error ->
+                    if (error is CancellationException) throw error
+                    PhoebeLog.d("AppState") { "play history record failed for '${track.id}': ${error.message}" }
+                }.isSuccess
+                if (recorded) {
+                    scope.launch {
+                        dependencies.plexPlaybackReporter.markPlayed(track, playedAtMs)
+                    }
                 }
             }
         }
@@ -934,7 +948,7 @@ class AppState(
 
     private fun syncRemotePlayHistoryInBackground() = startRemotePlayHistorySync(showMessage = false)
 
-    private fun startRemotePlayHistorySync(showMessage: Boolean) {
+    private fun startRemotePlayHistorySync(showMessage: Boolean, recentOnly: Boolean = !showMessage) {
         val currentSession = session.value
         if (!currentSession.isPlex() && !currentSession.isEmbyFamily() && !currentSession.isNavidrome()) {
             PhoebeLog.d("AppState") {
@@ -946,12 +960,25 @@ class AppState(
         if (showMessage) mutableMessage.value = "Syncing ${currentSession.providerLabel()} play history..."
         PhoebeLog.d("AppState") {
             "play history sync requested provider=${currentSession.providerLabel()} " +
+                "recentOnly=$recentOnly " +
                 "showMessage=$showMessage hasServer=${currentSession?.selectedServer != null} " +
                 "hasLibrary=${currentSession?.selectedLibrary != null}"
         }
         playHistorySyncJob?.cancel()
         playHistorySyncJob = scope.launch {
-            syncRemotePlayHistory(showMessage = showMessage, recentOnly = true)
+            syncRemotePlayHistory(showMessage = showMessage, recentOnly = recentOnly)
+        }
+    }
+
+    private fun syncPlayHistoryAfterProviderReports() {
+        scope.launch {
+            dependencies.plexPlaybackReporter.playHistoryChanged.collect {
+                providerPlayHistoryRefreshJob?.cancel()
+                providerPlayHistoryRefreshJob = scope.launch {
+                    delay(1_000L)
+                    syncRemotePlayHistoryInBackground()
+                }
+            }
         }
     }
 
@@ -991,15 +1018,8 @@ class AppState(
                 } else {
                     dependencies.plexPlayHistorySyncer.sync(currentSession, catalog.value)
                 }
-                if (!recentOnly) {
-                    val refreshTrackIds = buildList {
-                        addAll(dependencies.playHistoryRepository.queryTopMostPlayed(30).map { it.trackId })
-                        addAll(dependencies.playHistoryRepository.queryTopRecentlyPlayed(30).map { it.trackId })
-                    }.distinct()
-                    dependencies.plexPlayHistorySyncer.refreshViewCountsForTrackIds(
-                        currentSession,
-                        refreshTrackIds,
-                    )
+                if (recentOnly) {
+                    refreshKnownPlexPlayCounts(currentSession)
                 }
                 syncResult
             } else if (currentSession.isNavidrome()) {
@@ -1036,6 +1056,17 @@ class AppState(
             PhoebeLog.d("AppState") { "play history sync failed: ${error.message}" }
             if (showMessage) mutableMessage.value = error.message ?: "Couldn't sync play history."
         }.getOrNull()
+    }
+
+    private suspend fun refreshKnownPlexPlayCounts(currentSession: PlexSession?) {
+        val refreshTrackIds = buildList {
+            addAll(dependencies.playHistoryRepository.queryTopMostPlayed(60).map { it.trackId })
+            addAll(dependencies.playHistoryRepository.queryTopRecentlyPlayed(60).map { it.trackId })
+        }.distinct()
+        dependencies.plexPlayHistorySyncer.refreshViewCountsForTrackIds(
+            currentSession,
+            refreshTrackIds,
+        )
     }
 
     fun setTab(tab: LibraryTab) {
@@ -1350,6 +1381,7 @@ class AppState(
         index: Int = 0,
         collectionMixSeed: CollectionMixSeed? = null,
         shuffleEnabled: Boolean = false,
+        clearShuffle: Boolean = false,
     ): Boolean {
         collectionMixGeneration++
         val playbackTracks = tracks.withFreshPlaybackUrls(session.value)
@@ -1364,6 +1396,9 @@ class AppState(
                 return false
             }
             dependencies.castController.loadQueue(playbackTracks, startIndex)
+            if (shuffleEnabled || clearShuffle) {
+                dependencies.audioPlayer.setShuffle(shuffleEnabled)
+            }
             return true
         }
         if (session.value.isMusicAssistant() && track.localUri.isNullOrBlank() && track.streamUrl.isBlank()) {
@@ -1377,7 +1412,12 @@ class AppState(
                         mutableMessage.value = "Couldn't find a Music Assistant player for ${musicAssistantTrack.title}."
                         return@onSuccess
                     }
-                    mutableMusicAssistantRemotePlayback.value = MusicAssistantRemotePlayback(playbackTracks, startIndex, target)
+                    mutableMusicAssistantRemotePlayback.value = MusicAssistantRemotePlayback(
+                        tracks = playbackTracks,
+                        index = startIndex,
+                        target = target,
+                        shuffle = shuffleEnabled,
+                    )
                     mutableMessage.value = "Playing ${musicAssistantTrack.title} on Music Assistant: $target."
                 }.onFailure { error ->
                     mutableMessage.value = error.message ?: "Couldn't start Music Assistant playback."
@@ -1394,6 +1434,9 @@ class AppState(
             dependencies.audioPlayer.playShuffled(playbackTracks, startIndex)
         } else {
             dependencies.audioPlayer.play(playbackTracks, startIndex)
+            if (clearShuffle) {
+                dependencies.audioPlayer.setShuffle(false)
+            }
         }
         collectionMixSeed?.toCollectionMix()?.let { mix ->
             scheduleCollectionMix(mix, playbackTracks.map { it.id }.toSet())
@@ -2291,12 +2334,15 @@ class AppState(
     fun signOut() {
         val refreshJob = catalogRefreshJob
         val historyJob = playHistorySyncJob
+        val providerHistoryJob = providerPlayHistoryRefreshJob
         val lightweightSyncJob = lightweightRemoteSyncJob
         catalogRefreshJob = null
         playHistorySyncJob = null
+        providerPlayHistoryRefreshJob = null
         lightweightRemoteSyncJob = null
         refreshJob?.cancel()
         historyJob?.cancel()
+        providerHistoryJob?.cancel()
         lightweightSyncJob?.cancel()
         dependencies.catalogRepository.clearActiveSyncProgress()
         mostPlayedWarmSignature = null
@@ -2315,6 +2361,7 @@ class AppState(
             val signedOut = runCatching {
                 refreshJob?.cancelAndJoin()
                 historyJob?.cancelAndJoin()
+                providerHistoryJob?.cancelAndJoin()
                 lightweightSyncJob?.cancelAndJoin()
                 dependencies.sessionRepository.signOut()
                 dependencies.deleteDatabaseDataForSignOut()

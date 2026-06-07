@@ -118,6 +118,32 @@ class PlayHistoryRepositoryDesktopTest {
     }
 
     @Test
+    fun remoteImportWithinMergeWindowClaimsLocalPlay() = runBlocking {
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        val repo = PlayHistoryRepository(db)
+        repository = repo
+        val track = Track("navidrome:t1", "Song", "Art", "Alb", 30_000L, "", "")
+        repo.recordPlay(track, 1_000L)
+
+        assertTrue(
+            repo.importRemotePlay(
+                track = track,
+                source = "navidrome",
+                serverId = "server",
+                historyKey = "navidrome:server:t1:1100",
+                playedAtMs = 1_100L,
+                importedAtMs = 2_000L,
+            ),
+        )
+
+        val counts = repo.playCountsByTrack.first { it["navidrome:t1"] == 1L }
+        val lastPlayed = repo.lastPlayedByTrack.first { it["navidrome:t1"] == 1_100L }
+        assertEquals(1L, counts["navidrome:t1"])
+        assertEquals(1_100L, lastPlayed["navidrome:t1"])
+    }
+
+    @Test
     fun remotePlayCountFallbackUsesAggregateInsteadOfSyntheticRows() = runBlocking {
         val (db, d) = newInMemoryPhoebeDatabase()
         driver = d

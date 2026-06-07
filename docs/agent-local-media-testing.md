@@ -47,7 +47,7 @@ Do **not** commit large copyrighted commercial tracks. The script only curls the
 From the repo root:
 
 - **`./gradlew :composeApp:desktopTest`** — JVM/desktop tests: in-memory SQLDelight, `MediaSourcesRepository`, `CatalogRepository.refreshAggregated` (no Plex session), `PlexClient` with Ktor `MockEngine`, `LocalFolderCatalogBuilder` against a temp folder, and shared `commonTest` cases (e.g. `CatalogMerge`, player state, Plex JSON).
-- **`./gradlew :composeApp:connectedDebugAndroidTest`** — Android **instrumented** tests on a device or emulator (Compose UI smoke for fake playback, `MediaSourcesRepository` against an app-context SQLite DB). Requires a connected device or running AVD.
+- **`./gradlew :composeApp:connectedAndroidDeviceTest`** — Android **instrumented** tests on a device or emulator (Compose UI smoke for fake playback, `MediaSourcesRepository` against an app-context SQLite DB). Requires a connected device or running AVD.
 - **`./gradlew :composeApp:wasmJsTest`** — Runs **common** tests plus wasm test sources in the JS/Wasm test runner (logic that compiles on Wasm; no SQLDelight web worker in these tests).
 - **`npm run web:e2e`** — Playwright browser test against `/?e2e=localLibrary` (indexes wasm test-folder MP3s and verifies playback starts). Requires the wasm dev server (Playwright config starts it automatically).
 

@@ -1006,8 +1006,8 @@ internal fun defaultPlaylistName(initialTracks: List<Track>): String =
     }
 
 /**
- * Maps a tap from a filtered/visible track list back into the unfiltered source queue.
- * This keeps Up Next aligned with the list the user would have seen after clearing the filter.
+ * Maps a tap from a filtered/visible track list back into the unfiltered source queue,
+ * rotated so Up Next includes the rest of the playlist after the chosen start point.
  */
 internal fun playbackQueueForVisibleTrack(
     sourceTracks: List<Track>,
@@ -1015,9 +1015,12 @@ internal fun playbackQueueForVisibleTrack(
     visibleIndex: Int,
 ): Pair<List<Track>, Int> {
     val visibleTrack = visibleTracks.getOrNull(visibleIndex) ?: return visibleTracks to visibleIndex
-    val sourceIndex = sourceTracks.indexOfFirst { it.id == visibleTrack.id }
-    return if (sourceIndex >= 0) sourceTracks to sourceIndex else visibleTracks to visibleIndex
+    val sourceIndex = sourceTracks.indexOfFirst { it.reorderKey() == visibleTrack.reorderKey() }
+    return if (sourceIndex >= 0) sourceTracks.rotatedForPlayback(sourceIndex) to 0 else visibleTracks to visibleIndex
 }
+
+private fun List<Track>.rotatedForPlayback(startIndex: Int): List<Track> =
+    if (startIndex > 0 && startIndex in indices) drop(startIndex) + take(startIndex) else this
 
 /** Filter a list of tracks by a free-form search query against title/artist/album. */
 internal fun filterTracksByQuery(tracks: List<Track>, query: String): List<Track> {

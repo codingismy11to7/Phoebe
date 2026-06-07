@@ -1368,6 +1368,28 @@ class PlexClient(
         )
     }
 
+    suspend fun markPlayed(
+        server: PlexServer,
+        token: String,
+        ratingKey: String,
+    ) {
+        val response = withReachableBase(server) { base ->
+            httpClient.put("$base/:/scrobble") {
+                plexTimelineAuth(token)
+                parameter("identifier", LibraryIdentifier)
+                parameter("key", ratingKey)
+            }
+        }
+        val body = response.bodyAsText()
+        if (!response.status.isSuccess()) {
+            PhoebeLog.d("PlexClient") {
+                "markPlayed failed for '$ratingKey' -> HTTP ${response.status.value}: ${body.take(300)}"
+            }
+            error("Plex mark played failed (${response.status.value}): ${body.take(200)}")
+        }
+        PhoebeLog.v("PlexClient") { "markPlayed ok for '$ratingKey' (${response.status.value}): ${body.take(200)}" }
+    }
+
     /**
      * Register an audio play queue with Plex — first-party clients do this before timeline
      * updates and many servers expect a playQueueItemID on each ping.

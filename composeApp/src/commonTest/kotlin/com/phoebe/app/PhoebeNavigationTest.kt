@@ -1,11 +1,7 @@
 package com.phoebe.app
 
-import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.navigation3.runtime.NavBackStack
 import androidx.navigation3.runtime.NavKey
-import androidx.navigation3.runtime.serialization.NavBackStackSerializer
-import androidx.savedstate.serialization.decodeFromSavedState
-import androidx.savedstate.serialization.encodeToSavedState
 import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.CollectionEntry
 import com.phoebe.app.domain.CollectionFacet
@@ -16,7 +12,8 @@ import com.phoebe.app.ui.BrowseSection
 import com.phoebe.app.ui.PhoebeNavigator
 import com.phoebe.app.ui.PhoebeRoute
 import com.phoebe.app.ui.PhoebeRouteResolution
-import com.phoebe.app.ui.phoebeRouteSavedStateConfiguration
+import com.phoebe.app.ui.decodePhoebeRouteBackStack
+import com.phoebe.app.ui.encodePhoebeRouteBackStack
 import com.phoebe.app.ui.phoebeRouteSerializersModule
 import com.phoebe.app.ui.resolvePhoebeRoute
 import kotlin.test.Test
@@ -65,22 +62,18 @@ class PhoebeNavigationTest {
     }
 
     @Test
-    fun recentlyAddedRouteRoundTripsThroughSavedState() {
-        val routes = SnapshotStateList<NavKey>().apply {
-            add(PhoebeRoute.Browse(BrowseSection.Home))
+    fun recentlyAddedRouteRoundTripsThroughSaveableBackStackJson() {
+        val backStack = NavBackStack<PhoebeRoute>(PhoebeRoute.Browse(BrowseSection.Home)).apply {
             add(PhoebeRoute.RecentlyAdded(RecentlyAddedKind.Songs))
         }
-        val backStack = NavBackStack(routes)
-        val serializer = NavBackStackSerializer(PolymorphicSerializer(NavKey::class))
-        val saved = encodeToSavedState(serializer, backStack, phoebeRouteSavedStateConfiguration)
-        val decoded = decodeFromSavedState(serializer, saved, phoebeRouteSavedStateConfiguration)
+        val decoded = decodePhoebeRouteBackStack(encodePhoebeRouteBackStack(backStack))
 
         assertEquals(
             listOf(
                 PhoebeRoute.Browse(BrowseSection.Home),
                 PhoebeRoute.RecentlyAdded(RecentlyAddedKind.Songs),
             ),
-            decoded.mapNotNull { it as? PhoebeRoute },
+            decoded.toList(),
         )
     }
 

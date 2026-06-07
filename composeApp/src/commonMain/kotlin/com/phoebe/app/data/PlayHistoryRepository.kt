@@ -21,6 +21,7 @@ import kotlinx.coroutines.withContext
 
 /** Max rows loaded eagerly for home derivation and catalog warm hints. */
 const val PlayHistoryTopListCapacity = 200
+private const val RemotePlayMergeWindowMs = 10L * 60L * 1000L
 
 /**
  * Tracks per-track play timestamps. Surfaces "last played" aggregates per
@@ -317,6 +318,7 @@ class PlayHistoryRepository(
         historyKey: String,
         playedAtMs: Long,
         importedAtMs: Long,
+        mergeWindowMs: Long = RemotePlayMergeWindowMs,
     ): Boolean {
         if (track.id.isBlank() || historyKey.isBlank()) return false
         val cleanArtist = track.artist.ifBlank { "Unknown Artist" }
@@ -326,16 +328,37 @@ class PlayHistoryRepository(
                 .selectImportedPlexHistoryKey(historyKey)
                 .awaitAsOneOrNull() != null
             if (alreadyImported) return@withContext false
-            database.playHistoryQueries.insertImportedRemotePlay(
-                track_id = track.id,
-                artist = cleanArtist,
-                album = cleanAlbum,
-                played_at_ms = playedAtMs,
-                source = source,
-                plex_server_id = serverId,
-                plex_history_key = historyKey,
-                plex_imported_at_ms = importedAtMs,
-            )
+
+            val candidatePlayedAtMs = database.playHistoryQueries
+                .selectLocalMergeCandidate(
+                    track_id = track.id,
+                    played_at_ms = playedAtMs - mergeWindowMs,
+                    played_at_ms_ = playedAtMs + mergeWindowMs,
+                )
+                .awaitAsOneOrNull()
+
+            if (candidatePlayedAtMs != null) {
+                database.playHistoryQueries.markLocalPlayAsImportedRemote(
+                    played_at_ms = playedAtMs,
+                    source = source,
+                    plex_server_id = serverId,
+                    plex_history_key = historyKey,
+                    plex_imported_at_ms = importedAtMs,
+                    track_id = track.id,
+                    played_at_ms_ = candidatePlayedAtMs,
+                )
+            } else {
+                database.playHistoryQueries.insertImportedRemotePlay(
+                    track_id = track.id,
+                    artist = cleanArtist,
+                    album = cleanAlbum,
+                    played_at_ms = playedAtMs,
+                    source = source,
+                    plex_server_id = serverId,
+                    plex_history_key = historyKey,
+                    plex_imported_at_ms = importedAtMs,
+                )
+            }
             true
         }
     }

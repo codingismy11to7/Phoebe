@@ -42,7 +42,7 @@ class LibrarySortingTest {
     }
 
     @Test
-    fun filteredPlaylistPlaybackUsesUnfilteredQueueAndMappedIndex() {
+    fun filteredPlaylistPlaybackUsesUnfilteredQueueRotatedFromClickedTrack() {
         val tracks = listOf(
             track("one", "Track 01"),
             track("two", "Track 02"),
@@ -52,8 +52,26 @@ class LibrarySortingTest {
 
         val (queue, index) = playbackQueueForVisibleTrack(tracks, filtered, visibleIndex = 0)
 
-        assertEquals(listOf("one", "two", "three"), queue.map { it.id })
-        assertEquals(2, index)
+        assertEquals(listOf("three", "one", "two"), queue.map { it.id })
+        assertEquals(0, index)
+    }
+
+    @Test
+    fun playlistPlaybackRotationUsesPlaylistItemIdForDuplicateTracks() {
+        val tracks = listOf(
+            track("one", "Track 01").copy(playlistItemId = 101),
+            track("two", "Track 02").copy(playlistItemId = 102),
+            track("one", "Track 01").copy(playlistItemId = 103),
+        )
+
+        val (queue, index) = playbackQueueForVisibleTrack(
+            sourceTracks = tracks,
+            visibleTracks = listOf(tracks[2]),
+            visibleIndex = 0,
+        )
+
+        assertEquals(listOf(103L, 101L, 102L), queue.map { it.playlistItemId })
+        assertEquals(0, index)
     }
 
     @Test

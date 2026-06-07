@@ -93,6 +93,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -429,15 +430,25 @@ internal fun FlippableSongArtwork(
     radius: Dp = 10.dp,
     shape: Shape = RoundedCornerShape(radius),
     maxDecodeDimension: Int = ListArtworkMaxDecodeDimension,
+    onFlipRotationChange: (Float) -> Unit = {},
     frontOverlay: @Composable BoxScope.() -> Unit = {},
 ) {
     var showingDetails by remember(track.id) { mutableStateOf(false) }
+    val latestOnFlipRotationChange by rememberUpdatedState(onFlipRotationChange)
     val rotation by animateFloatAsState(
         targetValue = if (showingDetails) 180f else 0f,
         animationSpec = tween(durationMillis = 520, easing = FastOutSlowInEasing),
         label = "songArtworkFlip",
     )
     val density = LocalDensity.current
+    LaunchedEffect(rotation) {
+        latestOnFlipRotationChange(rotation)
+    }
+    DisposableEffect(track.id) {
+        onDispose {
+            latestOnFlipRotationChange(0f)
+        }
+    }
 
     Box(
         modifier
@@ -799,15 +810,17 @@ private fun PlayAllActionButton(
     tracks: List<Track>,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
 ) {
     LibraryToolbarButton(
         icon = PhoebeIcon.Play,
         label = "Play All",
         value = tracks.takeIf { it.isNotEmpty() }?.size?.let { "$it" },
-        modifier = modifier,
+        modifier = modifier.playAllTarget(),
         enabled = tracks.isNotEmpty(),
         iconTint = if (tracks.isEmpty()) PhoebeUi.mutedText else PhoebeUi.accentLight,
         onClick = onClick,
+        onLongClick = onLongClick,
     )
 }
 
@@ -970,6 +983,8 @@ internal fun ArtistDetailPanel(
     onBack: () -> Unit,
     onAlbum: (Album) -> Unit,
     onPlayTracks: (List<Track>, Int) -> Unit,
+    onPlayAllTracks: (List<Track>) -> Unit = { tracksToPlay -> onPlayTracks(tracksToPlay, 0) },
+    onShuffleAllTracks: (List<Track>) -> Unit = { tracksToShuffle -> onPlayTracks(tracksToShuffle.shuffled(), 0) },
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
     onDownloadArtist: (Artist) -> Unit,
@@ -1106,7 +1121,8 @@ internal fun ArtistDetailPanel(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                         PlayAllActionButton(
                             tracks = visibleTracks,
-                            onClick = { onPlayTracks(visibleTracks, 0) },
+                            onClick = { onPlayAllTracks(visibleTracks) },
+                            onLongClick = { onShuffleAllTracks(visibleTracks) },
                         )
                         if (artistRadioAvailability == ArtistRadioAvailability.Available) {
                             PlayRadioActionButton(
@@ -1167,7 +1183,8 @@ internal fun ArtistDetailPanel(
                         if (useTable) {
                             PlayAllActionButton(
                                 tracks = visibleTracks,
-                                onClick = { onPlayTracks(visibleTracks, 0) },
+                                onClick = { onPlayAllTracks(visibleTracks) },
+                                onLongClick = { onShuffleAllTracks(visibleTracks) },
                             )
                             if (artistRadioAvailability == ArtistRadioAvailability.Available) {
                                 PlayRadioActionButton(
@@ -2023,12 +2040,12 @@ internal fun PlaylistDetailPanel(
         )
         val displayTracks = if (reorderEnabled || reorderState.isDragging) reorderState.tracks else visibleTracks
         val playDisplayTrack = { visibleIndex: Int ->
-            if (reorderEnabled || reorderState.isDragging) {
-                onPlayTracks(displayTracks, visibleIndex)
+            val (queueTracks, queueIndex) = if (reorderEnabled || reorderState.isDragging) {
+                playbackQueueForVisibleTrack(displayTracks, displayTracks, visibleIndex)
             } else {
-                val (queueTracks, queueIndex) = playbackQueueForVisibleTrack(sortedTracks, visibleTracks, visibleIndex)
-                onPlayTracks(queueTracks, queueIndex)
+                playbackQueueForVisibleTrack(sortedTracks, visibleTracks, visibleIndex)
             }
+            onPlayTracks(queueTracks, queueIndex)
         }
 
         CompositionLocalProvider(LocalArtworkLoadingEnabled provides artworkLoadingEnabled) {

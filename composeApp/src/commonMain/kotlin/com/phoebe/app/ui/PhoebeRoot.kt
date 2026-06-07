@@ -635,6 +635,22 @@ private fun PhoebeRootStateHolder(
             collectionMixSeed = navigator.routes.collectionMixSeed(),
         )
     }
+    val playAllTracks: (List<Track>) -> Unit = { tracks ->
+        state.playTracks(
+            tracks = tracks,
+            index = 0,
+            collectionMixSeed = navigator.routes.collectionMixSeed(),
+            clearShuffle = true,
+        )
+    }
+    val shuffleAllTracks: (List<Track>) -> Unit = { tracks ->
+        state.playTracks(
+            tracks = tracks.shuffled(),
+            index = 0,
+            collectionMixSeed = navigator.routes.collectionMixSeed(),
+            shuffleEnabled = true,
+        )
+    }
     val mobilePlaybackScope = rememberCoroutineScope()
     var pendingMobilePlaybackJob by remember { mutableStateOf<Job?>(null) }
     var pendingMobilePlaybackPreview by remember { mutableStateOf<PendingMobilePlaybackPreview?>(null) }
@@ -644,8 +660,13 @@ private fun PhoebeRootStateHolder(
             pendingMobilePlaybackPreview = null
         }
     }
-    val playTracksFromMobile: (List<Track>, Int) -> Unit = playTracksFromMobile@{ tracks, index ->
-        if (tracks.isEmpty()) return@playTracksFromMobile
+    fun requestMobilePlayback(
+        tracks: List<Track>,
+        index: Int,
+        shuffleEnabled: Boolean = false,
+        clearShuffle: Boolean = false,
+    ) {
+        if (tracks.isEmpty()) return
         val collectionMixSeed = navigator.routes.collectionMixSeed()
         val previewIndex = index.coerceIn(0, tracks.lastIndex)
         pendingMobilePlaybackJob?.cancel()
@@ -654,10 +675,12 @@ private fun PhoebeRootStateHolder(
             tracks = tracks,
             index = index,
             collectionMixSeed = collectionMixSeed,
+            shuffleEnabled = shuffleEnabled,
+            clearShuffle = clearShuffle,
         )
         if (!playbackAccepted) {
             pendingMobilePlaybackPreview = null
-            return@playTracksFromMobile
+            return
         }
         pendingMobilePlaybackPreview = PendingMobilePlaybackPreview(tracks, previewIndex)
         navigator.openPlayer()
@@ -667,6 +690,15 @@ private fun PhoebeRootStateHolder(
                 pendingMobilePlaybackPreview = null
             }
         }
+    }
+    val playTracksFromMobile: (List<Track>, Int) -> Unit = { tracks, index ->
+        requestMobilePlayback(tracks, index)
+    }
+    val playAllTracksFromMobile: (List<Track>) -> Unit = { tracks ->
+        requestMobilePlayback(tracks, 0, clearShuffle = true)
+    }
+    val shuffleAllTracksFromMobile: (List<Track>) -> Unit = { tracks ->
+        requestMobilePlayback(tracks.shuffled(), 0, shuffleEnabled = true)
     }
     val mobilePlayerTrack = pendingMobilePlaybackPreview?.currentTrack ?: currentTrack
     val mobilePlayerUpNext = pendingMobilePlaybackPreview?.upNext ?: upNext
@@ -1076,6 +1108,8 @@ private fun PhoebeRootStateHolder(
                         onBack = { navigator.pop() },
                         onAlbum = { navigator.open(it.route()) },
                         onPlayTracks = playTracksFromMobile,
+                        onPlayAllTracks = playAllTracksFromMobile,
+                        onShuffleAllTracks = shuffleAllTracksFromMobile,
                         onAddToUpNext = state::addToUpNext,
                         onDownload = state::download,
                         onDownloadArtist = state::download,
@@ -1600,6 +1634,8 @@ private fun PhoebeRootStateHolder(
                         onPlayPersonalMix = playPersonalMix,
                         onPopDetail = { navigator.pop() },
                         onPlayTracks = playTracks,
+                        onPlayAllTracks = playAllTracks,
+                        onShuffleAllTracks = shuffleAllTracks,
                         onAddToUpNext = state::addToUpNext,
                         onDownload = state::download,
                         onDownloadArtist = state::download,

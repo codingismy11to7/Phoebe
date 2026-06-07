@@ -3,10 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "run:android": "ADB=\"${ANDROID_HOME:-$HOME/Library/Android/sdk}/platform-tools/adb\"; [ -x \"$ADB\" ] || ADB=adb; ./gradlew :composeApp:installDebug && \"$ADB\" shell monkey -p com.phoebe.app.debug -c android.intent.category.LAUNCHER 1",
+    "run:android": "ADB=\"${ANDROID_HOME:-$HOME/Library/Android/sdk}/platform-tools/adb\"; [ -x \"$ADB\" ] || ADB=adb; ./gradlew :androidApp:installDebug && \"$ADB\" shell monkey -p com.phoebe.app.debug -c android.intent.category.LAUNCHER 1",
     "run:desktop": "./gradlew :composeApp:run",
     "run:web": "./gradlew :composeApp:wasmJsBrowserDevelopmentRun",
-    "run:screenshots": "./gradlew :composeApp:recordRoborazziDebug && npm run web:screenshots:update",
+    "run:screenshots": "./gradlew :composeApp:recordRoborazziAndroidHostTest && npm run web:screenshots:update",
     "web:install-browsers": "playwright install --with-deps chromium",
     "web:screenshots": "playwright test phoebe.spec.ts",
     "web:screenshots:update": "playwright test phoebe.spec.ts --update-snapshots",

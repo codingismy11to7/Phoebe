@@ -141,8 +141,8 @@ jobs:
       - name: Build Android APK and bundle
         run: >
           ./gradlew
-          :composeApp:assembleRelease
-          :composeApp:bundleRelease
+          :androidApp:assembleRelease
+          :androidApp:bundleRelease
           -Pphoebe.versionName=${{ needs.version.outputs.version }}
           -Pphoebe.versionCode=${{ needs.version.outputs.version_code }}
 
@@ -150,8 +150,8 @@ jobs:
         shell: bash
         run: |
           mkdir -p release-artifacts
-          apk="$(find composeApp/build/outputs/apk/release -name '*.apk' -print -quit)"
-          aab="$(find composeApp/build/outputs/bundle/release -name '*.aab' -print -quit)"
+          apk="$(find androidApp/build/outputs/apk/release -name '*.apk' -print -quit)"
+          aab="$(find androidApp/build/outputs/bundle/release -name '*.aab' -print -quit)"
           if [[ -z "${apk}" || -z "${aab}" ]]; then
             echo "::error::Could not find Android APK and AAB release artifacts"
             exit 1

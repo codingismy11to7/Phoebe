@@ -6,13 +6,16 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
 import com.phoebe.app.domain.Album
+import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.LibraryUiPreferences
 import com.phoebe.app.domain.Playlist
@@ -152,8 +155,55 @@ class PlaybackClickTargetDesktopTest {
         onNodeWithTag(PlaybackTestTags.playTrack(tracks[1].id)).performClick()
 
         val captured = assertNotNull(request)
-        assertEquals(1, captured.index)
-        assertEquals(tracks, captured.tracks)
+        assertEquals(0, captured.index)
+        assertEquals(listOf(tracks[1], tracks[2], tracks[0]), captured.tracks)
+    }
+
+    @OptIn(ExperimentalTestApi::class, ExperimentalComposeUiApi::class)
+    @Test
+    fun artistPlayAllClickAndLongClickUseSeparatePlaybackRequests() = runDesktopComposeUiTest(width = 800, height = 620) {
+        val artist = Artist(id = "artist-1", title = "Fixture Artist")
+        val album = Album(id = "album-1", title = "Regression Album", artist = artist.title)
+        val tracks = playbackTracks()
+        var playAllRequest: List<Track>? = null
+        var shuffleAllRequest: List<Track>? = null
+
+        setContent {
+            PhoebeTheme {
+                Box(Modifier.size(800.dp, 620.dp)) {
+                    ArtistDetailPanel(
+                        artist = artist,
+                        catalog = CatalogSnapshot(
+                            artists = listOf(artist),
+                            albums = listOf(album),
+                            tracksByParent = mapOf(album.id to tracks),
+                        ),
+                        libraryUi = LibraryUiPreferences(),
+                        onBack = {},
+                        onAlbum = {},
+                        onPlayTracks = { _, _ -> },
+                        onPlayAllTracks = { playAllRequest = it },
+                        onShuffleAllTracks = { shuffleAllRequest = it },
+                        onAddToUpNext = {},
+                        onDownload = {},
+                        onDownloadArtist = {},
+                        onPlayArtistRadio = {},
+                        onArtist = {},
+                        onLibraryColumns = {},
+                    )
+                }
+            }
+        }
+
+        waitUntil(timeoutMillis = 5_000) {
+            onAllNodesWithTag(PlaybackTestTags.PlayAll).fetchSemanticsNodes().isNotEmpty()
+        }
+        onNodeWithTag(PlaybackTestTags.PlayAll).performClick()
+        assertEquals(tracks, playAllRequest)
+        assertEquals(null, shuffleAllRequest)
+
+        onNodeWithTag(PlaybackTestTags.PlayAll).performTouchInput { longClick() }
+        assertEquals(tracks, shuffleAllRequest)
     }
 
     @OptIn(ExperimentalTestApi::class, ExperimentalComposeUiApi::class)

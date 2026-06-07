@@ -181,7 +181,7 @@ private class AndroidCastController : CastController {
         val track = queue[index]
         val positionMs = startPositionMs.coerceAtLeast(0L)
         val localState = audioPlayer?.state?.value
-        val servicePlaying = AndroidPlaybackBridge.servicePlayer?.isPlaying == true
+        val servicePlaying = AndroidPlaybackBridge.isServicePlaybackActive()
         val wasLocalPlaying = localState?.isPlaying == true || servicePlaying
         loadRequestId++
         val requestId = loadRequestId
@@ -464,7 +464,7 @@ private class AndroidCastController : CastController {
         if (client.isPlaying && localPlayer?.state?.value?.isPlaying == true) {
             suspendLocalPlayback()
         }
-        if (AndroidPlaybackBridge.servicePlayer?.isPlaying == true) {
+        if (AndroidPlaybackBridge.isServicePlaybackActive()) {
             suspendLocalPlayback()
         }
     }

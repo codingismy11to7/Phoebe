@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.graphics.drawable.Icon
 import android.os.Build
 import androidx.core.content.ContextCompat
 import androidx.work.CoroutineWorker
@@ -93,7 +94,13 @@ class PhoebeDownloadWorker(
             .setContentText(text)
             .setContentIntent(openApp)
             .setOngoing(true)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Cancel", cancel)
+            .addAction(
+                Notification.Action.Builder(
+                    Icon.createWithResource(applicationContext, android.R.drawable.ic_menu_close_clear_cancel),
+                    "Cancel",
+                    cancel,
+                ).build(),
+            )
             .setColor(ContextCompat.getColor(applicationContext, R.color.ic_launcher_background))
             .build()
     }
