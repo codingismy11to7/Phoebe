@@ -185,7 +185,7 @@ internal class CastMediaSessionPlayer(
 
     private fun SimpleBasePlayer.State.mediaSessionOverrideBuilder(): SimpleBasePlayer.State.Builder =
         SimpleBasePlayer.State.Builder()
-            .setAvailableCommands(availableCommands)
+            .setAvailableCommands(availableCommands.withoutTimelineAccess())
             .setPlaybackSuppressionReason(playbackSuppressionReason)
             .setRepeatMode(repeatMode)
             .setShuffleModeEnabled(shuffleModeEnabled)
@@ -204,6 +204,12 @@ internal class CastMediaSessionPlayer(
             .setSeekBackIncrementMs(seekBackIncrementMs)
             .setSeekForwardIncrementMs(seekForwardIncrementMs)
             .setMaxSeekToPreviousPositionMs(maxSeekToPreviousPositionMs)
+
+    private fun Player.Commands.withoutTimelineAccess(): Player.Commands =
+        buildUpon()
+            // Synthetic one-item overrides cannot safely merge with a controller's old delegate timeline.
+            .remove(Player.COMMAND_GET_TIMELINE)
+            .build()
 
     private fun safeDelegateState(): SimpleBasePlayer.State {
         val player = getPlayer()

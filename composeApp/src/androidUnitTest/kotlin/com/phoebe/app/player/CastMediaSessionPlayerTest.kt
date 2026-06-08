@@ -18,6 +18,7 @@ import org.robolectric.annotation.Config
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 @OptIn(UnstableApi::class)
@@ -44,6 +45,7 @@ class CastMediaSessionPlayerTest {
             assertEquals("track-crossfade", player.currentMediaItem?.mediaId)
             assertTrue(player.playWhenReady)
             assertTrue(player.isPlaying)
+            assertFalse(player.isCommandAvailable(Player.COMMAND_GET_TIMELINE))
             assertTrue(player.currentPosition >= 42_000)
             assertEquals(180_000, player.duration)
         } finally {
