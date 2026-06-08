@@ -250,7 +250,7 @@ jobs:
     name: Windows release
     needs: version
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     environment: release
     env:
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
