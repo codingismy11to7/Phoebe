@@ -54,6 +54,7 @@ class AppSettingsRepositoryDesktopTest {
             setScanLibraryOnLaunch(true)
             setNotifyWhenDownloadFinishes(true)
             setPersistEqualizerSettings(true, EqualizerProfile.Default.normalized().withGain(7, 4.5f))
+            setPersistVolumeSettings(true, 0.42f)
             setBlurredArtworkAppearance(false)
         }
         val restored = AppSettingsRepository(db).apply { restore() }
@@ -62,6 +63,8 @@ class AppSettingsRepositoryDesktopTest {
         assertTrue(restored.settings.value.scanLibraryOnLaunch)
         assertTrue(restored.settings.value.notifyWhenDownloadFinishes)
         assertTrue(restored.settings.value.persistEqualizerSettings)
+        assertTrue(restored.settings.value.persistVolumeSettings)
+        assertEquals(0.42f, restored.settings.value.savedVolume)
         assertEquals(4.5f, restored.settings.value.equalizerProfile.gainsDb[7])
         assertFalse(restored.settings.value.blurredArtworkAppearance)
     }

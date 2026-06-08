@@ -1649,9 +1649,15 @@ internal fun ArtistAlbumGrid(albums: List<Album>, gridColumns: Int, onAlbum: (Al
                                 .clip(RoundedCornerShape(12.dp))
                                 .clickable { onAlbum(album) }
                                 .padding(6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            Box(Modifier.fillMaxWidth().aspectRatio(1f)) {
+                            Box(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .widthIn(max = LibraryAlbumGridArtworkMaxSize)
+                                    .aspectRatio(1f),
+                            ) {
                                 ArtworkImage(
                                     album.title,
                                     album.thumbUrl,

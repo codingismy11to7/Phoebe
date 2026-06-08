@@ -115,6 +115,24 @@ internal class CastMediaSessionPlayer(
             }
             return Futures.immediateVoidFuture()
         }
+        when (seekCommand) {
+            Player.COMMAND_SEEK_TO_NEXT,
+            Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
+            -> {
+                if (AndroidPlaybackBridge.hasNextTrack?.invoke() == true) {
+                    AndroidPlaybackBridge.onSkipNext?.invoke()
+                    return Futures.immediateVoidFuture()
+                }
+            }
+            Player.COMMAND_SEEK_TO_PREVIOUS,
+            Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
+            -> {
+                if (AndroidPlaybackBridge.hasPreviousTrack?.invoke() == true) {
+                    AndroidPlaybackBridge.onSkipPrevious?.invoke()
+                    return Futures.immediateVoidFuture()
+                }
+            }
+        }
         return super.handleSeek(mediaItemIndex, positionMs, seekCommand)
     }
 
@@ -207,9 +225,11 @@ internal fun SimpleBasePlayer.State.withPhoebeQueueNavigationCommands(
     if (!hasNext && !hasPrevious) return this
     val commands = availableCommands.buildUpon().apply {
         if (hasNext) {
+            add(Player.COMMAND_SEEK_TO_NEXT)
             add(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
         }
         if (hasPrevious) {
+            add(Player.COMMAND_SEEK_TO_PREVIOUS)
             add(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
         }
     }.build()

@@ -747,15 +747,24 @@ private fun MobileAlbumCard(
             .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = { onAlbum(album) })
             .padding(6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        ArtworkImage(
-            album.title,
-            album.thumbUrl,
-            Modifier.fillMaxWidth().aspectRatio(1f).sharedArtworkTransition("album:${album.id}"),
-            radius = 10.dp,
-            elevated = false,
-        )
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .widthIn(max = LibraryAlbumGridArtworkMaxSize)
+                .aspectRatio(1f)
+                .sharedArtworkTransition("album:${album.id}"),
+        ) {
+            ArtworkImage(
+                album.title,
+                album.thumbUrl,
+                Modifier.fillMaxSize(),
+                radius = 10.dp,
+                elevated = false,
+            )
+        }
         Column(verticalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.padding(horizontal = 2.dp)) {
             Text(
                 album.title,

@@ -291,6 +291,7 @@ private fun PhoebeRootStateHolder(
     val tracksLoading by state.tracksLoading.collectAsState()
     val supportedCollectionEntries = remember(session) { session.supportedCollectionEntries().toSet() }
     val shellPlayback by state.shellPlayback.collectAsState()
+    val playerTransport by state.playerTransport.collectAsState()
     val playerQueue by state.playerQueue.collectAsState()
     val musicAssistantRemotePlayback by state.musicAssistantRemotePlayback.collectAsState()
     val cast by state.cast.collectAsState()
@@ -969,13 +970,17 @@ private fun PhoebeRootStateHolder(
             val wideDesktop = maxWidth >= 1280.dp
             CompositionLocalProvider(LocalPlaylistDragEnabled provides !compact) {
             val mergesTitleBar = LocalDesktopMergesTitleBar.current
-            val desktopCompactTopPadding = if (compact && isDesktopPlatform()) 22.dp else 0.dp
             val shellModifier = if (compact) {
-                Modifier
+                val base = Modifier
                     .fillMaxSize()
                     .background(PhoebeUi.shellTop)
-                    .statusBarsPadding()
-                    .padding(top = desktopCompactTopPadding)
+                if (isDesktopPlatform() && mergesTitleBar) {
+                    // Main.kt already places content below the custom title bar; status-bar
+                    // insets on Windows would leave an unpainted strip with transparent windows.
+                    base
+                } else {
+                    base.statusBarsPadding()
+                }
             } else {
                 val shellInsets = if (mergesTitleBar) {
                     WindowInsets.safeDrawing.only(
@@ -1505,6 +1510,7 @@ private fun PhoebeRootStateHolder(
                     ),
                     playbackState = PlaybackUiState(
                         shellPlayback = shellPlayback,
+                        playerTransport = playerTransport,
                         track = currentTrack,
                         upNext = upNext,
                         currentIndex = currentIndex,
@@ -1700,6 +1706,7 @@ private fun PhoebeRootStateHolder(
                         onScanLibraryOnLaunch = state::setScanLibraryOnLaunch,
                         onNotifyWhenDownloadFinishes = state::setNotifyWhenDownloadFinishes,
                         onPersistEqualizerSettings = state::setPersistEqualizerSettings,
+                        onPersistVolumeSettings = state::setPersistVolumeSettings,
                         onVisualizerPreset = state::setNowPlayingVisualizerPreset,
                         onBlurredArtworkAppearance = state::setBlurredArtworkAppearance,
                         onDownloadDirectory = state::setDownloadDirectory,

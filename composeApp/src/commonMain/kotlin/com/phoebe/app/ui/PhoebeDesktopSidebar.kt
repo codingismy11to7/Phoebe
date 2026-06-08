@@ -30,7 +30,6 @@ import org.jetbrains.compose.resources.painterResource
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
@@ -234,7 +233,7 @@ internal fun Sidebar(
                         .size(32.dp)
                         .clip(CircleShape)
                         .background(PhoebeUpdateBlue.copy(alpha = if (updateInstalling) 0.10f else 0.16f))
-                        .clickable(enabled = !updateInstalling, onClick = onInstallUpdate),
+                        .phoebeClickable(enabled = !updateInstalling, onClick = onInstallUpdate),
                     contentAlignment = Alignment.Center,
                 ) {
                     if (installingUpdateState != null) {
@@ -318,7 +317,7 @@ internal fun Sidebar(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(10.dp))
-                    .clickable { profileExpanded = !profileExpanded }
+                    .phoebeClickable { profileExpanded = !profileExpanded }
                     .background(PhoebeUi.subtleFill)
                     .padding(horizontal = 8.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -347,7 +346,7 @@ internal fun Sidebar(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(8.dp))
-                            .clickable {
+                            .phoebeClickable {
                                 profileExpanded = false
                                 onNavigate(BrowseSection.Settings)
                             }
@@ -399,7 +398,7 @@ internal fun Sidebar(
                                     fontSize = 11.sp,
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(6.dp))
-                                        .clickable { onToggleLocalFolder(folder.id, !folder.enabled) }
+                                        .phoebeClickable { onToggleLocalFolder(folder.id, !folder.enabled) }
                                         .padding(horizontal = 6.dp, vertical = 4.dp),
                                 )
                                 Text(
@@ -408,7 +407,7 @@ internal fun Sidebar(
                                     fontSize = 11.sp,
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(6.dp))
-                                        .clickable { onRemoveLocalFolder(folder.id) }
+                                        .phoebeClickable { onRemoveLocalFolder(folder.id) }
                                         .padding(horizontal = 6.dp, vertical = 4.dp),
                                 )
                             }
@@ -466,11 +465,11 @@ private fun SidebarPlaylistDropRow(
             .draggablePlaylist(playlist)
             .playlistDropTarget(playlist)
             .clip(RoundedCornerShape(10.dp))
-            .background(if (isHovered) PhoebeUi.accentLight.copy(alpha = 0.32f) else Color.Transparent)
+            .background(if (isHovered) PhoebeUi.accentLight.copy(alpha = 0.32f) else PhoebeUi.sidebar)
             .border(
                 BorderStroke(
                     width = if (isHovered) 1.5.dp else 0.dp,
-                    color = if (isHovered) PhoebeUi.accentLight else Color.Transparent,
+                    color = if (isHovered) PhoebeUi.accentLight else PhoebeUi.sidebar,
                 ),
                 RoundedCornerShape(10.dp),
             )
@@ -512,8 +511,8 @@ internal fun NavRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
-            .clickable(enabled = enabled, onClick = onClick)
-            .background(if (showActive) PhoebeUi.elevatedFill else Color.Transparent)
+            .phoebeClickable(enabled = enabled, onClick = onClick)
+            .background(if (showActive) PhoebeUi.elevatedFill else PhoebeUi.sidebar)
             .padding(horizontal = 8.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -540,8 +539,8 @@ internal fun PlaylistRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .background(if (active) PhoebeUi.accent.copy(alpha = 0.09f) else Color.Transparent)
+            .phoebeCombinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .background(if (active) PhoebeUi.accent.copy(alpha = 0.09f) else PhoebeUi.sidebar)
             .padding(2.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),

@@ -108,6 +108,7 @@ internal class BorderlessWindowProcedure(
 ) : WindowProc {
 
     private val defaultProc: LONG_PTR = subclass()
+    private var cachedWindowRect: RECT? = null
 
     private fun subclass(): LONG_PTR {
         val previous = runCatching { user32.SetWindowLongPtr(hwnd, GWLP_WNDPROC, this) }
@@ -135,6 +136,10 @@ internal class BorderlessWindowProcedure(
 
     override fun callback(hWnd: HWND, uMsg: Int, wParam: WPARAM, lParam: LPARAM): LRESULT =
         when (uMsg) {
+            WM_SIZE, WM_MOVE, WM_WINDOWPOSCHANGED -> {
+                cachedWindowRect = null
+                callDefault(hWnd, uMsg, wParam, lParam)
+            }
             WM_NCCALCSIZE -> onNcCalcSize(hWnd, uMsg, wParam, lParam)
             WM_NCHITTEST -> onNcHitTest(lParam)
             else -> callDefault(hWnd, uMsg, wParam, lParam)
@@ -159,13 +164,20 @@ internal class BorderlessWindowProcedure(
         return LRESULT(0)
     }
 
+    private fun windowRect(): RECT? {
+        cachedWindowRect?.let { return it }
+        val rect = RECT()
+        if (!user32.GetWindowRect(hwnd, rect)) return null
+        cachedWindowRect = rect
+        return rect
+    }
+
     private fun onNcHitTest(lParam: LPARAM): LRESULT {
         if (WindowsFrameStateSync.isMaximized(user32, hwnd)) return LRESULT(HTCLIENT.toLong())
         val packed = lParam.toInt()
         val x = (packed and 0xFFFF).toShort().toInt()
         val y = ((packed ushr 16) and 0xFFFF).toShort().toInt()
-        val rect = RECT()
-        if (!user32.GetWindowRect(hwnd, rect)) return LRESULT(HTCLIENT.toLong())
+        val rect = windowRect() ?: return LRESULT(HTCLIENT.toLong())
         val border = WindowsWindowMetrics.resizeBorder(user32)
         val onLeft = x < rect.left + border
         val onRight = x >= rect.right - border
@@ -200,6 +212,9 @@ internal class BorderlessWindowProcedure(
         const val SWP_NOACTIVATE = 0x0010
         const val SWP_FRAMECHANGED = 0x0020
 
+        const val WM_SIZE = 0x0005
+        const val WM_MOVE = 0x0003
+        const val WM_WINDOWPOSCHANGED = 0x0047
         const val WM_NCCALCSIZE = 0x0083
         const val WM_NCHITTEST = 0x0084
 

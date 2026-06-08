@@ -28,6 +28,7 @@ import com.phoebe.app.domain.PlexRadioStation
 import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.PlayerState
+import com.phoebe.app.domain.PlayerTransportState
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.ShellPlaybackState
 import com.phoebe.app.domain.Track
@@ -53,6 +54,7 @@ internal data class DesktopShellState(
 
 internal data class PlaybackUiState(
     val shellPlayback: ShellPlaybackState,
+    val playerTransport: PlayerTransportState = PlayerTransportState(),
     val player: PlayerState = PlayerState(),
     val track: Track?,
     val upNext: List<Track>,
@@ -207,6 +209,7 @@ internal data class SettingsActions(
     val onScanLibraryOnLaunch: (Boolean) -> Unit,
     val onNotifyWhenDownloadFinishes: (Boolean) -> Unit,
     val onPersistEqualizerSettings: (Boolean) -> Unit = {},
+    val onPersistVolumeSettings: (Boolean) -> Unit = {},
     val onVisualizerPreset: (NowPlayingVisualizerPreset) -> Unit = {},
     val onBlurredArtworkAppearance: (Boolean) -> Unit = {},
     val onDownloadDirectory: (String?) -> Unit,

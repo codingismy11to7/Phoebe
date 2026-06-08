@@ -161,6 +161,7 @@ import com.phoebe.app.domain.PlexRadioStation
 import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.PlayerState
+import com.phoebe.app.domain.PlayerTransportState
 import com.phoebe.app.domain.RecentSearchItem
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.ShellPlaybackState
@@ -388,6 +389,11 @@ internal fun PhoebeDesktopScreenshotScenario(
                 currentTrack = fixture.currentTrack,
                 isPlaying = true,
                 isBuffering = false,
+            ),
+            playerTransport = PlayerTransportState(
+                shuffle = true,
+                repeat = RepeatMode.All,
+                volume = 0.72f,
             ),
             player = PlayerState(
                 queue = listOfNotNull(fixture.currentTrack) + fixture.upNext,

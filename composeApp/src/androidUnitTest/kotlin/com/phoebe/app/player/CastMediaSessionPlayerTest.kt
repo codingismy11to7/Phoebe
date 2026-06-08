@@ -49,6 +49,26 @@ class CastMediaSessionPlayerTest {
     }
 
     @Test
+    fun delegateRoutesSkipNextToPhoebeQueueWhenAppHasMoreTracks() {
+        val player = CastMediaSessionPlayer(FakeSessionDelegate())
+        var skipNextCalls = 0
+        val previousHasNext = AndroidPlaybackBridge.hasNextTrack
+        val previousSkipNext = AndroidPlaybackBridge.onSkipNext
+        try {
+            AndroidPlaybackBridge.hasNextTrack = { true }
+            AndroidPlaybackBridge.onSkipNext = { skipNextCalls++ }
+
+            player.seekToNext()
+
+            assertEquals(1, skipNextCalls)
+        } finally {
+            AndroidPlaybackBridge.hasNextTrack = previousHasNext
+            AndroidPlaybackBridge.onSkipNext = previousSkipNext
+            player.release()
+        }
+    }
+
+    @Test
     fun localStateRoutesSessionControlsToLocalCallbacks() {
         val player = CastMediaSessionPlayer(FakeSessionDelegate())
         var pauseCalls = 0

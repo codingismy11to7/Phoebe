@@ -111,8 +111,17 @@ val aarch64C1OsrWorkaroundJvmArgs = if (usesJvmWithAarch64C1OsrBug()) {
 
 fun windowsSkikoJvmArgs(): List<String> {
     if (!System.getProperty("os.name").orEmpty().lowercase().contains("win")) return emptyList()
-    // Skiko defaults to Direct3D on Windows, which GeForce Experience often treats like a game.
-    return listOf("-Dskiko.renderApi=OPENGL")
+    val renderApi = System.getenv("PHOEBE_SKIKO_RENDER_API")
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?: System.getProperty("phoebe.skiko.renderApi")
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+    return when (renderApi?.uppercase()) {
+        "OPENGL", "DIRECT3D", "SOFTWARE", "SOFTWARE_COMPAT" -> listOf("-Dskiko.renderApi=${renderApi.uppercase()}")
+        "ANGLE", null -> listOf("-Dskiko.rendering.angle.enabled=true")
+        else -> listOf("-Dskiko.rendering.angle.enabled=true")
+    }
 }
 
 plugins {
@@ -288,6 +297,10 @@ kotlin {
         }
         desktopMain.dependencies {
             implementation("org.jetbrains.compose.desktop:desktop-jvm-$composeDesktopTarget:${libs.versions.compose.get()}")
+            if (composeDesktopTarget.startsWith("windows")) {
+                // ANGLE backend: more stable than raw D3D12/OpenGL-in-Swing on many Windows GPUs.
+                implementation("org.jetbrains.skiko:skiko-awt-runtime-angle-$composeDesktopTarget:0.144.6")
+            }
             implementation(libs.jnativehook)
             implementation(libs.jna)
             implementation(libs.jna.platform)

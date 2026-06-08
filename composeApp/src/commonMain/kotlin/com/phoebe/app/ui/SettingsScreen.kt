@@ -70,6 +70,7 @@ import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.providerLabel
 import com.phoebe.app.platform.PhoebeBuildInfo
 import com.phoebe.app.platform.SecureCredentialAvailability
+import com.phoebe.app.platform.isDesktopPlatform
 import com.phoebe.app.platform.openExternalUrl
 import com.phoebe.app.platform.rememberPickDownloadDirectory
 import kotlin.math.roundToInt
@@ -107,6 +108,7 @@ internal fun SettingsDesktopView(
     onScanLibraryOnLaunch: (Boolean) -> Unit,
     onNotifyWhenDownloadFinishes: (Boolean) -> Unit,
     onPersistEqualizerSettings: (Boolean) -> Unit = {},
+    onPersistVolumeSettings: (Boolean) -> Unit = {},
     onVisualizerPreset: (NowPlayingVisualizerPreset) -> Unit = {},
     onBlurredArtworkAppearance: (Boolean) -> Unit = {},
     onHomeSections: (List<HomeSection>) -> Unit,
@@ -180,6 +182,7 @@ internal fun SettingsDesktopView(
                         onCrossfadeSeconds = onCrossfadeSeconds,
                         onScanLibraryOnLaunch = onScanLibraryOnLaunch,
                         onPersistEqualizerSettings = onPersistEqualizerSettings,
+                        onPersistVolumeSettings = onPersistVolumeSettings,
                     )
                     SettingsCategory.Account -> AccountSettingsCard(
                         session = session,
@@ -233,6 +236,7 @@ internal fun SettingsMobileView(
     onScanLibraryOnLaunch: (Boolean) -> Unit,
     onNotifyWhenDownloadFinishes: (Boolean) -> Unit,
     onPersistEqualizerSettings: (Boolean) -> Unit = {},
+    onPersistVolumeSettings: (Boolean) -> Unit = {},
     onVisualizerPreset: (NowPlayingVisualizerPreset) -> Unit = {},
     onBlurredArtworkAppearance: (Boolean) -> Unit = {},
     onHomeSections: (List<HomeSection>) -> Unit,
@@ -294,6 +298,7 @@ internal fun SettingsMobileView(
             onCrossfadeSeconds = onCrossfadeSeconds,
             onScanLibraryOnLaunch = onScanLibraryOnLaunch,
             onPersistEqualizerSettings = onPersistEqualizerSettings,
+            onPersistVolumeSettings = onPersistVolumeSettings,
             compact = true,
         )
         SectionLabel("DOWNLOADS", PhoebeUi.accentLight)
@@ -528,6 +533,7 @@ private fun AudioPlaybackSettingsCard(
     onCrossfadeSeconds: (Int) -> Unit,
     onScanLibraryOnLaunch: (Boolean) -> Unit,
     onPersistEqualizerSettings: (Boolean) -> Unit,
+    onPersistVolumeSettings: (Boolean) -> Unit = {},
     compact: Boolean = false,
 ) {
     var localCrossfade by remember(settings.crossfadeSeconds) { mutableIntStateOf(settings.crossfadeSeconds) }
@@ -566,6 +572,14 @@ private fun AudioPlaybackSettingsCard(
             checked = settings.persistEqualizerSettings,
             onCheckedChange = onPersistEqualizerSettings,
         )
+        if (isDesktopPlatform()) {
+            SettingsSwitchRow(
+                title = "Remember volume",
+                subtitle = "Restore the transport volume slider after app restart",
+                checked = settings.persistVolumeSettings,
+                onCheckedChange = onPersistVolumeSettings,
+            )
+        }
         SettingsSwitchRow(
             title = "Scan library on launch",
             subtitle = "Refresh local folders when Phoebe starts",
