@@ -46,6 +46,8 @@ import com.phoebe.app.domain.belongsToProvider
 import com.phoebe.app.domain.hasPlayableSource
 import com.phoebe.app.domain.isLocalMediaPlayback
 import com.phoebe.app.domain.isLocalPlaylist
+import com.phoebe.app.domain.playlistEntryKey
+import com.phoebe.app.domain.supportsTrackRemoval
 import com.phoebe.app.domain.isLikedSongsPlaylist
 import com.phoebe.app.domain.isEmbyFamily
 import com.phoebe.app.domain.isJellyfin
@@ -4906,6 +4908,119 @@ class CatalogRepository(
             return false
         }
         return synced
+    }
+
+    suspend fun removeTracksFromPlaylist(
+        session: PlexSession?,
+        playlist: Playlist,
+        tracks: List<Track>,
+    ): Boolean {
+        if (tracks.isEmpty()) return true
+        if (!playlist.supportsTrackRemoval()) return false
+        val playlistId = playlist.id
+        var snapshot = mutableCatalog.value
+        var existing = snapshot.tracksByParent[playlistId].orEmpty()
+        if (playlistId.startsWith("plex:") && tracks.any { it.playlistItemId == null }) {
+            runCatching {
+                refetchPlaylistTracksFromPlex(session, playlist, showRefreshing = false)
+            }.onFailure { error ->
+                PhoebeLog.d("CatalogRepository") {
+                    "removeTracksFromPlaylist Plex refetch failed for '${playlist.title}': ${error.message}"
+                }
+            }
+            snapshot = mutableCatalog.value
+            existing = snapshot.tracksByParent[playlistId].orEmpty()
+        }
+        val removeKeys = tracks.map { it.playlistEntryKey() }.toSet()
+        val toRemove = existing.filter { it.playlistEntryKey() in removeKeys }
+        if (toRemove.isEmpty()) return false
+        val updated = existing.filterNot { it.playlistEntryKey() in removeKeys }
+        publish(
+            snapshot.copy(
+                playlists = snapshot.playlists.map {
+                    if (it.id == playlistId) it.copy(trackCount = updated.size) else it
+                },
+                tracksByParent = snapshot.tracksByParent + (playlistId to updated),
+            ),
+            persist = false,
+        )
+        runCatalogDbWrite { persistPlaylistTracks(mutableCatalog.value, playlistId) }
+        val synced = syncRemovedPlaylistTracks(session, playlist, toRemove, updated)
+        if (!synced && !playlist.isLocalPlaylist()) {
+            val current = mutableCatalog.value
+            publish(
+                current.copy(
+                    playlists = current.playlists.map {
+                        if (it.id == playlistId) snapshot.playlists.firstOrNull { p -> p.id == playlistId }?.copy(trackCount = existing.size)
+                            ?: it.copy(trackCount = existing.size)
+                        else it
+                    },
+                    tracksByParent = current.tracksByParent + (playlistId to existing),
+                ),
+                persist = false,
+            )
+            runCatalogDbWrite { persistPlaylistTracks(mutableCatalog.value, playlistId) }
+            return false
+        }
+        if (playlist.isLocalPlaylist()) {
+            publish(mutableCatalog.value, persist = true)
+        }
+        return synced
+    }
+
+    private suspend fun syncRemovedPlaylistTracks(
+        session: PlexSession?,
+        playlist: Playlist,
+        removedTracks: List<Track>,
+        updatedTracks: List<Track>,
+    ): Boolean {
+        if (playlist.isLocalPlaylist()) return true
+        val remotePrefix = playlist.remoteProviderPrefix() ?: return false
+        if (remotePrefix == "plex") {
+            if (session?.supportsPlexPlaylists() != true) return false
+            val server = session.selectedServer ?: return false
+            val token = session.serverAuthToken() ?: return false
+            val playlistRating = plexRatingKey(playlist.id) ?: return false
+            val itemIds = removedTracks.mapNotNull { it.playlistItemId }
+            if (itemIds.isEmpty()) return false
+            return runCatching {
+                plexClient.removePlaylistItems(server, token, playlistRating, itemIds)
+            }.onFailure { error ->
+                PhoebeLog.d("CatalogRepository") {
+                    "removeTracksFromPlaylist Plex sync failed for '${playlist.title}': ${error.message}"
+                }
+            }.isSuccess
+        }
+        if (session?.providerType?.catalogPrefix != remotePrefix || session.supportsRemotePlaylists() != true) return false
+        if (session.isEmbyFamily()) {
+            val server = session.selectedServer ?: return false
+            val userId = session.userId ?: return false
+            val remoteClient = if (remotePrefix == "emby") embyClient else jellyfinClient
+            val entryIds = removedTracks.map { track ->
+                track.playlistItemId?.toString()
+                    ?: track.id.removePrefix("$remotePrefix:")
+            }
+            return runCatching {
+                remoteClient.removePlaylistItems(
+                    server = server,
+                    token = session.token,
+                    userId = userId,
+                    playlistId = playlist.id.removePrefix("$remotePrefix:"),
+                    entryIds = entryIds,
+                )
+            }.onFailure { error ->
+                PhoebeLog.d("CatalogRepository") {
+                    "removeTracksFromPlaylist $remotePrefix sync failed for '${playlist.title}': ${error.message}"
+                }
+            }.isSuccess
+        }
+        return runCatching {
+            providerRegistry.adapterFor(session)?.replacePlaylistTracks(session, playlist, updatedTracks) == true
+        }.onFailure { error ->
+            PhoebeLog.d("CatalogRepository") {
+                "removeTracksFromPlaylist $remotePrefix sync failed for '${playlist.title}': ${error.message}"
+            }
+        }.getOrDefault(false)
     }
 
     private suspend fun syncMovedPlaylistTrack(

@@ -154,6 +154,7 @@ import com.phoebe.app.domain.isLocalMediaPlayback
 import com.phoebe.app.domain.isLikedSongsPlaylist
 import com.phoebe.app.domain.isRemoteLibraryTrack
 import com.phoebe.app.domain.supportsPlexPlaylists
+import com.phoebe.app.domain.supportsTrackRemoval
 import com.phoebe.app.platform.createPlatformHttpClient
 import com.phoebe.app.platform.currentTimeMs
 import com.phoebe.app.platform.prefersReducedArtworkEffects
@@ -414,11 +415,31 @@ internal fun DesktopContent(
                 val playlistActions = LocalPlaylistActions.current
                 var playlistSortBy by remember(selectedPlaylist.id) { mutableStateOf(LibrarySortBy.PlaylistOrder) }
                 var playlistAscending by remember(selectedPlaylist.id) { mutableStateOf(true) }
+                var editModeEnabled by remember(selectedPlaylist.id) { mutableStateOf(false) }
+                var selectedTrackKeys by remember(selectedPlaylist.id) { mutableStateOf(setOf<String>()) }
+                var confirmRemove by remember(selectedPlaylist.id) { mutableStateOf(false) }
+                LaunchedEffect(editModeEnabled) {
+                    if (!editModeEnabled) selectedTrackKeys = emptySet()
+                }
                 val sortedPlaylistTracks = remember(playlistTracks, playlistSortBy, playlistAscending) {
                     sortTracksForLibrary(playlistTracks, playlistSortBy, playlistAscending)
                 }
                 val filteredPlaylistTracks = remember(sortedPlaylistTracks, searchQuery) {
                     filterTracksByQuery(sortedPlaylistTracks, searchQuery)
+                }
+                val editModeAvailable = filteredPlaylistTracks.isNotEmpty() &&
+                    selectedPlaylist.supportsTrackRemoval()
+                val editEnabled = editModeEnabled && editModeAvailable
+                val selectedTracks = remember(filteredPlaylistTracks, selectedTrackKeys) {
+                    filteredPlaylistTracks.filter { it.playlistRemovalKey() in selectedTrackKeys }
+                }
+                val toggleTrackSelection = { track: Track ->
+                    val key = track.playlistRemovalKey()
+                    selectedTrackKeys = if (key in selectedTrackKeys) {
+                        selectedTrackKeys - key
+                    } else {
+                        selectedTrackKeys + key
+                    }
                 }
                 val playFilteredPlaylistTracks: (List<Track>, Int) -> Unit = { visible, visibleIndex ->
                     val sourceTracks = if (
@@ -459,16 +480,39 @@ internal fun DesktopContent(
                                 else -> "Song name"
                             }
                         },
-                        onSortBy = { playlistSortBy = it },
+                        onSortBy = {
+                            playlistSortBy = it
+                            if (it != LibrarySortBy.PlaylistOrder) editModeEnabled = false
+                        },
                         ascending = playlistAscending,
-                        onAscending = { playlistAscending = it },
+                        onAscending = {
+                            playlistAscending = it
+                            if (!it) editModeEnabled = false
+                        },
                         columns = libraryUi.columns,
                         onColumns = onLibraryColumns,
+                        editMode = editModeEnabled,
+                        editModeAvailable = editModeAvailable,
+                        onEditMode = { enabled ->
+                            editModeEnabled = enabled
+                            if (!enabled) selectedTrackKeys = emptySet()
+                        },
                         actions = {
                             DownloadActionButton("Download Playlist", sortedPlaylistTracks) { onDownloadPlaylist(selectedPlaylist) }
                             PlaylistExportMenu(playlist = selectedPlaylist)
                         },
                     )
+                    if (editEnabled) {
+                        PlaylistEditActionBar(
+                            selectedCount = selectedTrackKeys.size,
+                            totalCount = filteredPlaylistTracks.size,
+                            onRemove = { confirmRemove = true },
+                            onSelectAll = {
+                                selectedTrackKeys = filteredPlaylistTracks.map { it.playlistRemovalKey() }.toSet()
+                            },
+                            onClearSelection = { selectedTrackKeys = emptySet() },
+                        )
+                    }
                     TrackList(
                         tracks = filteredPlaylistTracks,
                         empty = if (searchQuery.isNotBlank()) {
@@ -485,13 +529,32 @@ internal fun DesktopContent(
                         onMoveTrack = if (
                             playlistSortBy == LibrarySortBy.PlaylistOrder &&
                             playlistAscending &&
-                            searchQuery.isBlank()
+                            searchQuery.isBlank() &&
+                            !editEnabled
                         ) {
                             { from, to -> playlistActions.onMovePlaylistTrack(selectedPlaylist, from, to) }
                         } else {
                             null
                         },
+                        editModeEnabled = editEnabled,
+                        selectedTrackKeys = selectedTrackKeys,
+                        onToggleTrackSelection = toggleTrackSelection,
                     )
+                    if (confirmRemove) {
+                        val count = selectedTracks.size
+                        ConfirmDeleteDownloadsDialog(
+                            title = "Remove from playlist?",
+                            body = "Remove $count ${if (count == 1) "song" else "songs"} from ${selectedPlaylist.title}?",
+                            confirmLabel = "Remove",
+                            onDismiss = { confirmRemove = false },
+                            onConfirm = {
+                                playlistActions.onRemovePlaylistTracks(selectedPlaylist, selectedTracks)
+                                confirmRemove = false
+                                editModeEnabled = false
+                                selectedTrackKeys = emptySet()
+                            },
+                        )
+                    }
                 }
             }
             section == BrowseSection.Search -> {

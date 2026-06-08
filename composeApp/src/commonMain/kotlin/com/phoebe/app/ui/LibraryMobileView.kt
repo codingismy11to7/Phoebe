@@ -946,6 +946,9 @@ internal fun MobileSongRow(
     onDownload: () -> Unit,
     modifier: Modifier = Modifier,
     leadingHandle: (@Composable () -> Unit)? = null,
+    selectionMode: Boolean = false,
+    selected: Boolean = false,
+    onToggleSelection: (() -> Unit)? = null,
 ) {
     var menuExpanded by remember(track.id) { mutableStateOf(false) }
     val likeActions = LocalLikeActions.current
@@ -968,16 +971,29 @@ internal fun MobileSongRow(
             .playTrackTarget(track)
             .clip(RoundedCornerShape(12.dp))
             .combinedClickable(
-                onClick = onPlay,
-                onLongClick = { menuExpanded = true },
+                onClick = {
+                    if (selectionMode) {
+                        onToggleSelection?.invoke()
+                    } else {
+                        onPlay()
+                    }
+                },
+                onLongClick = if (selectionMode) null else ({ menuExpanded = true }),
             )
             .background(
-                if (isNowPlaying) PhoebeUi.accent.copy(alpha = 0.14f) else Color.Transparent,
+                when {
+                    selectionMode && selected -> PhoebeUi.accent.copy(alpha = 0.12f)
+                    isNowPlaying -> PhoebeUi.accent.copy(alpha = 0.14f)
+                    else -> Color.Transparent
+                },
             )
             .padding(horizontal = 6.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        if (selectionMode) {
+            LibraryCheckbox(checked = selected, size = 18)
+        }
         if (leadingHandle != null) {
             leadingHandle()
         }

@@ -517,6 +517,7 @@ internal data class PlaylistActions(
     val playlistsEnabled: Boolean = false,
     val onAddTrackToPlaylist: (Playlist, Track) -> Unit = { _, _ -> },
     val onMovePlaylistTrack: (Playlist, Int, Int) -> Unit = { _, _, _ -> },
+    val onRemovePlaylistTracks: (Playlist, List<Track>) -> Unit = { _, _ -> },
     val onCopyPlaylistToPlaylist: (source: Playlist, target: Playlist) -> Unit = { _, _ -> },
     val onCreatePlaylist: (title: String, initialTracks: List<Track>) -> Unit = { _, _ -> },
     val onRequestCreatePlaylist: (initialTracks: List<Track>) -> Unit = {},

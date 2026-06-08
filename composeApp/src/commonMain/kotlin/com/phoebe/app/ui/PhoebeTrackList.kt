@@ -187,6 +187,9 @@ internal fun TrackList(
     libraryColumns: LibraryColumnVisibility = FullTrackMetadataColumns,
     showLoadingWhenEmpty: Boolean = true,
     onMoveTrack: ((Int, Int) -> Unit)? = null,
+    editModeEnabled: Boolean = false,
+    selectedTrackKeys: Set<String> = emptySet(),
+    onToggleTrackSelection: ((Track) -> Unit)? = null,
 ) {
     if (tracks.isEmpty()) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -200,7 +203,7 @@ internal fun TrackList(
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val useTable = maxWidth >= 640.dp
         val listState = rememberLazyListState()
-        val reorderEnabled = onMoveTrack != null && tracks.size > 1
+        val reorderEnabled = onMoveTrack != null && tracks.size > 1 && !editModeEnabled
         val reorderState = rememberPlaylistTrackReorderState(
             tracks = tracks,
             enabled = reorderEnabled,
@@ -222,14 +225,22 @@ internal fun TrackList(
                     SongsTableHeader(
                         columns = libraryColumns,
                         showLeadingHandle = reorderEnabled || LocalPlaylistDragEnabled.current,
+                        showSelectionColumn = editModeEnabled,
                     )
                 }
                 itemsIndexed(displayTracks, key = { _, track -> track.reorderKey() }, contentType = { _, _ -> "track" }) { index, track ->
+                    val trackKey = track.playlistRemovalKey()
                     SongRow(
                         track = track,
-                        selected = false,
+                        selected = trackKey in selectedTrackKeys,
                         columns = libraryColumns,
-                        onSelect = { onPlayTracks(displayTracks, index) },
+                        onSelect = {
+                            if (editModeEnabled) {
+                                onToggleTrackSelection?.invoke(track)
+                            } else {
+                                onPlayTracks(displayTracks, index)
+                            }
+                        },
                         onPlay = { onPlayTracks(displayTracks, index) },
                         onAddToUpNext = { onAddToUpNext(track) },
                         onDownload = { onDownload(track) },
@@ -239,14 +250,22 @@ internal fun TrackList(
                         } else {
                             null
                         },
+                        selectionMode = editModeEnabled,
                     )
                 }
             } else {
                 itemsIndexed(displayTracks, key = { _, track -> track.reorderKey() }, contentType = { _, _ -> "track" }) { index, track ->
+                    val trackKey = track.playlistRemovalKey()
                     ContentTrackRow(
                         track = track,
                         libraryColumns = libraryColumns,
-                        onPlay = { onPlayTracks(displayTracks, index) },
+                        onPlay = {
+                            if (editModeEnabled) {
+                                onToggleTrackSelection?.invoke(track)
+                            } else {
+                                onPlayTracks(displayTracks, index)
+                            }
+                        },
                         onAddToUpNext = { onAddToUpNext(track) },
                         onDownload = { onDownload(track) },
                         modifier = if (reorderEnabled) reorderState.itemModifier(track) else Modifier.animateItem(),
@@ -255,6 +274,8 @@ internal fun TrackList(
                         } else {
                             null
                         },
+                        selectionMode = editModeEnabled,
+                        selected = trackKey in selectedTrackKeys,
                     )
                 }
             }
@@ -279,6 +300,8 @@ internal fun ContentTrackRow(
     sharedKey: String? = null,
     leadingHandle: (@Composable () -> Unit)? = null,
     showPlaylistDragHandle: Boolean = true,
+    selectionMode: Boolean = false,
+    selected: Boolean = false,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     val cols = libraryColumns
@@ -306,7 +329,7 @@ internal fun ContentTrackRow(
         }
     }
     val playlistDragEnabled = LocalPlaylistDragEnabled.current
-    val rowDragEnabled = playlistDragEnabled && leadingHandle == null
+    val rowDragEnabled = playlistDragEnabled && leadingHandle == null && !selectionMode
     val dragHandleVisible = rowDragEnabled && showPlaylistDragHandle
     Box(if (rowDragEnabled) modifier.draggableSong(track, immediate = !dragHandleVisible) else modifier) {
         Row(
@@ -314,14 +337,21 @@ internal fun ContentTrackRow(
                 .fillMaxWidth()
                 .playTrackTarget(track)
                 .clip(RoundedCornerShape(10.dp))
-                .combinedClickable(onClick = onPlay, onLongClick = { menuExpanded = true })
+                .combinedClickable(onClick = onPlay, onLongClick = if (selectionMode) null else ({ menuExpanded = true }))
                 .background(
-                    if (isNowPlaying) PhoebeUi.accent.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.045f),
+                    when {
+                        selectionMode && selected -> PhoebeUi.accent.copy(alpha = 0.12f)
+                        isNowPlaying -> PhoebeUi.accent.copy(alpha = 0.12f)
+                        else -> Color.White.copy(alpha = 0.045f)
+                    },
                 )
                 .padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            if (selectionMode) {
+                LibraryCheckbox(checked = selected, size = 18)
+            }
             if (leadingHandle != null) {
                 leadingHandle()
             } else if (dragHandleVisible) {
@@ -854,6 +884,7 @@ internal fun AddToPlaylistMenuItems(
     track: Track,
     actions: PlaylistActions = LocalPlaylistActions.current,
     onAfter: () -> Unit = {},
+    startExpanded: Boolean = false,
 ) {
     if (!actions.playlistsEnabled) return
     val isLocal = track.canAddToLocalPlaylist()
@@ -866,21 +897,26 @@ internal fun AddToPlaylistMenuItems(
             else -> false
         }
     }
-    var submenuExpanded by remember { mutableStateOf(false) }
-    DropdownMenuItem(
-        text = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Add to Playlist", modifier = Modifier.weight(1f))
-                PhoebeIconView(PhoebeIcon.Forward, tint = PhoebeUi.mutedText, modifier = Modifier.size(14.dp))
-            }
-        },
-        onClick = { submenuExpanded = true },
-    )
-    DropdownMenu(expanded = submenuExpanded, onDismissRequest = { submenuExpanded = false }) {
+    var showPlaylistPicker by remember(track.id, startExpanded) { mutableStateOf(startExpanded) }
+    if (!showPlaylistPicker) {
+        DropdownMenuItem(
+            text = {
+                Row(
+                    modifier = Modifier.widthIn(min = 220.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text("Add to Playlist", modifier = Modifier.weight(1f))
+                    PhoebeIconView(PhoebeIcon.Forward, tint = PhoebeUi.mutedText, modifier = Modifier.size(14.dp))
+                }
+            },
+            onClick = { showPlaylistPicker = true },
+        )
+    } else {
+        AddToPlaylistBackMenuItem(onClick = { showPlaylistPicker = false })
         DropdownMenuItem(
             text = { Text("New playlist…", color = PhoebeUi.accentLight, fontWeight = FontWeight.SemiBold) },
             onClick = {
-                submenuExpanded = false
                 actions.onRequestCreatePlaylist(listOf(track))
                 onAfter()
             },
@@ -899,7 +935,6 @@ internal fun AddToPlaylistMenuItems(
                         }
                     },
                     onClick = {
-                        submenuExpanded = false
                         actions.onAddTrackToPlaylist(playlist, track)
                         onAfter()
                     },
@@ -908,11 +943,28 @@ internal fun AddToPlaylistMenuItems(
         } else {
             DropdownMenuItem(
                 text = { Text("No playlists yet", color = PhoebeUi.mutedText) },
-                onClick = { submenuExpanded = false },
+                onClick = {},
                 enabled = false,
             )
         }
     }
+}
+
+@Composable
+private fun AddToPlaylistBackMenuItem(onClick: () -> Unit) {
+    DropdownMenuItem(
+        text = {
+            Row(
+                modifier = Modifier.widthIn(min = 220.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                PhoebeIconView(PhoebeIcon.Back, tint = PhoebeUi.mutedText, modifier = Modifier.size(14.dp))
+                Text("Add to Playlist", color = PhoebeUi.primaryText, fontWeight = FontWeight.SemiBold)
+            }
+        },
+        onClick = onClick,
+    )
 }
 
 /**
