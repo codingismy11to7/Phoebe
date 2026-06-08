@@ -129,6 +129,11 @@ private class PhoebeRenderersFactory(
     private val diagnostics: PlaybackDiagnostics,
     private val engine: PlaybackEnginePath,
 ) : DefaultRenderersFactory(context) {
+    init {
+        // Recover from hardware codec failures instead of leaving MediaCodec in a fatal state.
+        setEnableDecoderFallback(true)
+    }
+
     override fun buildAudioSink(
         context: Context,
         enableFloatOutput: Boolean,

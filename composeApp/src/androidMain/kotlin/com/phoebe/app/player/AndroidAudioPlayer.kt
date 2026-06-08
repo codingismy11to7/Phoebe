@@ -21,6 +21,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
@@ -81,6 +82,12 @@ private data class PendingPlatformQueueRebase(
     val queue: List<Track>,
     val currentIndex: Int,
     val generation: Int,
+)
+
+private data class CrossfadeOutgoingSetup(
+    val player: Player,
+    val ownedPlayer: ExoPlayer?,
+    val incoming: ExoPlayer,
 )
 
 internal class AndroidAudioPlayer(
@@ -251,7 +258,7 @@ internal class AndroidAudioPlayer(
     }
 
     override fun stopCurrentPlaybackImmediately() {
-        platformLoadJob?.cancel()
+        val priorLoad = platformLoadJob
         platformLoadJob = null
         stopPositionSyncLoop()
         stopBufferingTimeout()
@@ -263,6 +270,8 @@ internal class AndroidAudioPlayer(
         clearLocalMediaSessionState()
         platformStopJob?.cancel()
         platformStopJob = scope.launch {
+            priorLoad?.cancelAndJoin()
+            crossfadeJob?.cancelAndJoin()
             stopAndroidCrossfade()
             controllerMutex.withLock {
                 activeLocalPlayer()?.run {
@@ -410,24 +419,33 @@ internal class AndroidAudioPlayer(
             var incomingOwnedByPlayback = false
             AndroidPlaybackBridge.suppressServiceEndedCallback = true
             try {
-                crossfadeIncomingPlayer?.release()
-                crossfadeIncomingPlayer = null
-                val outgoingOwnedByPlayback = ownedCrossfadePlayer()
-                val outgoing: Player = outgoingOwnedByPlayback ?: activeLocalPlayer() ?: return@launch
-                diagnostics.crossfadeStarted(
-                    engine = PlaybackEnginePath.Media3Crossfade,
-                    outgoingTrackId = state.value.currentTrack?.id,
-                    incomingTrackId = track.id,
-                    durationMs = durationMs,
-                )
-                incoming = AndroidPlaybackDiagnostics.newPlayerBuilder(appContext, PlaybackEnginePath.Media3Crossfade)
-                    .setAudioAttributes(AudioAttributes.DEFAULT, /* handleAudioFocus= */ false)
-                    .build()
-                incoming.volume = 0f
-                incoming.setMediaItem(playbackMediaItem(track, inAppPlayback = true))
-                crossfadeIncomingPlayer = incoming
-                incoming.prepare()
-                incoming.play()
+                val setup = controllerMutex.withLock {
+                    if (!isPlayRequestCurrent(generation)) return@launch
+                    val outgoingOwnedByPlayback = ownedCrossfadePlayer()
+                    val outgoingPlayer: Player = outgoingOwnedByPlayback ?: activeLocalPlayer() ?: return@launch
+                    diagnostics.crossfadeStarted(
+                        engine = PlaybackEnginePath.Media3Crossfade,
+                        outgoingTrackId = state.value.currentTrack?.id,
+                        incomingTrackId = track.id,
+                        durationMs = durationMs,
+                    )
+                    val incomingPlayer = AndroidPlaybackDiagnostics.newPlayerBuilder(appContext, PlaybackEnginePath.Media3Crossfade)
+                        .setAudioAttributes(AudioAttributes.DEFAULT, /* handleAudioFocus= */ false)
+                        .build()
+                    incomingPlayer.volume = 0f
+                    incomingPlayer.setMediaItem(playbackMediaItem(track, inAppPlayback = true))
+                    crossfadeIncomingPlayer = incomingPlayer
+                    incomingPlayer.prepare()
+                    incomingPlayer.play()
+                    CrossfadeOutgoingSetup(
+                        player = outgoingPlayer,
+                        ownedPlayer = outgoingOwnedByPlayback,
+                        incoming = incomingPlayer,
+                    )
+                }
+                incoming = setup.incoming
+                val outgoing = setup.player
+                val outgoingOwnedByPlayback = setup.ownedPlayer
                 if (!waitUntilReady(incoming, generation, CrossfadePrepareTimeoutMs)) return@launch
                 if (!isAndroidCrossfadeTransitionCurrent(generation, incoming)) return@launch
                 if (outgoingOwnedByPlayback == null && activeLocalPlayer() !== outgoing) return@launch
@@ -616,7 +634,7 @@ internal class AndroidAudioPlayer(
         }
     }
 
-    private fun rebasePlatformQueueOnCurrentTrackLocked(
+    private suspend fun rebasePlatformQueueOnCurrentTrackLocked(
         player: Player,
         queue: List<Track>,
         currentIndex: Int,
@@ -667,10 +685,12 @@ internal class AndroidAudioPlayer(
         crossfadeGeneration = -1
         crossfadeOwnedTrackId = null
         AndroidPlaybackBridge.suppressServiceEndedCallback = false
-        crossfadeIncomingPlayer?.release()
+        val incoming = crossfadeIncomingPlayer
         crossfadeIncomingPlayer = null
-        crossfadePlayer?.release()
+        val owned = crossfadePlayer
         crossfadePlayer = null
+        incoming?.release()
+        owned?.release()
         clearLocalMediaSessionState()
     }
 
@@ -790,7 +810,7 @@ internal class AndroidAudioPlayer(
     }
 
     private fun runPlatformLoad(generation: Int, block: suspend (Player) -> Unit) {
-        platformLoadJob?.cancel()
+        val priorLoad = platformLoadJob
         platformStopJob?.cancel()
         platformStopJob = null
         pendingPlatformSeek = null
@@ -806,6 +826,8 @@ internal class AndroidAudioPlayer(
         platformLoadJob = scope.launch {
             var shouldSyncAfterMutation = false
             try {
+                priorLoad?.cancelAndJoin()
+                crossfadeJob?.cancelAndJoin()
                 stopAndroidCrossfade()
                 startPlaybackService()
                 ensureController()
@@ -856,7 +878,7 @@ internal class AndroidAudioPlayer(
         }
     }
 
-    private fun loadQueueOnPlayer(
+    private suspend fun loadQueueOnPlayer(
         player: Player,
         queue: List<Track>,
         targetIndex: Int,
@@ -874,6 +896,8 @@ internal class AndroidAudioPlayer(
         player.pause()
         player.stop()
         player.clearMediaItems()
+        // Let MediaCodec_looper finish releasing before configuring a new decoder.
+        delay(CodecTeardownSettleMs)
         player.volume = effectiveOutputVolume()
         player.setMediaItems(
             windowTracks.map { playbackMediaItem(it, inAppPlayback = true) },
@@ -1398,6 +1422,7 @@ internal class AndroidAudioPlayer(
         const val CrossfadeSteps = 24
         const val CrossfadePrepareTimeoutMs = 5_000L
         const val CrossfadeMinimumFadeMs = 500L
+        const val CodecTeardownSettleMs = 50L
     }
 }
 
