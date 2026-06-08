@@ -153,20 +153,14 @@ internal class CastMediaSessionPlayer(
         durationMs: Long,
         playWhenReadyChangeReason: Int,
     ): SimpleBasePlayer.State {
-        val mediaItem = playbackMediaItem(track, inAppPlayback = true)
-        val itemData = SimpleBasePlayer.MediaItemData.Builder(track.id)
-            .setMediaItem(mediaItem)
-            .setMediaMetadata(mediaItem.mediaMetadata)
-            .setDurationUs(durationMs.takeIf { it > 0L }?.times(1_000L) ?: C.TIME_UNSET)
-            .setIsSeekable(durationMs > 0L)
-            .build()
+        val playlistOverride = mediaSessionOverridePlaylist(track, durationMs)
         val position = positionMs.coerceAtLeast(0L)
         val buffered = bufferedPositionMs
             .coerceAtLeast(position)
             .let { if (durationMs > 0L) it.coerceAtMost(durationMs) else it }
         return mediaSessionOverrideBuilder()
-            .setPlaylist(listOf(itemData))
-            .setCurrentMediaItemIndex(0)
+            .setPlaylist(playlistOverride.playlist)
+            .setCurrentMediaItemIndex(playlistOverride.currentIndex)
             .setCurrentAd(C.INDEX_UNSET, C.INDEX_UNSET)
             .setPlayerError(null)
             .setPlaybackState(
@@ -183,9 +177,49 @@ internal class CastMediaSessionPlayer(
             .build()
     }
 
+    private fun SimpleBasePlayer.State.mediaSessionOverridePlaylist(
+        track: Track,
+        durationMs: Long,
+    ): MediaSessionOverridePlaylist {
+        val delegatePlaylist = getPlaylist()
+        val currentIndex = when {
+            delegatePlaylist.isEmpty() -> 0
+            else -> delegatePlaylist.indexOfFirst { it.mediaItem.mediaId == track.id }
+                .takeIf { it >= 0 }
+                ?: currentMediaItemIndex.takeIf { it in delegatePlaylist.indices }
+                ?: 0
+        }
+        val overrideItem = mediaSessionOverrideItem(
+            track = track,
+            durationMs = durationMs,
+            index = currentIndex,
+        )
+        if (delegatePlaylist.isEmpty()) {
+            return MediaSessionOverridePlaylist(listOf(overrideItem), currentIndex)
+        }
+        return MediaSessionOverridePlaylist(
+            playlist = delegatePlaylist.toMutableList().also { it[currentIndex] = overrideItem },
+            currentIndex = currentIndex,
+        )
+    }
+
+    private fun mediaSessionOverrideItem(
+        track: Track,
+        durationMs: Long,
+        index: Int,
+    ): SimpleBasePlayer.MediaItemData {
+        val mediaItem = playbackMediaItem(track, inAppPlayback = true)
+        return SimpleBasePlayer.MediaItemData.Builder("${track.id}:media-session:$index")
+            .setMediaItem(mediaItem)
+            .setMediaMetadata(mediaItem.mediaMetadata)
+            .setDurationUs(durationMs.takeIf { it > 0L }?.times(1_000L) ?: C.TIME_UNSET)
+            .setIsSeekable(durationMs > 0L)
+            .build()
+    }
+
     private fun SimpleBasePlayer.State.mediaSessionOverrideBuilder(): SimpleBasePlayer.State.Builder =
         SimpleBasePlayer.State.Builder()
-            .setAvailableCommands(availableCommands.withoutTimelineAccess())
+            .setAvailableCommands(availableCommands)
             .setPlaybackSuppressionReason(playbackSuppressionReason)
             .setRepeatMode(repeatMode)
             .setShuffleModeEnabled(shuffleModeEnabled)
@@ -204,12 +238,6 @@ internal class CastMediaSessionPlayer(
             .setSeekBackIncrementMs(seekBackIncrementMs)
             .setSeekForwardIncrementMs(seekForwardIncrementMs)
             .setMaxSeekToPreviousPositionMs(maxSeekToPreviousPositionMs)
-
-    private fun Player.Commands.withoutTimelineAccess(): Player.Commands =
-        buildUpon()
-            // Synthetic one-item overrides cannot safely merge with a controller's old delegate timeline.
-            .remove(Player.COMMAND_GET_TIMELINE)
-            .build()
 
     private fun safeDelegateState(): SimpleBasePlayer.State {
         val player = getPlayer()
@@ -260,6 +288,11 @@ internal class CastMediaSessionPlayer(
     private companion object {
         private const val EmptyPlaylistStateError = "Empty playlist only allowed in STATE_IDLE or STATE_ENDED"
     }
+
+    private data class MediaSessionOverridePlaylist(
+        val playlist: List<SimpleBasePlayer.MediaItemData>,
+        val currentIndex: Int,
+    )
 }
 
 @OptIn(UnstableApi::class)

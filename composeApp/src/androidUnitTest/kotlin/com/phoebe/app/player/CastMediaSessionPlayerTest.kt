@@ -45,7 +45,7 @@ class CastMediaSessionPlayerTest {
             assertEquals("track-crossfade", player.currentMediaItem?.mediaId)
             assertTrue(player.playWhenReady)
             assertTrue(player.isPlaying)
-            assertFalse(player.isCommandAvailable(Player.COMMAND_GET_TIMELINE))
+            assertTrue(player.isCommandAvailable(Player.COMMAND_GET_TIMELINE))
             assertTrue(player.currentPosition >= 42_000)
             assertEquals(180_000, player.duration)
         } finally {
@@ -89,6 +89,40 @@ class CastMediaSessionPlayerTest {
     }
 
     @Test
+    fun localStatePreservesDelegateTimelineWindowForControllerMerges() {
+        val delegate = FakeSessionDelegate()
+        val player = CastMediaSessionPlayer(delegate)
+        val first = testTrack("delegate-first")
+        val second = testTrack("delegate-second")
+
+        try {
+            delegate.setStateForTest(
+                delegateState(
+                    tracks = listOf(first, second),
+                    currentIndex = 0,
+                ).build(),
+            )
+
+            player.updateLocalState(
+                LocalMediaSessionState(
+                    track = second,
+                    isPlaying = true,
+                    isBuffering = false,
+                    positionMs = 10_000,
+                    bufferedPositionMs = 20_000,
+                    durationMs = 180_000,
+                ),
+            )
+
+            assertEquals(2, player.currentTimeline.windowCount)
+            assertEquals(1, player.currentMediaItemIndex)
+            assertEquals("delegate-second", player.currentMediaItem?.mediaId)
+        } finally {
+            player.release()
+        }
+    }
+
+    @Test
     fun localStateDoesNotReplayDelegatePositionDiscontinuity() {
         val delegate = FakeSessionDelegate()
         val player = CastMediaSessionPlayer(delegate)
@@ -123,6 +157,8 @@ class CastMediaSessionPlayerTest {
                     second = testTrack("delegate-second"),
                 ),
             )
+            shadowOf(Looper.getMainLooper()).idle()
+            discontinuityCalls = 0
 
             player.updateLocalState(
                 LocalMediaSessionState(
@@ -134,9 +170,10 @@ class CastMediaSessionPlayerTest {
                     durationMs = 180_000,
                 ),
             )
+            shadowOf(Looper.getMainLooper()).idle()
 
             assertEquals("track-local", player.currentMediaItem?.mediaId)
-            assertEquals(0, player.currentMediaItemIndex)
+            assertEquals(1, player.currentMediaItemIndex)
             assertEquals(0, discontinuityCalls)
         } finally {
             player.release()
@@ -210,6 +247,7 @@ class CastMediaSessionPlayerTest {
 
         fun setStateForTest(state: SimpleBasePlayer.State) {
             this.state = state
+            invalidateState()
         }
 
         override fun handleSetPlayWhenReady(playWhenReady: Boolean): ListenableFuture<*> {
@@ -246,7 +284,25 @@ class CastMediaSessionPlayerTest {
         first: Track,
         second: Track,
     ): SimpleBasePlayer.State {
-        val items = listOf(first, second).map { track ->
+        return delegateState(
+            tracks = listOf(first, second),
+            currentIndex = 1,
+        )
+            .setCurrentAd(C.INDEX_UNSET, C.INDEX_UNSET)
+            .setPlaybackState(Player.STATE_READY)
+            .setPlayWhenReady(true, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
+            .setContentPositionMs(12_000)
+            .setContentBufferedPositionMs(SimpleBasePlayer.PositionSupplier.getConstant(20_000))
+            .setTotalBufferedDurationMs(SimpleBasePlayer.PositionSupplier.ZERO)
+            .setPositionDiscontinuity(Player.DISCONTINUITY_REASON_SKIP, 12_000)
+            .build()
+    }
+
+    private fun delegateState(
+        tracks: List<Track>,
+        currentIndex: Int,
+    ): SimpleBasePlayer.State.Builder {
+        val items = tracks.map { track ->
             val mediaItem = playbackMediaItem(track, inAppPlayback = true)
             SimpleBasePlayer.MediaItemData.Builder(track.id)
                 .setMediaItem(mediaItem)
@@ -258,15 +314,7 @@ class CastMediaSessionPlayerTest {
         return SimpleBasePlayer.State.Builder()
             .setAvailableCommands(Player.Commands.Builder().addAllCommands().build())
             .setPlaylist(items)
-            .setCurrentMediaItemIndex(1)
-            .setCurrentAd(C.INDEX_UNSET, C.INDEX_UNSET)
-            .setPlaybackState(Player.STATE_READY)
-            .setPlayWhenReady(true, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
-            .setContentPositionMs(12_000)
-            .setContentBufferedPositionMs(SimpleBasePlayer.PositionSupplier.getConstant(20_000))
-            .setTotalBufferedDurationMs(SimpleBasePlayer.PositionSupplier.ZERO)
-            .setPositionDiscontinuity(Player.DISCONTINUITY_REASON_SKIP, 12_000)
-            .build()
+            .setCurrentMediaItemIndex(currentIndex)
     }
 
     private fun testTrack(id: String): Track =
