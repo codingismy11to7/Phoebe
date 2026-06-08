@@ -33,6 +33,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
@@ -104,7 +105,7 @@ class PlexPlaybackReporterTest {
 
         try {
             reporter.start(scope, includePeriodicTimeline = false)
-            val changed = async {
+            val changed = async(UnconfinedTestDispatcher(testScheduler)) {
                 reporter.playHistoryChanged.first()
             }
 
@@ -127,6 +128,7 @@ class PlexPlaybackReporterTest {
             )
             advanceUntilIdle()
             timelineStates.awaitSize(2)
+            advanceUntilIdle()
 
             withTimeout(2_000L) {
                 changed.await()
