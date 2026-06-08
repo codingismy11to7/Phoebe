@@ -1,5 +1,7 @@
 package com.phoebe.app.player
 
+import android.os.Handler
+import android.os.Looper
 import androidx.annotation.OptIn
 import androidx.media3.common.C
 import androidx.media3.common.ForwardingSimpleBasePlayer
@@ -15,17 +17,23 @@ import com.phoebe.app.domain.Track
 internal class CastMediaSessionPlayer(
     player: Player,
 ) : ForwardingSimpleBasePlayer(player) {
+    private val sessionLooper = player.applicationLooper
+    private val sessionHandler = Handler(sessionLooper)
     private var castState: CastMediaSessionState? = null
     private var localState: LocalMediaSessionState? = null
 
     fun updateCastState(state: CastMediaSessionState?) {
-        castState = state
-        invalidateState()
+        updateSessionState {
+            castState = state
+            invalidateState()
+        }
     }
 
     fun updateLocalState(state: LocalMediaSessionState?) {
-        localState = state
-        invalidateState()
+        updateSessionState {
+            localState = state
+            invalidateState()
+        }
     }
 
     override fun getState(): SimpleBasePlayer.State {
@@ -211,6 +219,14 @@ internal class CastMediaSessionPlayer(
             .setVolume(volume)
             .setTotalBufferedDurationMs(SimpleBasePlayer.PositionSupplier.ZERO)
             .build()
+
+    private fun updateSessionState(update: () -> Unit) {
+        if (Looper.myLooper() == sessionLooper) {
+            update()
+        } else {
+            sessionHandler.post { update() }
+        }
+    }
 
     private companion object {
         private const val EmptyPlaylistStateError = "Empty playlist only allowed in STATE_IDLE or STATE_ENDED"

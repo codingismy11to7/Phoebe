@@ -10,9 +10,12 @@ import androidx.media3.common.util.UnstableApi
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.phoebe.app.domain.Track
+import org.junit.Assert.assertNull
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -43,6 +46,41 @@ class CastMediaSessionPlayerTest {
             assertTrue(player.isPlaying)
             assertTrue(player.currentPosition >= 42_000)
             assertEquals(180_000, player.duration)
+        } finally {
+            player.release()
+        }
+    }
+
+    @Test
+    fun localStateCanBeUpdatedOffMainThread() {
+        val player = CastMediaSessionPlayer(FakeSessionDelegate())
+        val error = AtomicReference<Throwable?>()
+
+        try {
+            val thread = Thread {
+                runCatching {
+                    player.updateLocalState(
+                        LocalMediaSessionState(
+                            track = testTrack("track-background"),
+                            isPlaying = true,
+                            isBuffering = false,
+                            positionMs = 7_000,
+                            bufferedPositionMs = 8_000,
+                            durationMs = 90_000,
+                        ),
+                    )
+                }.exceptionOrNull()?.let(error::set)
+            }
+
+            thread.start()
+            thread.join()
+            assertNull(error.get())
+
+            shadowOf(Looper.getMainLooper()).idle()
+
+            assertEquals("track-background", player.currentMediaItem?.mediaId)
+            assertTrue(player.playWhenReady)
+            assertEquals(90_000, player.duration)
         } finally {
             player.release()
         }
