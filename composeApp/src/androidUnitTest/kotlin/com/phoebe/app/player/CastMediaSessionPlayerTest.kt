@@ -87,6 +87,61 @@ class CastMediaSessionPlayerTest {
     }
 
     @Test
+    fun localStateDoesNotReplayDelegatePositionDiscontinuity() {
+        val delegate = FakeSessionDelegate()
+        val player = CastMediaSessionPlayer(delegate)
+        val track = testTrack("track-local")
+        var discontinuityCalls = 0
+
+        try {
+            player.updateLocalState(
+                LocalMediaSessionState(
+                    track = track,
+                    isPlaying = true,
+                    isBuffering = false,
+                    positionMs = 10_000,
+                    bufferedPositionMs = 20_000,
+                    durationMs = 180_000,
+                ),
+            )
+            player.addListener(
+                object : Player.Listener {
+                    override fun onPositionDiscontinuity(
+                        oldPosition: Player.PositionInfo,
+                        newPosition: Player.PositionInfo,
+                        reason: Int,
+                    ) {
+                        discontinuityCalls++
+                    }
+                },
+            )
+            delegate.setStateForTest(
+                delegateStateWithPositionDiscontinuity(
+                    first = testTrack("delegate-first"),
+                    second = testTrack("delegate-second"),
+                ),
+            )
+
+            player.updateLocalState(
+                LocalMediaSessionState(
+                    track = track,
+                    isPlaying = true,
+                    isBuffering = false,
+                    positionMs = 10_000,
+                    bufferedPositionMs = 20_000,
+                    durationMs = 180_000,
+                ),
+            )
+
+            assertEquals("track-local", player.currentMediaItem?.mediaId)
+            assertEquals(0, player.currentMediaItemIndex)
+            assertEquals(0, discontinuityCalls)
+        } finally {
+            player.release()
+        }
+    }
+
+    @Test
     fun delegateRoutesSkipNextToPhoebeQueueWhenAppHasMoreTracks() {
         val player = CastMediaSessionPlayer(FakeSessionDelegate())
         var skipNextCalls = 0
@@ -151,6 +206,10 @@ class CastMediaSessionPlayerTest {
 
         override fun getState(): SimpleBasePlayer.State = state
 
+        fun setStateForTest(state: SimpleBasePlayer.State) {
+            this.state = state
+        }
+
         override fun handleSetPlayWhenReady(playWhenReady: Boolean): ListenableFuture<*> {
             state = state.buildUpon()
                 .setPlayWhenReady(playWhenReady, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
@@ -179,6 +238,33 @@ class CastMediaSessionPlayerTest {
 
         override fun handleRelease(): ListenableFuture<*> =
             Futures.immediateVoidFuture()
+    }
+
+    private fun delegateStateWithPositionDiscontinuity(
+        first: Track,
+        second: Track,
+    ): SimpleBasePlayer.State {
+        val items = listOf(first, second).map { track ->
+            val mediaItem = playbackMediaItem(track, inAppPlayback = true)
+            SimpleBasePlayer.MediaItemData.Builder(track.id)
+                .setMediaItem(mediaItem)
+                .setMediaMetadata(mediaItem.mediaMetadata)
+                .setDurationUs(track.durationMs * 1_000L)
+                .setIsSeekable(true)
+                .build()
+        }
+        return SimpleBasePlayer.State.Builder()
+            .setAvailableCommands(Player.Commands.Builder().addAllCommands().build())
+            .setPlaylist(items)
+            .setCurrentMediaItemIndex(1)
+            .setCurrentAd(C.INDEX_UNSET, C.INDEX_UNSET)
+            .setPlaybackState(Player.STATE_READY)
+            .setPlayWhenReady(true, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
+            .setContentPositionMs(12_000)
+            .setContentBufferedPositionMs(SimpleBasePlayer.PositionSupplier.getConstant(20_000))
+            .setTotalBufferedDurationMs(SimpleBasePlayer.PositionSupplier.ZERO)
+            .setPositionDiscontinuity(Player.DISCONTINUITY_REASON_SKIP, 12_000)
+            .build()
     }
 
     private fun testTrack(id: String): Track =

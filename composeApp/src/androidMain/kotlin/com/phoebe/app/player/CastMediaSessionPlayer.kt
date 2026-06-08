@@ -164,7 +164,7 @@ internal class CastMediaSessionPlayer(
         val buffered = bufferedPositionMs
             .coerceAtLeast(position)
             .let { if (durationMs > 0L) it.coerceAtMost(durationMs) else it }
-        return buildUpon()
+        return mediaSessionOverrideBuilder()
             .setPlaylist(listOf(itemData))
             .setCurrentMediaItemIndex(0)
             .setCurrentAd(C.INDEX_UNSET, C.INDEX_UNSET)
@@ -175,12 +175,35 @@ internal class CastMediaSessionPlayer(
                     else -> Player.STATE_READY
                 },
             )
+            .setIsLoading(isBuffering)
             .setPlayWhenReady(isPlaying, playWhenReadyChangeReason)
             .setContentPositionMs(position)
             .setContentBufferedPositionMs(SimpleBasePlayer.PositionSupplier.getConstant(buffered))
             .setTotalBufferedDurationMs(SimpleBasePlayer.PositionSupplier.ZERO)
             .build()
     }
+
+    private fun SimpleBasePlayer.State.mediaSessionOverrideBuilder(): SimpleBasePlayer.State.Builder =
+        SimpleBasePlayer.State.Builder()
+            .setAvailableCommands(availableCommands)
+            .setPlaybackSuppressionReason(playbackSuppressionReason)
+            .setRepeatMode(repeatMode)
+            .setShuffleModeEnabled(shuffleModeEnabled)
+            .setPlaybackParameters(playbackParameters)
+            .setTrackSelectionParameters(trackSelectionParameters)
+            .setAudioAttributes(audioAttributes)
+            .setVolume(volume)
+            .setVideoSize(videoSize)
+            .setCurrentCues(currentCues)
+            .setDeviceInfo(deviceInfo)
+            .setDeviceVolume(deviceVolume)
+            .setIsDeviceMuted(isDeviceMuted)
+            .setSurfaceSize(surfaceSize)
+            .setTimedMetadata(timedMetadata)
+            .setPlaylistMetadata(playlistMetadata)
+            .setSeekBackIncrementMs(seekBackIncrementMs)
+            .setSeekForwardIncrementMs(seekForwardIncrementMs)
+            .setMaxSeekToPreviousPositionMs(maxSeekToPreviousPositionMs)
 
     private fun safeDelegateState(): SimpleBasePlayer.State {
         val player = getPlayer()
