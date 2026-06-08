@@ -1109,12 +1109,20 @@ fun Track.canAddToPlexPlaylist(): Boolean = isRemoteLibraryTrack()
 /** Liked Songs syncs by Plex identity, so downloaded Plex songs are still eligible. */
 fun Track.canTogglePlexLike(): Boolean = isRemoteLibraryTrack()
 
+/** Stable key for playlist reorder/remove when duplicate tracks share the same id. */
+fun Track.playlistEntryKey(): String =
+    playlistItemId?.let { "playlist-item:$it" } ?: id
+
 fun Playlist.remoteProviderPrefix(): String? =
     id.substringBefore(':', missingDelimiterValue = "").takeIf { prefix ->
         MediaProviderType.entries.any { it.catalogPrefix == prefix }
     }
 
 fun Playlist.isRemoteProviderPlaylist(): Boolean = remoteProviderPrefix() != null
+
+/** Playlists whose track list can be edited in Phoebe (excluding Liked Songs). */
+fun Playlist.supportsTrackRemoval(): Boolean =
+    isLocalPlaylist() || (isRemoteProviderPlaylist() && !isLikedSongsPlaylist())
 
 fun Playlist.belongsToProvider(providerType: MediaProviderType): Boolean =
     id.startsWith("${providerType.catalogPrefix}:")

@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.phoebe.app.domain.Track
+import com.phoebe.app.domain.playlistEntryKey
 import com.phoebe.app.platform.currentTimeMs
 import kotlinx.coroutines.delay
 import kotlin.math.abs
@@ -325,5 +326,6 @@ private fun <T> List<T>.moved(from: Int, to: Int): List<T> {
     return copy
 }
 
-internal fun Track.reorderKey(): String =
-    playlistItemId?.let { "playlist-item:$it" } ?: id
+internal fun Track.reorderKey(): String = playlistEntryKey()
+
+internal fun Track.playlistRemovalKey(): String = playlistEntryKey()

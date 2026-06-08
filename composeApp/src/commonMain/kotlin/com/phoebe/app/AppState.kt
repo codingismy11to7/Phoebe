@@ -36,6 +36,7 @@ import com.phoebe.app.domain.canAddToPlexPlaylist
 import com.phoebe.app.domain.canTogglePlexLike
 import com.phoebe.app.domain.hasPlayableSource
 import com.phoebe.app.domain.isLocalPlaylist
+import com.phoebe.app.domain.playlistEntryKey
 import com.phoebe.app.domain.isRemoteProviderPlaylist
 import com.phoebe.app.domain.isEmbyFamily
 import com.phoebe.app.domain.isFromLocalFolder
@@ -47,6 +48,7 @@ import com.phoebe.app.domain.supportsCollectionEntry
 import com.phoebe.app.domain.displayName
 import com.phoebe.app.domain.supportsRemotePlaylists
 import com.phoebe.app.domain.supportsRemoteRatings
+import com.phoebe.app.domain.supportsTrackRemoval
 import com.phoebe.app.domain.isJellyfin
 import com.phoebe.app.domain.providerLabel
 import com.phoebe.app.data.DownloadBatchResult
@@ -2087,29 +2089,53 @@ class AppState(
                 mutableMessage.value = "Only local audio files can be added to local playlists."
                 return@launch
             }
-            dependencies.catalogRepository.addTracksToPlaylist(session.value, playlist, listOf(track))
-            return@launch
+        } else {
+            if (!session.value.supportsRemotePlaylists()) {
+                mutableMessage.value = "Sign in and select a music library to use streaming playlists."
+                return@launch
+            }
+            if (!playlist.isRemoteProviderPlaylist()) {
+                mutableMessage.value = "This playlist can't be edited in Phoebe."
+                return@launch
+            }
+            if (!track.canAddToPlexPlaylist()) {
+                mutableMessage.value = "Only streaming library songs can be added to streaming playlists."
+                return@launch
+            }
         }
-        if (!session.value.supportsRemotePlaylists()) {
-            mutableMessage.value = "Sign in and select a music library to use streaming playlists."
-            return@launch
-        }
-        if (!playlist.isRemoteProviderPlaylist()) {
-            mutableMessage.value = "This playlist can't be edited in Phoebe."
-            return@launch
-        }
-        if (!track.canAddToPlexPlaylist()) {
-            mutableMessage.value = "Only streaming library songs can be added to streaming playlists."
-            return@launch
-        }
+        val before = catalog.value.tracksByParent[playlist.id].orEmpty()
+        val trackKey = track.playlistEntryKey()
+        val alreadyPresent = before.any { it.playlistEntryKey() == trackKey || it.id == track.id }
         PhoebeLog.d("AppState") { "addToPlaylist → playlist='${playlist.title}' (${playlist.id}), track='${track.title}' (${track.id})" }
         dependencies.catalogRepository.addTracksToPlaylist(session.value, playlist, listOf(track))
+        val after = catalog.value.tracksByParent[playlist.id].orEmpty()
+        mutableMessage.value = when {
+            alreadyPresent && after.size == before.size -> "${track.title} is already in ${playlist.title}."
+            after.any { it.playlistEntryKey() == trackKey || it.id == track.id } || after.size > before.size ->
+                "Added to ${playlist.title}."
+            else -> "Couldn't add to ${playlist.title}."
+        }
     }
 
     fun movePlaylistTrack(playlist: Playlist, fromIndex: Int, toIndex: Int) = scope.launch {
         val moved = dependencies.catalogRepository.movePlaylistTrack(session.value, playlist, fromIndex, toIndex)
         if (!moved && fromIndex != toIndex) {
             mutableMessage.value = "Couldn't reorder ${playlist.title}."
+        }
+    }
+
+    fun removePlaylistTracks(playlist: Playlist, tracks: List<Track>) = scope.launch {
+        if (tracks.isEmpty()) return@launch
+        if (!playlist.supportsTrackRemoval()) {
+            mutableMessage.value = "This playlist can't be edited in Phoebe."
+            return@launch
+        }
+        val removed = dependencies.catalogRepository.removeTracksFromPlaylist(session.value, playlist, tracks)
+        mutableMessage.value = if (removed) {
+            val count = tracks.size
+            "Removed $count ${if (count == 1) "song" else "songs"} from ${playlist.title}."
+        } else {
+            "Couldn't remove songs from ${playlist.title}."
         }
     }
 

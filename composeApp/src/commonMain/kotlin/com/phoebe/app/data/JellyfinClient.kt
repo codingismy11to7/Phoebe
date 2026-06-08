@@ -651,6 +651,24 @@ open class JellyfinClient(
         }
     }
 
+    suspend fun removePlaylistItems(
+        server: PlexServer,
+        token: String,
+        userId: String,
+        playlistId: String,
+        entryIds: List<String>,
+    ) {
+        if (entryIds.isEmpty()) return
+        val response = httpClient.delete("${server.uri}/Playlists/$playlistId/Items") {
+            jellyfinAuth(token)
+            q("userId", userId)
+            q("entryIds", entryIds.joinToString(","))
+        }
+        if (!response.status.isSuccess() && response.status.value != 204) {
+            error("${family.displayName} playlist remove failed (${response.status.value}): ${response.bodyAsText().take(200)}")
+        }
+    }
+
     suspend fun setFavorite(server: PlexServer, token: String, itemId: String, favorite: Boolean) {
         val path = if (family == EmbyFamily.Emby) {
             error("Emby favorites require a user id.")

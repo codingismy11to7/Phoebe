@@ -795,6 +795,12 @@ internal fun DetailSectionToolbar(
     onViewMode: ((LibraryViewMode) -> Unit)? = null,
     columns: LibraryColumnVisibility? = null,
     onColumns: ((LibraryColumnVisibility) -> Unit)? = null,
+    reorderMode: Boolean? = null,
+    reorderModeAvailable: Boolean = true,
+    onReorderMode: ((Boolean) -> Unit)? = null,
+    editMode: Boolean? = null,
+    editModeAvailable: Boolean = true,
+    onEditMode: ((Boolean) -> Unit)? = null,
     modifier: Modifier = Modifier,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
@@ -815,6 +821,12 @@ internal fun DetailSectionToolbar(
             onViewMode = onViewMode,
             columns = columns,
             onColumns = onColumns,
+            reorderMode = reorderMode,
+            reorderModeAvailable = reorderModeAvailable,
+            onReorderMode = onReorderMode,
+            editMode = editMode,
+            editModeAvailable = editModeAvailable,
+            onEditMode = onEditMode,
         )
     }
 }
@@ -836,6 +848,9 @@ internal fun DetailSectionHeader(
     reorderMode: Boolean? = null,
     reorderModeAvailable: Boolean = true,
     onReorderMode: ((Boolean) -> Unit)? = null,
+    editMode: Boolean? = null,
+    editModeAvailable: Boolean = true,
+    onEditMode: ((Boolean) -> Unit)? = null,
     modifier: Modifier = Modifier,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
@@ -861,6 +876,9 @@ internal fun DetailSectionHeader(
             reorderMode = reorderMode,
             reorderModeAvailable = reorderModeAvailable,
             onReorderMode = onReorderMode,
+            editMode = editMode,
+            editModeAvailable = editModeAvailable,
+            onEditMode = onEditMode,
         )
     }
 }
@@ -882,6 +900,9 @@ internal fun LibrarySectionOptionsMenu(
     reorderMode: Boolean? = null,
     reorderModeAvailable: Boolean = true,
     onReorderMode: ((Boolean) -> Unit)? = null,
+    editMode: Boolean? = null,
+    editModeAvailable: Boolean = true,
+    onEditMode: ((Boolean) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val hasSort = sortBy != null && onSortBy != null && sortKeys.isNotEmpty()
@@ -889,7 +910,8 @@ internal fun LibrarySectionOptionsMenu(
     val hasView = viewMode != null && onViewMode != null
     val hasColumns = columns != null && onColumns != null
     val hasReorderMode = reorderMode != null && onReorderMode != null
-    if (!hasSort && !hasOrder && !hasView && !hasColumns && !hasReorderMode) return
+    val hasEditMode = editMode != null && onEditMode != null
+    if (!hasSort && !hasOrder && !hasView && !hasColumns && !hasReorderMode && !hasEditMode) return
 
     var expanded by remember { mutableStateOf(false) }
     var submenu by remember { mutableStateOf<LibrarySectionOptionsSubmenu?>(null) }
@@ -960,6 +982,30 @@ internal fun LibrarySectionOptionsMenu(
                             enabled = reorderModeAvailable || reorderMode == true,
                             onClick = {
                                 onReorderMode(reorderMode != true)
+                                expanded = false
+                                submenu = null
+                            },
+                        )
+                    }
+                    if (hasEditMode) {
+                        DropdownMenuItem(
+                            text = {
+                                Row(
+                                    modifier = Modifier.width(220.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    if (editMode == true) {
+                                        PhoebeIconView(PhoebeIcon.Check, tint = PhoebeUi.accentLight, modifier = Modifier.size(14.dp))
+                                    } else {
+                                        Spacer(Modifier.size(14.dp))
+                                    }
+                                    Text("Edit mode")
+                                }
+                            },
+                            enabled = editModeAvailable || editMode == true,
+                            onClick = {
+                                onEditMode(editMode != true)
                                 expanded = false
                                 submenu = null
                             },
@@ -1420,6 +1466,140 @@ internal fun LibraryCheckbox(checked: Boolean, size: Int = 16) {
                 drawLine(color = Color.White, start = p2, end = p3, strokeWidth = stroke, cap = StrokeCap.Round)
             }
         }
+    }
+}
+
+@Composable
+internal fun PlaylistEditActionBar(
+    selectedCount: Int,
+    totalCount: Int,
+    onRemove: () -> Unit,
+    onSelectAll: () -> Unit,
+    onClearSelection: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color.White.copy(alpha = 0.05f))
+            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(10.dp))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            if (selectedCount == 0) "Select songs to remove" else "$selectedCount selected",
+            color = PhoebeUi.secondaryText,
+            fontSize = 12.sp,
+            modifier = Modifier.weight(1f),
+        )
+        if (totalCount > 0 && selectedCount < totalCount) {
+            PlaylistEditSecondaryAction("Select all", onSelectAll)
+        } else if (selectedCount > 0) {
+            PlaylistEditSecondaryAction("Clear", onClearSelection)
+        }
+        PlaylistEditRemoveButton(
+            selectedCount = selectedCount,
+            onRemove = onRemove,
+        )
+    }
+}
+
+@Composable
+internal fun PlaylistEditBottomBar(
+    selectedCount: Int,
+    totalCount: Int,
+    onRemove: () -> Unit,
+    onSelectAll: () -> Unit,
+    onClearSelection: () -> Unit,
+    onDone: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier
+            .fillMaxWidth()
+            .background(PhoebeUi.shellTop)
+            .border(BorderStroke(1.dp, PhoebeUi.border))
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                if (selectedCount == 0) "Select songs to remove" else "$selectedCount selected",
+                color = PhoebeUi.primaryText,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            if (totalCount > 0) {
+                Text(
+                    if (selectedCount < totalCount) "Tap Select all or choose songs" else "All visible songs selected",
+                    color = PhoebeUi.mutedText,
+                    fontSize = 11.sp,
+                )
+            }
+        }
+        if (totalCount > 0 && selectedCount < totalCount) {
+            PlaylistEditSecondaryAction("Select all", onSelectAll)
+        } else if (selectedCount > 0) {
+            PlaylistEditSecondaryAction("Clear", onClearSelection)
+        }
+        PlaylistEditSecondaryAction("Done", onDone)
+        PlaylistEditRemoveButton(
+            selectedCount = selectedCount,
+            onRemove = onRemove,
+            compact = false,
+        )
+    }
+}
+
+@Composable
+private fun PlaylistEditSecondaryAction(label: String, onClick: () -> Unit) {
+    Text(
+        label,
+        color = PhoebeUi.accentLight,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .phoebeClickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+    )
+}
+
+@Composable
+private fun PlaylistEditRemoveButton(
+    selectedCount: Int,
+    onRemove: () -> Unit,
+    compact: Boolean = true,
+) {
+    val enabled = selectedCount > 0
+    val label = if (selectedCount > 0) "Remove ($selectedCount)" else "Remove"
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(if (compact) 8.dp else 999.dp))
+            .background(
+                if (enabled) PhoebeUi.accent.copy(alpha = 0.92f) else Color.White.copy(alpha = 0.06f),
+            )
+            .border(
+                BorderStroke(1.dp, if (enabled) PhoebeUi.accentLight.copy(alpha = 0.35f) else PhoebeUi.border),
+                RoundedCornerShape(if (compact) 8.dp else 999.dp),
+            )
+            .phoebeClickable(enabled = enabled, onClick = onRemove)
+            .padding(
+                horizontal = if (compact) 10.dp else 16.dp,
+                vertical = if (compact) 6.dp else 10.dp,
+            ),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            label,
+            color = if (enabled) PhoebeUi.primaryText else PhoebeUi.mutedText,
+            fontSize = if (compact) 12.sp else 13.sp,
+            fontWeight = FontWeight.Bold,
+        )
     }
 }
 
@@ -2013,6 +2193,7 @@ private fun SongsTable(
 internal fun SongsTableHeader(
     columns: LibraryColumnVisibility,
     showLeadingHandle: Boolean = LocalPlaylistDragEnabled.current,
+    showSelectionColumn: Boolean = false,
 ) {
     Row(
         Modifier
@@ -2021,7 +2202,16 @@ internal fun SongsTableHeader(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        TableHeaderCell("# Title", modifier = Modifier.weight(2.2f).padding(start = if (showLeadingHandle) 92.dp else 56.dp))
+        TableHeaderCell(
+            "# Title",
+            modifier = Modifier.weight(2.2f).padding(
+                start = when {
+                    showSelectionColumn -> 36.dp
+                    showLeadingHandle -> 92.dp
+                    else -> 56.dp
+                },
+            ),
+        )
         TableHeaderCell("Artist", modifier = Modifier.weight(1.4f))
         TableHeaderCell("Album", modifier = Modifier.weight(1.6f))
         if (columns.duration) TableHeaderCell("Duration", modifier = Modifier.width(70.dp))
@@ -2049,6 +2239,7 @@ internal fun SongRow(
     modifier: Modifier = Modifier,
     leadingHandle: (@Composable () -> Unit)? = null,
     showPlaylistDragHandle: Boolean = true,
+    selectionMode: Boolean = false,
     sharedKey: String? = "song:${track.id}",
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
@@ -2062,14 +2253,14 @@ internal fun SongRow(
     val canLike = likeActions.likesEnabled && track.canTogglePlexLike()
     val liked = likeActions.isLiked(track)
     val downloaded = downloads.isComplete(track)
-    val rowDragEnabled = playlistDragEnabled && leadingHandle == null
+    val rowDragEnabled = playlistDragEnabled && leadingHandle == null && !selectionMode
     val dragHandleVisible = rowDragEnabled && showPlaylistDragHandle
     Row(
         modifier
             .fillMaxWidth()
             .playTrackTarget(track)
             .then(if (rowDragEnabled) Modifier.draggableSong(track, immediate = !dragHandleVisible) else Modifier)
-            .openContextMenuOnSecondaryClick(enabled = hasMenu) { menuExpanded = true }
+            .openContextMenuOnSecondaryClick(enabled = hasMenu && !selectionMode) { menuExpanded = true }
             .clip(RoundedCornerShape(10.dp))
             .phoebeClickable(onClick = onSelect)
             .background(
@@ -2084,6 +2275,9 @@ internal fun SongRow(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(modifier = Modifier.weight(2.2f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            if (selectionMode) {
+                LibraryCheckbox(checked = selected, size = 18)
+            }
             if (leadingHandle != null) {
                 leadingHandle()
             } else if (dragHandleVisible) {
@@ -2382,6 +2576,7 @@ private fun SongDetailSidebar(
                     AddToPlaylistMenuItems(
                         track = track,
                         onAfter = { playlistMenuExpanded = false },
+                        startExpanded = true,
                     )
                 }
             }

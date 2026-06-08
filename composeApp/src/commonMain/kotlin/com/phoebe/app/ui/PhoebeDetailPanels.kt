@@ -163,6 +163,7 @@ import com.phoebe.app.domain.isLocalPlaylist
 import com.phoebe.app.domain.isRemoteLibraryTrack
 import com.phoebe.app.domain.mergeDownloadCopiesById
 import com.phoebe.app.domain.supportsPlexPlaylists
+import com.phoebe.app.domain.supportsTrackRemoval
 import com.phoebe.app.playlists.PlaylistExportFormat
 import com.phoebe.app.platform.createPlatformHttpClient
 import com.phoebe.app.platform.currentTimeMs
@@ -2002,6 +2003,9 @@ internal fun PlaylistDetailPanel(
     var sortBy by remember(playlist.id) { mutableStateOf(LibrarySortBy.PlaylistOrder) }
     var ascending by remember(playlist.id) { mutableStateOf(true) }
     var reorderModeEnabled by remember(playlist.id) { mutableStateOf(false) }
+    var editModeEnabled by remember(playlist.id) { mutableStateOf(false) }
+    var selectedTrackKeys by remember(playlist.id) { mutableStateOf(setOf<String>()) }
+    var confirmRemove by remember(playlist.id) { mutableStateOf(false) }
     var trackListState by remember(playlist.id) { mutableStateOf<PlaylistTrackListState?>(null) }
     LaunchedEffect(playlist.id, tracks, sortBy, ascending, searchQuery) {
         trackListState = withContext(Dispatchers.Default) {
@@ -2022,21 +2026,37 @@ internal fun PlaylistDetailPanel(
     val favoriteActions = LocalFavoriteActions.current
     val nowPlaying = LocalNowPlaying.current
     val mobileChromeBottom = LocalMobileChromePadding.current.bottom
+    val playlistActions = LocalPlaylistActions.current
     LaunchedEffect(playlist.id, searchQuery) {
         if (searchQuery.isNotBlank()) reorderModeEnabled = false
+    }
+    LaunchedEffect(editModeEnabled) {
+        if (!editModeEnabled) selectedTrackKeys = emptySet()
     }
 
     BoxWithConstraints(modifier.fillMaxSize()) {
         val useTable = maxWidth >= 640.dp
-        val bottomContentPadding = mobileChromeBottom + 24.dp
+        val editBarHeight = 68.dp
         val listState = RetainedLazyListStates.remember("playlist-detail:${playlist.id}")
         val scrolling by remember(listState) { derivedStateOf { listState.isScrollInProgress } }
         val artworkLoadingEnabled = LocalArtworkLoadingEnabled.current && (useTable || !scrolling)
         val reorderModeAvailable = searchQuery.isBlank() && visibleTracks.size > 1
+        val editModeAvailable = visibleTracks.isNotEmpty() && playlist.supportsTrackRemoval()
         val reorderEnabled = reorderModeEnabled &&
             sortBy == LibrarySortBy.PlaylistOrder &&
             ascending &&
-            reorderModeAvailable
+            reorderModeAvailable &&
+            !editModeEnabled
+        val editEnabled = editModeEnabled && editModeAvailable && !reorderEnabled
+        val bottomContentPadding = mobileChromeBottom + 24.dp + if (editEnabled && !useTable) editBarHeight else 0.dp
+        val toggleTrackSelection = { track: Track ->
+            val key = track.playlistRemovalKey()
+            selectedTrackKeys = if (key in selectedTrackKeys) {
+                selectedTrackKeys - key
+            } else {
+                selectedTrackKeys + key
+            }
+        }
         val reorderState = rememberPlaylistTrackReorderState(
             tracks = visibleTracks,
             enabled = reorderEnabled,
@@ -2045,6 +2065,9 @@ internal fun PlaylistDetailPanel(
             onMove = { from, to -> onMovePlaylistTrack(playlist, from, to) },
         )
         val displayTracks = if (reorderEnabled || reorderState.isDragging) reorderState.tracks else visibleTracks
+        val selectedTracks = remember(displayTracks, selectedTrackKeys) {
+            displayTracks.filter { it.playlistRemovalKey() in selectedTrackKeys }
+        }
         val playDisplayTrack = { visibleIndex: Int ->
             val (queueTracks, queueIndex) = if (reorderEnabled || reorderState.isDragging) {
                 playbackQueueForVisibleTrack(displayTracks, displayTracks, visibleIndex)
@@ -2054,6 +2077,7 @@ internal fun PlaylistDetailPanel(
             onPlayTracks(queueTracks, queueIndex)
         }
 
+        Box(Modifier.fillMaxSize()) {
         CompositionLocalProvider(LocalArtworkLoadingEnabled provides artworkLoadingEnabled) {
             LazyColumn(
                 state = listState,
@@ -2129,22 +2153,40 @@ internal fun PlaylistDetailPanel(
                             },
                             onSortBy = {
                                 sortBy = it
-                                if (it != LibrarySortBy.PlaylistOrder) reorderModeEnabled = false
+                                if (it != LibrarySortBy.PlaylistOrder) {
+                                    reorderModeEnabled = false
+                                    editModeEnabled = false
+                                }
                             },
                             ascending = ascending,
                             onAscending = {
                                 ascending = it
-                                if (!it) reorderModeEnabled = false
+                                if (!it) {
+                                    reorderModeEnabled = false
+                                    editModeEnabled = false
+                                }
                             },
                             columns = libraryUi.columns,
                             onColumns = onLibraryColumns,
                             reorderMode = reorderModeEnabled,
-                            reorderModeAvailable = reorderModeAvailable,
+                            reorderModeAvailable = reorderModeAvailable && !editModeEnabled,
                             onReorderMode = { enabled ->
                                 reorderModeEnabled = enabled
                                 if (enabled) {
+                                    editModeEnabled = false
+                                    selectedTrackKeys = emptySet()
                                     sortBy = LibrarySortBy.PlaylistOrder
                                     ascending = true
+                                }
+                            },
+                            editMode = editModeEnabled,
+                            editModeAvailable = editModeAvailable && !reorderModeEnabled,
+                            onEditMode = { enabled ->
+                                editModeEnabled = enabled
+                                if (enabled) {
+                                    reorderModeEnabled = false
+                                } else {
+                                    selectedTrackKeys = emptySet()
                                 }
                             },
                             actions = {
@@ -2159,6 +2201,17 @@ internal fun PlaylistDetailPanel(
                                 }
                             },
                         )
+                        if (editEnabled && useTable) {
+                            PlaylistEditActionBar(
+                                selectedCount = selectedTrackKeys.size,
+                                totalCount = displayTracks.size,
+                                onRemove = { confirmRemove = true },
+                                onSelectAll = {
+                                    selectedTrackKeys = displayTracks.map { it.playlistRemovalKey() }.toSet()
+                                },
+                                onClearSelection = { selectedTrackKeys = emptySet() },
+                            )
+                        }
                     }
                 }
                 if (preparingTracks) {
@@ -2192,14 +2245,22 @@ internal fun PlaylistDetailPanel(
                         SongsTableHeader(
                             columns = libraryUi.columns,
                             showLeadingHandle = reorderEnabled,
+                            showSelectionColumn = editEnabled,
                         )
                     }
                     itemsIndexed(displayTracks, key = { _, t -> t.reorderKey() }, contentType = { _, _ -> "playlist-track" }) { index, track ->
+                        val trackKey = track.playlistRemovalKey()
                         SongRow(
                             track = track,
-                            selected = false,
+                            selected = trackKey in selectedTrackKeys,
                             columns = libraryUi.columns,
-                            onSelect = { playDisplayTrack(index) },
+                            onSelect = {
+                                if (editEnabled) {
+                                    toggleTrackSelection(track)
+                                } else {
+                                    playDisplayTrack(index)
+                                }
+                            },
                             onPlay = { playDisplayTrack(index) },
                             onAddToUpNext = { onAddToUpNext(track) },
                             onDownload = { onDownload(track) },
@@ -2207,12 +2268,14 @@ internal fun PlaylistDetailPanel(
                             leadingHandle = if (reorderEnabled) {
                                 { PlaylistTrackReorderHandle(reorderState, track, index) }
                             } else {
-                                {}
+                                null
                             },
+                            selectionMode = editEnabled,
                         )
                     }
                 } else {
                     itemsIndexed(displayTracks, key = { _, t -> t.reorderKey() }, contentType = { _, _ -> "playlist-track" }) { index, track ->
+                        val trackKey = track.playlistRemovalKey()
                         MobileSongRow(
                             track = track,
                             columns = libraryUi.columns,
@@ -2226,12 +2289,49 @@ internal fun PlaylistDetailPanel(
                             leadingHandle = if (reorderEnabled) {
                                 { PlaylistTrackReorderHandle(reorderState, track, index) }
                             } else {
-                                {}
+                                null
                             },
+                            selectionMode = editEnabled,
+                            selected = trackKey in selectedTrackKeys,
+                            onToggleSelection = { toggleTrackSelection(track) },
                         )
                     }
                 }
             }
+        }
+            if (editEnabled && !useTable) {
+                PlaylistEditBottomBar(
+                    selectedCount = selectedTrackKeys.size,
+                    totalCount = displayTracks.size,
+                    onRemove = { confirmRemove = true },
+                    onSelectAll = {
+                        selectedTrackKeys = displayTracks.map { it.playlistRemovalKey() }.toSet()
+                    },
+                    onClearSelection = { selectedTrackKeys = emptySet() },
+                    onDone = {
+                        editModeEnabled = false
+                        selectedTrackKeys = emptySet()
+                    },
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = mobileChromeBottom),
+                )
+            }
+        }
+        if (confirmRemove) {
+            val count = selectedTracks.size
+            ConfirmDeleteDownloadsDialog(
+                title = "Remove from playlist?",
+                body = "Remove $count ${if (count == 1) "song" else "songs"} from ${playlist.title}?",
+                confirmLabel = "Remove",
+                onDismiss = { confirmRemove = false },
+                onConfirm = {
+                    playlistActions.onRemovePlaylistTracks(playlist, selectedTracks)
+                    confirmRemove = false
+                    editModeEnabled = false
+                    selectedTrackKeys = emptySet()
+                },
+            )
         }
     }
 }

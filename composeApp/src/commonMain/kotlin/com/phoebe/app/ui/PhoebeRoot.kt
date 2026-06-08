@@ -848,6 +848,7 @@ private fun PhoebeRootStateHolder(
             playlistsEnabled = plexReady || localReady,
             onAddTrackToPlaylist = { playlist, track -> state.addToPlaylist(playlist, track) },
             onMovePlaylistTrack = { playlist, from, to -> state.movePlaylistTrack(playlist, from, to) },
+            onRemovePlaylistTracks = { playlist, tracks -> state.removePlaylistTracks(playlist, tracks) },
             onCopyPlaylistToPlaylist = { source, target -> state.copyPlaylistIntoPlaylist(source, target) },
             onCreatePlaylist = { title, initialTracks -> state.createPlaylist(title, initialTracks) },
             onRequestCreatePlaylist = { initialTracks ->
