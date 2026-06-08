@@ -10,11 +10,15 @@ import androidx.media3.common.util.UnstableApi
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.phoebe.app.domain.Track
+import org.junit.Assert.assertNull
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 @OptIn(UnstableApi::class)
@@ -41,9 +45,157 @@ class CastMediaSessionPlayerTest {
             assertEquals("track-crossfade", player.currentMediaItem?.mediaId)
             assertTrue(player.playWhenReady)
             assertTrue(player.isPlaying)
+            assertTrue(player.isCommandAvailable(Player.COMMAND_GET_TIMELINE))
             assertTrue(player.currentPosition >= 42_000)
             assertEquals(180_000, player.duration)
         } finally {
+            player.release()
+        }
+    }
+
+    @Test
+    fun localStateCanBeUpdatedOffMainThread() {
+        val player = CastMediaSessionPlayer(FakeSessionDelegate())
+        val error = AtomicReference<Throwable?>()
+
+        try {
+            val thread = Thread {
+                runCatching {
+                    player.updateLocalState(
+                        LocalMediaSessionState(
+                            track = testTrack("track-background"),
+                            isPlaying = true,
+                            isBuffering = false,
+                            positionMs = 7_000,
+                            bufferedPositionMs = 8_000,
+                            durationMs = 90_000,
+                        ),
+                    )
+                }.exceptionOrNull()?.let(error::set)
+            }
+
+            thread.start()
+            thread.join()
+            assertNull(error.get())
+
+            shadowOf(Looper.getMainLooper()).idle()
+
+            assertEquals("track-background", player.currentMediaItem?.mediaId)
+            assertTrue(player.playWhenReady)
+            assertEquals(90_000, player.duration)
+        } finally {
+            player.release()
+        }
+    }
+
+    @Test
+    fun localStatePreservesDelegateTimelineWindowForControllerMerges() {
+        val delegate = FakeSessionDelegate()
+        val player = CastMediaSessionPlayer(delegate)
+        val first = testTrack("delegate-first")
+        val second = testTrack("delegate-second")
+
+        try {
+            delegate.setStateForTest(
+                delegateState(
+                    tracks = listOf(first, second),
+                    currentIndex = 0,
+                ).build(),
+            )
+
+            player.updateLocalState(
+                LocalMediaSessionState(
+                    track = second,
+                    isPlaying = true,
+                    isBuffering = false,
+                    positionMs = 10_000,
+                    bufferedPositionMs = 20_000,
+                    durationMs = 180_000,
+                ),
+            )
+
+            assertEquals(2, player.currentTimeline.windowCount)
+            assertEquals(1, player.currentMediaItemIndex)
+            assertEquals("delegate-second", player.currentMediaItem?.mediaId)
+        } finally {
+            player.release()
+        }
+    }
+
+    @Test
+    fun localStateDoesNotReplayDelegatePositionDiscontinuity() {
+        val delegate = FakeSessionDelegate()
+        val player = CastMediaSessionPlayer(delegate)
+        val track = testTrack("track-local")
+        var discontinuityCalls = 0
+
+        try {
+            player.updateLocalState(
+                LocalMediaSessionState(
+                    track = track,
+                    isPlaying = true,
+                    isBuffering = false,
+                    positionMs = 10_000,
+                    bufferedPositionMs = 20_000,
+                    durationMs = 180_000,
+                ),
+            )
+            player.addListener(
+                object : Player.Listener {
+                    override fun onPositionDiscontinuity(
+                        oldPosition: Player.PositionInfo,
+                        newPosition: Player.PositionInfo,
+                        reason: Int,
+                    ) {
+                        discontinuityCalls++
+                    }
+                },
+            )
+            delegate.setStateForTest(
+                delegateStateWithPositionDiscontinuity(
+                    first = testTrack("delegate-first"),
+                    second = testTrack("delegate-second"),
+                ),
+            )
+            shadowOf(Looper.getMainLooper()).idle()
+            discontinuityCalls = 0
+
+            player.updateLocalState(
+                LocalMediaSessionState(
+                    track = track,
+                    isPlaying = true,
+                    isBuffering = false,
+                    positionMs = 10_000,
+                    bufferedPositionMs = 20_000,
+                    durationMs = 180_000,
+                ),
+            )
+            shadowOf(Looper.getMainLooper()).idle()
+
+            assertEquals("track-local", player.currentMediaItem?.mediaId)
+            assertEquals(1, player.currentMediaItemIndex)
+            assertEquals(0, discontinuityCalls)
+        } finally {
+            player.release()
+        }
+    }
+
+    @Test
+    fun delegateRoutesSkipNextToPhoebeQueueWhenAppHasMoreTracks() {
+        val player = CastMediaSessionPlayer(FakeSessionDelegate())
+        var skipNextCalls = 0
+        val previousHasNext = AndroidPlaybackBridge.hasNextTrack
+        val previousSkipNext = AndroidPlaybackBridge.onSkipNext
+        try {
+            AndroidPlaybackBridge.hasNextTrack = { true }
+            AndroidPlaybackBridge.onSkipNext = { skipNextCalls++ }
+
+            player.seekToNext()
+
+            assertEquals(1, skipNextCalls)
+        } finally {
+            AndroidPlaybackBridge.hasNextTrack = previousHasNext
+            AndroidPlaybackBridge.onSkipNext = previousSkipNext
             player.release()
         }
     }
@@ -93,6 +245,11 @@ class CastMediaSessionPlayerTest {
 
         override fun getState(): SimpleBasePlayer.State = state
 
+        fun setStateForTest(state: SimpleBasePlayer.State) {
+            this.state = state
+            invalidateState()
+        }
+
         override fun handleSetPlayWhenReady(playWhenReady: Boolean): ListenableFuture<*> {
             state = state.buildUpon()
                 .setPlayWhenReady(playWhenReady, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
@@ -121,6 +278,43 @@ class CastMediaSessionPlayerTest {
 
         override fun handleRelease(): ListenableFuture<*> =
             Futures.immediateVoidFuture()
+    }
+
+    private fun delegateStateWithPositionDiscontinuity(
+        first: Track,
+        second: Track,
+    ): SimpleBasePlayer.State {
+        return delegateState(
+            tracks = listOf(first, second),
+            currentIndex = 1,
+        )
+            .setCurrentAd(C.INDEX_UNSET, C.INDEX_UNSET)
+            .setPlaybackState(Player.STATE_READY)
+            .setPlayWhenReady(true, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
+            .setContentPositionMs(12_000)
+            .setContentBufferedPositionMs(SimpleBasePlayer.PositionSupplier.getConstant(20_000))
+            .setTotalBufferedDurationMs(SimpleBasePlayer.PositionSupplier.ZERO)
+            .setPositionDiscontinuity(Player.DISCONTINUITY_REASON_SKIP, 12_000)
+            .build()
+    }
+
+    private fun delegateState(
+        tracks: List<Track>,
+        currentIndex: Int,
+    ): SimpleBasePlayer.State.Builder {
+        val items = tracks.map { track ->
+            val mediaItem = playbackMediaItem(track, inAppPlayback = true)
+            SimpleBasePlayer.MediaItemData.Builder(track.id)
+                .setMediaItem(mediaItem)
+                .setMediaMetadata(mediaItem.mediaMetadata)
+                .setDurationUs(track.durationMs * 1_000L)
+                .setIsSeekable(true)
+                .build()
+        }
+        return SimpleBasePlayer.State.Builder()
+            .setAvailableCommands(Player.Commands.Builder().addAllCommands().build())
+            .setPlaylist(items)
+            .setCurrentMediaItemIndex(currentIndex)
     }
 
     private fun testTrack(id: String): Track =

@@ -382,6 +382,8 @@ data class AppSettings(
     val scanLibraryOnLaunch: Boolean = false,
     val notifyWhenDownloadFinishes: Boolean = false,
     val persistEqualizerSettings: Boolean = false,
+    val persistVolumeSettings: Boolean = false,
+    val savedVolume: Float = DefaultSavedVolume,
     val equalizerProfile: EqualizerProfile = EqualizerProfile.Default,
     val nowPlayingVisualizerPreset: NowPlayingVisualizerPreset = NowPlayingVisualizerPreset.Default,
     val blurredArtworkAppearance: Boolean = true,
@@ -390,6 +392,7 @@ data class AppSettings(
     fun normalized(): AppSettings =
         copy(
             crossfadeSeconds = crossfadeSeconds.coerceIn(MinCrossfadeSeconds, MaxCrossfadeSeconds),
+            savedVolume = savedVolume.coerceIn(MinSavedVolume, MaxSavedVolume),
             equalizerProfile = equalizerProfile.normalized(),
             listenBrainz = listenBrainz.normalized(),
         )
@@ -398,6 +401,9 @@ data class AppSettings(
         val Default = AppSettings()
         const val MinCrossfadeSeconds = 0
         const val MaxCrossfadeSeconds = 12
+        const val MinSavedVolume = 0f
+        const val MaxSavedVolume = 1f
+        const val DefaultSavedVolume = 0.7f
     }
 }
 
@@ -1001,6 +1007,13 @@ data class ShellPlaybackState(
     val currentTrack: Track? = null,
     val isPlaying: Boolean = false,
     val isBuffering: Boolean = false,
+)
+
+/** Shuffle/repeat/volume for transport UI without position-driven recomposition. */
+data class PlayerTransportState(
+    val shuffle: Boolean = false,
+    val repeat: RepeatMode = RepeatMode.Off,
+    val volume: Float = 1f,
 )
 
 /** Queue snapshot for up-next / skip UI; ignores position-only player updates. */

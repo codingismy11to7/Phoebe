@@ -1,5 +1,7 @@
 package com.phoebe.app.player
 
+import android.os.Handler
+import android.os.Looper
 import androidx.annotation.OptIn
 import androidx.media3.common.C
 import androidx.media3.common.ForwardingSimpleBasePlayer
@@ -15,17 +17,23 @@ import com.phoebe.app.domain.Track
 internal class CastMediaSessionPlayer(
     player: Player,
 ) : ForwardingSimpleBasePlayer(player) {
+    private val sessionLooper = player.applicationLooper
+    private val sessionHandler = Handler(sessionLooper)
     private var castState: CastMediaSessionState? = null
     private var localState: LocalMediaSessionState? = null
 
     fun updateCastState(state: CastMediaSessionState?) {
-        castState = state
-        invalidateState()
+        updateSessionState {
+            castState = state
+            invalidateState()
+        }
     }
 
     fun updateLocalState(state: LocalMediaSessionState?) {
-        localState = state
-        invalidateState()
+        updateSessionState {
+            localState = state
+            invalidateState()
+        }
     }
 
     override fun getState(): SimpleBasePlayer.State {
@@ -115,6 +123,24 @@ internal class CastMediaSessionPlayer(
             }
             return Futures.immediateVoidFuture()
         }
+        when (seekCommand) {
+            Player.COMMAND_SEEK_TO_NEXT,
+            Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
+            -> {
+                if (AndroidPlaybackBridge.hasNextTrack?.invoke() == true) {
+                    AndroidPlaybackBridge.onSkipNext?.invoke()
+                    return Futures.immediateVoidFuture()
+                }
+            }
+            Player.COMMAND_SEEK_TO_PREVIOUS,
+            Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
+            -> {
+                if (AndroidPlaybackBridge.hasPreviousTrack?.invoke() == true) {
+                    AndroidPlaybackBridge.onSkipPrevious?.invoke()
+                    return Futures.immediateVoidFuture()
+                }
+            }
+        }
         return super.handleSeek(mediaItemIndex, positionMs, seekCommand)
     }
 
@@ -127,20 +153,14 @@ internal class CastMediaSessionPlayer(
         durationMs: Long,
         playWhenReadyChangeReason: Int,
     ): SimpleBasePlayer.State {
-        val mediaItem = playbackMediaItem(track, inAppPlayback = true)
-        val itemData = SimpleBasePlayer.MediaItemData.Builder(track.id)
-            .setMediaItem(mediaItem)
-            .setMediaMetadata(mediaItem.mediaMetadata)
-            .setDurationUs(durationMs.takeIf { it > 0L }?.times(1_000L) ?: C.TIME_UNSET)
-            .setIsSeekable(durationMs > 0L)
-            .build()
+        val playlistOverride = mediaSessionOverridePlaylist(track, durationMs)
         val position = positionMs.coerceAtLeast(0L)
         val buffered = bufferedPositionMs
             .coerceAtLeast(position)
             .let { if (durationMs > 0L) it.coerceAtMost(durationMs) else it }
-        return buildUpon()
-            .setPlaylist(listOf(itemData))
-            .setCurrentMediaItemIndex(0)
+        return mediaSessionOverrideBuilder()
+            .setPlaylist(playlistOverride.playlist)
+            .setCurrentMediaItemIndex(playlistOverride.currentIndex)
             .setCurrentAd(C.INDEX_UNSET, C.INDEX_UNSET)
             .setPlayerError(null)
             .setPlaybackState(
@@ -149,12 +169,75 @@ internal class CastMediaSessionPlayer(
                     else -> Player.STATE_READY
                 },
             )
+            .setIsLoading(isBuffering)
             .setPlayWhenReady(isPlaying, playWhenReadyChangeReason)
             .setContentPositionMs(position)
             .setContentBufferedPositionMs(SimpleBasePlayer.PositionSupplier.getConstant(buffered))
             .setTotalBufferedDurationMs(SimpleBasePlayer.PositionSupplier.ZERO)
             .build()
     }
+
+    private fun SimpleBasePlayer.State.mediaSessionOverridePlaylist(
+        track: Track,
+        durationMs: Long,
+    ): MediaSessionOverridePlaylist {
+        val delegatePlaylist = getPlaylist()
+        val currentIndex = when {
+            delegatePlaylist.isEmpty() -> 0
+            else -> delegatePlaylist.indexOfFirst { it.mediaItem.mediaId == track.id }
+                .takeIf { it >= 0 }
+                ?: currentMediaItemIndex.takeIf { it in delegatePlaylist.indices }
+                ?: 0
+        }
+        val overrideItem = mediaSessionOverrideItem(
+            track = track,
+            durationMs = durationMs,
+            index = currentIndex,
+        )
+        if (delegatePlaylist.isEmpty()) {
+            return MediaSessionOverridePlaylist(listOf(overrideItem), currentIndex)
+        }
+        return MediaSessionOverridePlaylist(
+            playlist = delegatePlaylist.toMutableList().also { it[currentIndex] = overrideItem },
+            currentIndex = currentIndex,
+        )
+    }
+
+    private fun mediaSessionOverrideItem(
+        track: Track,
+        durationMs: Long,
+        index: Int,
+    ): SimpleBasePlayer.MediaItemData {
+        val mediaItem = playbackMediaItem(track, inAppPlayback = true)
+        return SimpleBasePlayer.MediaItemData.Builder("${track.id}:media-session:$index")
+            .setMediaItem(mediaItem)
+            .setMediaMetadata(mediaItem.mediaMetadata)
+            .setDurationUs(durationMs.takeIf { it > 0L }?.times(1_000L) ?: C.TIME_UNSET)
+            .setIsSeekable(durationMs > 0L)
+            .build()
+    }
+
+    private fun SimpleBasePlayer.State.mediaSessionOverrideBuilder(): SimpleBasePlayer.State.Builder =
+        SimpleBasePlayer.State.Builder()
+            .setAvailableCommands(availableCommands)
+            .setPlaybackSuppressionReason(playbackSuppressionReason)
+            .setRepeatMode(repeatMode)
+            .setShuffleModeEnabled(shuffleModeEnabled)
+            .setPlaybackParameters(playbackParameters)
+            .setTrackSelectionParameters(trackSelectionParameters)
+            .setAudioAttributes(audioAttributes)
+            .setVolume(volume)
+            .setVideoSize(videoSize)
+            .setCurrentCues(currentCues)
+            .setDeviceInfo(deviceInfo)
+            .setDeviceVolume(deviceVolume)
+            .setIsDeviceMuted(isDeviceMuted)
+            .setSurfaceSize(surfaceSize)
+            .setTimedMetadata(timedMetadata)
+            .setPlaylistMetadata(playlistMetadata)
+            .setSeekBackIncrementMs(seekBackIncrementMs)
+            .setSeekForwardIncrementMs(seekForwardIncrementMs)
+            .setMaxSeekToPreviousPositionMs(maxSeekToPreviousPositionMs)
 
     private fun safeDelegateState(): SimpleBasePlayer.State {
         val player = getPlayer()
@@ -194,9 +277,22 @@ internal class CastMediaSessionPlayer(
             .setTotalBufferedDurationMs(SimpleBasePlayer.PositionSupplier.ZERO)
             .build()
 
+    private fun updateSessionState(update: () -> Unit) {
+        if (Looper.myLooper() == sessionLooper) {
+            update()
+        } else {
+            sessionHandler.post { update() }
+        }
+    }
+
     private companion object {
         private const val EmptyPlaylistStateError = "Empty playlist only allowed in STATE_IDLE or STATE_ENDED"
     }
+
+    private data class MediaSessionOverridePlaylist(
+        val playlist: List<SimpleBasePlayer.MediaItemData>,
+        val currentIndex: Int,
+    )
 }
 
 @OptIn(UnstableApi::class)
@@ -207,9 +303,11 @@ internal fun SimpleBasePlayer.State.withPhoebeQueueNavigationCommands(
     if (!hasNext && !hasPrevious) return this
     val commands = availableCommands.buildUpon().apply {
         if (hasNext) {
+            add(Player.COMMAND_SEEK_TO_NEXT)
             add(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
         }
         if (hasPrevious) {
+            add(Player.COMMAND_SEEK_TO_PREVIOUS)
             add(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
         }
     }.build()

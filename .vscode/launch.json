@@ -17,7 +17,7 @@
       "runtimeExecutable": "bash",
       "runtimeArgs": [
         "-c",
-        "ADB=\"${ANDROID_HOME:-$HOME/Library/Android/sdk}/platform-tools/adb\"; [ -x \"$ADB\" ] || ADB=adb; ./gradlew :composeApp:installDebug && \"$ADB\" shell monkey -p com.phoebe.app.debug -c android.intent.category.LAUNCHER 1"
+        "ADB=\"${ANDROID_HOME:-$HOME/Library/Android/sdk}/platform-tools/adb\"; [ -x \"$ADB\" ] || ADB=adb; ./gradlew :androidApp:installDebug && \"$ADB\" shell monkey -p com.phoebe.app.debug -c android.intent.category.LAUNCHER 1"
       ],
       "console": "integratedTerminal",
       "cwd": "${workspaceFolder}"
@@ -38,7 +38,7 @@
       "runtimeExecutable": "bash",
       "runtimeArgs": [
         "-c",
-        "./gradlew :composeApp:recordRoborazziDebug && npm run web:screenshots:update"
+        "./gradlew :composeApp:recordRoborazziAndroidHostTest && npm run web:screenshots:update"
       ],
       "console": "integratedTerminal",
       "cwd": "${workspaceFolder}"

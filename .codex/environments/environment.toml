@@ -13,7 +13,7 @@ command = "./gradlew :composeApp:run"
 [[actions]]
 name = "Android"
 icon = "run"
-command = "ADB=\"${ANDROID_HOME:-$HOME/Library/Android/sdk}/platform-tools/adb\"; [ -x \"$ADB\" ] || ADB=adb; ./gradlew :composeApp:installDebug && \"$ADB\" shell monkey -p com.phoebe.app.debug -c android.intent.category.LAUNCHER 1"
+command = "ADB=\"${ANDROID_HOME:-$HOME/Library/Android/sdk}/platform-tools/adb\"; [ -x \"$ADB\" ] || ADB=adb; ./gradlew :androidApp:installDebug && \"$ADB\" shell monkey -p com.phoebe.app.debug -c android.intent.category.LAUNCHER 1"
 
 [[actions]]
 name = "Web"
@@ -23,4 +23,4 @@ command = "./gradlew :composeApp:wasmJsBrowserDevelopmentRun"
 [[actions]]
 name = "Screenshots"
 icon = "test"
-command = "./gradlew :composeApp:recordRoborazziDebug && npm run web:screenshots:update"
+command = "./gradlew :composeApp:recordRoborazziAndroidHostTest && npm run web:screenshots:update"

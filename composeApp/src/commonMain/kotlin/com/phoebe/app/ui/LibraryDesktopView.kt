@@ -5,7 +5,6 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -742,7 +741,7 @@ private fun LibraryTabsPill(filter: LibraryFilterTab, onFilter: (LibraryFilterTa
                 fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
-                    .clickable { onFilter(tab) }
+                    .phoebeClickable { onFilter(tab) }
                     .background(if (active) PhoebeUi.accent.copy(alpha = 0.22f) else Color.Transparent)
                     .padding(horizontal = 16.dp, vertical = 8.dp),
             )
@@ -761,7 +760,7 @@ internal fun LibraryDropdown(
         Row(
             Modifier
                 .clip(RoundedCornerShape(8.dp))
-                .clickable { expanded = true }
+                .phoebeClickable { expanded = true }
                 .background(Color.White.copy(alpha = 0.04f))
                 .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(8.dp))
                 .padding(horizontal = 12.dp, vertical = 8.dp),
@@ -899,7 +898,7 @@ internal fun LibrarySectionOptionsMenu(
             Modifier
                 .size(36.dp)
                 .clip(RoundedCornerShape(8.dp))
-                .clickable { expanded = true }
+                .phoebeClickable { expanded = true }
                 .semantics { contentDescription = "Section options" },
             contentAlignment = Alignment.Center,
         ) {
@@ -1153,7 +1152,7 @@ internal fun LibraryFilterOptionsMenu(
             Modifier
                 .size(36.dp)
                 .clip(RoundedCornerShape(8.dp))
-                .clickable { expanded = true }
+                .phoebeClickable { expanded = true }
                 .semantics { contentDescription = "Library options" },
             contentAlignment = Alignment.Center,
         ) {
@@ -1301,6 +1300,8 @@ private fun OrderMenuItem(
 internal fun libraryGridCells(columns: Int): GridCells =
     GridCells.Fixed(columns.coerceIn(LibraryUiPreferences.MinGridColumns, LibraryUiPreferences.MaxGridColumns))
 
+internal val LibraryAlbumGridArtworkMaxSize = 200.dp
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun LibraryToolbarButton(
@@ -1353,7 +1354,7 @@ internal fun ColumnsPickerButton(columns: LibraryColumnVisibility, onColumns: (L
         Row(
             Modifier
                 .clip(RoundedCornerShape(8.dp))
-                .clickable { expanded = true }
+                .phoebeClickable { expanded = true }
                 .background(Color.White.copy(alpha = 0.04f))
                 .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(8.dp))
                 .padding(horizontal = 12.dp, vertical = 8.dp),
@@ -1384,7 +1385,7 @@ private fun ColumnsToggleRow(label: String, checked: Boolean, onToggle: () -> Un
     Row(
         Modifier
             .fillMaxWidth()
-            .clickable(onClick = onToggle)
+            .phoebeClickable(onClick = onToggle)
             .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -1565,7 +1566,7 @@ private fun ArtistCard(
     Column(
         Modifier
             .clip(RoundedCornerShape(14.dp))
-            .clickable(onClick = onArtist)
+            .phoebeClickable(onClick = onArtist)
             .padding(horizontal = 10.dp, vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -1642,7 +1643,7 @@ private fun ArtistRow(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
-            .clickable(onClick = onArtist)
+            .phoebeClickable(onClick = onArtist)
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -1810,11 +1811,19 @@ private fun AlbumCard(
             .clip(RoundedCornerShape(12.dp))
             .border(BorderStroke(1.dp, borderColor), RoundedCornerShape(12.dp))
             .background(if (selected) PhoebeUi.accent.copy(alpha = 0.06f) else Color.Transparent)
-            .clickable(onClick = onSelect)
+            .phoebeClickable(onClick = onSelect)
             .padding(6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Box(Modifier.fillMaxWidth().aspectRatio(1f).sharedArtworkTransition("album:${album.id}").clickable(onClick = onOpen)) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .widthIn(max = LibraryAlbumGridArtworkMaxSize)
+                .aspectRatio(1f)
+                .sharedArtworkTransition("album:${album.id}")
+                .phoebeClickable(onClick = onOpen),
+        ) {
             ArtworkImage(album.title, album.thumbUrl, Modifier.fillMaxSize(), radius = 10.dp)
         }
         Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(horizontal = 4.dp)) {
@@ -1879,13 +1888,13 @@ private fun AlbumListRow(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
-            .clickable(onClick = onSelect)
+            .phoebeClickable(onClick = onSelect)
             .background(if (selected) PhoebeUi.librarySelectedRow else PhoebeUi.libraryHoverRow)
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Box(Modifier.size(46.dp).sharedArtworkTransition("album:${album.id}").clickable(onClick = onOpen)) {
+        Box(Modifier.size(46.dp).sharedArtworkTransition("album:${album.id}").phoebeClickable(onClick = onOpen)) {
             ArtworkImage(album.title, album.thumbUrl, Modifier.fillMaxSize(), radius = 8.dp)
         }
         Column(Modifier.weight(1f)) {
@@ -2062,7 +2071,7 @@ internal fun SongRow(
             .then(if (rowDragEnabled) Modifier.draggableSong(track, immediate = !dragHandleVisible) else Modifier)
             .openContextMenuOnSecondaryClick(enabled = hasMenu) { menuExpanded = true }
             .clip(RoundedCornerShape(10.dp))
-            .clickable(onClick = onSelect)
+            .phoebeClickable(onClick = onSelect)
             .background(
                 when {
                     isCurrent -> PhoebeUi.accent.copy(alpha = 0.14f)
@@ -2093,7 +2102,7 @@ internal fun SongRow(
                 Modifier
                     .size(42.dp)
                     .sharedArtworkTransition(sharedKey)
-                    .clickable(onClick = onPlay),
+                    .phoebeClickable(onClick = onPlay),
                 contentAlignment = Alignment.Center,
             ) {
                 TrackArtworkImage(
@@ -2187,7 +2196,7 @@ internal fun SongRow(
                 Modifier
                     .size(34.dp)
                     .clip(CircleShape)
-                    .clickable(onClick = { if (hasMenu) menuExpanded = true else onPlay() }),
+                    .phoebeClickable(onClick = { if (hasMenu) menuExpanded = true else onPlay() }),
                 contentAlignment = Alignment.Center,
             ) {
                 PhoebeIconView(
@@ -2275,7 +2284,7 @@ private fun AlbumDetailSidebar(
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             tracks.take(5).forEachIndexed { index, t ->
                 Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).clickable { onPlayTrack(tracks, index) }.padding(vertical = 3.dp),
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).phoebeClickable { onPlayTrack(tracks, index) }.padding(vertical = 3.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
@@ -2316,7 +2325,7 @@ private fun SongDetailSidebar(
                     .aspectRatio(1f)
                     .widthIn(max = 232.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .clickable(onClick = onPlay),
+                    .phoebeClickable(onClick = onPlay),
             ) {
                 TrackArtworkImage(track, Modifier.fillMaxSize(), radius = 12.dp)
                 if (isCurrent) {
@@ -2387,7 +2396,7 @@ private fun SongDetailAction(icon: PhoebeIcon, label: String, onClick: () -> Uni
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick)
+            .phoebeClickable(onClick = onClick)
             .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),

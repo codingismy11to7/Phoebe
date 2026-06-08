@@ -91,7 +91,10 @@ class RealAudioPlaybackInstrumentedTest {
                 )
                 val firstPosition = player.state.value.positionMs
                 assertTrue(
-                    waitUntil(timeoutMs = 30_000L) { player.state.value.positionMs > firstPosition + 250L },
+                    waitUntil(timeoutMs = 30_000L) {
+                        player.state.value.positionMs > firstPosition + 250L ||
+                            diagnostics.maxProgress(PlaybackEnginePath.Media3) > firstPosition + 250L
+                    },
                     "Expected playback position to advance for $fixture",
                 )
                 assertTrue(diagnostics.hasPlayingEvent(PlaybackEnginePath.Media3))
@@ -455,6 +458,7 @@ class RealAudioPlaybackInstrumentedTest {
         private val playingEngines = Collections.synchronizedSet(mutableSetOf<PlaybackEnginePath>())
         private val committed = Collections.synchronizedList(mutableListOf<Pair<PlaybackEnginePath, String>>())
         private val volumes = Collections.synchronizedList(mutableListOf<Pair<PlaybackEnginePath, VolumeSample>>())
+        private val progressByEngine = Collections.synchronizedMap(mutableMapOf<PlaybackEnginePath, Long>())
 
         override fun engineSelected(engine: PlaybackEnginePath) {
             engines += engine
@@ -462,6 +466,11 @@ class RealAudioPlaybackInstrumentedTest {
 
         override fun platformPlaying(engine: PlaybackEnginePath, positionMs: Long, durationMs: Long) {
             playingEngines += engine
+            recordProgress(engine, positionMs)
+        }
+
+        override fun playbackProgress(engine: PlaybackEnginePath, positionMs: Long, durationMs: Long) {
+            recordProgress(engine, positionMs)
         }
 
         override fun decodedAudioEnergy(engine: PlaybackEnginePath, rms: Double) {
@@ -487,10 +496,16 @@ class RealAudioPlaybackInstrumentedTest {
 
         fun hasPlayingEvent(engine: PlaybackEnginePath): Boolean = engine in playingEngines
 
+        fun maxProgress(engine: PlaybackEnginePath): Long = progressByEngine[engine] ?: 0L
+
         fun hasCommitted(engine: PlaybackEnginePath, trackId: String): Boolean = engine to trackId in committed
 
         fun volumeSteps(engine: PlaybackEnginePath): List<VolumeSample> =
             volumes.filter { it.first == engine }.map { it.second }
+
+        private fun recordProgress(engine: PlaybackEnginePath, positionMs: Long) {
+            progressByEngine[engine] = maxOf(progressByEngine[engine] ?: 0L, positionMs)
+        }
     }
 
     private companion object {

@@ -30,7 +30,6 @@ import org.jetbrains.compose.resources.painterResource
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
@@ -279,7 +278,7 @@ internal fun DesktopTransport(
             BottomTransportArtworkShadow(
                 modifier = Modifier
                     .size(artworkSize)
-                    .clickable { trackNavigationActions.onOpenAlbumForTrack(track) },
+                    .phoebeClickable { trackNavigationActions.onOpenAlbumForTrack(track) },
             ) {
                 TrackArtworkImage(
                     track,
@@ -312,7 +311,7 @@ internal fun DesktopTransport(
                 fontSize = 12.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.clickable(
+                modifier = Modifier.phoebeClickable(
                     enabled = track != null && track.artist.isNotBlank(),
                 ) {
                     track?.let { trackNavigationActions.onOpenArtistForTrack(it) }
@@ -324,7 +323,7 @@ internal fun DesktopTransport(
                 fontSize = 11.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.clickable(
+                modifier = Modifier.phoebeClickable(
                     enabled = track != null && track.album.isNotBlank(),
                 ) {
                     track?.let { trackNavigationActions.onOpenAlbumForTrack(it) }
@@ -628,7 +627,7 @@ private fun ListenBrainzFeedbackVoteButton(
                     Modifier
                 },
             )
-            .clickable(enabled = enabled, onClick = onClick)
+            .phoebeClickable(enabled = enabled, onClick = onClick)
             .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {
@@ -662,7 +661,7 @@ private fun ListenBrainzFeedbackButton(
             .size(34.dp)
             .clip(CircleShape)
             .background(if (active) PhoebeUi.accent.copy(alpha = 0.18f) else Color.Transparent)
-            .clickable(enabled = enabled, onClick = onClick)
+            .phoebeClickable(enabled = enabled, onClick = onClick)
             .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {
@@ -701,7 +700,7 @@ private fun ListenBrainzFeedbackTextButton(
                 BorderStroke(1.dp, if (active) PhoebeUi.accent.copy(alpha = 0.28f) else PhoebeUi.border.copy(alpha = 0.55f)),
                 RoundedCornerShape(999.dp),
             )
-            .clickable(enabled = enabled, onClick = onClick)
+            .phoebeClickable(enabled = enabled, onClick = onClick)
             .semantics { contentDescription = "$label on ListenBrainz" }
             .padding(horizontal = 8.dp),
         contentAlignment = Alignment.Center,
@@ -877,7 +876,7 @@ internal fun ShuffleIcon(active: Boolean, onClick: () -> Unit) {
             .size(44.dp)
             .clip(CircleShape)
             .background(if (active) PhoebeUi.accent.copy(alpha = 0.16f) else Color.Transparent)
-            .clickable(onClick = onClick)
+            .phoebeClickable(onClick = onClick)
             .semantics { contentDescription = if (active) "Shuffle on" else "Shuffle off" },
         contentAlignment = Alignment.Center,
     ) {
@@ -899,7 +898,7 @@ internal fun RepeatIcon(mode: RepeatMode, onClick: () -> Unit) {
             .size(44.dp)
             .clip(CircleShape)
             .background(if (active) PhoebeUi.accent.copy(alpha = 0.16f) else Color.Transparent)
-            .clickable(onClick = onClick)
+            .phoebeClickable(onClick = onClick)
             .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {
@@ -950,7 +949,7 @@ internal fun UpNextToggleIcon(visible: Boolean, enabled: Boolean, onClick: () ->
             .size(40.dp)
             .clip(CircleShape)
             .background(if (visible) PhoebeUi.accent.copy(alpha = 0.16f) else Color.Transparent)
-            .let { if (enabled) it.clickable(onClick = onClick) else it }
+            .let { if (enabled) it.phoebeClickable(onClick = onClick) else it }
             .semantics { contentDescription = if (visible) "Hide Up Next" else "Show Up Next" },
         contentAlignment = Alignment.Center,
     ) {
@@ -983,7 +982,7 @@ internal fun CastIcon(active: Boolean, loading: Boolean, enabled: Boolean, onCli
             .size(40.dp)
             .clip(CircleShape)
             .background(if (active || loading) PhoebeUi.accent.copy(alpha = 0.14f) else Color.Transparent)
-            .clickable(enabled = enabled && !loading, onClick = onClick)
+            .phoebeClickable(enabled = enabled && !loading, onClick = onClick)
             .semantics {
                 contentDescription = when {
                     loading -> "Connecting to Chromecast"

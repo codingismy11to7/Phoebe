@@ -157,11 +157,7 @@ internal class AndroidAudioPlayer(
         AndroidPlaybackBridge.onServicePlayerChanged = { scope.launch { syncFromController() } }
         AndroidPlaybackBridge.onPlayQueue = { queue, index -> play(queue, index) }
         AndroidPlaybackBridge.onAdoptQueue = { queue, index, playing ->
-            loadedPlatformQueue = LoadedPlatformQueue(
-                queueIds = queue.map { it.id },
-                firstAppIndex = 0,
-                itemCount = queue.size,
-            )
+            loadedPlatformQueue = null
             adoptPlatformPlayIntent(playing)
             adoptQueueState(queue, index, playing)
         }
@@ -264,6 +260,7 @@ internal class AndroidAudioPlayer(
         pendingPlatformSeek = null
         pendingPlatformQueueRebase = null
         clearPendingAutoplay()
+        clearLocalMediaSessionState()
         platformStopJob?.cancel()
         platformStopJob = scope.launch {
             stopAndroidCrossfade()
@@ -1082,6 +1079,7 @@ internal class AndroidAudioPlayer(
             bufferedPositionMs = bufferedPosition,
             generation = generation,
         )
+        publishLocalMediaSessionState(player, appState.currentTrack)
         if (player.isPlaying && playWhenReady) {
             stopBufferingTimeout()
             resetRetries(generation)
@@ -1324,8 +1322,12 @@ internal class AndroidAudioPlayer(
     }
 
     private fun publishLocalMediaSessionState(player: Player, track: Track?) {
-        if (crossfadePlayer !== player || crossfadeOwnedTrackId == null) return
-        val currentTrack = track ?: state.value.currentTrack ?: return
+        if (crossfadePlayer != null && crossfadePlayer !== player) return
+        val currentTrack = track ?: state.value.currentTrack
+        if (currentTrack == null) {
+            clearLocalMediaSessionState()
+            return
+        }
         val positionMs = player.currentPosition.coerceAtLeast(0L)
         val durationMs = player.duration
             .takeIf { it > 0L }

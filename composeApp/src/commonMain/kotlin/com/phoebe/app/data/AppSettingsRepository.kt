@@ -65,6 +65,25 @@ class AppSettingsRepository(
         }
     }
 
+    suspend fun setPersistVolumeSettings(enabled: Boolean, currentVolume: Float? = null) {
+        updateAndSave { current ->
+            val volume = (currentVolume ?: current.savedVolume).coerceIn(
+                AppSettings.MinSavedVolume,
+                AppSettings.MaxSavedVolume,
+            )
+            current.copy(
+                persistVolumeSettings = enabled,
+                savedVolume = volume,
+            )
+        }
+    }
+
+    suspend fun setSavedVolume(volume: Float) {
+        updateAndSave { current ->
+            current.copy(savedVolume = volume)
+        }
+    }
+
     suspend fun setEqualizerProfile(profile: EqualizerProfile) {
         updateAndSave { current ->
             current.copy(equalizerProfile = profile.normalized())
@@ -108,6 +127,8 @@ class AppSettingsRepository(
                     scanLibraryOnLaunch = normalized.scanLibraryOnLaunch.toDb(),
                     notifyWhenDownloadFinishes = normalized.notifyWhenDownloadFinishes.toDb(),
                     persistEqualizerSettings = normalized.persistEqualizerSettings.toDb(),
+                    persistVolumeSettings = normalized.persistVolumeSettings.toDb(),
+                    savedVolume = normalized.savedVolume.toDouble(),
                     equalizerProfile = json.encodeToString(normalized.equalizerProfile),
                     nowPlayingVisualizerPreset = normalized.nowPlayingVisualizerPreset.name,
                     blurredArtworkAppearance = normalized.blurredArtworkAppearance.toDb(),
@@ -124,6 +145,8 @@ class AppSettingsRepository(
             scanLibraryOnLaunch = scanLibraryOnLaunch.toBool(),
             notifyWhenDownloadFinishes = notifyWhenDownloadFinishes.toBool(),
             persistEqualizerSettings = persistEqualizerSettings.toBool(),
+            persistVolumeSettings = persistVolumeSettings.toBool(),
+            savedVolume = savedVolume.toFloat(),
             equalizerProfile = decodeEqualizerProfile(equalizerProfile),
             nowPlayingVisualizerPreset = NowPlayingVisualizerPreset.fromStoredName(nowPlayingVisualizerPreset),
             blurredArtworkAppearance = blurredArtworkAppearance.toBool(),

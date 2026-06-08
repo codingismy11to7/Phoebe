@@ -27,6 +27,7 @@ import com.phoebe.app.ui.PhoebePaletteDark
 import com.phoebe.app.ui.PhoebeTheme
 import com.phoebe.app.ui.PhoebeTintOption
 import com.phoebe.app.ui.PhoebeRoot
+import com.phoebe.app.ui.PlatformInteractionLocals
 import com.phoebe.app.ui.mediaPlaybackShortcuts
 import com.phoebe.app.telemetry.Telemetry
 import kotlinx.coroutines.launch
@@ -121,7 +122,8 @@ fun App(
     }
 
     PhoebeTheme(useLightAppearance = useLightAppearance, tintId = appearanceTintId) {
-        val resolvedHomeScreenLayoutMode = homeScreenLayoutMode ?: return@PhoebeTheme
+        PlatformInteractionLocals {
+        val resolvedHomeScreenLayoutMode = homeScreenLayoutMode ?: return@PlatformInteractionLocals
 
         GlobalMediaKeysEffect(
             playerFlow = state.player,
@@ -180,6 +182,7 @@ fun App(
                 navigationPath = navigationPath,
                 onNavigationPathChange = onNavigationPathChange,
             )
+        }
         }
     }
 }

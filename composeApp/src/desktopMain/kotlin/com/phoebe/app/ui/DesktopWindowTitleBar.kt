@@ -6,10 +6,12 @@ import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.captionBar
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
@@ -62,37 +64,44 @@ fun WindowScope.DesktopWindowTitleBar(
         isMaximized = target.extendedState and JFrame.MAXIMIZED_BOTH != 0
         onDispose { target.removeWindowListener(listener) }
     }
-    Row(
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
             .height(captionHeight),
     ) {
-        WindowDraggableArea(
-            modifier = Modifier
-                .width(SidebarWidth)
-                .fillMaxHeight()
-                .background(palette.sidebar),
-        ) {}
-        WindowDraggableArea(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxHeight()
-                .background(palette.shellTop),
-        ) {}
-        Row(
-            modifier = Modifier
-                .fillMaxHeight()
-                .background(palette.shellTop),
-        ) {
+        // Keep in sync with PhoebeRoot's compact breakpoint.
+        val compactLayout = maxWidth < 1200.dp
+        Row(Modifier.fillMaxSize()) {
+            if (!compactLayout) {
+                WindowDraggableArea(
+                    modifier = Modifier
+                        .width(SidebarWidth)
+                        .fillMaxHeight()
+                        .background(palette.sidebar),
+                ) {}
+            }
+            WindowDraggableArea(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .background(palette.shellTop),
+            ) {}
+            Row(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .background(palette.shellTop),
+            ) {
             TitleBarControlButton(
                 label = "−",
                 contentColor = palette.primaryText,
+                idleBackground = palette.shellTop,
                 hoverBackground = palette.elevatedFill,
                 onClick = { composeWindow?.isMinimized = true },
             )
             TitleBarControlButton(
                 label = if (isMaximized) "❐" else "□",
                 contentColor = palette.primaryText,
+                idleBackground = palette.shellTop,
                 hoverBackground = palette.elevatedFill,
                 onClick = {
                     composeWindow?.let { target ->
@@ -109,10 +118,12 @@ fun WindowScope.DesktopWindowTitleBar(
             TitleBarControlButton(
                 label = "×",
                 contentColor = palette.primaryText,
+                idleBackground = palette.shellTop,
                 hoverBackground = Color(0xFFE81123),
                 hoverForeground = Color.White,
                 onClick = onClose,
             )
+            }
         }
     }
 }
@@ -121,6 +132,7 @@ fun WindowScope.DesktopWindowTitleBar(
 private fun TitleBarControlButton(
     label: String,
     contentColor: Color,
+    idleBackground: Color,
     hoverBackground: Color,
     onClick: () -> Unit,
     hoverForeground: Color = contentColor,
@@ -132,7 +144,7 @@ private fun TitleBarControlButton(
             .width(ControlButtonWidth)
             .fillMaxHeight()
             .hoverable(interactionSource)
-            .background(if (hovered) hoverBackground else Color.Transparent)
+            .background(if (hovered) hoverBackground else idleBackground)
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,

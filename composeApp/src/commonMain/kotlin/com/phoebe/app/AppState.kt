@@ -21,6 +21,7 @@ import com.phoebe.app.domain.NowPlayingVisualizerPreset
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.PlayerQueueSnapshot
 import com.phoebe.app.domain.PlayerState
+import com.phoebe.app.domain.PlayerTransportState
 import com.phoebe.app.domain.ShellPlaybackState
 import com.phoebe.app.domain.PlexPin
 import com.phoebe.app.domain.PlexRadioStation
@@ -65,6 +66,7 @@ import com.phoebe.app.player.isPlaybackActive
 import com.phoebe.app.domain.RecentSearchItem
 import com.phoebe.app.platform.PhoebeLog
 import com.phoebe.app.platform.currentTimeMs
+import com.phoebe.app.platform.isDesktopPlatform
 import com.phoebe.app.platform.discoverJellyfinServers as discoverJellyfinServersOnNetwork
 import com.phoebe.app.platform.openExternalUrl
 import com.phoebe.app.updates.AppUpdateState
@@ -168,6 +170,24 @@ class AppState(
                 currentTrack = player.value.currentTrack,
                 isPlaying = player.value.isPlaying,
                 isBuffering = player.value.isBuffering,
+            ),
+        )
+    val playerTransport: StateFlow<PlayerTransportState> = player
+        .map { playback ->
+            PlayerTransportState(
+                shuffle = playback.shuffle,
+                repeat = playback.repeat,
+                volume = playback.volume,
+            )
+        }
+        .distinctUntilChanged()
+        .stateIn(
+            scope,
+            SharingStarted.Eagerly,
+            PlayerTransportState(
+                shuffle = player.value.shuffle,
+                repeat = player.value.repeat,
+                volume = player.value.volume,
             ),
         )
     val playerQueue: StateFlow<PlayerQueueSnapshot> = player
@@ -314,6 +334,9 @@ class AppState(
             }
             mutableEqualizerProfile.value = startupEqualizer
             dependencies.audioPlayer.setEqualizer(startupEqualizer)
+            if (isDesktopPlatform() && restoredSettings.persistVolumeSettings) {
+                setVolume(restoredSettings.savedVolume)
+            }
             dependencies.libraryUiRepository.restore()
             dependencies.searchHistoryRepository.restore()
             dependencies.audioPlayer.setCrossfadeDurationMs(appSettings.value.crossfadeSeconds * 1_000L)
@@ -1602,6 +1625,17 @@ class AppState(
             controller.setVolume(volume)
         } else {
             dependencies.audioPlayer.setVolume(volume)
+        }
+        if (isDesktopPlatform() && appSettings.value.persistVolumeSettings) {
+            scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                dependencies.appSettingsRepository.setSavedVolume(volume.coerceIn(0f, 1f))
+            }
+        }
+    }
+
+    fun setPersistVolumeSettings(enabled: Boolean) {
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            dependencies.appSettingsRepository.setPersistVolumeSettings(enabled, player.value.volume)
         }
     }
 

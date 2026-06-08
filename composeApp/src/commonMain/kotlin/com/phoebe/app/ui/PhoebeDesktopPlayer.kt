@@ -11,8 +11,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -61,7 +59,7 @@ internal fun DesktopPlayer(
     val compact = shellState.compact
     val busy = shellState.busy
     val shellPlayback = playbackState.shellPlayback
-    val player = rememberDesktopPlayerState(playerFlow, playbackState.player)
+    val playerTransport = playbackState.playerTransport
     val track = playbackState.track
     val upNext = playbackState.upNext
     val lyricsTrack = playbackState.lyricsTrack
@@ -190,6 +188,7 @@ internal fun DesktopPlayer(
     val onScanLibraryOnLaunch = settingsActions.onScanLibraryOnLaunch
     val onNotifyWhenDownloadFinishes = settingsActions.onNotifyWhenDownloadFinishes
     val onPersistEqualizerSettingsFromSettings = settingsActions.onPersistEqualizerSettings
+    val onPersistVolumeSettingsFromSettings = settingsActions.onPersistVolumeSettings
     val onVisualizerPresetFromSettings = settingsActions.onVisualizerPreset
     val onBlurredArtworkAppearance = settingsActions.onBlurredArtworkAppearance
     val onDownloadDirectory = settingsActions.onDownloadDirectory
@@ -203,29 +202,24 @@ internal fun DesktopPlayer(
     val onListenBrainzSubmitCurrentTrackFeedback = settingsActions.onListenBrainzSubmitCurrentTrackFeedback
     val isPlaying = shellPlayback.isPlaying
     val isBuffering = shellPlayback.isBuffering
-    val positionMs = player.positionMs
-    val bufferedPositionMs = player.bufferedPositionMs
-    val shuffle = player.shuffle
-    val repeat = player.repeat
-    val volume = player.volume
+    val shuffle = playerTransport.shuffle
+    val repeat = playerTransport.repeat
+    val volume = playerTransport.volume
     val displayRoutes = routes.ifEmpty { previewRoutesFor(screen, section) }
     var desktopUpNextExpanded by remember { mutableStateOf(true) }
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Surface(
-            modifier = Modifier
-                .fillMaxSize(),
-            shape = RoundedCornerShape(0.dp),
-            color = Color.Transparent,
-        ) {
-            Box(
-                Modifier.background(
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(
                     Brush.radialGradient(
-                        colors = listOf(PhoebeUi.shellRadialTint, Color.Transparent),
+                        colors = listOf(PhoebeUi.shellRadialTint, PhoebeUi.shellBottom),
                         center = Offset(500f, 20f),
                         radius = 560f,
                     ),
-                ).background(Brush.verticalGradient(listOf(PhoebeUi.shellTop, PhoebeUi.shellBottom)))
-            ) {
+                )
+                .background(Brush.verticalGradient(listOf(PhoebeUi.shellTop, PhoebeUi.shellBottom))),
+        ) {
                 Row(Modifier.fillMaxSize()) {
                     Sidebar(
                         catalog = catalog,
@@ -370,15 +364,17 @@ internal fun DesktopPlayer(
                                         onOpenLyrics = onOpenLyrics,
                                     )
                                 }
-                                is AppScreen.Lyrics -> LyricsView(
-                                    track = lyricsTrack,
-                                    currentTrackId = track?.id,
-                                    positionMs = positionMs,
-                                    state = lyricsState,
-                                    modifier = Modifier.fillMaxSize(),
-                                    onBack = onPopDetail,
-                                    onRetry = onRetryLyrics,
-                                )
+                                is AppScreen.Lyrics -> DesktopPlayerProgressScope(playerFlow, playbackState.player) { positionMs ->
+                                    LyricsView(
+                                        track = lyricsTrack,
+                                        currentTrackId = track?.id,
+                                        positionMs = positionMs,
+                                        state = lyricsState,
+                                        modifier = Modifier.fillMaxSize(),
+                                        onBack = onPopDetail,
+                                        onRetry = onRetryLyrics,
+                                    )
+                                }
                                 is AppScreen.RecentlyAdded -> Column(Modifier.fillMaxSize()) {
                                     LibraryTopBar(searchQuery = searchQuery, onSearchQuery = onSearchQuery)
                                     RecentlyAddedScreen(
@@ -462,15 +458,17 @@ internal fun DesktopPlayer(
                                     onBack = onPopDetail,
                                     modifier = Modifier.fillMaxSize(),
                                 )
-                                AppScreen.Player -> DesktopNowPlayingVisualizerView(
-                                    track = track,
-                                    preset = visualizerPreset,
-                                    audioAnalysis = audioAnalysis,
-                                    isPlaying = isPlaying,
-                                    positionMs = positionMs,
-                                    onPreset = onVisualizerPreset,
-                                    modifier = Modifier.fillMaxSize(),
-                                )
+                                AppScreen.Player -> DesktopPlayerProgressScope(playerFlow, playbackState.player) { positionMs ->
+                                    DesktopNowPlayingVisualizerView(
+                                        track = track,
+                                        preset = visualizerPreset,
+                                        audioAnalysis = audioAnalysis,
+                                        isPlaying = isPlaying,
+                                        positionMs = positionMs,
+                                        onPreset = onVisualizerPreset,
+                                        modifier = Modifier.fillMaxSize(),
+                                    )
+                                }
                                 else -> when {
                                     section == BrowseSection.Home && selectedPlaylistId == null -> {
                                         val homeListState = RetainedLazyListStates.remember("desktop-home")
@@ -544,15 +542,18 @@ internal fun DesktopPlayer(
                                             modifier = Modifier.fillMaxSize(),
                                         )
                                     }
-                                    section == BrowseSection.Lyrics && selectedPlaylistId == null -> LyricsView(
-                                        track = lyricsTrack,
-                                        currentTrackId = track?.id,
-                                        positionMs = positionMs,
-                                        state = lyricsState,
-                                        modifier = Modifier.fillMaxSize(),
-                                        onBack = null,
-                                        onRetry = onRetryLyrics,
-                                    )
+                                    section == BrowseSection.Lyrics && selectedPlaylistId == null ->
+                                        DesktopPlayerProgressScope(playerFlow, playbackState.player) { positionMs ->
+                                            LyricsView(
+                                                track = lyricsTrack,
+                                                currentTrackId = track?.id,
+                                                positionMs = positionMs,
+                                                state = lyricsState,
+                                                modifier = Modifier.fillMaxSize(),
+                                                onBack = null,
+                                                onRetry = onRetryLyrics,
+                                            )
+                                        }
                                     section == BrowseSection.Settings && selectedPlaylistId == null -> SettingsDesktopView(
                                         isLightMode = useLightAppearance,
                                         onLightModeChange = onUseLightAppearanceChange,
@@ -571,6 +572,7 @@ internal fun DesktopPlayer(
                                         onScanLibraryOnLaunch = onScanLibraryOnLaunch,
                                         onNotifyWhenDownloadFinishes = onNotifyWhenDownloadFinishes,
                                         onPersistEqualizerSettings = onPersistEqualizerSettingsFromSettings,
+                                        onPersistVolumeSettings = onPersistVolumeSettingsFromSettings,
                                         onVisualizerPreset = onVisualizerPresetFromSettings,
                                         onBlurredArtworkAppearance = onBlurredArtworkAppearance,
                                         onHomeSections = onHomeSections,
@@ -640,49 +642,50 @@ internal fun DesktopPlayer(
                                 )
                             }
                         }
-                        DesktopTransport(
-                            track = track,
-                            isPlaying = isPlaying,
-                            isBuffering = isBuffering,
-                            positionMs = positionMs,
-                            bufferedPositionMs = bufferedPositionMs,
-                            shuffle = shuffle,
-                            repeat = repeat,
-                            volume = volume,
-                            castState = castState,
-                            remotePlaybackTarget = remotePlaybackTarget,
-                            listenBrainzFeedbackTarget = listenBrainzFeedbackTarget,
-                            equalizerProfile = equalizerProfile,
-                            persistEqualizerSettings = persistEqualizerSettings,
-                            equalizerRemoteUnavailable = equalizerRemoteUnavailable,
-                            visualizerPreset = visualizerPreset,
-                            compact = compact,
-                            lyricsVisible = section == BrowseSection.Lyrics && selectedPlaylistId == null,
-                            upNextVisible = showQueue && desktopUpNextExpanded,
-                            upNextToggleEnabled = showQueue,
-                            onToggle = onToggle,
-                            onPrevious = onPrevious,
-                            onNext = onNext,
-                            onShuffle = onShuffle,
-                            onRepeat = onRepeat,
-                            onVolume = onVolume,
-                            onSeek = onSeek,
-                            onLyrics = onLyrics,
-                            onEqualizerEnabled = onEqualizerEnabled,
-                            onEqualizerBandCount = onEqualizerBandCount,
-                            onEqualizerGain = onEqualizerGain,
-                            onEqualizerReset = onEqualizerReset,
-                            onPersistEqualizerSettings = onPersistEqualizerSettings,
-                            onVisualizerPreset = onVisualizerPreset,
-                            onListenBrainzFeedback = onListenBrainzFeedback,
-                            onToggleUpNext = { desktopUpNextExpanded = !desktopUpNextExpanded },
-                            onCast = onCast,
-                        )
+                        DesktopPlayerProgressScope(playerFlow, playbackState.player) { positionMs, bufferedPositionMs ->
+                            DesktopTransport(
+                                track = track,
+                                isPlaying = isPlaying,
+                                isBuffering = isBuffering,
+                                positionMs = positionMs,
+                                bufferedPositionMs = bufferedPositionMs,
+                                shuffle = shuffle,
+                                repeat = repeat,
+                                volume = volume,
+                                castState = castState,
+                                remotePlaybackTarget = remotePlaybackTarget,
+                                listenBrainzFeedbackTarget = listenBrainzFeedbackTarget,
+                                equalizerProfile = equalizerProfile,
+                                persistEqualizerSettings = persistEqualizerSettings,
+                                equalizerRemoteUnavailable = equalizerRemoteUnavailable,
+                                visualizerPreset = visualizerPreset,
+                                compact = compact,
+                                lyricsVisible = section == BrowseSection.Lyrics && selectedPlaylistId == null,
+                                upNextVisible = showQueue && desktopUpNextExpanded,
+                                upNextToggleEnabled = showQueue,
+                                onToggle = onToggle,
+                                onPrevious = onPrevious,
+                                onNext = onNext,
+                                onShuffle = onShuffle,
+                                onRepeat = onRepeat,
+                                onVolume = onVolume,
+                                onSeek = onSeek,
+                                onLyrics = onLyrics,
+                                onEqualizerEnabled = onEqualizerEnabled,
+                                onEqualizerBandCount = onEqualizerBandCount,
+                                onEqualizerGain = onEqualizerGain,
+                                onEqualizerReset = onEqualizerReset,
+                                onPersistEqualizerSettings = onPersistEqualizerSettings,
+                                onVisualizerPreset = onVisualizerPreset,
+                                onListenBrainzFeedback = onListenBrainzFeedback,
+                                onToggleUpNext = { desktopUpNextExpanded = !desktopUpNextExpanded },
+                                onCast = onCast,
+                            )
+                        }
                     }
                 }
             }
         }
-    }
 }
 
 private fun shouldUseDesktopSharedElements(initial: AppScreen?, target: AppScreen): Boolean =
@@ -738,11 +741,26 @@ private fun previewRoutesFor(screen: AppScreen, section: BrowseSection): List<Ph
 }
 
 @Composable
-private fun rememberDesktopPlayerState(
+private fun DesktopPlayerProgressScope(
     playerFlow: StateFlow<PlayerState>?,
     fallback: PlayerState,
-): PlayerState {
-    if (playerFlow == null) return fallback
+    content: @Composable (positionMs: Long, bufferedPositionMs: Long) -> Unit,
+) {
+    if (playerFlow == null) {
+        content(fallback.positionMs, fallback.bufferedPositionMs)
+        return
+    }
     val player by playerFlow.collectAsState()
-    return player
+    content(player.positionMs, player.bufferedPositionMs)
+}
+
+@Composable
+private fun DesktopPlayerProgressScope(
+    playerFlow: StateFlow<PlayerState>?,
+    fallback: PlayerState,
+    content: @Composable (positionMs: Long) -> Unit,
+) {
+    DesktopPlayerProgressScope(playerFlow, fallback) { positionMs, _ ->
+        content(positionMs)
+    }
 }

@@ -18,6 +18,7 @@ import androidx.compose.ui.window.WindowScope
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.phoebe.app.platform.PhoebeLog
+import com.phoebe.app.platform.configureWindowsDesktopRendering
 import com.phoebe.app.platform.WindowsUndecoratedWindowSupport
 import com.phoebe.app.platform.appDisplayName
 import com.phoebe.app.platform.isDebugBuild
@@ -39,6 +40,7 @@ import javax.swing.RootPaneContainer
 
 fun main(args: Array<String>) {
     configureDesktopApplicationName()
+    configureWindowsDesktopRendering()
     configureSandboxedNativeLibraries()
     if (runDesktopPlaybackSmokeIfRequested(args)) return
 
@@ -69,6 +71,9 @@ fun main(args: Array<String>) {
             state = windowState,
             icon = icon,
             undecorated = useCustomWindowsTitleBar,
+            // Pairing transparent + undecorated avoids the Swing/Skiko layered-pane flicker
+            // that shows up on Windows when hovering interactive elements.
+            transparent = useCustomWindowsTitleBar,
         ) {
             DisposableEffect(window, iconImage) {
                 window.iconImages = listOf(iconImage)
