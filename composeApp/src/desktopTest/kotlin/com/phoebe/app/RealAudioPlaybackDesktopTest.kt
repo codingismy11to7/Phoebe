@@ -121,33 +121,164 @@ class RealAudioPlaybackDesktopTest {
     @Test
     fun flatpakLocalMp3UsesSampledStreamInsteadOfJavaFx() {
         assumeRealAudioTestsEnabled()
-        DesktopSandboxPlayback.flatpakSandboxOverride = { true }
+        withFlatpakSandbox {
+            val diagnostics = RecordingPlaybackDiagnostics()
+            val player = DesktopAudioPlayer(diagnostics)
+            try {
+                val track = fixtureTrack("wikimedia-example.mp3", durationMs = 10_000)
 
-        val diagnostics = RecordingPlaybackDiagnostics()
-        val player = DesktopAudioPlayer(diagnostics)
-        try {
-            val track = fixtureTrack("wikimedia-example.mp3", durationMs = 10_000)
+                player.play(listOf(track), 0)
 
-            player.play(listOf(track), 0)
-
-            assertTrue(
-                waitUntil {
-                    diagnostics.hasEngine(PlaybackEnginePath.SampledStream) &&
-                        player.state.value.isPlaying &&
-                        diagnostics.hasEnergy(PlaybackEnginePath.SampledStream) &&
-                        diagnostics.hasPlayingEvent(PlaybackEnginePath.SampledStream)
-                },
-                "Flatpak MP3 should route to sampled stream; engines=${diagnostics.engineEvents()} " +
-                    "errors=${diagnostics.errorEvents()}",
-            )
-            assertFalse(
-                diagnostics.hasEngine(PlaybackEnginePath.JavaFxMediaPlayer),
-                "Flatpak MP3 must not fall through to JavaFX media; engines=${diagnostics.engineEvents()}",
-            )
-        } finally {
-            player.releaseForTests()
-            DesktopSandboxPlayback.flatpakSandboxOverride = null
+                assertFlatpakSampledStreamPlaybackStarted(
+                    diagnostics = diagnostics,
+                    player = player,
+                    label = "Flatpak local MP3",
+                )
+                assertFalse(
+                    diagnostics.hasEngine(PlaybackEnginePath.JavaFxMediaPlayer),
+                    "Flatpak local MP3 must not fall through to JavaFX media; engines=${diagnostics.engineEvents()}",
+                )
+            } finally {
+                player.releaseForTests()
+            }
         }
+    }
+
+    @Test
+    fun flatpakLocalWavUsesSampledClipInsteadOfJavaFx() {
+        assumeRealAudioTestsEnabled()
+        withFlatpakSandbox {
+            val diagnostics = RecordingPlaybackDiagnostics()
+            val player = DesktopAudioPlayer(diagnostics)
+            try {
+                val track = fixtureTrack("wikimedia-example.wav", durationMs = 10_000)
+
+                player.play(listOf(track), 0)
+
+                assertFlatpakSampledClipPlaybackStarted(
+                    diagnostics = diagnostics,
+                    player = player,
+                    label = "Flatpak local WAV",
+                )
+                assertFalse(
+                    diagnostics.hasEngine(PlaybackEnginePath.JavaFxMediaPlayer),
+                    "Flatpak local WAV must not fall through to JavaFX media; engines=${diagnostics.engineEvents()}",
+                )
+            } finally {
+                player.releaseForTests()
+            }
+        }
+    }
+
+    @Test
+    fun flatpakRemoteMp3UsesSampledPlaybackInsteadOfJavaFx() {
+        assumeRealAudioTestsEnabled()
+        val fixture = fixtureBytes("wikimedia-example.mp3")
+        val requestEvents = Collections.synchronizedList(mutableListOf<String>())
+        val server = createRemoteMp3HttpServer(fixture, requestEvents)
+        server.start()
+        withFlatpakSandbox {
+            val diagnostics = RecordingPlaybackDiagnostics()
+            val player = DesktopAudioPlayer(diagnostics)
+            try {
+                val track = remoteTrack(
+                    id = "flatpak-remote-mp3",
+                    uri = "http://127.0.0.1:${server.address.port}/library/track.mp3?X-Plex-Token=test",
+                    durationMs = 10_000,
+                    audioCodec = "mp3",
+                )
+
+                player.play(listOf(track), 0)
+
+                assertFlatpakSampledPlaybackStarted(
+                    diagnostics = diagnostics,
+                    player = player,
+                    label = "Flatpak remote MP3",
+                    requestEvents = requestEvents,
+                )
+                assertFalse(
+                    diagnostics.hasEngine(PlaybackEnginePath.JavaFxMediaPlayer),
+                    "Flatpak remote MP3 must not fall through to JavaFX media; engines=${diagnostics.engineEvents()} " +
+                        "requests=${requestEvents.toList()} errors=${diagnostics.errorEvents()}",
+                )
+            } finally {
+                player.releaseForTests()
+            }
+        }
+        server.stop(0)
+    }
+
+    @Test
+    fun flatpakRemoteAacUsesPlexTranscodeAndSampledPlayback() {
+        assumeRealAudioTestsEnabled()
+        val fixture = fixtureBytes("wikimedia-example.mp3")
+        val requestEvents = Collections.synchronizedList(mutableListOf<String>())
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/") { exchange ->
+            requestEvents += "${exchange.requestMethod}:${exchange.requestURI.path}"
+            if (exchange.requestURI.path.endsWith(".m4a")) {
+                val body = "direct AAC stream should not be used on Flatpak".toByteArray()
+                exchange.responseHeaders.add("Content-Type", "audio/mp4")
+                exchange.sendResponseHeaders(503, body.size.toLong())
+                exchange.responseBody.use { it.write(body) }
+                return@createContext
+            }
+            serveRemoteMp3(exchange, fixture)
+        }
+        server.start()
+        withFlatpakSandbox {
+            val diagnostics = RecordingPlaybackDiagnostics()
+            val player = DesktopAudioPlayer(diagnostics)
+            try {
+                val directStreamUrl =
+                    "http://127.0.0.1:${server.address.port}/library/parts/2.m4a?X-Plex-Token=test"
+                val track = Track(
+                    id = "plex:124",
+                    title = "Flatpak Remote AAC",
+                    artist = "Fixture",
+                    album = "Real Audio Tests",
+                    durationMs = 10_000,
+                    streamUrl = directStreamUrl,
+                    downloadUrl = "$directStreamUrl&download=1",
+                    filepath = "/music/Artist/Album/02 Track.m4a",
+                    audioCodec = "aac",
+                )
+                val transcodeUrl = DesktopSandboxPlayback.playbackStreamUrlForTrack(track)
+                assertEquals(
+                    "http://127.0.0.1:${server.address.port}/music/:/transcode/universal/start.mp3" +
+                        "?path=%2Flibrary%2Fmetadata%2F124&mediaIndex=0&partIndex=0&protocol=http&format=mp3" +
+                        "&audioCodec=mp3&directPlay=0&directStream=0&X-Plex-Token=test",
+                    transcodeUrl,
+                )
+
+                player.play(listOf(track), 0)
+
+                assertFlatpakSampledPlaybackStarted(
+                    diagnostics = diagnostics,
+                    player = player,
+                    label = "Flatpak remote AAC via Plex transcode",
+                    requestEvents = requestEvents,
+                )
+                assertTrue(
+                    waitUntil(timeoutMs = 25_000L) {
+                        requestEvents.any { it.endsWith("/music/:/transcode/universal/start.mp3") }
+                    },
+                    "Flatpak AAC playback should request the Plex MP3 transcode URL; requests=${requestEvents.toList()}",
+                )
+                assertFalse(
+                    requestEvents.any { it.endsWith(".m4a") },
+                    "Flatpak AAC playback must not request the direct AAC stream; requests=${requestEvents.toList()}",
+                )
+                assertFalse(
+                    diagnostics.hasEngine(PlaybackEnginePath.JavaFxMediaPlayer),
+                    "Flatpak remote AAC must not fall through to JavaFX media; engines=${diagnostics.engineEvents()} " +
+                        "requests=${requestEvents.toList()} errors=${diagnostics.errorEvents()}",
+                )
+            } finally {
+                player.releaseForTests()
+            }
+        }
+        server.stop(0)
     }
 
     @Test
@@ -474,6 +605,147 @@ class RealAudioPlaybackDesktopTest {
 
     private fun assumeRealAudioTestsEnabled() {
         assumeTrue("Real audio playback tests are disabled", System.getProperty("phoebe.realAudioTests").toBoolean())
+    }
+
+    private inline fun withFlatpakSandbox(block: () -> Unit) {
+        DesktopSandboxPlayback.flatpakSandboxOverride = { true }
+        try {
+            block()
+        } finally {
+            DesktopSandboxPlayback.flatpakSandboxOverride = null
+        }
+    }
+
+    private fun assertFlatpakSampledStreamPlaybackStarted(
+        diagnostics: RecordingPlaybackDiagnostics,
+        player: DesktopAudioPlayer,
+        label: String,
+        requestEvents: List<String>? = null,
+    ) {
+        assertTrue(
+            waitUntil(timeoutMs = 25_000L) {
+                diagnostics.hasEngine(PlaybackEnginePath.SampledStream) &&
+                    player.state.value.isPlaying &&
+                    diagnostics.hasEnergy(PlaybackEnginePath.SampledStream) &&
+                    diagnostics.hasPlayingEvent(PlaybackEnginePath.SampledStream)
+            },
+            "$label should route to sampled stream; engines=${diagnostics.engineEvents()} " +
+                "requests=${requestEvents.orEmpty()} errors=${diagnostics.errorEvents()}",
+        )
+    }
+
+    private fun assertFlatpakSampledClipPlaybackStarted(
+        diagnostics: RecordingPlaybackDiagnostics,
+        player: DesktopAudioPlayer,
+        label: String,
+        requestEvents: List<String>? = null,
+    ) {
+        assertTrue(
+            waitUntil(timeoutMs = 25_000L) {
+                diagnostics.hasEngine(PlaybackEnginePath.SampledClip) &&
+                    player.state.value.isPlaying &&
+                    diagnostics.hasEnergy(PlaybackEnginePath.SampledClip) &&
+                    diagnostics.hasPlayingEvent(PlaybackEnginePath.SampledClip)
+            },
+            "$label should route to sampled clip; engines=${diagnostics.engineEvents()} " +
+                "requests=${requestEvents.orEmpty()} errors=${diagnostics.errorEvents()}",
+        )
+    }
+
+    private fun assertFlatpakSampledPlaybackStarted(
+        diagnostics: RecordingPlaybackDiagnostics,
+        player: DesktopAudioPlayer,
+        label: String,
+        requestEvents: List<String>? = null,
+    ) {
+        assertTrue(
+            waitUntil(timeoutMs = 25_000L) {
+                player.state.value.isPlaying && (
+                    (
+                        diagnostics.hasEngine(PlaybackEnginePath.SampledStream) &&
+                            diagnostics.hasEnergy(PlaybackEnginePath.SampledStream) &&
+                            diagnostics.hasPlayingEvent(PlaybackEnginePath.SampledStream)
+                        ) ||
+                        (
+                            diagnostics.hasEngine(PlaybackEnginePath.SampledClip) &&
+                                diagnostics.hasEnergy(PlaybackEnginePath.SampledClip) &&
+                                diagnostics.hasPlayingEvent(PlaybackEnginePath.SampledClip)
+                            )
+                    )
+            },
+            "$label should route to sampled stream or clip; engines=${diagnostics.engineEvents()} " +
+                "requests=${requestEvents.orEmpty()} errors=${diagnostics.errorEvents()}",
+        )
+    }
+
+    private fun fixtureBytes(name: String): ByteArray {
+        val url = javaClass.classLoader.getResource("test-audio/$name")
+            ?: error("Missing test audio fixture: $name")
+        return File(url.toURI()).readBytes()
+    }
+
+    private fun remoteTrack(
+        id: String,
+        uri: String,
+        durationMs: Long,
+        audioCodec: String,
+    ): Track =
+        Track(
+            id = id,
+            title = "Remote Track",
+            artist = "Fixture",
+            album = "Real Audio Tests",
+            durationMs = durationMs,
+            streamUrl = uri,
+            downloadUrl = "$uri&download=1",
+            audioCodec = audioCodec,
+        )
+
+    private fun createRemoteMp3HttpServer(
+        bytes: ByteArray,
+        requestEvents: MutableList<String>,
+    ): HttpServer {
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/library/track.mp3") { exchange ->
+            requestEvents += "${exchange.requestMethod}:${exchange.requestURI.path}"
+            serveRemoteMp3(exchange, bytes)
+        }
+        return server
+    }
+
+    private fun serveRemoteMp3(
+        exchange: com.sun.net.httpserver.HttpExchange,
+        bytes: ByteArray,
+    ) {
+        val headers = exchange.responseHeaders
+        headers.add("Accept-Ranges", "bytes")
+        headers.add("Content-Type", "audio/mpeg")
+        val range = exchange.requestHeaders.getFirst("Range")
+        if (range != null && range.startsWith("bytes=")) {
+            val requested = range.removePrefix("bytes=").substringBefore(",")
+            val start = requested.substringBefore("-").toIntOrNull()?.coerceIn(0, bytes.lastIndex) ?: 0
+            val requestedEnd = requested.substringAfter("-", missingDelimiterValue = "")
+                .toIntOrNull()
+                ?.coerceIn(start, bytes.lastIndex)
+                ?: bytes.lastIndex
+            val length = requestedEnd - start + 1
+            headers.add("Content-Range", "bytes $start-$requestedEnd/${bytes.size}")
+            headers.add("Content-Length", length.toString())
+            exchange.sendResponseHeaders(206, if (exchange.requestMethod == "HEAD") -1L else length.toLong())
+            if (exchange.requestMethod != "HEAD") {
+                exchange.responseBody.use { it.write(bytes, start, length) }
+            } else {
+                exchange.close()
+            }
+        } else {
+            headers.add("Content-Length", bytes.size.toString())
+            exchange.sendResponseHeaders(200, if (exchange.requestMethod == "HEAD") -1L else bytes.size.toLong())
+            if (exchange.requestMethod != "HEAD") {
+                exchange.responseBody.use { it.write(bytes) }
+            } else {
+                exchange.close()
+            }
+        }
     }
 
     private fun fixtureTrack(
