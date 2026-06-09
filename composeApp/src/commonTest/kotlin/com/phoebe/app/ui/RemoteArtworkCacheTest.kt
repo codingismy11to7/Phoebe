@@ -4,6 +4,10 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.ImageBitmapConfig
 import androidx.compose.ui.graphics.colorspace.ColorSpace
 import androidx.compose.ui.graphics.colorspace.ColorSpaces
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.runBlocking
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -89,6 +93,23 @@ class RemoteArtworkCacheTest {
             1024,
             RemoteArtworkCache.cachedForDisplay("art", HeroArtworkMaxDecodeDimension)?.width,
         )
+    }
+
+    @Test
+    fun concurrentReadsAndWritesDoNotThrow() = runBlocking {
+        RemoteArtworkCache.configureLimitsForTest(maxEntries = 50, maxEstimatedBytes = Long.MAX_VALUE)
+
+        val jobs = List(24) { worker ->
+            async(Dispatchers.Default) {
+                repeat(40) { index ->
+                    val url = "art-$worker-$index"
+                    RemoteArtworkCache.putForTest(url, 128, testImageBitmap(64, 64))
+                    RemoteArtworkCache.cachedRequested(url, ThumbnailArtworkMaxDecodeDimension)
+                    RemoteArtworkCache.cachedForDisplay(url, HeroArtworkMaxDecodeDimension)
+                }
+            }
+        }
+        jobs.awaitAll()
     }
 
     @Test

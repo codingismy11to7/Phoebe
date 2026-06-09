@@ -65,6 +65,7 @@ import com.phoebe.app.domain.supportsCollectionEntry
 import com.phoebe.app.domain.supportsRemotePlaylists
 import com.phoebe.app.domain.supportsRemoteRatings
 import com.phoebe.app.platform.PlatformStorage
+import com.phoebe.app.data.splitCollectionTagLabels
 import com.phoebe.app.platform.PhoebeLog
 import com.phoebe.app.platform.catalogTrackIndexParallelism
 import com.phoebe.app.platform.currentTimeMs
@@ -1871,6 +1872,7 @@ class CatalogRepository(
             val library = session.selectedLibrary ?: return
             val token = session.serverAuthToken() ?: return
             ensureCollectionValues(session, entry)
+            markCollectionValueItemsLoading(entry, normalizedValue)
             val current = mutableCatalog.value
             val matchingTags = current.collectionTags.filter {
                 it.target == entry.target.name &&
@@ -1883,11 +1885,13 @@ class CatalogRepository(
                 "lazy item state target=${entry.target.name} facet=${entry.facet.name} value='$normalizedValue' tags=${matchingTags.size} usable=$alreadyLoaded targetIds=${existingTargetIds.size} sample=${matchingTags.take(10).map { it.itemId }}"
             }
             if (alreadyLoaded) return
-            val collectionValue = current.collectionValues.firstOrNull {
-                it.target == entry.target.name &&
-                    it.facet == entry.facet.name &&
-                    it.value.equals(normalizedValue, ignoreCase = true)
-            } ?: return
+            val collectionValue = resolveCollectionValue(
+                server = server,
+                library = library,
+                token = token,
+                entry = entry,
+                normalizedValue = normalizedValue,
+            )
             val target = entry.target.toPlexCollectionTarget()
             val facet = entry.facet.toPlexCollectionFacet()
             PhoebeLog.d("PlexCollections") {
@@ -2045,8 +2049,11 @@ class CatalogRepository(
         return "plex:$raw"
     }
 
-    private fun String?.matchesCollectionValue(value: String): Boolean =
-        this?.trim()?.equals(value, ignoreCase = true) == true
+    private fun String?.matchesCollectionValue(value: String): Boolean {
+        val normalized = value.trim()
+        if (normalized.isBlank()) return false
+        return splitCollectionTagLabels(this).any { it.equals(normalized, ignoreCase = true) }
+    }
 
     private suspend fun markCollectionValueItemsLoading(entry: CollectionEntry, value: String) {
         catalogMergeMutex.withLock {
@@ -2054,8 +2061,7 @@ class CatalogRepository(
             val values = latest.collectionValues.map {
                 if (it.target == entry.target.name &&
                     it.facet == entry.facet.name &&
-                    it.value.equals(value, ignoreCase = true) &&
-                    it.itemsLoaded
+                    it.value.equals(value, ignoreCase = true)
                 ) {
                     it.copy(itemsLoaded = false)
                 } else {
@@ -2109,75 +2115,147 @@ class CatalogRepository(
             PhoebeLog.d("PlexCollections") { "lazy values skipped target=${entry.target.name} facet=${entry.facet.name}: unsupported provider facet" }
             return
         }
-        val server = session?.selectedServer
-        if (server == null) {
-            PhoebeLog.d("PlexCollections") { "lazy values skipped target=${entry.target.name} facet=${entry.facet.name}: no selected server" }
-            return
-        }
-        val library = session.selectedLibrary
-        if (library == null) {
-            PhoebeLog.d("PlexCollections") { "lazy values skipped target=${entry.target.name} facet=${entry.facet.name}: no selected library" }
-            return
-        }
-        val token = session.serverAuthToken()
-        if (token == null) {
-            PhoebeLog.d("PlexCollections") { "lazy values skipped target=${entry.target.name} facet=${entry.facet.name}: no auth token" }
-            return
-        }
-        val current = mutableCatalog.value
-        val alreadyLoaded = current.collectionValues.any {
-            it.target == entry.target.name && it.facet == entry.facet.name
-        }
-        PhoebeLog.d("PlexCollections") {
-            val matchingValues = current.collectionValues.filter {
+        try {
+            val server = session?.selectedServer
+            if (server == null) {
+                PhoebeLog.d("PlexCollections") { "lazy values skipped target=${entry.target.name} facet=${entry.facet.name}: no selected server" }
+                return
+            }
+            val library = session.selectedLibrary
+            if (library == null) {
+                PhoebeLog.d("PlexCollections") { "lazy values skipped target=${entry.target.name} facet=${entry.facet.name}: no selected library" }
+                return
+            }
+            val token = session.serverAuthToken()
+            if (token == null) {
+                PhoebeLog.d("PlexCollections") { "lazy values skipped target=${entry.target.name} facet=${entry.facet.name}: no auth token" }
+                return
+            }
+            val current = mutableCatalog.value
+            val alreadyLoaded = current.collectionValues.any {
                 it.target == entry.target.name && it.facet == entry.facet.name
             }
-            val loadMarkers = current.collectionValueLoads.count {
-                it.target == entry.target.name && it.facet == entry.facet.name
+            PhoebeLog.d("PlexCollections") {
+                val matchingValues = current.collectionValues.filter {
+                    it.target == entry.target.name && it.facet == entry.facet.name
+                }
+                val loadMarkers = current.collectionValueLoads.count {
+                    it.target == entry.target.name && it.facet == entry.facet.name
+                }
+                "lazy values state target=${entry.target.name} facet=${entry.facet.name} alreadyLoaded=$alreadyLoaded values=${matchingValues.size} loadMarkers=$loadMarkers sample=${matchingValues.take(10).map { "${it.value}:${it.key}:${it.filterField}" }}"
             }
-            "lazy values state target=${entry.target.name} facet=${entry.facet.name} alreadyLoaded=$alreadyLoaded values=${matchingValues.size} loadMarkers=$loadMarkers sample=${matchingValues.take(10).map { "${it.value}:${it.key}:${it.filterField}" }}"
+            if (alreadyLoaded) return
+
+            val target = entry.target.toPlexCollectionTarget()
+            val facet = entry.facet.toPlexCollectionFacet()
+            PhoebeLog.d("PlexCollections") {
+                "lazy values target=${entry.target.name} facet=${entry.facet.name}"
+            }
+            val loadedValues = plexClient.collectionFilterChoices(
+                server = server,
+                library = library,
+                target = target,
+                facet = facet,
+                token = token,
+            ).map { choice ->
+                CatalogCollectionValue(
+                    target = entry.target.name,
+                    facet = entry.facet.name,
+                    value = choice.title,
+                    key = choice.key,
+                    fastKey = choice.fastKey,
+                    filterField = choice.filterField,
+                    itemsLoaded = false,
+                )
+            }
+            catalogMergeMutex.withLock {
+                val latest = mutableCatalog.value
+                val retained = latest.collectionValues.filterNot {
+                    it.target == entry.target.name && it.facet == entry.facet.name
+                }
+                val updated = latest.copy(
+                    collectionValues = (retained + loadedValues).distinct(),
+                    collectionValueLoads = (
+                        latest.collectionValueLoads +
+                            CatalogCollectionValueLoad(target = entry.target.name, facet = entry.facet.name)
+                        ).distinct(),
+                )
+                mutableCatalog.value = updated
+                persistAsync(updated)
+            }
+            PhoebeLog.d("PlexCollections") {
+                "lazy values loaded target=${entry.target.name} facet=${entry.facet.name} count=${loadedValues.size}"
+            }
+        } finally {
+            markCollectionValuesFetchAttempted(entry)
         }
-        if (alreadyLoaded) return
+    }
+
+    private suspend fun resolveCollectionValue(
+        server: PlexServer,
+        library: MusicLibrary,
+        token: String,
+        entry: CollectionEntry,
+        normalizedValue: String,
+    ): CatalogCollectionValue {
+        mutableCatalog.value.collectionValues.firstOrNull {
+            it.target == entry.target.name &&
+                it.facet == entry.facet.name &&
+                it.value.equals(normalizedValue, ignoreCase = true)
+        }?.let { return it }
 
         val target = entry.target.toPlexCollectionTarget()
         val facet = entry.facet.toPlexCollectionFacet()
-        PhoebeLog.d("PlexCollections") {
-            "lazy values target=${entry.target.name} facet=${entry.facet.name}"
-        }
-        val loadedValues = plexClient.collectionFilterChoices(
+        val refreshedChoice = plexClient.collectionFilterChoices(
             server = server,
             library = library,
             target = target,
             facet = facet,
             token = token,
-        ).map { choice ->
-            CatalogCollectionValue(
+        ).firstOrNull { it.title.equals(normalizedValue, ignoreCase = true) }
+        if (refreshedChoice != null) {
+            val resolved = CatalogCollectionValue(
                 target = entry.target.name,
                 facet = entry.facet.name,
-                value = choice.title,
-                key = choice.key,
-                fastKey = choice.fastKey,
-                filterField = choice.filterField,
+                value = refreshedChoice.title,
+                key = refreshedChoice.key,
+                fastKey = refreshedChoice.fastKey,
+                filterField = refreshedChoice.filterField,
                 itemsLoaded = false,
             )
+            return catalogMergeMutex.withLock {
+                val latest = mutableCatalog.value
+                latest.collectionValues.firstOrNull {
+                    it.target == entry.target.name &&
+                        it.facet == entry.facet.name &&
+                        it.value.equals(resolved.value, ignoreCase = true)
+                } ?: resolved.also { value ->
+                    val updated = latest.copy(collectionValues = latest.collectionValues + value)
+                    mutableCatalog.value = updated
+                    persistAsync(updated)
+                }
+            }
         }
+
+        return CatalogCollectionValue(
+            target = entry.target.name,
+            facet = entry.facet.name,
+            value = normalizedValue,
+            key = normalizedValue,
+            itemsLoaded = false,
+        )
+    }
+
+    private suspend fun markCollectionValuesFetchAttempted(entry: CollectionEntry) {
         catalogMergeMutex.withLock {
             val latest = mutableCatalog.value
-            val retained = latest.collectionValues.filterNot {
-                it.target == entry.target.name && it.facet == entry.facet.name
-            }
+            if (latest.hasCollectionValueLoad(entry)) return@withLock
             val updated = latest.copy(
-                collectionValues = (retained + loadedValues).distinct(),
-                collectionValueLoads = (
-                    latest.collectionValueLoads +
-                        CatalogCollectionValueLoad(target = entry.target.name, facet = entry.facet.name)
-                    ).distinct(),
+                collectionValueLoads = latest.collectionValueLoads +
+                    CatalogCollectionValueLoad(target = entry.target.name, facet = entry.facet.name),
             )
             mutableCatalog.value = updated
             persistAsync(updated)
-        }
-        PhoebeLog.d("PlexCollections") {
-            "lazy values loaded target=${entry.target.name} facet=${entry.facet.name} count=${loadedValues.size}"
         }
     }
 

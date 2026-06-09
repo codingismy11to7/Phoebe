@@ -118,6 +118,8 @@ internal fun DesktopPlayer(
     val onMostPlayed = browseActions.onMostPlayed
     val onCollections = browseActions.onCollections
     val onCollectionValue = browseActions.onCollectionValue
+    val onEnsureCollectionValuesLoaded = browseActions.onEnsureCollectionValuesLoaded
+    val onEnsureCollectionItemsLoaded = browseActions.onEnsureCollectionItemsLoaded
     val onRefreshRandomArtists = browseActions.onRefreshRandomArtists
     val onRefreshRandomAlbums = browseActions.onRefreshRandomAlbums
     val onPrefetchHomeArtist = browseActions.onPrefetchHomeArtist
@@ -181,7 +183,8 @@ internal fun DesktopPlayer(
     val onRetryServers = authSetupActions.onRetryServers
     val onHomeSections = settingsActions.onHomeSections
     val onPersonalMix = settingsActions.onPersonalMix
-    val onGridColumns = settingsActions.onGridColumns
+    val onAlbumGridItemSize = settingsActions.onAlbumGridItemSize
+    val onArtistGridItemSize = settingsActions.onArtistGridItemSize
     val onExportFavoritePlaylists = settingsActions.onExportFavoritePlaylists
     val onImportFavoritePlaylists = settingsActions.onImportFavoritePlaylists
     val onCrossfadeSeconds = settingsActions.onCrossfadeSeconds
@@ -399,6 +402,7 @@ internal fun DesktopPlayer(
                                         modifier = Modifier.weight(1f).fillMaxWidth(),
                                         onBack = onPopDetail,
                                         onCollectionValue = { entry, value -> onCollectionValue(entry, value) },
+                                        onEnsureValuesLoaded = { onEnsureCollectionValuesLoaded(targetScreen.entry) },
                                     )
                                 }
                                 is AppScreen.CollectionItems -> Column(Modifier.fillMaxSize()) {
@@ -412,6 +416,9 @@ internal fun DesktopPlayer(
                                         onBack = onPopDetail,
                                         onArtist = onArtist,
                                         onAlbum = onAlbum,
+                                        onEnsureItemsLoaded = {
+                                            onEnsureCollectionItemsLoaded(targetScreen.entry, targetScreen.value)
+                                        },
                                     )
                                 }
                                 is AppScreen.PlayHistory -> Column(Modifier.fillMaxSize()) {
@@ -577,7 +584,8 @@ internal fun DesktopPlayer(
                                         onBlurredArtworkAppearance = onBlurredArtworkAppearance,
                                         onHomeSections = onHomeSections,
                                         onPersonalMix = onPersonalMix,
-                                        onGridColumns = onGridColumns,
+                                        onAlbumGridItemSize = onAlbumGridItemSize,
+                                        onArtistGridItemSize = onArtistGridItemSize,
                                         onExportFavoritePlaylists = onExportFavoritePlaylists,
                                         onImportFavoritePlaylists = onImportFavoritePlaylists,
                                         session = session,

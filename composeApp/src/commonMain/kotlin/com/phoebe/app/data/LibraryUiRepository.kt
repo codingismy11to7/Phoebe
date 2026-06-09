@@ -71,8 +71,12 @@ class LibraryUiRepository(
         save(mutableState.value.copy(personalMix = personalMix.normalized()))
     }
 
-    suspend fun setGridColumns(gridColumns: Int) {
-        save(mutableState.value.normalized().copy(gridColumns = gridColumns))
+    suspend fun setAlbumGridItemSize(sizeDp: Int) {
+        save(mutableState.value.normalized().copy(albumGridItemSizeDp = sizeDp))
+    }
+
+    suspend fun setArtistGridItemSize(sizeDp: Int) {
+        save(mutableState.value.normalized().copy(artistGridItemSizeDp = sizeDp))
     }
 
     /** Updates UI state immediately; pair with [persistCurrentToDisk] on a background coroutine. */
@@ -111,7 +115,9 @@ class LibraryUiRepository(
             colFavorite = c.favorite.toDb(),
             homeSections = prefs.homeSections.joinToString(",") { it.name },
             personalMix = json.encodeToString(PersonalMixPreferences.serializer(), prefs.personalMix.normalized()),
-            gridColumns = prefs.normalized().gridColumns.toLong(),
+            gridColumns = 3,
+            albumGridItemSizeDp = prefs.normalized().albumGridItemSizeDp.toLong(),
+            artistGridItemSizeDp = prefs.normalized().artistGridItemSizeDp.toLong(),
         )
     }
 
@@ -134,7 +140,8 @@ class LibraryUiRepository(
             ),
             homeSections = homeSections.toHomeSections(),
             personalMix = personalMix.toPersonalMixPreferences(),
-            gridColumns = gridColumns.toInt(),
+            albumGridItemSizeDp = albumGridItemSizeDp.toInt(),
+            artistGridItemSizeDp = artistGridItemSizeDp.toInt(),
         )
 
     private companion object {

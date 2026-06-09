@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -39,7 +40,10 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
+import androidx.compose.foundation.lazy.grid.LazyGridScope
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -47,6 +51,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -58,6 +64,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
@@ -228,7 +235,7 @@ internal fun FavoriteArtistsDesktopView(
             catalog = catalog,
             artists = visibleArtists,
             viewMode = viewMode,
-            gridColumns = libraryUi.gridColumns,
+            artistGridItemSizeDp = libraryUi.artistGridItemSizeDp,
             sortBy = libraryUi.sortBy,
             ascending = libraryUi.ascending,
             onArtist = onArtist,
@@ -286,7 +293,7 @@ internal fun FavoriteAlbumsDesktopView(
             albums = visibleAlbums,
             selectedAlbumId = selectedAlbumId,
             viewMode = viewMode,
-            gridColumns = libraryUi.gridColumns,
+            albumGridItemSizeDp = libraryUi.albumGridItemSizeDp,
             sortBy = libraryUi.sortBy,
             ascending = libraryUi.ascending,
             onSelect = { selectedAlbumId = it.id },
@@ -566,7 +573,7 @@ internal fun LibraryDesktopView(
                         catalog = catalog,
                         artists = artistPage.items,
                         viewMode = libraryViewMode,
-                        gridColumns = libraryUi.gridColumns,
+                        artistGridItemSizeDp = libraryUi.artistGridItemSizeDp,
                         sortBy = sortBy,
                         ascending = ascending,
                         onArtist = onArtist,
@@ -577,7 +584,7 @@ internal fun LibraryDesktopView(
                         albums = albumPage.items,
                         selectedAlbumId = selectedAlbumId,
                         viewMode = libraryViewMode,
-                        gridColumns = libraryUi.gridColumns,
+                        albumGridItemSizeDp = libraryUi.albumGridItemSizeDp,
                         sortBy = sortBy,
                         ascending = ascending,
                         onSelect = { selectedAlbumId = it.id },
@@ -612,7 +619,7 @@ internal fun LibraryDesktopView(
                         albums = albumPage.items,
                         selectedAlbumId = selectedAlbumId,
                         viewMode = libraryViewMode,
-                        gridColumns = libraryUi.gridColumns,
+                        albumGridItemSizeDp = libraryUi.albumGridItemSizeDp,
                         sortBy = sortBy,
                         ascending = ascending,
                         onSelect = { selectedAlbumId = it.id },
@@ -1343,10 +1350,80 @@ private fun OrderMenuItem(
     )
 }
 
-internal fun libraryGridCells(columns: Int): GridCells =
-    GridCells.Fixed(columns.coerceIn(LibraryUiPreferences.MinGridColumns, LibraryUiPreferences.MaxGridColumns))
+private const val LibraryGridLayoutSettleMs = 200L
+private const val LibraryGridWidthDebounceMs = 200L
+private const val LibraryGridWidthBucketDp = 64f
 
-internal val LibraryAlbumGridArtworkMaxSize = 200.dp
+internal fun libraryAdaptiveColumnCount(
+    availableWidth: Dp,
+    itemSizeDp: Int,
+    gap: Dp = 14.dp,
+): Int {
+    val itemWidth = itemSizeDp.dp
+    if (availableWidth <= 0.dp) return 1
+    return ((availableWidth + gap) / (itemWidth + gap)).toInt().coerceAtLeast(1)
+}
+
+@Composable
+internal fun rememberLibraryGridColumnCount(
+    availableWidth: Dp,
+    itemSizeDp: Int,
+    horizontalSpacing: Dp,
+): Int {
+    var settledWidth by remember { mutableStateOf(availableWidth) }
+    LaunchedEffect(availableWidth) {
+        delay(LibraryGridWidthDebounceMs)
+        settledWidth = availableWidth
+    }
+    val widthBucket = (settledWidth.value / LibraryGridWidthBucketDp).roundToInt().coerceAtLeast(1)
+    return remember(widthBucket, itemSizeDp, horizontalSpacing) {
+        libraryAdaptiveColumnCount(
+            availableWidth = (widthBucket * LibraryGridWidthBucketDp).dp,
+            itemSizeDp = itemSizeDp,
+            gap = horizontalSpacing,
+        )
+    }
+}
+
+@Composable
+internal fun LibraryResponsiveGrid(
+    itemSizeDp: Int,
+    horizontalSpacing: Dp,
+    verticalSpacing: Dp,
+    state: LazyGridState,
+    modifier: Modifier = Modifier,
+    contentPadding: PaddingValues = PaddingValues(),
+    content: LazyGridScope.() -> Unit,
+) {
+    BoxWithConstraints(modifier) {
+        val columnCount = rememberLibraryGridColumnCount(
+            availableWidth = maxWidth,
+            itemSizeDp = itemSizeDp,
+            horizontalSpacing = horizontalSpacing,
+        )
+        var layoutSettling by remember { mutableStateOf(false) }
+        LaunchedEffect(maxWidth) {
+            layoutSettling = true
+            delay(LibraryGridLayoutSettleMs)
+            layoutSettling = false
+        }
+        val artworkEnabled = LocalArtworkLoadingEnabled.current && !layoutSettling
+        CompositionLocalProvider(
+            LocalSharedElementTransitionsEnabled provides false,
+            LocalArtworkLoadingEnabled provides artworkEnabled,
+        ) {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(columnCount),
+                state = state,
+                verticalArrangement = Arrangement.spacedBy(verticalSpacing),
+                horizontalArrangement = Arrangement.spacedBy(horizontalSpacing),
+                contentPadding = contentPadding,
+                modifier = Modifier.fillMaxSize(),
+                content = content,
+            )
+        }
+    }
+}
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -1633,7 +1710,7 @@ private fun ArtistsContent(
     catalog: CatalogSnapshot,
     artists: List<Artist>,
     viewMode: LibraryViewMode,
-    gridColumns: Int,
+    artistGridItemSizeDp: Int,
     sortBy: LibrarySortBy,
     ascending: Boolean,
     onArtist: (Artist) -> Unit,
@@ -1654,27 +1731,18 @@ private fun ArtistsContent(
         LibraryViewMode.Grid -> {
             val gridState = rememberLazyGridState()
             val revealIndex by remember(gridState) { derivedStateOf { gridState.isScrollInProgress } }
-            val scrollbarState by remember(gridState) {
-                derivedStateOf {
-                    LibraryScrollbarState(
-                        firstVisibleItemIndex = gridState.firstVisibleItemIndex,
-                        visibleItemsCount = gridState.layoutInfo.visibleItemsInfo.size,
-                        totalItemsCount = gridState.layoutInfo.totalItemsCount,
-                    )
-                }
-            }
             Box(modifier) {
-                LazyVerticalGrid(
-                    columns = libraryGridCells(gridColumns),
+                LibraryResponsiveGrid(
+                    itemSizeDp = artistGridItemSizeDp,
+                    horizontalSpacing = 18.dp,
+                    verticalSpacing = 20.dp,
                     state = gridState,
-                    verticalArrangement = Arrangement.spacedBy(20.dp),
-                    horizontalArrangement = Arrangement.spacedBy(18.dp),
                     modifier = Modifier.fillMaxSize(),
                 ) {
                     items(artists, key = { it.id }, contentType = { "artist-card" }) { artist ->
                         ArtistCard(
-                            catalog = catalog,
                             artist = artist,
+                            artworkDecodeDimension = libraryGridDecodeDimension(artistGridItemSizeDp),
                             onArtist = { onArtist(artist) },
                         )
                     }
@@ -1686,7 +1754,13 @@ private fun ArtistsContent(
                     },
                     mode = LibrarySectionIndexMode.DesktopScrollbar,
                     revealSignal = revealIndex,
-                    scrollbarState = scrollbarState,
+                    scrollbarStateProvider = {
+                        LibraryScrollbarState(
+                            firstVisibleItemIndex = gridState.firstVisibleItemIndex,
+                            visibleItemsCount = gridState.layoutInfo.visibleItemsInfo.size,
+                            totalItemsCount = gridState.layoutInfo.totalItemsCount,
+                        )
+                    },
                     modifier = Modifier.align(Alignment.CenterEnd),
                 )
             }
@@ -1737,12 +1811,18 @@ private fun ArtistsContent(
 
 @Composable
 private fun ArtistCard(
-    catalog: CatalogSnapshot,
     artist: Artist,
+    artworkDecodeDimension: Int,
     onArtist: () -> Unit,
 ) {
-    val genre = remember(catalog, artist.title) { catalogArtistGenre(catalog, artist.title) }
-    val albumCount = remember(catalog, artist.title) { catalogAlbumsForArtist(catalog, artist.title).size }
+    val subtitle = remember(artist.albumCount) {
+        val albumCount = artist.albumCount
+        if (albumCount > 0) {
+            "$albumCount ${if (albumCount == 1) "album" else "albums"}"
+        } else {
+            "Artist"
+        }
+    }
     Column(
         Modifier
             .clip(RoundedCornerShape(14.dp))
@@ -1753,11 +1833,18 @@ private fun ArtistCard(
     ) {
         Box(
             Modifier
-                .size(112.dp)
-                .sharedArtworkTransition("artist:${artist.id}")
+                .fillMaxWidth()
+                .aspectRatio(1f)
                 .clip(CircleShape),
         ) {
-            ArtworkImage(artist.title, artist.thumbUrl, Modifier.fillMaxSize(), radius = 56.dp)
+            ArtworkImage(
+                artist.title,
+                artist.thumbUrl,
+                Modifier.fillMaxSize(),
+                radius = 999.dp,
+                elevated = false,
+                maxDecodeDimension = artworkDecodeDimension,
+            )
         }
         Text(
             artist.title,
@@ -1766,16 +1853,9 @@ private fun ArtistCard(
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.sharedBoundsTransition("artist:${artist.id}:title"),
         )
         Text(
-            buildString {
-                genre?.let { append(it) }
-                if (albumCount > 0) {
-                    if (length > 0) append(" • ")
-                    append("$albumCount ${if (albumCount == 1) "album" else "albums"}")
-                }
-            }.ifBlank { "Artist" },
+            subtitle,
             color = PhoebeUi.mutedText,
             fontSize = 11.sp,
             maxLines = 1,
@@ -1869,7 +1949,7 @@ private fun AlbumsGrid(
     albums: List<Album>,
     selectedAlbumId: String?,
     viewMode: LibraryViewMode,
-    gridColumns: Int,
+    albumGridItemSizeDp: Int,
     sortBy: LibrarySortBy,
     ascending: Boolean,
     onSelect: (Album) -> Unit,
@@ -1891,21 +1971,12 @@ private fun AlbumsGrid(
         LibraryViewMode.Grid -> {
             val gridState = rememberLazyGridState()
             val revealIndex by remember(gridState) { derivedStateOf { gridState.isScrollInProgress } }
-            val scrollbarState by remember(gridState) {
-                derivedStateOf {
-                    LibraryScrollbarState(
-                        firstVisibleItemIndex = gridState.firstVisibleItemIndex,
-                        visibleItemsCount = gridState.layoutInfo.visibleItemsInfo.size,
-                        totalItemsCount = gridState.layoutInfo.totalItemsCount,
-                    )
-                }
-            }
             Box(modifier) {
-                LazyVerticalGrid(
-                    columns = libraryGridCells(gridColumns),
+                LibraryResponsiveGrid(
+                    itemSizeDp = albumGridItemSizeDp,
+                    horizontalSpacing = 18.dp,
+                    verticalSpacing = 20.dp,
                     state = gridState,
-                    verticalArrangement = Arrangement.spacedBy(20.dp),
-                    horizontalArrangement = Arrangement.spacedBy(18.dp),
                     modifier = Modifier.fillMaxSize(),
                 ) {
                     items(albums, key = { it.id }, contentType = { "album-card" }) { album ->
@@ -1913,6 +1984,7 @@ private fun AlbumsGrid(
                             catalog = catalog,
                             album = album,
                             selected = album.id == selectedAlbumId,
+                            artworkDecodeDimension = libraryGridDecodeDimension(albumGridItemSizeDp),
                             onSelect = { onSelect(album) },
                             onOpen = { onOpen(album) },
                         )
@@ -1925,7 +1997,13 @@ private fun AlbumsGrid(
                     },
                     mode = LibrarySectionIndexMode.DesktopScrollbar,
                     revealSignal = revealIndex,
-                    scrollbarState = scrollbarState,
+                    scrollbarStateProvider = {
+                        LibraryScrollbarState(
+                            firstVisibleItemIndex = gridState.firstVisibleItemIndex,
+                            visibleItemsCount = gridState.layoutInfo.visibleItemsInfo.size,
+                            totalItemsCount = gridState.layoutInfo.totalItemsCount,
+                        )
+                    },
                     modifier = Modifier.align(Alignment.CenterEnd),
                 )
             }
@@ -1978,6 +2056,7 @@ private fun AlbumCard(
     catalog: CatalogSnapshot,
     album: Album,
     selected: Boolean,
+    artworkDecodeDimension: Int,
     onSelect: () -> Unit,
     onOpen: () -> Unit,
 ) {
@@ -1999,12 +2078,18 @@ private fun AlbumCard(
         Box(
             Modifier
                 .fillMaxWidth()
-                .widthIn(max = LibraryAlbumGridArtworkMaxSize)
                 .aspectRatio(1f)
                 .sharedArtworkTransition("album:${album.id}")
                 .phoebeClickable(onClick = onOpen),
         ) {
-            ArtworkImage(album.title, album.thumbUrl, Modifier.fillMaxSize(), radius = 10.dp)
+            ArtworkImage(
+                album.title,
+                album.thumbUrl,
+                Modifier.fillMaxSize(),
+                radius = 10.dp,
+                elevated = false,
+                maxDecodeDimension = artworkDecodeDimension,
+            )
         }
         Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(horizontal = 4.dp)) {
             Text(

@@ -20,12 +20,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyGridState
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -77,7 +74,6 @@ private val MobileLibraryToolbarToContentGap = 10.dp
 private val MobileLibraryLoadingStripHeight = 16.dp
 private val MobileLibraryPaginationHeight = 36.dp
 private val MobileLibraryContentGap = 8.dp
-private val MobileArtistGridArtworkMaxSize = 112.dp
 private val MobileLibrarySectionIndexBottomPadding = 22.dp
 
 private fun LazyListState.libraryScrollbarState(): LibraryScrollbarState =
@@ -170,7 +166,7 @@ internal fun LibraryMobileView(
                 LibraryFilterTab.Artists -> MobileArtistsContent(
                     artists = artistPage.items,
                     viewMode = libraryViewMode,
-                    gridColumns = libraryUi.gridColumns,
+                    artistGridItemSizeDp = libraryUi.artistGridItemSizeDp,
                     sortBy = sortBy,
                     ascending = ascending,
                     onArtist = onArtist,
@@ -180,7 +176,7 @@ internal fun LibraryMobileView(
                     catalog = catalog,
                     albums = albumPage.items,
                     viewMode = libraryViewMode,
-                    gridColumns = libraryUi.gridColumns,
+                    albumGridItemSizeDp = libraryUi.albumGridItemSizeDp,
                     sortBy = sortBy,
                     ascending = ascending,
                     onAlbum = onAlbum,
@@ -279,7 +275,7 @@ internal fun FavoriteArtistsMobileView(
         MobileArtistsContent(
             artists = favoriteArtists,
             viewMode = viewMode,
-            gridColumns = libraryUi.gridColumns,
+            artistGridItemSizeDp = libraryUi.artistGridItemSizeDp,
             sortBy = libraryUi.sortBy,
             ascending = libraryUi.ascending,
             onArtist = onArtist,
@@ -331,7 +327,7 @@ internal fun FavoriteAlbumsMobileView(
             catalog = catalog,
             albums = favoriteAlbums,
             viewMode = viewMode,
-            gridColumns = libraryUi.gridColumns,
+            albumGridItemSizeDp = libraryUi.albumGridItemSizeDp,
             sortBy = libraryUi.sortBy,
             ascending = libraryUi.ascending,
             onAlbum = onAlbum,
@@ -444,7 +440,7 @@ private fun MobileColumnRow(label: String, checked: Boolean, onToggle: () -> Uni
 private fun MobileArtistsContent(
     artists: List<Artist>,
     viewMode: LibraryViewMode,
-    gridColumns: Int,
+    artistGridItemSizeDp: Int,
     sortBy: LibrarySortBy,
     ascending: Boolean,
     onArtist: (Artist) -> Unit,
@@ -466,16 +462,20 @@ private fun MobileArtistsContent(
             val gridState = RetainedLazyGridStates.remember("library-artists-grid")
             val scrolling by remember(gridState) { derivedStateOf { gridState.isScrollInProgress } }
             Box(Modifier.fillMaxSize()) {
-                LazyVerticalGrid(
-                    columns = libraryGridCells(gridColumns),
+                LibraryResponsiveGrid(
+                    itemSizeDp = artistGridItemSizeDp,
+                    horizontalSpacing = 14.dp,
+                    verticalSpacing = 16.dp,
                     state = gridState,
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
                     contentPadding = contentPadding,
                     modifier = Modifier.fillMaxSize(),
                 ) {
                     items(artists, key = { it.id }, contentType = { "artist-card" }) { artist ->
-                        MobileArtistCard(artist = artist, onArtist = onArtist)
+                        MobileArtistCard(
+                            artist = artist,
+                            artworkDecodeDimension = libraryGridDecodeDimension(artistGridItemSizeDp),
+                            onArtist = onArtist,
+                        )
                     }
                 }
                 LibrarySectionIndex(
@@ -532,6 +532,7 @@ private fun MobileArtistsContent(
 @Composable
 private fun MobileArtistCard(
     artist: Artist,
+    artworkDecodeDimension: Int,
     onArtist: (Artist) -> Unit,
 ) {
     val subtitle = remember(artist.albumCount) {
@@ -555,14 +556,13 @@ private fun MobileArtistCard(
             artist.title,
             artist.thumbUrl,
             Modifier
-                .widthIn(max = MobileArtistGridArtworkMaxSize)
                 .fillMaxWidth()
                 .aspectRatio(1f)
-                .sharedArtworkTransition("artist:${artist.id}")
                 .clip(CircleShape),
             radius = 999.dp,
             shape = CircleShape,
             elevated = false,
+            maxDecodeDimension = artworkDecodeDimension,
         )
         Text(
             artist.title,
@@ -571,7 +571,6 @@ private fun MobileArtistCard(
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.sharedBoundsTransition("artist:${artist.id}:title"),
         )
         Text(
             subtitle,
@@ -649,7 +648,7 @@ private fun MobileAlbumsContent(
     catalog: CatalogSnapshot,
     albums: List<Album>,
     viewMode: LibraryViewMode,
-    gridColumns: Int,
+    albumGridItemSizeDp: Int,
     sortBy: LibrarySortBy,
     ascending: Boolean,
     onAlbum: (Album) -> Unit,
@@ -671,16 +670,21 @@ private fun MobileAlbumsContent(
             val gridState = RetainedLazyGridStates.remember("library-albums-grid")
             val scrolling by remember(gridState) { derivedStateOf { gridState.isScrollInProgress } }
             Box(Modifier.fillMaxSize()) {
-                LazyVerticalGrid(
-                    columns = libraryGridCells(gridColumns),
+                LibraryResponsiveGrid(
+                    itemSizeDp = albumGridItemSizeDp,
+                    horizontalSpacing = 14.dp,
+                    verticalSpacing = 16.dp,
                     state = gridState,
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
                     contentPadding = contentPadding,
                     modifier = Modifier.fillMaxSize(),
                 ) {
                     items(albums, key = { it.id }, contentType = { "album-card" }) { album ->
-                        MobileAlbumCard(catalog = catalog, album = album, onAlbum = onAlbum)
+                        MobileAlbumCard(
+                            catalog = catalog,
+                            album = album,
+                            artworkDecodeDimension = libraryGridDecodeDimension(albumGridItemSizeDp),
+                            onAlbum = onAlbum,
+                        )
                     }
                 }
                 LibrarySectionIndex(
@@ -738,6 +742,7 @@ private fun MobileAlbumsContent(
 private fun MobileAlbumCard(
     catalog: CatalogSnapshot,
     album: Album,
+    artworkDecodeDimension: Int,
     onAlbum: (Album) -> Unit,
 ) {
     val tracks = remember(catalog, album.id) { catalogTracksForAlbum(catalog, album.id) }
@@ -753,7 +758,6 @@ private fun MobileAlbumCard(
         Box(
             Modifier
                 .fillMaxWidth()
-                .widthIn(max = LibraryAlbumGridArtworkMaxSize)
                 .aspectRatio(1f)
                 .sharedArtworkTransition("album:${album.id}"),
         ) {
@@ -763,6 +767,7 @@ private fun MobileAlbumCard(
                 Modifier.fillMaxSize(),
                 radius = 10.dp,
                 elevated = false,
+                maxDecodeDimension = artworkDecodeDimension,
             )
         }
         Column(verticalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.padding(horizontal = 2.dp)) {

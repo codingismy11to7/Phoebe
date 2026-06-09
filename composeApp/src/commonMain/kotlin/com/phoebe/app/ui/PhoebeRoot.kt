@@ -1178,6 +1178,7 @@ private fun PhoebeRootStateHolder(
                         supportedCollectionEntries = supportedCollectionEntries,
                         onBack = { navigator.pop() },
                         onCollectionValue = openCollectionValue,
+                        onEnsureValuesLoaded = { state.preloadCollections(scr.entry) },
                     )
                     is AppScreen.CollectionItems -> CollectionItemsScreen(
                         entry = scr.entry,
@@ -1188,6 +1189,7 @@ private fun PhoebeRootStateHolder(
                         onBack = { navigator.pop() },
                         onArtist = { navigator.open(it.route()) },
                         onAlbum = { navigator.open(it.route()) },
+                        onEnsureItemsLoaded = { state.preloadCollectionItems(scr.entry, scr.value) },
                     )
                     is AppScreen.PlayHistory -> PlayHistoryScreen(
                         kind = scr.kind,
@@ -1366,7 +1368,8 @@ private fun PhoebeRootStateHolder(
                         onLibraryColumns = state::setLibraryColumns,
                         onHomeSections = state::setHomeSections,
                         onPersonalMix = state::setPersonalMixPreferences,
-                        onGridColumns = state::setGridColumns,
+                        onAlbumGridItemSize = state::setAlbumGridItemSize,
+                        onArtistGridItemSize = state::setArtistGridItemSize,
                         onExportFavoritePlaylists = state::exportFavoritePlaylists,
                         onImportFavoritePlaylists = state::importFavoritePlaylists,
                         appSettings = appSettings,
@@ -1631,6 +1634,8 @@ private fun PhoebeRootStateHolder(
                         onMostPlayed = openMostPlayed,
                         onCollections = openCollections,
                         onCollectionValue = openCollectionValue,
+                        onEnsureCollectionValuesLoaded = state::preloadCollections,
+                        onEnsureCollectionItemsLoaded = state::preloadCollectionItems,
                         onRefreshRandomArtists = { randomArtistSeed = Random.nextInt() },
                         onRefreshRandomAlbums = { randomAlbumSeed = Random.nextInt() },
                         onPrefetchHomeArtist = state::prefetchHomeArtistStats,
@@ -1700,7 +1705,8 @@ private fun PhoebeRootStateHolder(
                     settingsActions = SettingsActions(
                         onHomeSections = state::setHomeSections,
                         onPersonalMix = state::setPersonalMixPreferences,
-                        onGridColumns = state::setGridColumns,
+                        onAlbumGridItemSize = state::setAlbumGridItemSize,
+                        onArtistGridItemSize = state::setArtistGridItemSize,
                         onExportFavoritePlaylists = state::exportFavoritePlaylists,
                         onImportFavoritePlaylists = state::importFavoritePlaylists,
                         onCrossfadeSeconds = state::setCrossfadeSeconds,
