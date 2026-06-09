@@ -1,6 +1,7 @@
 package com.phoebe.app.platform
 
 import com.phoebe.app.ui.RemoteArtworkCache
+import kotlin.concurrent.Volatile
 
 enum class MemoryPressureLevel {
     UiHidden,
