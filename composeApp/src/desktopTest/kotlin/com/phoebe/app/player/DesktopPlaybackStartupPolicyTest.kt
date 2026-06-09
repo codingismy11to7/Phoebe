@@ -52,6 +52,27 @@ class DesktopPlaybackStartupPolicyTest {
     }
 
     @Test
+    fun flatpakSandboxUsesPlexMp3TranscodeForAacStreams() {
+        DesktopSandboxPlayback.flatpakSandboxOverride = { true }
+        try {
+            val track = playbackTrack(
+                streamUrl = "https://plex.example:32400/library/parts/2.m4a?X-Plex-Token=token",
+                localUri = null,
+            ).copy(
+                id = "plex:124",
+                audioCodec = "aac",
+                filepath = "/music/Artist/Album/02 Track.m4a",
+            )
+            assertEquals(
+                "https://plex.example:32400/music/:/transcode/universal/start.mp3?path=%2Flibrary%2Fmetadata%2F124&mediaIndex=0&partIndex=0&protocol=http&format=mp3&audioCodec=mp3&directPlay=0&directStream=0&X-Plex-Token=token",
+                DesktopSandboxPlayback.playbackStreamUrlForTrack(track),
+            )
+        } finally {
+            DesktopSandboxPlayback.flatpakSandboxOverride = null
+        }
+    }
+
+    @Test
     fun flatpakSandboxBuffersRemoteMp3WithSampledPlayback() {
         DesktopSandboxPlayback.flatpakSandboxOverride = { true }
         try {

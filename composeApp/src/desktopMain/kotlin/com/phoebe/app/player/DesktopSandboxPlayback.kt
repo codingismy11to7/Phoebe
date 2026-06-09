@@ -1,5 +1,6 @@
 package com.phoebe.app.player
 
+import com.phoebe.app.domain.Track
 import java.io.File
 
 /**
@@ -49,5 +50,13 @@ internal object DesktopSandboxPlayback {
         val path = runCatching { java.net.URI(uri).path }.getOrNull()
             ?: uri.substringBefore('?').substringBefore('#')
         return sampledPlaybackExtensionFromSuffix(path.substringAfterLast('.', missingDelimiterValue = ""))
+    }
+
+    fun playbackStreamUrlForTrack(track: Track): String {
+        if (!isFlatpakSandbox() || track.streamUrl.isBlank()) return track.streamUrl
+        if (flatpakSandboxSampledPlaybackExtension(track.audioCodec, track.filepath, track.streamUrl) != null) {
+            return track.streamUrl
+        }
+        return track.plexUniversalMp3TranscodeUrl() ?: track.streamUrl
     }
 }

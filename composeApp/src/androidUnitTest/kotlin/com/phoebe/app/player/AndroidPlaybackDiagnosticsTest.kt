@@ -6,25 +6,54 @@ import kotlin.test.assertTrue
 
 class AndroidPlaybackDiagnosticsTest {
     @Test
-    fun media3LoadControlKeepsMainPlaybackBufferBounded() {
-        val profile = PhoebeLoadControlConfig.profileFor(PlaybackEnginePath.Media3)
+    fun media3LoadControlUsesRelaxedProfileForForegroundUnmeteredPlayback() {
+        val profile = PhoebeLoadControlConfig.profileFor(
+            engine = PlaybackEnginePath.Media3,
+            constrainedNetwork = false,
+            uiVisible = true,
+        )
 
-        assertEquals(PhoebeLoadControlConfig.MainMinBufferMs, profile.minBufferMs)
-        assertEquals(PhoebeLoadControlConfig.MainMaxBufferMs, profile.maxBufferMs)
-        assertEquals(PhoebeLoadControlConfig.MainTargetBufferBytes, profile.targetBufferBytes)
-        assertTrue(profile.maxBufferMs <= PhoebeLoadControlConfig.MainMaxBufferMs)
-        assertTrue(profile.targetBufferBytes <= PhoebeLoadControlConfig.MainTargetBufferBytes)
+        assertEquals(PhoebeLoadControlConfig.RelaxedMainMinBufferMs, profile.minBufferMs)
+        assertEquals(PhoebeLoadControlConfig.RelaxedMainMaxBufferMs, profile.maxBufferMs)
+        assertEquals(PhoebeLoadControlConfig.RelaxedMainTargetBufferBytes, profile.targetBufferBytes)
     }
 
     @Test
     fun media3LoadControlTightensBuffersOnConstrainedNetwork() {
-        val wifi = PhoebeLoadControlConfig.profileFor(PlaybackEnginePath.Media3, constrainedNetwork = false)
-        val cellular = PhoebeLoadControlConfig.profileFor(PlaybackEnginePath.Media3, constrainedNetwork = true)
+        val wifi = PhoebeLoadControlConfig.profileFor(
+            engine = PlaybackEnginePath.Media3,
+            constrainedNetwork = false,
+            uiVisible = true,
+        )
+        val cellular = PhoebeLoadControlConfig.profileFor(
+            engine = PlaybackEnginePath.Media3,
+            constrainedNetwork = true,
+            uiVisible = true,
+        )
 
         assertTrue(cellular.maxBufferMs < wifi.maxBufferMs)
         assertTrue(cellular.targetBufferBytes < wifi.targetBufferBytes)
         assertEquals(PhoebeLoadControlConfig.ConstrainedMainMaxBufferMs, cellular.maxBufferMs)
         assertEquals(PhoebeLoadControlConfig.ConstrainedMainTargetBufferBytes, cellular.targetBufferBytes)
+    }
+
+    @Test
+    fun media3LoadControlTightensBuffersWhenUiIsHidden() {
+        val foreground = PhoebeLoadControlConfig.profileFor(
+            engine = PlaybackEnginePath.Media3,
+            constrainedNetwork = false,
+            uiVisible = true,
+        )
+        val background = PhoebeLoadControlConfig.profileFor(
+            engine = PlaybackEnginePath.Media3,
+            constrainedNetwork = false,
+            uiVisible = false,
+        )
+
+        assertTrue(background.maxBufferMs < foreground.maxBufferMs)
+        assertTrue(background.targetBufferBytes < foreground.targetBufferBytes)
+        assertEquals(PhoebeLoadControlConfig.ConstrainedMainMaxBufferMs, background.maxBufferMs)
+        assertEquals(PhoebeLoadControlConfig.ConstrainedMainTargetBufferBytes, background.targetBufferBytes)
     }
 
     @Test
@@ -41,7 +70,16 @@ class AndroidPlaybackDiagnosticsTest {
     @Test
     fun bufferDurationsRemainValidForMedia3Builder() {
         val profiles = listOf(
-            PhoebeLoadControlConfig.profileFor(PlaybackEnginePath.Media3),
+            PhoebeLoadControlConfig.profileFor(
+                engine = PlaybackEnginePath.Media3,
+                constrainedNetwork = false,
+                uiVisible = true,
+            ),
+            PhoebeLoadControlConfig.profileFor(
+                engine = PlaybackEnginePath.Media3,
+                constrainedNetwork = true,
+                uiVisible = false,
+            ),
             PhoebeLoadControlConfig.profileFor(PlaybackEnginePath.Media3Crossfade),
         )
 

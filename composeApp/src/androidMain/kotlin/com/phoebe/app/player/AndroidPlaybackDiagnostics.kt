@@ -19,6 +19,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import com.phoebe.app.domain.EqualizerProfile
+import com.phoebe.app.platform.PhoebeAppLifecycle
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.roundToInt
@@ -43,6 +44,7 @@ internal object AndroidPlaybackDiagnostics {
             PhoebeLoadControlConfig.create(
                 engine = engine,
                 constrainedNetwork = context.hasConstrainedPlaybackNetwork(),
+                uiVisible = PhoebeAppLifecycle.isUiVisible,
             ),
         )
     }
@@ -54,6 +56,9 @@ internal object AndroidPlaybackDiagnostics {
 
 @OptIn(UnstableApi::class)
 internal object PhoebeLoadControlConfig {
+    const val RelaxedMainMinBufferMs = 15_000
+    const val RelaxedMainMaxBufferMs = 75_000
+    const val RelaxedMainTargetBufferBytes = 6 * 1024 * 1024
     const val MainMinBufferMs = 12_000
     const val MainMaxBufferMs = 45_000
     const val MainTargetBufferBytes = 4 * 1024 * 1024
@@ -68,12 +73,14 @@ internal object PhoebeLoadControlConfig {
     fun create(
         engine: PlaybackEnginePath,
         constrainedNetwork: Boolean = false,
+        uiVisible: Boolean = true,
     ): DefaultLoadControl =
-        create(profileFor(engine, constrainedNetwork))
+        create(profileFor(engine, constrainedNetwork, uiVisible))
 
     fun profileFor(
         engine: PlaybackEnginePath,
         constrainedNetwork: Boolean = false,
+        uiVisible: Boolean = true,
     ): PhoebeLoadControlProfile =
         if (engine == PlaybackEnginePath.Media3Crossfade) {
             PhoebeLoadControlProfile(
@@ -81,15 +88,17 @@ internal object PhoebeLoadControlConfig {
                 maxBufferMs = CrossfadeMaxBufferMs,
                 targetBufferBytes = CrossfadeTargetBufferBytes,
             )
-        } else {
+        } else if (!uiVisible || constrainedNetwork) {
             PhoebeLoadControlProfile(
                 minBufferMs = MainMinBufferMs,
-                maxBufferMs = if (constrainedNetwork) ConstrainedMainMaxBufferMs else MainMaxBufferMs,
-                targetBufferBytes = if (constrainedNetwork) {
-                    ConstrainedMainTargetBufferBytes
-                } else {
-                    MainTargetBufferBytes
-                },
+                maxBufferMs = ConstrainedMainMaxBufferMs,
+                targetBufferBytes = ConstrainedMainTargetBufferBytes,
+            )
+        } else {
+            PhoebeLoadControlProfile(
+                minBufferMs = RelaxedMainMinBufferMs,
+                maxBufferMs = RelaxedMainMaxBufferMs,
+                targetBufferBytes = RelaxedMainTargetBufferBytes,
             )
         }
 

@@ -6,6 +6,7 @@ import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.db.SqlSchema
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import java.io.File
+import java.sql.DriverManager
 import java.util.Properties
 
 actual suspend fun createSqlDriver(schema: SqlSchema<QueryResult.AsyncValue<Unit>>): SqlDriver {
@@ -21,7 +22,22 @@ actual suspend fun createSqlDriver(schema: SqlSchema<QueryResult.AsyncValue<Unit
 
     val driver = openDriver(dbFile, properties, schema)
     driver.execPragma("PRAGMA busy_timeout=30000")
+    registerDesktopDatabaseShutdownHook(dbFile)
     return driver
+}
+
+private fun registerDesktopDatabaseShutdownHook(dbFile: File) {
+    Runtime.getRuntime().addShutdownHook(
+        Thread {
+            runCatching {
+                DriverManager.getConnection("jdbc:sqlite:${dbFile.absolutePath}").use { connection ->
+                    connection.createStatement().use { statement ->
+                        statement.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                    }
+                }
+            }
+        },
+    )
 }
 
 private fun openDriver(

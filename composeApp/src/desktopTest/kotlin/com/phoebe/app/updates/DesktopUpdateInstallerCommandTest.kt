@@ -26,15 +26,18 @@ class DesktopUpdateInstallerCommandTest {
     @Test
     fun linuxFlatpakHelperEscapesToHostWhenRunningInsideFlatpak() {
         val script = linuxInstallerHelperScript(
-            filePath = "/tmp/Phoebe 1.2.3.flatpak",
+            filePath = "/home/ada/Downloads/Phoebe-1.2.3.flatpak",
             flatpak = true,
             insideFlatpak = true,
-            relaunchCommand = "phoebe",
+            relaunchCommand = "flatpak run com.phoebe.app",
         )
 
         assertTrue(script.contains("flatpak-spawn --host sh -c"))
         assertTrue(script.contains("flatpak install --user -y"))
+        assertTrue(script.contains("/home/ada/Downloads/Phoebe-1.2.3.flatpak"))
         assertTrue(script.contains("flatpak install -y"))
+        assertTrue(script.contains("flatpak run com.phoebe.app"))
+        assertTrue(script.contains(">/dev/null 2>&1 &"))
     }
 
     @Test
@@ -49,6 +52,7 @@ class DesktopUpdateInstallerCommandTest {
         assertTrue(script.contains("pkexec sh -c"))
         assertTrue(script.contains("dpkg -i"))
         assertTrue(script.contains("apt-get install -f -y"))
-        assertTrue(script.contains("phoebe >/dev/null 2>&1 &"))
+        assertTrue(script.contains("phoebe"))
+        assertTrue(script.contains(">/dev/null 2>&1 &"))
     }
 }

@@ -49,14 +49,15 @@ private fun bufferedToImageBitmap(image: BufferedImage): ImageBitmap {
     val rgbaBytes = ByteArray(width * height * 4)
     var offset = 0
     for (pixel in pixels) {
-        rgbaBytes[offset++] = ((pixel shr 16) and 0xFF).toByte()
-        rgbaBytes[offset++] = ((pixel shr 8) and 0xFF).toByte()
+        // Skia N32 is BGRA on little-endian desktops; ImageIO getRGB() is ARGB.
         rgbaBytes[offset++] = (pixel and 0xFF).toByte()
+        rgbaBytes[offset++] = ((pixel shr 8) and 0xFF).toByte()
+        rgbaBytes[offset++] = ((pixel shr 16) and 0xFF).toByte()
         rgbaBytes[offset++] = ((pixel shr 24) and 0xFF).toByte()
     }
     val bitmap = Bitmap()
     bitmap.installPixels(
-        ImageInfo.makeN32(width, height, ColorAlphaType.PREMUL),
+        ImageInfo.makeN32(width, height, ColorAlphaType.UNPREMUL),
         rgbaBytes,
         width * 4,
     )
