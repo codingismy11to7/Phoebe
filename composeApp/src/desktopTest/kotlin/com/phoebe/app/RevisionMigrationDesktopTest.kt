@@ -125,6 +125,46 @@ class RevisionMigrationDesktopTest {
                     """.trimIndent(),
                 )
                 statement.execute("CREATE INDEX TrackParentRow_parent_position ON TrackParentRow(parentId, position)")
+                statement.execute(
+                    """
+                    CREATE TABLE LibraryPrefsRow (
+                        id INTEGER NOT NULL PRIMARY KEY CHECK (id = 1) DEFAULT 1,
+                        sortBy TEXT NOT NULL,
+                        ascending INTEGER NOT NULL,
+                        colYear INTEGER NOT NULL,
+                        colGenre INTEGER NOT NULL,
+                        colFilepath INTEGER NOT NULL,
+                        colAudioCodec INTEGER NOT NULL,
+                        colBitrate INTEGER NOT NULL,
+                        colDuration INTEGER NOT NULL,
+                        colSampleRate INTEGER NOT NULL,
+                        colFileType INTEGER NOT NULL,
+                        colDateAdded INTEGER NOT NULL,
+                        colRating INTEGER NOT NULL DEFAULT 1,
+                        colFavorite INTEGER NOT NULL DEFAULT 1,
+                        homeSections TEXT NOT NULL DEFAULT 'Mixes,Collections,FavoritePlaylists,FavoriteArtists,FavoriteAlbums,RecentSongs,RecentArtists,RecentAlbums,Played,Random',
+                        personalMix TEXT NOT NULL DEFAULT '{"limit":50,"heavyRotationWeight":25,"recentWeight":30,"mostPlayedWeight":25,"similarWeight":15,"discoveryWeight":5}',
+                        gridColumns INTEGER NOT NULL DEFAULT 3
+                    )
+                    """.trimIndent(),
+                )
+                statement.execute(
+                    """
+                    INSERT INTO LibraryPrefsRow(
+                        id, sortBy, ascending,
+                        colYear, colGenre, colFilepath, colAudioCodec, colBitrate,
+                        colDuration, colSampleRate, colFileType, colDateAdded, colRating, colFavorite,
+                        homeSections, personalMix, gridColumns
+                    ) VALUES (
+                        1, 'Name', 1,
+                        1, 1, 1, 1, 1,
+                        1, 1, 1, 1, 1, 1,
+                        'Mixes,Collections,FavoritePlaylists,FavoriteArtists,FavoriteAlbums,RecentSongs,RecentArtists,RecentAlbums,Played,Random',
+                        '{"limit":50,"heavyRotationWeight":25,"recentWeight":30,"mostPlayedWeight":25,"similarWeight":15,"discoveryWeight":5}',
+                        3
+                    )
+                    """.trimIndent(),
+                )
                 statement.execute("PRAGMA user_version = 21")
             }
         }

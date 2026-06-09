@@ -359,7 +359,8 @@ internal fun PhoebeDesktopScreenshotScenario(
     }
     val libraryUi = when (scenario) {
         PhoebeScreenshotScenario.LibraryFiveColumnGrid -> fixture.libraryUi.copy(
-            gridColumns = LibraryUiPreferences.MaxGridColumns,
+            albumGridItemSizeDp = LibraryUiPreferences.MinAlbumGridItemSizeDp,
+            artistGridItemSizeDp = LibraryUiPreferences.MinArtistGridItemSizeDp,
         )
         PhoebeScreenshotScenario.HomePlayedRows -> fixture.libraryUi.copy(
             homeSections = listOf(HomeSection.Played, HomeSection.Random),
@@ -509,7 +510,8 @@ internal fun PhoebeDesktopScreenshotScenario(
         settingsActions = SettingsActions(
             onHomeSections = {},
             onPersonalMix = {},
-            onGridColumns = {},
+            onAlbumGridItemSize = {},
+            onArtistGridItemSize = {},
             onExportFavoritePlaylists = {},
             onImportFavoritePlaylists = {},
             onCrossfadeSeconds = {},
@@ -535,7 +537,10 @@ internal fun PhoebeMobileScreenshotScenario(
         fixture.catalog
     }
     val libraryUi = if (scenario == PhoebeScreenshotScenario.LibraryFiveColumnGrid) {
-        fixture.libraryUi.copy(gridColumns = LibraryUiPreferences.MaxGridColumns)
+        fixture.libraryUi.copy(
+            albumGridItemSizeDp = LibraryUiPreferences.MinAlbumGridItemSizeDp,
+            artistGridItemSizeDp = LibraryUiPreferences.MinArtistGridItemSizeDp,
+        )
     } else {
         fixture.libraryUi
     }
@@ -807,7 +812,8 @@ internal fun PhoebeMobileScreenshotScenario(
                 onLibraryColumns = {},
                 onHomeSections = {},
                 onPersonalMix = {},
-                onGridColumns = {},
+                onAlbumGridItemSize = {},
+            onArtistGridItemSize = {},
                 onExportFavoritePlaylists = {},
                 onImportFavoritePlaylists = {},
                 appSettings = AppSettings.Default,
@@ -897,7 +903,8 @@ private fun MobileHomeAccordionScreenshot(
         onLibraryColumns = {},
         onHomeSections = {},
         onPersonalMix = {},
-        onGridColumns = {},
+                onAlbumGridItemSize = {},
+                onArtistGridItemSize = {},
         onExportFavoritePlaylists = {},
         onImportFavoritePlaylists = {},
         appSettings = AppSettings.Default,

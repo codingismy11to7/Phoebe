@@ -6,25 +6,22 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
-import androidx.compose.foundation.lazy.grid.LazyGridState
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -57,15 +54,18 @@ internal fun CollectionsScreen(
     supportedCollectionEntries: Set<CollectionEntry> = allCollectionEntries().toSet(),
     onBack: () -> Unit,
     onCollectionValue: (CollectionEntry, String) -> Unit,
+    onEnsureValuesLoaded: () -> Unit = {},
 ) {
+    LaunchedEffect(entry) {
+        onEnsureValuesLoaded()
+    }
     val index = remember(catalog, supportedCollectionEntries) { CollectionIndex.from(catalog, supportedCollectionEntries) }
     val buckets = remember(index, entry) { index.bucketsFor(entry) }
     val loading = remember(catalog.collectionValues, catalog.collectionValueLoads, buckets, entry) {
-        buckets.isEmpty() && !catalog.collectionValuesLoaded(entry)
+        buckets.isEmpty() && !catalog.collectionValuesFetchSettled(entry)
     }
     var sortBy by rememberSaveable(entry.target.name, entry.facet.name) { mutableStateOf(LibrarySortBy.Name) }
     var ascending by rememberSaveable(entry.target.name, entry.facet.name) { mutableStateOf(true) }
-    var viewMode by rememberSaveable(entry.target.name, entry.facet.name) { mutableStateOf(LibraryViewMode.Grid) }
     val visibleBuckets = remember(buckets, sortBy, ascending, searchQuery) {
         sortCollectionBuckets(
             filterCollectionBucketsByQuery(buckets, searchQuery),
@@ -79,11 +79,11 @@ internal fun CollectionsScreen(
         "screen values target=${entry.target.name} facet=${entry.facet.name} loading=$loading buckets=${buckets.size} nonEmpty=${buckets.count { it.items.isNotEmpty() }} values=${values.size} markers=$markers sample=${values.take(10).map { "${it.value}:${it.key}:${it.filterField}" }}"
     }
     val chromePadding = LocalMobileChromePadding.current
-    val gridState = rememberSaveable(
+    val listState = rememberSaveable(
         entry.target.name,
         entry.facet.name,
-        saver = LazyGridState.Saver,
-    ) { LazyGridState() }
+        saver = LazyListState.Saver,
+    ) { LazyListState() }
     Column(
         modifier
             .fillMaxSize()
@@ -110,22 +110,16 @@ internal fun CollectionsScreen(
             onSortBy = { sortBy = it },
             ascending = ascending,
             onAscending = { ascending = it },
-            viewMode = viewMode,
-            onViewMode = { viewMode = it },
         )
-        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
-            CollectionValuesGrid(
-                entry = entry,
-                buckets = visibleBuckets,
-                loading = loading,
-                searchQuery = searchQuery,
-                compact = maxWidth < 700.dp,
-                viewMode = viewMode,
-                state = gridState,
-                onCollectionValue = onCollectionValue,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
+        CollectionValuesList(
+            entry = entry,
+            buckets = visibleBuckets,
+            loading = loading,
+            searchQuery = searchQuery,
+            state = listState,
+            onCollectionValue = onCollectionValue,
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+        )
     }
 }
 
@@ -140,7 +134,11 @@ internal fun CollectionItemsScreen(
     onBack: () -> Unit,
     onArtist: (Artist) -> Unit,
     onAlbum: (Album) -> Unit,
+    onEnsureItemsLoaded: () -> Unit = {},
 ) {
+    LaunchedEffect(entry, value) {
+        onEnsureItemsLoaded()
+    }
     val index = remember(catalog, supportedCollectionEntries) { CollectionIndex.from(catalog, supportedCollectionEntries) }
     val bucket = remember(index, entry, value) {
         index.bucketsFor(entry).firstOrNull { it.label.equals(value, ignoreCase = true) }
@@ -153,12 +151,18 @@ internal fun CollectionItemsScreen(
                 it.value.equals(value, ignoreCase = true)
         }
     }
-    val loading = items.isEmpty() && collectionValue?.itemsLoaded != true
+    val loading = remember(catalog.collectionValues, catalog.collectionValueLoads, collectionValue, entry, value) {
+        when {
+            collectionValue?.itemsLoaded == true -> false
+            collectionValue != null -> true
+            !catalog.collectionValuesFetchSettled(entry) -> true
+            else -> true
+        }
+    }
     var sortBy by rememberSaveable(entry.target.name, entry.facet.name, value) {
         mutableStateOf(if (entry.target == CollectionTarget.Albums) LibrarySortBy.Year else LibrarySortBy.Name)
     }
     var ascending by rememberSaveable(entry.target.name, entry.facet.name, value) { mutableStateOf(true) }
-    var viewMode by rememberSaveable(entry.target.name, entry.facet.name, value) { mutableStateOf(LibraryViewMode.Grid) }
     val visibleItems = remember(items, entry, sortBy, ascending, searchQuery) {
         sortCollectionItems(
             filterCollectionItemsByQuery(items, searchQuery),
@@ -167,12 +171,12 @@ internal fun CollectionItemsScreen(
             ascending,
         )
     }
-    val gridState = rememberSaveable(
+    val listState = rememberSaveable(
         entry.target.name,
         entry.facet.name,
         value,
-        saver = LazyGridState.Saver,
-    ) { LazyGridState() }
+        saver = LazyListState.Saver,
+    ) { LazyListState() }
     val chromePadding = LocalMobileChromePadding.current
     Column(
         modifier
@@ -198,23 +202,17 @@ internal fun CollectionItemsScreen(
             onSortBy = { sortBy = it },
             ascending = ascending,
             onAscending = { ascending = it },
-            viewMode = viewMode,
-            onViewMode = { viewMode = it },
         )
-        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
-            CollectionItemsGrid(
-                entry = entry,
-                items = visibleItems,
-                compact = maxWidth < 700.dp,
-                loading = loading,
-                searchQuery = searchQuery,
-                viewMode = viewMode,
-                state = gridState,
-                onArtist = onArtist,
-                onAlbum = onAlbum,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
+        CollectionItemsList(
+            entry = entry,
+            items = visibleItems,
+            loading = loading,
+            searchQuery = searchQuery,
+            state = listState,
+            onArtist = onArtist,
+            onAlbum = onAlbum,
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+        )
     }
 }
 
@@ -253,19 +251,38 @@ private fun CollectionsHeader(
 }
 
 @Composable
-private fun CollectionValuesGrid(
+private fun CollectionLoadingIndicator(message: String, modifier: Modifier = Modifier) {
+    Box(
+        modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(20.dp),
+                color = PhoebeUi.accentLight,
+                strokeWidth = 2.dp,
+                trackColor = PhoebeUi.progressTrack,
+            )
+            Text(message, color = PhoebeUi.secondaryText, fontSize = 14.sp)
+        }
+    }
+}
+
+@Composable
+private fun CollectionValuesList(
     entry: CollectionEntry,
     buckets: List<CollectionBucket>,
     loading: Boolean,
     searchQuery: String,
-    compact: Boolean,
-    viewMode: LibraryViewMode,
-    state: LazyGridState,
+    state: LazyListState,
     onCollectionValue: (CollectionEntry, String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     if (loading) {
-        RecentlyAddedEmpty("Loading ${entry.facet.plural.lowercase()}…", modifier)
+        CollectionLoadingIndicator("Loading ${entry.facet.plural.lowercase()}…", modifier)
         return
     }
     if (buckets.isEmpty()) {
@@ -278,23 +295,17 @@ private fun CollectionValuesGrid(
         RecentlyAddedEmpty(message, modifier)
         return
     }
-    LazyVerticalGrid(
-        columns = if (viewMode == LibraryViewMode.List) {
-            GridCells.Fixed(1)
-        } else {
-            GridCells.Adaptive(if (compact) 148.dp else 184.dp)
-        },
+    LazyColumn(
         state = state,
         modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         items(
             items = buckets,
             key = { it.label },
             contentType = { "collection-value" },
         ) { bucket ->
-            CollectionValueCard(entry, bucket) {
+            CollectionValueRow(entry, bucket) {
                 onCollectionValue(entry, bucket.label)
             }
         }
@@ -302,41 +313,42 @@ private fun CollectionValuesGrid(
 }
 
 @Composable
-private fun CollectionValueCard(entry: CollectionEntry, bucket: CollectionBucket, onClick: () -> Unit) {
+private fun CollectionValueRow(entry: CollectionEntry, bucket: CollectionBucket, onClick: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
             .clickable(onClick = onClick)
-            .background(PhoebeUi.elevatedFill)
-            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(10.dp))
-            .padding(12.dp),
+            .padding(vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        CollectionIcon(entry, Modifier.size(38.dp))
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(bucket.label, color = PhoebeUi.primaryText, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-        PhoebeIconView(PhoebeIcon.Forward, tint = PhoebeUi.secondaryText, modifier = Modifier.size(16.dp))
+        CollectionIcon(entry, Modifier.size(32.dp))
+        Text(
+            bucket.label,
+            color = PhoebeUi.primaryText,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        PhoebeIconView(PhoebeIcon.Forward, tint = PhoebeUi.mutedText, modifier = Modifier.size(12.dp))
     }
 }
 
 @Composable
-private fun CollectionItemsGrid(
+private fun CollectionItemsList(
     entry: CollectionEntry,
     items: List<CollectionItem>,
-    compact: Boolean,
     loading: Boolean,
     searchQuery: String,
-    viewMode: LibraryViewMode,
-    state: LazyGridState,
+    state: LazyListState,
     onArtist: (Artist) -> Unit,
     onAlbum: (Album) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     if (loading) {
-        RecentlyAddedEmpty("Loading ${entry.target.itemPlural.lowercase()}…", modifier)
+        CollectionLoadingIndicator("Loading ${entry.target.itemPlural.lowercase()}…", modifier)
         return
     }
     if (items.isEmpty()) {
@@ -349,24 +361,11 @@ private fun CollectionItemsGrid(
         RecentlyAddedEmpty(message, modifier)
         return
     }
-    LazyVerticalGrid(
-        columns = if (viewMode == LibraryViewMode.List) {
-            GridCells.Fixed(1)
-        } else {
-            GridCells.Adaptive(if (compact) 132.dp else 158.dp)
-        },
+    LazyColumn(
         state = state,
         modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        item(
-            key = "header",
-            span = { GridItemSpan(maxLineSpan) },
-            contentType = "collection-items-header",
-        ) {
-            SectionLabel(entry.target.itemPlural, PhoebeUi.mutedText)
-        }
         items(
             items = items,
             key = { it.id },
@@ -375,47 +374,25 @@ private fun CollectionItemsGrid(
             when (entry.target) {
                 CollectionTarget.Artists -> {
                     val artist = item.artist ?: return@items
-                    if (viewMode == LibraryViewMode.List) {
-                        LibraryRow(
-                            title = artist.title,
-                            subtitle = item.subtitle,
-                            seed = artist.title,
-                            thumbUrl = item.thumbUrl,
-                            sharedKey = "artist:${artist.id}",
-                            onClick = { onArtist(artist) },
-                        )
-                    } else {
-                        CollectionMediaCard(
-                            title = artist.title,
-                            subtitle = item.subtitle,
-                            thumbUrl = item.thumbUrl,
-                            circular = true,
-                            sharedKey = "artist:${artist.id}",
-                            onClick = { onArtist(artist) },
-                        )
-                    }
+                    LibraryRow(
+                        title = artist.title,
+                        subtitle = item.subtitle,
+                        seed = artist.title,
+                        thumbUrl = item.thumbUrl,
+                        sharedKey = "artist:${artist.id}",
+                        onClick = { onArtist(artist) },
+                    )
                 }
                 CollectionTarget.Albums -> {
                     val album = item.album ?: return@items
-                    if (viewMode == LibraryViewMode.List) {
-                        LibraryRow(
-                            title = album.title,
-                            subtitle = item.subtitle,
-                            seed = album.title,
-                            thumbUrl = item.thumbUrl,
-                            sharedKey = "album:${album.id}",
-                            onClick = { onAlbum(album) },
-                        )
-                    } else {
-                        CollectionMediaCard(
-                            title = album.title,
-                            subtitle = album.artist,
-                            thumbUrl = album.thumbUrl,
-                            circular = false,
-                            sharedKey = "album:${album.id}",
-                            onClick = { onAlbum(album) },
-                        )
-                    }
+                    LibraryRow(
+                        title = album.title,
+                        subtitle = item.subtitle,
+                        seed = album.title,
+                        thumbUrl = item.thumbUrl,
+                        sharedKey = "album:${album.id}",
+                        onClick = { onAlbum(album) },
+                    )
                 }
             }
         }
@@ -437,50 +414,6 @@ private fun CollectionIcon(entry: CollectionEntry, modifier: Modifier = Modifier
             CollectionFacet.Genre -> PhoebeIcon.GenreMasks
         }
         PhoebeIconView(icon, tint = PhoebeUi.accentLight, modifier = Modifier.size(17.dp))
-    }
-}
-
-@Composable
-private fun CollectionMediaCard(
-    title: String,
-    subtitle: String,
-    thumbUrl: String?,
-    circular: Boolean,
-    sharedKey: String,
-    onClick: () -> Unit,
-) {
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .clickable(onClick = onClick)
-            .background(PhoebeUi.elevatedFill)
-            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(10.dp))
-            .padding(10.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        val artModifier = Modifier.fillMaxWidth().aspectRatio(1f).sharedArtworkTransition(sharedKey)
-        if (circular) {
-            ArtworkImage(title, thumbUrl, artModifier.clip(CircleShape), radius = 999.dp, elevated = false)
-        } else {
-            ArtworkImage(title, thumbUrl, artModifier, radius = 8.dp, elevated = false)
-        }
-        Text(
-            title,
-            color = PhoebeUi.primaryText,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.sharedBoundsTransition("$sharedKey:title"),
-        )
-        Text(
-            subtitle,
-            color = PhoebeUi.secondaryText,
-            fontSize = 11.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
     }
 }
 
@@ -670,8 +603,9 @@ private fun CatalogSnapshot.collectionValueLabels(entry: CollectionEntry): List<
         .distinct()
         .toList()
 
-private fun CatalogSnapshot.collectionValuesLoaded(entry: CollectionEntry): Boolean =
-    collectionValues.any { it.target == entry.target.name && it.facet == entry.facet.name }
+private fun CatalogSnapshot.collectionValuesFetchSettled(entry: CollectionEntry): Boolean =
+    collectionValues.any { it.target == entry.target.name && it.facet == entry.facet.name } ||
+        collectionValueLoads.any { it.target == entry.target.name && it.facet == entry.facet.name }
 
 private fun String.cleanCollectionLabel(): String? =
     trim()

@@ -1673,8 +1673,12 @@ class AppState(
         dependencies.libraryUiRepository.setPersonalMix(preferences)
     }
 
-    fun setGridColumns(gridColumns: Int) = scope.launch {
-        dependencies.libraryUiRepository.setGridColumns(gridColumns)
+    fun setAlbumGridItemSize(sizeDp: Int) = scope.launch {
+        dependencies.libraryUiRepository.setAlbumGridItemSize(sizeDp)
+    }
+
+    fun setArtistGridItemSize(sizeDp: Int) = scope.launch {
+        dependencies.libraryUiRepository.setArtistGridItemSize(sizeDp)
     }
 
     fun prependRecentSearch(item: RecentSearchItem) = scope.launch {

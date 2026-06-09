@@ -113,7 +113,8 @@ internal fun SettingsDesktopView(
     onBlurredArtworkAppearance: (Boolean) -> Unit = {},
     onHomeSections: (List<HomeSection>) -> Unit,
     onPersonalMix: (PersonalMixPreferences) -> Unit,
-    onGridColumns: (Int) -> Unit,
+    onAlbumGridItemSize: (Int) -> Unit,
+    onArtistGridItemSize: (Int) -> Unit,
     onExportFavoritePlaylists: () -> Unit,
     onImportFavoritePlaylists: () -> Unit,
     homeScreenLayoutMode: HomeScreenLayoutMode = HomeScreenLayoutMode.Default,
@@ -195,7 +196,12 @@ internal fun SettingsDesktopView(
                         onListenBrainzSubmitCurrentTrackFeedback = onListenBrainzSubmitCurrentTrackFeedback,
                     )
                     SettingsCategory.Library -> {
-                        GridSettingsCard(libraryUi.gridColumns, onGridColumns)
+                        LibraryGridSizeSettingsCard(
+                            albumGridItemSizeDp = libraryUi.albumGridItemSizeDp,
+                            artistGridItemSizeDp = libraryUi.artistGridItemSizeDp,
+                            onAlbumGridItemSize = onAlbumGridItemSize,
+                            onArtistGridItemSize = onArtistGridItemSize,
+                        )
                         HomeSettingsCard(libraryUi.homeSections, onHomeSections)
                         FavoritePlaylistSettingsCard(onExportFavoritePlaylists, onImportFavoritePlaylists)
                     }
@@ -241,7 +247,8 @@ internal fun SettingsMobileView(
     onBlurredArtworkAppearance: (Boolean) -> Unit = {},
     onHomeSections: (List<HomeSection>) -> Unit,
     onPersonalMix: (PersonalMixPreferences) -> Unit,
-    onGridColumns: (Int) -> Unit,
+    onAlbumGridItemSize: (Int) -> Unit,
+    onArtistGridItemSize: (Int) -> Unit,
     onExportFavoritePlaylists: () -> Unit,
     onImportFavoritePlaylists: () -> Unit,
     homeScreenLayoutMode: HomeScreenLayoutMode = HomeScreenLayoutMode.Default,
@@ -289,7 +296,13 @@ internal fun SettingsMobileView(
             compact = true,
         )
         SectionLabel("LIBRARY", PhoebeUi.accentLight)
-        GridSettingsCard(libraryUi.gridColumns, onGridColumns, compact = true)
+        LibraryGridSizeSettingsCard(
+            albumGridItemSizeDp = libraryUi.albumGridItemSizeDp,
+            artistGridItemSizeDp = libraryUi.artistGridItemSizeDp,
+            onAlbumGridItemSize = onAlbumGridItemSize,
+            onArtistGridItemSize = onArtistGridItemSize,
+            compact = true,
+        )
         HomeSettingsCard(libraryUi.homeSections, onHomeSections, compact = true)
         FavoritePlaylistSettingsCard(onExportFavoritePlaylists, onImportFavoritePlaylists, compact = true)
         SectionLabel("AUDIO PLAYBACK", PhoebeUi.accentLight)
@@ -854,44 +867,37 @@ private fun MixValueSlider(
 }
 
 @Composable
-private fun GridSettingsCard(
-    gridColumns: Int,
-    onGridColumns: (Int) -> Unit,
+private fun LibraryGridSizeSettingsCard(
+    albumGridItemSizeDp: Int,
+    artistGridItemSizeDp: Int,
+    onAlbumGridItemSize: (Int) -> Unit,
+    onArtistGridItemSize: (Int) -> Unit,
     compact: Boolean = false,
 ) {
     SettingsCard {
-        Text("Grid size", color = PhoebeUi.primaryText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Text("Library grid", color = PhoebeUi.primaryText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
         Text(
-            "Number of columns when browsing artists, albums, and songs",
+            "Artwork size when browsing artists and albums in library grid view",
             color = PhoebeUi.mutedText,
             fontSize = 12.sp,
             modifier = Modifier.padding(bottom = 14.dp),
         )
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            (LibraryUiPreferences.MinGridColumns..LibraryUiPreferences.MaxGridColumns).forEach { count ->
-                val selected = count == gridColumns
-                Box(
-                    Modifier
-                        .weight(1f)
-                        .height(if (compact) 42.dp else 46.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable { onGridColumns(count) }
-                        .background(if (selected) PhoebeUi.accent.copy(alpha = 0.22f) else PhoebeUi.subtleFill)
-                        .border(BorderStroke(1.dp, if (selected) PhoebeUi.accentLight else PhoebeUi.border), RoundedCornerShape(10.dp)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        count.toString(),
-                        color = if (selected) PhoebeUi.primaryText else PhoebeUi.secondaryText,
-                        fontSize = 14.sp,
-                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                    )
-                }
-            }
-        }
+        MixValueSlider(
+            label = "Albums",
+            value = albumGridItemSizeDp,
+            range = LibraryUiPreferences.MinAlbumGridItemSizeDp..LibraryUiPreferences.MaxAlbumGridItemSizeDp,
+            suffix = " dp",
+            compact = compact,
+            onValue = onAlbumGridItemSize,
+        )
+        MixValueSlider(
+            label = "Artists",
+            value = artistGridItemSizeDp,
+            range = LibraryUiPreferences.MinArtistGridItemSizeDp..LibraryUiPreferences.MaxArtistGridItemSizeDp,
+            suffix = " dp",
+            compact = compact,
+            onValue = onArtistGridItemSize,
+        )
     }
 }
 

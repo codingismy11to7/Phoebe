@@ -185,6 +185,13 @@ internal const val ListArtworkMaxDecodeDimension = 256
 /** Decode cap for single, large artwork surfaces such as the mobile full-screen player. */
 internal const val HeroArtworkMaxDecodeDimension = 1024
 
+/** Upper decode cap for library grid tiles at the largest supported item size. */
+internal const val GridArtworkMaxDecodeDimension = 512
+
+/** Decode cap for a library grid tile from its configured artwork size in dp. */
+internal fun libraryGridDecodeDimension(itemSizeDp: Int): Int =
+    (itemSizeDp * 2).coerceIn(ThumbnailArtworkMaxDecodeDimension, GridArtworkMaxDecodeDimension)
+
 @Composable
 internal fun SectionLabel(label: String, color: Color) {
     Text(label.uppercase(), color = color, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.08.em)
@@ -320,7 +327,7 @@ private fun rememberRemoteImageState(
                 delay(250L)
                 continue
             }
-            val delayMs = if (previewDecodeDimensions.isEmpty()) {
+            val delayMs = if (previewDecodeDimensions.isEmpty() && RemoteArtworkCache.pacingEnabled) {
                 RemoteArtworkCache.staggerDelayMs(target) + artworkStaggerMs
             } else {
                 artworkStaggerMs
@@ -378,14 +385,15 @@ internal data class ArtworkCacheStats(
 internal object RemoteArtworkCache {
     private const val DefaultMaxEntries = 300
     private const val FailedLoadRetryMs = 10L * 60L * 1000L
-    private const val DefaultLoadPermits = 2
+    private const val DefaultLoadPermits = 4
     private const val PacedMinIntervalMs = 72L
     private const val BurstMinIntervalMs = 24L
     private const val DownloadModeMaxEntries = 32
     private const val DownloadModeMaxEstimatedBytes = 4L * 1024L * 1024L
 
     @Volatile
-    private var pacingEnabled: Boolean = false
+    var pacingEnabled: Boolean = false
+        private set
 
     @Volatile
     private var lastLoadStartMs = 0L
@@ -396,12 +404,13 @@ internal object RemoteArtworkCache {
     )
 
     private val images = mutableMapOf<CacheKey, ImageBitmap>()
+    private val cacheLock = ArtworkCacheLock()
 
     internal val httpClient: HttpClient by lazy { createPlatformHttpClient() }
     private val storage: PlatformStorage by lazy { PlatformStorage() }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var gate = Semaphore(permits = DefaultLoadPermits)
-    private val mutex = Mutex()
+    private val inFlightMutex = Mutex()
     private val inFlight = mutableMapOf<CacheKey, Deferred<ImageBitmap?>>()
     private val estimatedBytesByKey = mutableMapOf<CacheKey, Long>()
     private val accessOrder = LinkedHashMap<CacheKey, Unit>()
@@ -411,26 +420,22 @@ internal object RemoteArtworkCache {
     private var maxEstimatedBytes = platformMaxEstimatedBytes
     private var estimatedBytes = 0L
 
-    fun cached(url: String, maxDecodeDimension: Int = ListArtworkMaxDecodeDimension): ImageBitmap? {
-        val key = CacheKey(url, maxDecodeDimension.normalizedDecodeDimension())
-        val image = images[key] ?: return null
-        touch(key)
-        return image
-    }
+    fun cached(url: String, maxDecodeDimension: Int = ListArtworkMaxDecodeDimension): ImageBitmap? =
+        withCacheLock {
+            val key = CacheKey(url, maxDecodeDimension.normalizedDecodeDimension())
+            cachedLocked(key)
+        }
 
     fun cachedRequested(url: String, maxDecodeDimension: Int, fallbackUrl: String? = null): ImageBitmap? =
-        cached(url, maxDecodeDimension)
-            ?: fallbackUrl?.let { cached(it, maxDecodeDimension) }
-            ?: cachedListArtworkFromAnyDimension(url, maxDecodeDimension)
-            ?: fallbackUrl?.let { cachedListArtworkFromAnyDimension(it, maxDecodeDimension) }
+        withCacheLock { cachedRequestedLocked(url, maxDecodeDimension, fallbackUrl) }
 
-    fun cachedForDisplay(url: String, maxDecodeDimension: Int, fallbackUrl: String? = null): ImageBitmap? {
-        cachedRequested(url, maxDecodeDimension, fallbackUrl)?.let { return it }
-        progressivePreviewDecodeDimensions(maxDecodeDimension).forEach { previewDimension ->
-            cachedRequested(url, previewDimension, fallbackUrl)?.let { return it }
+    fun cachedForDisplay(url: String, maxDecodeDimension: Int, fallbackUrl: String? = null): ImageBitmap? =
+        withCacheLock {
+            cachedRequestedLocked(url, maxDecodeDimension, fallbackUrl)
+                ?: progressivePreviewDecodeDimensions(maxDecodeDimension).firstNotNullOfOrNull { previewDimension ->
+                    cachedRequestedLocked(url, previewDimension, fallbackUrl)
+                }
         }
-        return null
-    }
 
     fun staggerDelayMs(url: String): Long = (url.hashCode() and 0x3F).toLong() * 12L
 
@@ -440,14 +445,16 @@ internal object RemoteArtworkCache {
     }
 
     fun configureDownloadMemoryMode(enabled: Boolean) {
-        if (enabled) {
-            maxEntries = DownloadModeMaxEntries
-            maxEstimatedBytes = minOf(platformMaxEstimatedBytes, DownloadModeMaxEstimatedBytes)
-        } else {
-            maxEntries = DefaultMaxEntries
-            maxEstimatedBytes = platformMaxEstimatedBytes
+        withCacheLock {
+            if (enabled) {
+                maxEntries = DownloadModeMaxEntries
+                maxEstimatedBytes = minOf(platformMaxEstimatedBytes, DownloadModeMaxEstimatedBytes)
+            } else {
+                maxEntries = DefaultMaxEntries
+                maxEstimatedBytes = platformMaxEstimatedBytes
+            }
+            trimToLimitsLocked()
         }
-        trimToLimits()
     }
 
     private suspend fun paceBeforeLoad() {
@@ -460,17 +467,17 @@ internal object RemoteArtworkCache {
 
     suspend fun awaitLoad(url: String, maxDecodeDimension: Int = ListArtworkMaxDecodeDimension): ImageBitmap? {
         val key = CacheKey(url, maxDecodeDimension.normalizedDecodeDimension())
-        cached(key)?.let { return it }
-        if (!shouldRetryFailedLoad(key)) return null
+        withCacheLock { cachedLocked(key) }?.let { return it }
+        if (!withCacheLock { shouldRetryFailedLoadLocked(key) }) return null
 
-        val job = mutex.withLock {
-            cached(key)?.let { return it }
-            if (!shouldRetryFailedLoad(key)) return null
+        val job = inFlightMutex.withLock {
+            withCacheLock { cachedLocked(key) }?.let { return it }
+            if (!withCacheLock { shouldRetryFailedLoadLocked(key) }) return null
             inFlight[key] ?: scope.async {
                 try {
                     fetchAndDecode(key)
                 } finally {
-                    mutex.withLock { inFlight.remove(key) }
+                    inFlightMutex.withLock { inFlight.remove(key) }
                 }
             }.also { inFlight[key] = it }
         }
@@ -489,9 +496,9 @@ internal object RemoteArtworkCache {
     }
 
     private suspend fun fetchAndDecode(key: CacheKey): ImageBitmap? {
-        cached(key)?.let { return it }
+        withCacheLock { cachedLocked(key) }?.let { return it }
         return gate.withPermit {
-            cached(key)?.let { return@withPermit it }
+            withCacheLock { cachedLocked(key) }?.let { return@withPermit it }
             paceBeforeLoad()
             val url = key.url
             val remote = url.startsWith("http://") || url.startsWith("https://")
@@ -512,33 +519,39 @@ internal object RemoteArtworkCache {
                 decodeImageBitmap(bytes, key.maxDecodeDimension)
             }.getOrNull()
             if (decoded != null) {
-                put(key, decoded)
+                withCacheLock { putLocked(key, decoded) }
                 decoded
             } else {
-                recentFailures[key] = currentTimeMs()
+                withCacheLock { recentFailures[key] = currentTimeMs() }
                 null
             }
         }
     }
 
-    private fun cached(key: CacheKey): ImageBitmap? {
+    private fun cachedLocked(key: CacheKey): ImageBitmap? {
         val image = images[key] ?: return null
-        touch(key)
+        touchLocked(key)
         return image
     }
 
-    private fun put(key: CacheKey, image: ImageBitmap) {
+    private fun putLocked(key: CacheKey, image: ImageBitmap) {
         val newBytes = image.estimatedBytes()
         estimatedBytes -= estimatedBytesByKey[key] ?: 0L
         images[key] = image
         estimatedBytesByKey[key] = newBytes
         estimatedBytes += newBytes
-        clearFailuresForUrl(key.url)
-        touch(key)
-        trimToLimits()
+        clearFailuresForUrlLocked(key.url)
+        touchLocked(key)
+        trimToLimitsLocked()
     }
 
-    private fun cachedListArtworkFromAnyDimension(url: String, maxDecodeDimension: Int): ImageBitmap? {
+    private fun cachedRequestedLocked(url: String, maxDecodeDimension: Int, fallbackUrl: String? = null): ImageBitmap? =
+        cachedLocked(CacheKey(url, maxDecodeDimension.normalizedDecodeDimension()))
+            ?: fallbackUrl?.let { cachedLocked(CacheKey(it, maxDecodeDimension.normalizedDecodeDimension())) }
+            ?: cachedListArtworkFromAnyDimensionLocked(url, maxDecodeDimension)
+            ?: fallbackUrl?.let { cachedListArtworkFromAnyDimensionLocked(it, maxDecodeDimension) }
+
+    private fun cachedListArtworkFromAnyDimensionLocked(url: String, maxDecodeDimension: Int): ImageBitmap? {
         val requested = maxDecodeDimension.normalizedDecodeDimension()
         if (requested > ListArtworkMaxDecodeDimension) return null
         val candidate = images.keys
@@ -550,19 +563,19 @@ internal object RemoteArtworkCache {
             )
             .firstOrNull()
             ?: return null
-        return cached(candidate)
+        return cachedLocked(candidate)
     }
 
-    private fun clearFailuresForUrl(url: String) {
+    private fun clearFailuresForUrlLocked(url: String) {
         recentFailures.keys.removeAll { it.url == url }
     }
 
-    private fun touch(key: CacheKey) {
+    private fun touchLocked(key: CacheKey) {
         accessOrder.remove(key)
         accessOrder[key] = Unit
     }
 
-    private fun trimToLimits() {
+    private fun trimToLimitsLocked() {
         while (images.size > maxEntries || estimatedBytes > maxEstimatedBytes) {
             val eldest = accessOrder.keys.firstOrNull() ?: return
             accessOrder.remove(eldest)
@@ -572,39 +585,49 @@ internal object RemoteArtworkCache {
         }
     }
 
-    private fun shouldRetryFailedLoad(key: CacheKey): Boolean {
+    private fun shouldRetryFailedLoadLocked(key: CacheKey): Boolean {
         val failedAt = recentFailures[key] ?: return true
         val retry = currentTimeMs() - failedAt >= FailedLoadRetryMs
         if (retry) recentFailures.remove(key)
         return retry
     }
 
+    private inline fun <T> withCacheLock(block: () -> T): T = cacheLock.withCacheLock(block)
+
     fun stats(): ArtworkCacheStats =
-        ArtworkCacheStats(
-            imageCount = images.size,
-            estimatedBytes = estimatedBytes,
-            inFlightCount = inFlight.size,
-        )
+        withCacheLock {
+            ArtworkCacheStats(
+                imageCount = images.size,
+                estimatedBytes = estimatedBytes,
+                inFlightCount = inFlight.size,
+            )
+        }
 
     internal fun putForTest(url: String, maxDecodeDimension: Int, image: ImageBitmap) {
-        put(CacheKey(url, maxDecodeDimension.normalizedDecodeDimension()), image)
+        withCacheLock {
+            putLocked(CacheKey(url, maxDecodeDimension.normalizedDecodeDimension()), image)
+        }
     }
 
     internal fun clearForTest() {
-        images.clear()
+        withCacheLock {
+            images.clear()
+            estimatedBytesByKey.clear()
+            accessOrder.clear()
+            recentFailures.clear()
+            estimatedBytes = 0L
+            maxEntries = DefaultMaxEntries
+            maxEstimatedBytes = platformMaxEstimatedBytes
+        }
         inFlight.clear()
-        estimatedBytesByKey.clear()
-        accessOrder.clear()
-        recentFailures.clear()
-        estimatedBytes = 0L
-        maxEntries = DefaultMaxEntries
-        maxEstimatedBytes = platformMaxEstimatedBytes
     }
 
     internal fun configureLimitsForTest(maxEntries: Int = DefaultMaxEntries, maxEstimatedBytes: Long = platformMaxEstimatedBytes) {
-        this.maxEntries = max(1, maxEntries)
-        this.maxEstimatedBytes = max(1L, maxEstimatedBytes)
-        trimToLimits()
+        withCacheLock {
+            this.maxEntries = max(1, maxEntries)
+            this.maxEstimatedBytes = max(1L, maxEstimatedBytes)
+            trimToLimitsLocked()
+        }
     }
 
     private fun Int.normalizedDecodeDimension(): Int =

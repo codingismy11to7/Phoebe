@@ -363,16 +363,24 @@ data class LibraryUiPreferences(
     val columns: LibraryColumnVisibility = LibraryColumnVisibility(),
     val homeSections: List<HomeSection> = HomeSection.defaultOrder,
     val personalMix: PersonalMixPreferences = PersonalMixPreferences(),
-    /** Number of columns in library/collection grid views (2–5). */
-    val gridColumns: Int = DefaultGridColumns,
+    /** Target artwork size (dp) for album cards in library grid view. */
+    val albumGridItemSizeDp: Int = DefaultAlbumGridItemSizeDp,
+    /** Target artwork size (dp) for artist cards in library grid view. */
+    val artistGridItemSizeDp: Int = DefaultArtistGridItemSizeDp,
 ) {
     fun normalized(): LibraryUiPreferences =
-        copy(gridColumns = gridColumns.coerceIn(MinGridColumns, MaxGridColumns))
+        copy(
+            albumGridItemSizeDp = albumGridItemSizeDp.coerceIn(MinAlbumGridItemSizeDp, MaxAlbumGridItemSizeDp),
+            artistGridItemSizeDp = artistGridItemSizeDp.coerceIn(MinArtistGridItemSizeDp, MaxArtistGridItemSizeDp),
+        )
 
     companion object {
-        const val DefaultGridColumns = 3
-        const val MinGridColumns = 2
-        const val MaxGridColumns = 5
+        const val MinAlbumGridItemSizeDp = 80
+        const val DefaultAlbumGridItemSizeDp = 160
+        const val MaxAlbumGridItemSizeDp = 280
+        const val MinArtistGridItemSizeDp = 56
+        const val DefaultArtistGridItemSizeDp = 112
+        const val MaxArtistGridItemSizeDp = 200
     }
 }
 

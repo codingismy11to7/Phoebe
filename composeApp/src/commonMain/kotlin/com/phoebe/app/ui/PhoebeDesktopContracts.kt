@@ -128,6 +128,8 @@ internal data class BrowseActions(
     val onMostPlayed: () -> Unit,
     val onCollections: (CollectionEntry) -> Unit,
     val onCollectionValue: (CollectionEntry, String) -> Unit,
+    val onEnsureCollectionValuesLoaded: (CollectionEntry) -> Unit = {},
+    val onEnsureCollectionItemsLoaded: (CollectionEntry, String) -> Unit = { _, _ -> },
     val onRefreshRandomArtists: () -> Unit,
     val onRefreshRandomAlbums: () -> Unit,
     val onPrefetchHomeArtist: (Artist) -> Unit = {},
@@ -202,7 +204,8 @@ internal data class SettingsUiState(
 internal data class SettingsActions(
     val onHomeSections: (List<HomeSection>) -> Unit,
     val onPersonalMix: (PersonalMixPreferences) -> Unit,
-    val onGridColumns: (Int) -> Unit,
+    val onAlbumGridItemSize: (Int) -> Unit,
+    val onArtistGridItemSize: (Int) -> Unit,
     val onExportFavoritePlaylists: () -> Unit,
     val onImportFavoritePlaylists: () -> Unit,
     val onCrossfadeSeconds: (Int) -> Unit,

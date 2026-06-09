@@ -1057,7 +1057,12 @@ internal fun ArtistDetailPanel(
         } else {
             if (mobileBottomPadding > 144.dp) mobileBottomPadding else 144.dp
         }
-        val albumGridColumns = libraryUi.gridColumns
+        val albumGridItemSizeDp = libraryUi.albumGridItemSizeDp
+        val albumGridColumns = rememberLibraryGridColumnCount(
+            availableWidth = maxWidth,
+            itemSizeDp = albumGridItemSizeDp,
+            horizontalSpacing = 14.dp,
+        )
         val albumGridRows = remember(visibleAlbums, albumGridColumns) {
             visibleAlbums.chunked(albumGridColumns)
         }
@@ -1636,10 +1641,14 @@ private fun SimilarArtistRow(
 }
 
 @Composable
-internal fun ArtistAlbumGrid(albums: List<Album>, gridColumns: Int, onAlbum: (Album) -> Unit, modifier: Modifier = Modifier) {
+internal fun ArtistAlbumGrid(albums: List<Album>, albumGridItemSizeDp: Int, onAlbum: (Album) -> Unit, modifier: Modifier = Modifier) {
     BoxWithConstraints(modifier.fillMaxWidth()) {
         val gap = 14.dp
-        val columns = gridColumns.coerceIn(LibraryUiPreferences.MinGridColumns, LibraryUiPreferences.MaxGridColumns)
+        val columns = rememberLibraryGridColumnCount(
+            availableWidth = maxWidth,
+            itemSizeDp = albumGridItemSizeDp,
+            horizontalSpacing = gap,
+        )
         Column(verticalArrangement = Arrangement.spacedBy(gap)) {
             albums.chunked(columns).forEach { row ->
                 Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
@@ -1656,7 +1665,6 @@ internal fun ArtistAlbumGrid(albums: List<Album>, gridColumns: Int, onAlbum: (Al
                             Box(
                                 Modifier
                                     .fillMaxWidth()
-                                    .widthIn(max = LibraryAlbumGridArtworkMaxSize)
                                     .aspectRatio(1f),
                             ) {
                                 ArtworkImage(

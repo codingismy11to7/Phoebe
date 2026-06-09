@@ -1,0 +1,15 @@
+ALTER TABLE LibraryPrefsRow ADD COLUMN albumGridItemSizeDp INTEGER NOT NULL DEFAULT 160;
+ALTER TABLE LibraryPrefsRow ADD COLUMN artistGridItemSizeDp INTEGER NOT NULL DEFAULT 112;
+UPDATE LibraryPrefsRow
+SET albumGridItemSizeDp = CASE gridColumns
+    WHEN 2 THEN 200
+    WHEN 4 THEN 140
+    WHEN 5 THEN 120
+    ELSE 160
+END,
+artistGridItemSizeDp = CASE gridColumns
+    WHEN 2 THEN 140
+    WHEN 4 THEN 96
+    WHEN 5 THEN 80
+    ELSE 112
+END;
