@@ -36,7 +36,7 @@ class CastControllerTest {
     }
 
     @Test
-    fun localOrNonPlexTracksAreNotChromecastPlayable() {
+    fun downloadedPlexTracksStayChromecastPlayableViaStreamUrl() {
         val plexDownload = Track(
             id = "plex:track:1",
             title = "One",
@@ -47,6 +47,13 @@ class CastControllerTest {
             downloadUrl = "",
             localUri = "file:///music/one.flac",
         )
+
+        assertTrue(plexDownload.isChromecastPlayable())
+        assertTrue(listOf(plexDownload).isChromecastPlayableQueue())
+    }
+
+    @Test
+    fun localOrNonPlexTracksAreNotChromecastPlayable() {
         val localFolderTrack = Track(
             id = "local:track:1",
             title = "Two",
@@ -55,11 +62,22 @@ class CastControllerTest {
             durationMs = 60_000,
             streamUrl = "",
             downloadUrl = "",
+            localUri = "file:///music/two.mp3",
+        )
+        val plexWithoutStream = Track(
+            id = "plex:track:2",
+            title = "Three",
+            artist = "Artist",
+            album = "Album",
+            durationMs = 60_000,
+            streamUrl = "",
+            downloadUrl = "",
+            localUri = "file:///music/three.flac",
         )
 
-        assertFalse(plexDownload.isChromecastPlayable())
         assertFalse(localFolderTrack.isChromecastPlayable())
-        assertFalse(listOf(plexDownload, localFolderTrack).isChromecastPlayableQueue())
+        assertFalse(plexWithoutStream.isChromecastPlayable())
+        assertFalse(listOf(localFolderTrack, plexWithoutStream).isChromecastPlayableQueue())
     }
 
     @Test
@@ -140,9 +158,22 @@ class CastControllerTest {
         assertFalse("".isCastReceiverLoadableUrl())
         assertFalse(fileUrl.streamUrl.isCastReceiverLoadableUrl())
         assertFalse(webBlob.streamUrl.isCastReceiverLoadableUrl())
+        val downloadedRemote = Track(
+            id = "jellyfin:track:4",
+            title = "Downloaded",
+            artist = "Artist",
+            album = "Album",
+            durationMs = 60_000,
+            streamUrl = "https://jellyfin.example/Audio/4/stream.mp3",
+            downloadUrl = "",
+            localUri = "file:///music/downloaded.mp3",
+        )
+
         assertFalse(local.isRemoteChromecastPlayable())
+        assertTrue(downloadedRemote.isRemoteChromecastPlayable())
         assertFalse(listOf(fileUrl).remoteChromecastQueueSupport().isSupported)
         assertFalse(listOf(local, webBlob).remoteChromecastQueueSupport().isSupported)
+        assertTrue(listOf(downloadedRemote).remoteChromecastQueueSupport().isSupported)
     }
 
     @Test

@@ -30,10 +30,21 @@ class WebCastControllerTest {
 
     @Test
     fun webQueueSupportRejectsLocalAndBrowserOnlyUrls() {
-        val localDownload = remoteTrack(id = "plex:1").copy(localUri = "phoebe-web-file://folder/one.mp3")
+        val downloadedRemote = remoteTrack(id = "plex:1").copy(localUri = "phoebe-web-file://folder/one.mp3")
+        val localOnly = Track(
+            id = "local_folder:track:1",
+            title = "Local",
+            artist = "Artist",
+            album = "Album",
+            durationMs = 60_000,
+            streamUrl = "",
+            downloadUrl = "",
+            localUri = "phoebe-web-file://folder/local.mp3",
+        )
         val blobStream = remoteTrack(id = "jellyfin:2", streamUrl = "blob:https://music.example/stream")
 
-        assertFalse(webCastQueueSupport(listOf(localDownload)).isSupported)
+        assertTrue(webCastQueueSupport(listOf(downloadedRemote)).isSupported)
+        assertFalse(webCastQueueSupport(listOf(localOnly)).isSupported)
         assertFalse(webCastQueueSupport(listOf(blobStream)).isSupported)
     }
 
