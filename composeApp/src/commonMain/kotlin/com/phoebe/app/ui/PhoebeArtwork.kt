@@ -457,6 +457,39 @@ internal object RemoteArtworkCache {
         }
     }
 
+    /** Drop least-recent artwork when the process is under memory pressure. */
+    fun trimForMemoryPressure(aggressive: Boolean) {
+        withCacheLock {
+            val targetEntries = if (aggressive) {
+                max(8, maxEntries / 4)
+            } else {
+                max(16, maxEntries / 2)
+            }
+            val targetBytes = if (aggressive) {
+                max(1L * 1024L * 1024L, maxEstimatedBytes / 4)
+            } else {
+                max(2L * 1024L * 1024L, maxEstimatedBytes / 2)
+            }
+            maxEntries = targetEntries
+            maxEstimatedBytes = minOf(platformMaxEstimatedBytes, targetBytes)
+            trimToLimitsLocked()
+        }
+    }
+
+    /** Evict all decoded artwork when the runtime reports critical heap pressure. */
+    fun clearUnderMemoryPressure() {
+        withCacheLock {
+            images.clear()
+            estimatedBytesByKey.clear()
+            accessOrder.clear()
+            recentFailures.clear()
+            estimatedBytes = 0L
+            maxEntries = max(8, DefaultMaxEntries / 4)
+            maxEstimatedBytes = minOf(platformMaxEstimatedBytes, 2L * 1024L * 1024L)
+        }
+        inFlight.clear()
+    }
+
     private suspend fun paceBeforeLoad() {
         val minInterval = if (pacingEnabled) PacedMinIntervalMs else BurstMinIntervalMs
         val now = currentTimeMs()

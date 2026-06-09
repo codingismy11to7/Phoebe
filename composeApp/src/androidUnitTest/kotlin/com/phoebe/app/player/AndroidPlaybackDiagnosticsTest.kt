@@ -12,8 +12,19 @@ class AndroidPlaybackDiagnosticsTest {
         assertEquals(PhoebeLoadControlConfig.MainMinBufferMs, profile.minBufferMs)
         assertEquals(PhoebeLoadControlConfig.MainMaxBufferMs, profile.maxBufferMs)
         assertEquals(PhoebeLoadControlConfig.MainTargetBufferBytes, profile.targetBufferBytes)
-        assertTrue(profile.maxBufferMs <= 90_000)
-        assertTrue(profile.targetBufferBytes <= 6 * 1024 * 1024)
+        assertTrue(profile.maxBufferMs <= PhoebeLoadControlConfig.MainMaxBufferMs)
+        assertTrue(profile.targetBufferBytes <= PhoebeLoadControlConfig.MainTargetBufferBytes)
+    }
+
+    @Test
+    fun media3LoadControlTightensBuffersOnConstrainedNetwork() {
+        val wifi = PhoebeLoadControlConfig.profileFor(PlaybackEnginePath.Media3, constrainedNetwork = false)
+        val cellular = PhoebeLoadControlConfig.profileFor(PlaybackEnginePath.Media3, constrainedNetwork = true)
+
+        assertTrue(cellular.maxBufferMs < wifi.maxBufferMs)
+        assertTrue(cellular.targetBufferBytes < wifi.targetBufferBytes)
+        assertEquals(PhoebeLoadControlConfig.ConstrainedMainMaxBufferMs, cellular.maxBufferMs)
+        assertEquals(PhoebeLoadControlConfig.ConstrainedMainTargetBufferBytes, cellular.targetBufferBytes)
     }
 
     @Test

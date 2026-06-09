@@ -714,6 +714,17 @@ internal class AndroidAudioPlayer(
             crossfadeIncomingPlayer === incoming &&
             playWhenReady
 
+    private suspend fun waitForPlayerIdle(player: Player, timeoutMs: Long = CodecTeardownTimeoutMs): Boolean {
+        if (player.playbackState == Player.STATE_IDLE) return true
+        var waitedMs = 0L
+        while (waitedMs < timeoutMs) {
+            if (player.playbackState == Player.STATE_IDLE) return true
+            delay(CodecTeardownPollMs)
+            waitedMs += CodecTeardownPollMs
+        }
+        return player.playbackState == Player.STATE_IDLE
+    }
+
     private suspend fun waitUntilReady(player: Player, generation: Int, timeoutMs: Long): Boolean {
         var waitedMs = 0L
         while (waitedMs < timeoutMs && isPlayRequestCurrent(generation) && playWhenReady) {
@@ -897,7 +908,9 @@ internal class AndroidAudioPlayer(
         player.stop()
         player.clearMediaItems()
         // Let MediaCodec_looper finish releasing before configuring a new decoder.
-        delay(CodecTeardownSettleMs)
+        if (!waitForPlayerIdle(player)) {
+            delay(CodecTeardownSettleMs)
+        }
         player.volume = effectiveOutputVolume()
         player.setMediaItems(
             windowTracks.map { playbackMediaItem(it, inAppPlayback = true) },
@@ -1422,7 +1435,9 @@ internal class AndroidAudioPlayer(
         const val CrossfadeSteps = 24
         const val CrossfadePrepareTimeoutMs = 5_000L
         const val CrossfadeMinimumFadeMs = 500L
-        const val CodecTeardownSettleMs = 50L
+        const val CodecTeardownSettleMs = 150L
+        const val CodecTeardownTimeoutMs = 500L
+        const val CodecTeardownPollMs = 25L
     }
 }
 
