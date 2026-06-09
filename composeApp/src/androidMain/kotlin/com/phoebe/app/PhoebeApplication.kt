@@ -5,6 +5,7 @@ import android.content.ComponentCallbacks2
 import com.google.android.gms.cast.framework.CastContext
 import com.phoebe.app.platform.MemoryPressureLevel
 import com.phoebe.app.platform.PhoebeAppLifecycle
+import com.phoebe.app.platform.memoryPressureLevelForTrimLevel
 import com.phoebe.app.platform.cancelPlatformDownloadRunner
 import com.phoebe.app.player.AndroidPlaybackRuntime
 import kotlinx.coroutines.CoroutineScope
@@ -40,15 +41,7 @@ class PhoebeApplication : Application() {
 
         @Suppress("DEPRECATION")
         override fun onTrimMemory(level: Int) {
-            val pressure = when {
-                level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL ||
-                    level >= ComponentCallbacks2.TRIM_MEMORY_COMPLETE -> MemoryPressureLevel.Critical
-                level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW ||
-                    level >= ComponentCallbacks2.TRIM_MEMORY_MODERATE ||
-                    level >= ComponentCallbacks2.TRIM_MEMORY_BACKGROUND -> MemoryPressureLevel.Moderate
-                level >= ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN -> MemoryPressureLevel.UiHidden
-                else -> return
-            }
+            val pressure = memoryPressureLevelForTrimLevel(level) ?: return
             PhoebeAppLifecycle.notifyMemoryPressure(pressure)
         }
     }

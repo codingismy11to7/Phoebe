@@ -161,17 +161,63 @@ private class DesktopUpdateInstaller : PlatformUpdateInstaller {
     }
 
     private fun launchLinuxInstaller(file: File, flatpak: Boolean) {
+        val insideFlatpak = !System.getenv("FLATPAK_ID").isNullOrBlank()
+        val installFile = if (insideFlatpak && flatpak) {
+            copyFlatpakBundleToHostDownloads(file)
+        } else {
+            file.absolutePath
+        }
+        val relaunchCommand = when {
+            insideFlatpak && flatpak -> "flatpak run com.phoebe.app"
+            else -> currentLaunchCommand()
+        }
         val helper = helperFile("phoebe-update.sh")
         helper.writeText(
             linuxInstallerHelperScript(
-                filePath = file.absolutePath,
+                filePath = installFile,
                 flatpak = flatpak,
-                insideFlatpak = !System.getenv("FLATPAK_ID").isNullOrBlank(),
-                relaunchCommand = currentLaunchCommand(),
+                insideFlatpak = insideFlatpak,
+                relaunchCommand = relaunchCommand,
             ),
         )
         helper.setExecutable(true)
         ProcessBuilder("/bin/sh", helper.absolutePath).start()
+    }
+
+    private fun copyFlatpakBundleToHostDownloads(sandboxFile: File): String {
+        val hostFileName = sandboxFile.name.replace(Regex("""[^A-Za-z0-9._-]"""), "_")
+        val hostPath = resolveHostDownloadsPath(hostFileName)
+        val copy = ProcessBuilder(
+            "flatpak-spawn",
+            "--host",
+            "sh",
+            "-c",
+            "cat > ${hostPath.shellQuote()}",
+        )
+            .redirectInput(sandboxFile)
+            .redirectErrorStream(true)
+            .start()
+        val exitCode = copy.waitFor()
+        check(exitCode == 0) { "Couldn't copy the Flatpak update to the host Downloads folder." }
+        return hostPath
+    }
+
+    private fun resolveHostDownloadsPath(fileName: String): String {
+        val query = ProcessBuilder(
+            "flatpak-spawn",
+            "--host",
+            "sh",
+            "-c",
+            "printf '%s' \"\$HOME/Downloads/$fileName\"",
+        )
+            .redirectErrorStream(true)
+            .start()
+        val hostPath = query.inputStream.bufferedReader().readText().trim()
+        val exitCode = query.waitFor()
+        check(exitCode == 0 && hostPath.isNotBlank()) {
+            "Couldn't resolve the host Downloads path for the Flatpak update."
+        }
+        return hostPath
     }
 
     private fun openReleasePage(update: AvailableUpdate): UpdateInstallResult {
@@ -235,18 +281,20 @@ internal fun linuxInstallerHelperScript(
     insideFlatpak: Boolean,
     relaunchCommand: String?,
 ): String {
-    val relaunch = relaunchCommand?.shellQuote() ?: "phoebe"
     val installCommand = if (flatpak) {
         val fileArg = filePath.shellQuote()
         "flatpak install --user -y $fileArg || flatpak install -y $fileArg"
     } else {
         "pkexec sh -c ${(("dpkg -i " + filePath.shellQuote()) + " || apt-get install -f -y").shellQuote()}"
     }
+    val relaunchBackground = relaunchCommand?.let { command ->
+        "(sh -c ${command.shellQuote()} >/dev/null 2>&1 &)"
+    } ?: "(sh -c 'phoebe' >/dev/null 2>&1 &)"
     val hostPrefix = if (insideFlatpak) "flatpak-spawn --host " else ""
     return """
         #!/bin/sh
         sleep 1
-        ${hostPrefix}sh -c ${(installCommand + " && (" + relaunch + " >/dev/null 2>&1 &)").shellQuote()}
+        ${hostPrefix}sh -c ${(installCommand + " && " + relaunchBackground).shellQuote()}
     """.trimIndent() + "\n"
 }
 

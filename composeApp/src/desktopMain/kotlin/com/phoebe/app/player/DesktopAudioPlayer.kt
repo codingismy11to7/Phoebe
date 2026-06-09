@@ -174,7 +174,7 @@ internal class DesktopAudioPlayer(
         preferJavaFxForLocalStreaming: Boolean,
     ) {
         val localUri = track.localUri?.takeIf { it.isNotBlank() }
-        val streamUri = track.streamUrl.takeIf { it.isNotBlank() }
+        val streamUri = DesktopSandboxPlayback.playbackStreamUrlForTrack(track).takeIf { it.isNotBlank() }
         val downloadUri = track.downloadUrl.takeIf { it.isNotBlank() }
         val uri = localUri ?: streamUri.orEmpty()
         playUri(

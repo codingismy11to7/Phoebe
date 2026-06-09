@@ -1,10 +1,7 @@
 package com.phoebe.app.player
 
 import com.phoebe.app.domain.Track
-import io.ktor.http.URLBuilder
 import io.ktor.http.Url
-import io.ktor.http.encodedPath
-import io.ktor.http.takeFrom
 
 data class CastMediaDescriptor(
     val trackId: String,
@@ -96,42 +93,8 @@ fun Track.matchesCastMedia(remoteTrack: Track, remoteCastUrl: String? = null): B
 
 private fun Track.chromecastMediaUrl(): String {
     if (hasChromecastDirectPlayableCodec()) return streamUrl
-    val ratingKey = id.removePrefix("plex:").takeIf { id.startsWith("plex:") && it.isNotBlank() }
-        ?: return streamUrl
-    val parsed = runCatching { Url(streamUrl) }.getOrNull() ?: return streamUrl
-    val token = parsed.parameters["X-Plex-Token"].orEmpty()
-    if (parsed.protocol.name.isBlank() || parsed.host.isBlank() || token.isBlank()) return streamUrl
-    return runCatching {
-        URLBuilder()
-            .takeFrom(parsed)
-            .apply {
-                encodedPath = "/music/:/transcode/universal/start.mp3"
-                parameters.clear()
-                parameters.append("path", "/library/metadata/$ratingKey")
-                parameters.append("mediaIndex", "0")
-                parameters.append("partIndex", "0")
-                parameters.append("protocol", "http")
-                parameters.append("format", "mp3")
-                parameters.append("audioCodec", "mp3")
-                parameters.append("directPlay", "0")
-                parameters.append("directStream", "0")
-                parameters.append("X-Plex-Token", token)
-            }
-            .buildString()
-    }.getOrDefault(streamUrl)
+    return plexUniversalMp3TranscodeUrl() ?: streamUrl
 }
-
-private fun Track.hasChromecastDirectPlayableCodec(): Boolean =
-    when (audioCodec?.lowercase()) {
-        "aac", "mp3", "mp4", "m4a" -> true
-        else -> {
-            val path = filepath ?: streamUrl.substringBefore('?').substringBefore('#')
-            when (path.substringAfterLast('.', missingDelimiterValue = "").lowercase()) {
-                "aac", "mp3", "m4a", "mp4" -> true
-                else -> false
-            }
-        }
-    }
 
 private fun Track.chromecastContentType(mediaUrl: String): String =
     if (mediaUrl != streamUrl) {
