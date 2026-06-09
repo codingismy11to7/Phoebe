@@ -109,15 +109,15 @@ class PlexPlayHistorySyncer(
     }
 
     suspend fun syncRecent(session: PlexSession?, catalog: CatalogSnapshot): PlexPlayHistorySyncResult {
-        val inputs = syncInputs(session, catalog) ?: return PlexPlayHistorySyncResult.Skipped
-        val (server, library, token, tracksById) = inputs
+        val inputs = syncSessionInputs(session) ?: return PlexPlayHistorySyncResult.Skipped
+        val (server, library, token) = inputs
         val importedAtMs = currentTimeMs()
         PhoebeLog.d("PlexPlayHistorySyncer") {
-            "recent sync start server=${server.name} library=${library.title} catalogPlexTracks=${tracksById.size}"
+            "recent sync start server=${server.name} library=${library.title}"
         }
 
         val stats = runCatching {
-            syncRecentTrackPlaybackStats(server, library, token, tracksById, importedAtMs)
+            syncRecentTrackPlaybackStats(server, library, token, importedAtMs)
         }.onFailure { error ->
             if (error is CancellationException) throw error
             PhoebeLog.d("PlexPlayHistorySyncer") {
@@ -225,7 +225,6 @@ class PlexPlayHistorySyncer(
         server: PlexServer,
         library: MusicLibrary,
         token: String,
-        tracksById: Map<String, Track>,
         importedAtMs: Long,
     ): StatsSyncResult {
         PhoebeLog.d("PlexPlayHistorySyncer") { "recent track playback stats fetch start size=$RecentStatsPageSize" }
@@ -244,6 +243,9 @@ class PlexPlayHistorySyncer(
                 size = RecentStatsPageSize,
             )
         } ?: error("timed out after ${RecentStatsTimeoutMs}ms")
+        val tracksById = catalogRepository.resolveTracksByIds(
+            stats.map { "plex:${it.ratingKey}" },
+        )
         val imported = playHistoryRepository.importPlexPlayCountFallbackBatch(
             stats = stats,
             serverId = server.id,
@@ -303,6 +305,17 @@ class PlexPlayHistorySyncer(
         )
 
     private fun syncInputs(session: PlexSession?, catalog: CatalogSnapshot): SyncInputs? {
+        val sessionInputs = syncSessionInputs(session) ?: return null
+        val tracksById = catalogPlexTracksById(catalog)
+        return SyncInputs(
+            server = sessionInputs.server,
+            library = sessionInputs.library,
+            token = sessionInputs.token,
+            tracksById = tracksById,
+        )
+    }
+
+    private fun syncSessionInputs(session: PlexSession?): SessionInputs? {
         val server = session?.selectedServer ?: run {
             PhoebeLog.d("PlexPlayHistorySyncer") { "skipped: no selected server" }
             return null
@@ -315,14 +328,22 @@ class PlexPlayHistorySyncer(
             PhoebeLog.d("PlexPlayHistorySyncer") { "skipped: no Plex token" }
             return null
         }
-        val tracksById = catalog.tracksByParent.values
+        return SessionInputs(server, library, token)
+    }
+
+    private fun catalogPlexTracksById(catalog: CatalogSnapshot): Map<String, Track> =
+        catalog.tracksByParent.values
             .asSequence()
             .flatten()
             .filter { it.isPlexLibraryTrack() }
             .distinctBy { it.id }
             .associateBy { it.id }
-        return SyncInputs(server, library, token, tracksById)
-    }
+
+    private data class SessionInputs(
+        val server: PlexServer,
+        val library: MusicLibrary,
+        val token: String,
+    )
 
     private data class SyncInputs(
         val server: PlexServer,

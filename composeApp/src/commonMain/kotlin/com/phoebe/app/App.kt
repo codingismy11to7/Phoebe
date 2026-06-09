@@ -115,6 +115,7 @@ fun App(
 
     LaunchedEffect(state) {
         bindCarPlayPlayback(state)
+        bindPlatformAppLifecycle(state)
     }
 
     LaunchedEffect(useLightAppearance) {

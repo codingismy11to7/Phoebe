@@ -19,6 +19,7 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.mediarouter.app.MediaRouteButton
 import com.google.android.gms.cast.framework.CastButtonFactory
+import com.phoebe.app.platform.PhoebeAppLifecycle
 import com.phoebe.app.player.AndroidPlaybackBridge
 
 class MainActivity : FragmentActivity() {
@@ -39,6 +40,16 @@ class MainActivity : FragmentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handlePlayFromSearchIntent(intent)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        PhoebeAppLifecycle.setUiVisible(true)
+    }
+
+    override fun onStop() {
+        PhoebeAppLifecycle.setUiVisible(false)
+        super.onStop()
     }
 
     override fun onDestroy() {

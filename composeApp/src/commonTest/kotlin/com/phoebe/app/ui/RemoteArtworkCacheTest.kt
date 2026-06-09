@@ -97,6 +97,31 @@ class RemoteArtworkCacheTest {
     }
 
     @Test
+    fun trimForMemoryPressureEvictsCachedImages() {
+        RemoteArtworkCache.configureLimitsForTest(maxEntries = 40, maxEstimatedBytes = Long.MAX_VALUE)
+        repeat(24) { index ->
+            RemoteArtworkCache.putForTest("art-$index", 128, testImageBitmap(32, 32))
+        }
+        assertEquals(24, RemoteArtworkCache.stats().imageCount)
+
+        RemoteArtworkCache.trimForMemoryPressure(aggressive = true)
+
+        assertTrue(RemoteArtworkCache.stats().imageCount <= 10)
+    }
+
+    @Test
+    fun clearUnderMemoryPressureDropsAllDecodedImages() {
+        RemoteArtworkCache.configureLimitsForTest(maxEntries = 20, maxEstimatedBytes = Long.MAX_VALUE)
+        RemoteArtworkCache.putForTest("art", 128, testImageBitmap(32, 32))
+        assertEquals(1, RemoteArtworkCache.stats().imageCount)
+
+        RemoteArtworkCache.clearUnderMemoryPressure()
+
+        assertEquals(0, RemoteArtworkCache.stats().imageCount)
+        assertNull(RemoteArtworkCache.cached("art", 128))
+    }
+
+    @Test
     fun concurrentReadsAndWritesDoNotThrow() {
         runTest {
             RemoteArtworkCache.configureLimitsForTest(maxEntries = 50, maxEstimatedBytes = Long.MAX_VALUE)

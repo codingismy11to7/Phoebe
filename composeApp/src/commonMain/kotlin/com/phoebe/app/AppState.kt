@@ -66,6 +66,8 @@ import com.phoebe.app.playlists.PlaylistExporter
 import com.phoebe.app.player.asPlayerState
 import com.phoebe.app.player.isPlaybackActive
 import com.phoebe.app.domain.RecentSearchItem
+import com.phoebe.app.platform.MemoryPressureLevel
+import com.phoebe.app.platform.PhoebeAppLifecycle
 import com.phoebe.app.platform.PhoebeLog
 import com.phoebe.app.platform.currentTimeMs
 import com.phoebe.app.platform.isDesktopPlatform
@@ -310,6 +312,7 @@ class AppState(
     private var catalogRefreshJob: Job? = null
     private var playHistorySyncJob: Job? = null
     private var providerPlayHistoryRefreshJob: Job? = null
+    private var plexPlayCountRefreshJob: Job? = null
     private var lightweightRemoteSyncJob: Job? = null
     private var downloadedArtworkCacheJob: Job? = null
     private val activeDownloadJobs = mutableSetOf<Job>()
@@ -973,6 +976,11 @@ class AppState(
 
     private fun syncRemotePlayHistoryInBackground() = startRemotePlayHistorySync(showMessage = false)
 
+    private fun shouldDeferBackgroundPlayHistorySync(): Boolean {
+        if (PhoebeAppLifecycle.isUiVisible) return false
+        return dependencies.audioPlayer.state.value.isPlaying
+    }
+
     private fun startRemotePlayHistorySync(showMessage: Boolean, recentOnly: Boolean = !showMessage) {
         val currentSession = session.value
         if (!currentSession.isPlex() && !currentSession.isEmbyFamily() && !currentSession.isNavidrome()) {
@@ -982,6 +990,10 @@ class AppState(
             if (showMessage) mutableMessage.value = "${currentSession.providerLabel()} play history sync is handled from playback progress."
             return
         }
+        if (!showMessage && shouldDeferBackgroundPlayHistorySync()) {
+            PhoebeLog.d("AppState") { "play history sync deferred: background playback active" }
+            return
+        }
         if (showMessage) mutableMessage.value = "Syncing ${currentSession.providerLabel()} play history..."
         PhoebeLog.d("AppState") {
             "play history sync requested provider=${currentSession.providerLabel()} " +
@@ -989,6 +1001,7 @@ class AppState(
                 "showMessage=$showMessage hasServer=${currentSession?.selectedServer != null} " +
                 "hasLibrary=${currentSession?.selectedLibrary != null}"
         }
+        cancelPlexPlayCountRefresh()
         playHistorySyncJob?.cancel()
         playHistorySyncJob = scope.launch {
             syncRemotePlayHistory(showMessage = showMessage, recentOnly = recentOnly)
@@ -1000,7 +1013,11 @@ class AppState(
             dependencies.plexPlaybackReporter.playHistoryChanged.collect {
                 providerPlayHistoryRefreshJob?.cancel()
                 providerPlayHistoryRefreshJob = scope.launch {
-                    delay(1_000L)
+                    delay(ProviderPlayHistoryDebounceMs)
+                    if (shouldDeferBackgroundPlayHistorySync()) {
+                        PhoebeLog.d("AppState") { "play history sync deferred: background playback active" }
+                        return@launch
+                    }
                     syncRemotePlayHistoryInBackground()
                 }
             }
@@ -1010,6 +1027,36 @@ class AppState(
     private fun cancelRemotePlayHistorySync() {
         playHistorySyncJob?.cancel()
         playHistorySyncJob = null
+        cancelPlexPlayCountRefresh()
+    }
+
+    private fun cancelPlexPlayCountRefresh() {
+        plexPlayCountRefreshJob?.cancel()
+        plexPlayCountRefreshJob = null
+    }
+
+    internal fun onMemoryPressure(level: MemoryPressureLevel) {
+        when (level) {
+            MemoryPressureLevel.UiHidden -> Unit
+            MemoryPressureLevel.Moderate -> {
+                cancelPlexPlayCountRefresh()
+                providerPlayHistoryRefreshJob?.cancel()
+                providerPlayHistoryRefreshJob = null
+                lightweightRemoteSyncJob?.cancel()
+                lightweightRemoteSyncJob = null
+                downloadedArtworkCacheJob?.cancel()
+                downloadedArtworkCacheJob = null
+            }
+            MemoryPressureLevel.Critical -> {
+                cancelRemotePlayHistorySync()
+                providerPlayHistoryRefreshJob?.cancel()
+                providerPlayHistoryRefreshJob = null
+                lightweightRemoteSyncJob?.cancel()
+                lightweightRemoteSyncJob = null
+                downloadedArtworkCacheJob?.cancel()
+                downloadedArtworkCacheJob = null
+            }
+        }
     }
 
     private fun cancelLightweightRemoteSync() {
@@ -1044,7 +1091,7 @@ class AppState(
                     dependencies.plexPlayHistorySyncer.sync(currentSession, catalog.value)
                 }
                 if (recentOnly) {
-                    refreshKnownPlexPlayCounts(currentSession)
+                    launchKnownPlexPlayCountRefresh(currentSession)
                 }
                 syncResult
             } else if (currentSession.isNavidrome()) {
@@ -1083,15 +1130,22 @@ class AppState(
         }.getOrNull()
     }
 
-    private suspend fun refreshKnownPlexPlayCounts(currentSession: PlexSession?) {
-        val refreshTrackIds = buildList {
-            addAll(dependencies.playHistoryRepository.queryTopMostPlayed(60).map { it.trackId })
-            addAll(dependencies.playHistoryRepository.queryTopRecentlyPlayed(60).map { it.trackId })
-        }.distinct()
-        dependencies.plexPlayHistorySyncer.refreshViewCountsForTrackIds(
-            currentSession,
-            refreshTrackIds,
-        )
+    private fun launchKnownPlexPlayCountRefresh(currentSession: PlexSession?) {
+        if (shouldDeferBackgroundPlayHistorySync()) {
+            PhoebeLog.d("AppState") { "Plex play count refresh deferred: background playback active" }
+            return
+        }
+        plexPlayCountRefreshJob?.cancel()
+        plexPlayCountRefreshJob = scope.launch {
+            val refreshTrackIds = buildList {
+                addAll(dependencies.playHistoryRepository.queryTopMostPlayed(60).map { it.trackId })
+                addAll(dependencies.playHistoryRepository.queryTopRecentlyPlayed(60).map { it.trackId })
+            }.distinct()
+            dependencies.plexPlayHistorySyncer.refreshViewCountsForTrackIds(
+                currentSession,
+                refreshTrackIds,
+            )
+        }
     }
 
     fun setTab(tab: LibraryTab) {
@@ -2399,14 +2453,17 @@ class AppState(
         val refreshJob = catalogRefreshJob
         val historyJob = playHistorySyncJob
         val providerHistoryJob = providerPlayHistoryRefreshJob
+        val plexCountRefreshJob = plexPlayCountRefreshJob
         val lightweightSyncJob = lightweightRemoteSyncJob
         catalogRefreshJob = null
         playHistorySyncJob = null
         providerPlayHistoryRefreshJob = null
+        plexPlayCountRefreshJob = null
         lightweightRemoteSyncJob = null
         refreshJob?.cancel()
         historyJob?.cancel()
         providerHistoryJob?.cancel()
+        plexCountRefreshJob?.cancel()
         lightweightSyncJob?.cancel()
         dependencies.catalogRepository.clearActiveSyncProgress()
         mostPlayedWarmSignature = null
@@ -2538,6 +2595,8 @@ private fun withQueryParameters(url: Url, vararg replacements: Pair<String, Stri
     }
     return rebuilt
 }
+
+private const val ProviderPlayHistoryDebounceMs = 8_000L
 
 private const val FavoritePlaylistsExportPath = "exports/favorite-playlists.json"
 private const val LISTEN_BRAINZ_CONNECT_TIMEOUT_MS = 45_000L

@@ -3,6 +3,8 @@
 package com.phoebe.app.player
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import androidx.annotation.OptIn
 import androidx.media3.common.C
 import androidx.media3.common.Player
@@ -37,7 +39,12 @@ internal object AndroidPlaybackDiagnostics {
                 diagnostics = diagnostics,
                 engine = engine,
             ),
-        ).setLoadControl(PhoebeLoadControlConfig.create(engine))
+        ).setLoadControl(
+            PhoebeLoadControlConfig.create(
+                engine = engine,
+                constrainedNetwork = context.hasConstrainedPlaybackNetwork(),
+            ),
+        )
     }
 
     fun reset() {
@@ -47,19 +54,27 @@ internal object AndroidPlaybackDiagnostics {
 
 @OptIn(UnstableApi::class)
 internal object PhoebeLoadControlConfig {
-    const val MainMinBufferMs = 15_000
-    const val MainMaxBufferMs = 90_000
-    const val MainTargetBufferBytes = 6 * 1024 * 1024
+    const val MainMinBufferMs = 12_000
+    const val MainMaxBufferMs = 45_000
+    const val MainTargetBufferBytes = 4 * 1024 * 1024
+    const val ConstrainedMainMaxBufferMs = 30_000
+    const val ConstrainedMainTargetBufferBytes = 2 * 1024 * 1024
     const val CrossfadeMinBufferMs = 2_000
     const val CrossfadeMaxBufferMs = 12_000
     const val CrossfadeTargetBufferBytes = 1 * 1024 * 1024
     const val BufferForPlaybackMs = 750
     const val BufferForPlaybackAfterRebufferMs = 2_000
 
-    fun create(engine: PlaybackEnginePath): DefaultLoadControl =
-        create(profileFor(engine))
+    fun create(
+        engine: PlaybackEnginePath,
+        constrainedNetwork: Boolean = false,
+    ): DefaultLoadControl =
+        create(profileFor(engine, constrainedNetwork))
 
-    fun profileFor(engine: PlaybackEnginePath): PhoebeLoadControlProfile =
+    fun profileFor(
+        engine: PlaybackEnginePath,
+        constrainedNetwork: Boolean = false,
+    ): PhoebeLoadControlProfile =
         if (engine == PlaybackEnginePath.Media3Crossfade) {
             PhoebeLoadControlProfile(
                 minBufferMs = CrossfadeMinBufferMs,
@@ -69,8 +84,12 @@ internal object PhoebeLoadControlConfig {
         } else {
             PhoebeLoadControlProfile(
                 minBufferMs = MainMinBufferMs,
-                maxBufferMs = MainMaxBufferMs,
-                targetBufferBytes = MainTargetBufferBytes,
+                maxBufferMs = if (constrainedNetwork) ConstrainedMainMaxBufferMs else MainMaxBufferMs,
+                targetBufferBytes = if (constrainedNetwork) {
+                    ConstrainedMainTargetBufferBytes
+                } else {
+                    MainTargetBufferBytes
+                },
             )
         }
 
@@ -417,6 +436,15 @@ private fun media3NormalizedSample(
         C.ENCODING_PCM_FLOAT -> buffer.order(ByteOrder.nativeOrder()).getFloat(offset).toDouble().coerceIn(-1.0, 1.0)
         else -> 0.0
     }
+}
+
+internal fun Context.hasConstrainedPlaybackNetwork(): Boolean {
+    val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        ?: return true
+    val network = connectivityManager.activeNetwork ?: return true
+    val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return true
+    if (!capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) return true
+    return !capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
 }
 
 private fun signedPcm(
