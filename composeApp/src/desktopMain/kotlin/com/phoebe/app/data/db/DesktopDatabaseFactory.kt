@@ -11,8 +11,10 @@ import java.util.Properties
 
 actual suspend fun createSqlDriver(schema: SqlSchema<QueryResult.AsyncValue<Unit>>): SqlDriver {
     val root = desktopDatabaseRoot()
+    migrateLegacyDesktopStorageIfNeeded(root)
     val dbFileName = localDatabaseFileName()
     val dbFile = File(root, dbFileName)
+    checkpointDatabaseIfPresent(dbFile)
 
     val properties = Properties().apply {
         setProperty("busy_timeout", "10000")
@@ -54,3 +56,39 @@ private fun openDriver(
 internal fun desktopDatabaseRoot(): File =
     System.getProperty("phoebe.storage.root")?.let(::File)
         ?: File(System.getProperty("user.home"), desktopDataDirectoryName()).also { it.mkdirs() }
+
+private fun checkpointDatabaseIfPresent(dbFile: File) {
+    if (!dbFile.isFile) return
+    runCatching {
+        DriverManager.getConnection("jdbc:sqlite:${dbFile.absolutePath}").use { connection ->
+            connection.createStatement().use { statement ->
+                statement.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            }
+        }
+    }
+}
+
+/**
+ * Flatpak sandboxes store data under `~/.var/app/...`, but native/deb/dev builds use
+ * `~/.phoebe` on the host. Copy the legacy tree once when the sandbox store is still empty.
+ */
+private fun migrateLegacyDesktopStorageIfNeeded(targetRoot: File) {
+    if (!File("/.flatpak-info").exists()) return
+    if (targetRoot.resolve(localDatabaseFileName()).isFile) return
+    val userName = System.getProperty("user.name")?.takeIf { it.isNotBlank() } ?: return
+    val hostLegacy = File("/home/$userName", desktopDataDirectoryName())
+    if (!hostLegacy.isDirectory) return
+    targetRoot.mkdirs()
+    hostLegacy.listFiles()?.forEach { source ->
+        val destination = targetRoot.resolve(source.name)
+        if (!destination.exists()) {
+            runCatching {
+                if (source.isDirectory) {
+                    source.copyRecursively(destination, overwrite = false)
+                } else {
+                    source.copyTo(destination, overwrite = false)
+                }
+            }
+        }
+    }
+}

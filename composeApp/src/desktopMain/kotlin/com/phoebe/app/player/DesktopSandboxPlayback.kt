@@ -35,6 +35,14 @@ internal object DesktopSandboxPlayback {
         return DesktopPlaybackStartupPolicy.streamingSampledExtensionFromSuffix(extension)
     }
 
+    /**
+     * Flatpak release 1.1.x buffered remote Plex streams before decoding. Progressive HTTP
+     * streaming was added in 1.2.x but is unreliable against real Plex transcode/direct URLs,
+     * so keep the buffer-first path inside the sandbox.
+     */
+    fun shouldStreamRemoteSampledPlayback(uri: String): Boolean =
+        DesktopPlaybackStartupPolicy.isRemoteUri(uri) && !isFlatpakSandbox()
+
     fun shouldEagerlyBufferRemotePlayback(uri: String, preferredSampledExtension: String?): Boolean {
         if (!DesktopPlaybackStartupPolicy.isRemoteUri(uri)) return false
         if (isFlatpakSandbox()) {
@@ -57,6 +65,6 @@ internal object DesktopSandboxPlayback {
         if (flatpakSandboxSampledPlaybackExtension(track.audioCodec, track.filepath, track.streamUrl) != null) {
             return track.streamUrl
         }
-        return track.plexUniversalMp3TranscodeUrl() ?: track.streamUrl
+        return track.flatpakSandboxTranscodeUrl() ?: track.streamUrl
     }
 }

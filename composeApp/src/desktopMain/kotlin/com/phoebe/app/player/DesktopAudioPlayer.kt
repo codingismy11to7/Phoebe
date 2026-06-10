@@ -251,7 +251,10 @@ internal class DesktopAudioPlayer(
                 }
                 if (file == null) {
                     val streamingExtension = preferredStreamingExtension ?: streamingSampledExtensionFromUri(activeUri)
-                    if (streamingExtension != null && tryStartSampledStream(activeUri, streamingExtension, generation)) {
+                    if (streamingExtension != null &&
+                        DesktopSandboxPlayback.shouldStreamRemoteSampledPlayback(activeUri) &&
+                        tryStartSampledStream(activeUri, streamingExtension, generation)
+                    ) {
                         return@execute
                     }
                     if (!isPlayRequestCurrent(generation)) return@execute

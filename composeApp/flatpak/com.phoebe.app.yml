@@ -15,7 +15,10 @@ finish-args:
   # Java Sound routes through ALSA; default to the Flatpak Pulse bridge.
   - --env=ALSA_PCM_NAME=pulse
   - --talk-name=org.freedesktop.Flatpak
+  - --talk-name=org.freedesktop.secrets
   - --device=dri
+  # Read-only host home lets folder picks and legacy ~/.phoebe migration reach real paths.
+  - --filesystem=home:ro
   - --filesystem=xdg-music:ro
   - --filesystem=xdg-download:ro
 

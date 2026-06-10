@@ -73,6 +73,46 @@ class DesktopPlaybackStartupPolicyTest {
     }
 
     @Test
+    fun flatpakSandboxUsesJellyfinMp3TranscodeForAacStreams() {
+        DesktopSandboxPlayback.flatpakSandboxOverride = { true }
+        try {
+            val track = playbackTrack(
+                streamUrl = "https://jellyfin.example/Audio/550e8400-e29b-41d4-a716-446655440000/stream?static=true&api_key=token",
+                localUri = null,
+            ).copy(
+                audioCodec = "M4A",
+                filepath = "/music/Artist/Album/02 Track.m4a",
+            )
+            assertEquals(
+                "https://jellyfin.example/Audio/550e8400-e29b-41d4-a716-446655440000/stream.mp3?static=true&audioCodec=mp3&api_key=token",
+                DesktopSandboxPlayback.playbackStreamUrlForTrack(track),
+            )
+        } finally {
+            DesktopSandboxPlayback.flatpakSandboxOverride = null
+        }
+    }
+
+    @Test
+    fun flatpakSandboxBuffersRemoteHttpInsteadOfProgressiveStreaming() {
+        DesktopSandboxPlayback.flatpakSandboxOverride = { true }
+        try {
+            assertFalse(
+                DesktopSandboxPlayback.shouldStreamRemoteSampledPlayback(
+                    "https://plex.example:32400/library/parts/2.mp3?X-Plex-Token=token",
+                ),
+            )
+            assertTrue(
+                DesktopSandboxPlayback.shouldEagerlyBufferRemotePlayback(
+                    "https://plex.example:32400/library/parts/2.mp3?X-Plex-Token=token",
+                    preferredSampledExtension = null,
+                ),
+            )
+        } finally {
+            DesktopSandboxPlayback.flatpakSandboxOverride = null
+        }
+    }
+
+    @Test
     fun flatpakSandboxBuffersRemoteMp3WithSampledPlayback() {
         DesktopSandboxPlayback.flatpakSandboxOverride = { true }
         try {
