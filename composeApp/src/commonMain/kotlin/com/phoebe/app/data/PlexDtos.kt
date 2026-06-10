@@ -136,6 +136,7 @@ data class PlexMetadataDto(
     val duration: Long? = null,
     val leafCount: Int? = null,
     val thumb: String? = null,
+    val composite: String? = null,
     val addedAt: Long? = null,
     val updatedAt: Long? = null,
     val userRating: Double? = null,

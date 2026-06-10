@@ -1009,7 +1009,6 @@ private fun PhoebeRootStateHolder(
             if (compact) {
                 SharedTransitionLayout(Modifier.fillMaxSize()) {
                 val sharedTransitionScope = this
-                val mobileArtworkTransition = remember { MobileNowPlayingArtworkTransitionState() }
                 val mobileChromeVisible = canBrowseMainSections(session, mediaSources) &&
                     screen != AppScreen.SignIn &&
                     screen != AppScreen.ServerPicker &&
@@ -1028,23 +1027,25 @@ private fun PhoebeRootStateHolder(
                 } else {
                     MobileChromePadding()
                 }
+
+                val mobileRoutes = navigator.routes
+                val mobilePlayerAsSheet = mobileRoutes.lastOrNull() == PhoebeRoute.Player && mobileRoutes.size > 1
+                val playerExpansionFraction = remember { Animatable(if (mobilePlayerAsSheet) 1f else 0f) }
+                var bottomBarHeightPx by remember { mutableFloatStateOf(0f) }
+                LaunchedEffect(mobilePlayerAsSheet) {
+                    if (mobilePlayerAsSheet) {
+                        playerExpansionFraction.animateTo(1f, spring(stiffness = Spring.StiffnessMedium, dampingRatio = Spring.DampingRatioNoBouncy))
+                    } else {
+                        playerExpansionFraction.animateTo(0f, spring(stiffness = Spring.StiffnessMedium, dampingRatio = Spring.DampingRatioNoBouncy))
+                    }
+                }
+
                 CompositionLocalProvider(
                     LocalSharedTransitionScope provides sharedTransitionScope,
                     LocalSharedElementTransitionsEnabled provides trackHeavySectionsEnabled,
                     LocalMobileChromePadding provides mobileChromePadding,
-                    LocalMobileNowPlayingArtworkTransition provides mobileArtworkTransition,
                 ) {
-                val mobileRoutes = navigator.routes
-                val mobilePlayerAsSheet = mobileRoutes.lastOrNull() == PhoebeRoute.Player && mobileRoutes.size > 1
                 val mobileContentRoutes = if (mobilePlayerAsSheet) mobileRoutes.dropLast(1) else mobileRoutes
-                LaunchedEffect(mobilePlayerAsSheet, currentTrack?.id) {
-                    if (!mobilePlayerAsSheet) {
-                        mobileArtworkTransition.activeTrack = null
-                        mobileArtworkTransition.fullArtworkBounds = null
-                        mobileArtworkTransition.fullArtworkTrackId = null
-                        mobileArtworkTransition.progress = 0f
-                    }
-                }
                 PhoebeNavDisplay(
                     backStack = mobileContentRoutes,
                     modifier = Modifier.fillMaxSize(),
@@ -1293,7 +1294,7 @@ private fun PhoebeRootStateHolder(
                         catalogRefreshing = catalogRefreshing,
                         session = session,
                         section = browseSection,
-                        selectedPlaylistId = selectedPlaylistId,
+                        selectedPlaylistId = null,
                         searchQuery = searchQuery,
                         libraryFilter = libraryFilter,
                         libraryUi = libraryUi,
@@ -1408,95 +1409,158 @@ private fun PhoebeRootStateHolder(
                 }
                 }
                 }
-                AnimatedVisibility(
-                    visible = mobileChromeVisible,
-                    enter = EnterTransition.None,
-                    exit = ExitTransition.None,
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .zIndex(3.5f),
-                ) {
-                    CompositionLocalProvider(
-                        LocalAnimatedVisibilityScope provides this,
-                    ) {
-                        MobilePersistentPlaybackChrome(
-                            section = browseSection,
-                            currentTrack = currentTrack,
-                            isPlaying = shellPlayback.isPlaying,
-                            isBuffering = shellPlayback.isBuffering,
-                            onNavigate = { section ->
-                                navigator.openBrowse(section)
-                                selectedPlaylistId = null
-                            },
-                            onOpenNowPlaying = { navigator.openPlayer() },
-                            onTogglePlayPause = state::togglePlayPause,
-                            onPreviousTrack = state::previous,
-                            onNextTrack = state::next,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
+                val density = LocalDensity.current
+                val navigationBars = WindowInsets.navigationBars
+                val calculatedFallbackPx = remember(mobileChromeVisible, density, navigationBars) {
+                    if (mobileChromeVisible) {
+                        with(density) {
+                            (MobileBottomNavChromeHeight + navigationBars.getBottom(this).toDp()).toPx()
+                        }
+                    } else {
+                        0f
                     }
                 }
-                if (mobilePlayerAsSheet) {
-                    val playerSheetVisibility = remember {
-                        MutableTransitionState(false)
-                    }.apply {
-                        targetState = true
-                    }
-                    AnimatedVisibility(
-                        visibleState = playerSheetVisibility,
-                        enter = slideInVertically(
-                            animationSpec = spring(
-                                stiffness = Spring.StiffnessMedium,
-                                dampingRatio = Spring.DampingRatioNoBouncy,
-                            ),
-                            initialOffsetY = { it },
-                        ),
-                        exit = ExitTransition.None,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .zIndex(4f),
-                    ) {
-                        CompositionLocalProvider(
-                            LocalAnimatedVisibilityScope provides this,
+                val actualBottomBarHeightPx = if (mobileChromeVisible) {
+                    if (bottomBarHeightPx > 0f) bottomBarHeightPx else calculatedFallbackPx
+                } else {
+                    0f
+                }
+                val miniPlayerHeightPx = with(density) { MobileMiniPlayerChromeHeight.toPx() }
+
+                BoxWithConstraints(Modifier.fillMaxSize()) {
+                    val screenHeightPx = constraints.maxHeight.toFloat()
+                    val dragRangePx = (screenHeightPx - actualBottomBarHeightPx - miniPlayerHeightPx).coerceAtLeast(1f)
+
+                    if (mobileChromeVisible) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .fillMaxWidth()
+                                .graphicsLayer {
+                                    translationY = actualBottomBarHeightPx * playerExpansionFraction.value
+                                }
+                                .zIndex(5f)
+                                .onGloballyPositioned { coordinates ->
+                                    bottomBarHeightPx = coordinates.size.height.toFloat()
+                                }
                         ) {
-                            MobilePlayerHost(
-                                appState = state,
-                                track = mobilePlayerTrack,
-                                upNext = mobilePlayerUpNext,
-                                previousTrack = mobilePlayerPreviousTrack,
-                                currentIndex = mobilePlayerCurrentIndex,
-                                playbackStarting = mobilePlaybackStarting,
-                                castState = cast,
-                                remotePlaybackTarget = musicAssistantRemotePlayback?.target,
-                                onToggle = state::togglePlayPause,
-                                onPrevious = state::previous,
-                                onNext = state::next,
-                                onSkipQueueBy = state::skipQueueBy,
-                                onShuffle = state::toggleShuffle,
-                                onRepeat = state::cycleRepeat,
-                                onSeek = state::seekTo,
-                                onPlayQueue = state::playUpNext,
-                                onMoveUpNext = state::moveUpNext,
-                                onRemoveUpNext = state::removeUpNext,
-                                onOpenSongDetail = { navigator.open(it.route()) },
-                                onCast = state::showCastPicker,
-                                onLyrics = {
-                                    currentTrack?.let { navigator.open(PhoebeRoute.Lyrics(it.id)) }
+                            MobileBottomNavigation(
+                                section = browseSection,
+                                onSection = { section ->
+                                    navigator.openBrowse(section)
+                                    selectedPlaylistId = null
                                 },
-                                onBack = collapseMobilePlayer,
-                                onSwipeDismiss = collapseMobilePlayer,
-                                handleSystemBack = true,
+                                attachedToMiniPlayer = currentTrack != null,
                             )
                         }
                     }
+
+                    if (currentTrack != null) {
+                        val scope = rememberCoroutineScope()
+                        val onDragStart = {
+                            scope.launch { playerExpansionFraction.stop() }
+                            Unit
+                        }
+                        val onDrag = { deltaY: Float ->
+                            val current = playerExpansionFraction.value
+                            val delta = -deltaY / dragRangePx
+                            scope.launch {
+                                playerExpansionFraction.snapTo((current + delta).coerceIn(0f, 1f))
+                            }
+                            Unit
+                        }
+                        val onDragEnd = { velocityY: Float ->
+                            val current = playerExpansionFraction.value
+                            val shouldExpand = when {
+                                velocityY < -350f -> true
+                                velocityY > 350f -> false
+                                current > 0.75f -> true
+                                else -> false
+                            }
+                            val initialFractionVelocity = (-velocityY / dragRangePx).coerceIn(-30f, 30f)
+                            if (shouldExpand) {
+                                navigator.openPlayer()
+                                scope.launch {
+                                    playerExpansionFraction.animateTo(
+                                        targetValue = 1f,
+                                        animationSpec = spring(stiffness = Spring.StiffnessMedium, dampingRatio = Spring.DampingRatioNoBouncy),
+                                        initialVelocity = initialFractionVelocity,
+                                    )
+                                }
+                            } else {
+                                if (mobilePlayerAsSheet) {
+                                    navigator.pop()
+                                }
+                                scope.launch {
+                                    playerExpansionFraction.animateTo(
+                                        targetValue = 0f,
+                                        animationSpec = spring(stiffness = Spring.StiffnessMedium, dampingRatio = Spring.DampingRatioNoBouncy),
+                                        initialVelocity = initialFractionVelocity,
+                                    )
+                                }
+                            }
+                            Unit
+                        }
+
+                        PlatformBackHandler(
+                            enabled = mobilePlayerAsSheet,
+                            onBack = {
+                                if (mobilePlayerAsSheet) {
+                                    navigator.pop()
+                                }
+                            },
+                            onBackProgress = { progress ->
+                                scope.launch {
+                                    playerExpansionFraction.snapTo(1f - progress)
+                                }
+                            },
+                            onBackCancel = {
+                                scope.launch {
+                                    playerExpansionFraction.animateTo(1f, spring(stiffness = Spring.StiffnessMedium, dampingRatio = Spring.DampingRatioNoBouncy))
+                                }
+                            }
+                        )
+
+                        MobilePlayerHost(
+                            appState = state,
+                            track = mobilePlayerTrack,
+                            upNext = mobilePlayerUpNext,
+                            previousTrack = mobilePlayerPreviousTrack,
+                            currentIndex = mobilePlayerCurrentIndex,
+                            playbackStarting = mobilePlaybackStarting,
+                            castState = cast,
+                            remotePlaybackTarget = musicAssistantRemotePlayback?.target,
+                            onToggle = state::togglePlayPause,
+                            onPrevious = state::previous,
+                            onNext = state::next,
+                            onSkipQueueBy = state::skipQueueBy,
+                            onShuffle = state::toggleShuffle,
+                            onRepeat = state::cycleRepeat,
+                            onSeek = state::seekTo,
+                            onPlayQueue = state::playUpNext,
+                            onMoveUpNext = state::moveUpNext,
+                            onRemoveUpNext = state::removeUpNext,
+                            onOpenSongDetail = { navigator.open(it.route()) },
+                            onCast = state::showCastPicker,
+                            onLyrics = {
+                                currentTrack.let { navigator.open(PhoebeRoute.Lyrics(it.id)) }
+                            },
+                            onBack = collapseMobilePlayer,
+                            onSwipeDismiss = collapseMobilePlayer,
+                            handleSystemBack = false,
+                            expansionFraction = playerExpansionFraction.value,
+                            onDragStart = onDragStart,
+                            onDrag = onDrag,
+                            onDragEnd = onDragEnd,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer {
+                                    translationY = dragRangePx * (1f - playerExpansionFraction.value)
+                                }
+                                .zIndex(4f)
+                        )
+                    }
                 }
-                MobileNowPlayingArtworkOverlay(
-                    transitionState = mobileArtworkTransition,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .zIndex(5f),
-                )
                 }
                 }
             } else {
@@ -2026,6 +2090,11 @@ private fun MobilePlayerHost(
     onBack: () -> Unit,
     onSwipeDismiss: () -> Unit,
     handleSystemBack: Boolean = true,
+    expansionFraction: Float = 0f,
+    onDragStart: () -> Unit = {},
+    onDrag: (Float) -> Unit = {},
+    onDragEnd: (Float) -> Unit = {},
+    modifier: Modifier = Modifier,
 ) {
     val player by appState.player.collectAsState()
     val appSettings by appState.appSettings.collectAsState()
@@ -2077,6 +2146,11 @@ private fun MobilePlayerHost(
         onBack = onBack,
         onSwipeDismiss = onSwipeDismiss,
         handleSystemBack = handleSystemBack,
+        expansionFraction = expansionFraction,
+        onDragStart = onDragStart,
+        onDrag = onDrag,
+        onDragEnd = onDragEnd,
+        modifier = modifier,
     )
 }
 

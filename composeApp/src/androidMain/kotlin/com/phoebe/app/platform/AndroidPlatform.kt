@@ -113,6 +113,8 @@ actual suspend fun platformStreamHttpDownloadToStorage(
 
 actual fun isDesktopPlatform(): Boolean = false
 
+actual fun isIosPlatform(): Boolean = false
+
 actual fun supportsPredictiveBack(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
 
 actual class PlatformStorage actual constructor() {

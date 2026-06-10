@@ -44,6 +44,8 @@ actual suspend fun platformStreamHttpDownloadToStorage(
 
 actual fun isDesktopPlatform(): Boolean = true
 
+actual fun isIosPlatform(): Boolean = false
+
 actual fun supportsPredictiveBack(): Boolean = false
 
 private val storageRoot: File by lazy {

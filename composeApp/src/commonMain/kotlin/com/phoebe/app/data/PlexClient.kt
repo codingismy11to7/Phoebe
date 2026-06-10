@@ -234,12 +234,13 @@ class PlexClient(
     suspend fun playlists(server: PlexServer, token: String): List<Playlist> {
         val response = plexGet<PlexMediaContainerResponse>(server, token, "/playlists")
         return response.mediaContainer.metadata.map {
+            val thumb = it.thumb ?: it.composite
             Playlist(
                 id = it.ratingKey,
                 title = it.title,
                 trackCount = it.leafCount ?: 0,
                 key = it.key,
-                thumbUrl = it.thumb?.let { thumb -> server.assetUrl(thumb, token) },
+                thumbUrl = thumb?.let { t -> server.assetUrl(t, token) },
                 rating = it.userRating.toStarRating(),
             )
         }
@@ -1172,12 +1173,13 @@ class PlexClient(
         val parsed = parsePlaylistResponse(response, "createPlaylist", title)
         val meta = parsed.mediaContainer.metadata.firstOrNull()
             ?: error("Plex returned an empty container when creating playlist '$title'")
+        val thumb = meta.thumb ?: meta.composite
         return Playlist(
             id = meta.ratingKey,
             title = meta.title,
             trackCount = meta.leafCount ?: ratingKeys.size,
             key = meta.key,
-            thumbUrl = meta.thumb?.let { server.assetUrl(it, token) },
+            thumbUrl = thumb?.let { server.assetUrl(it, token) },
         )
     }
 
