@@ -460,6 +460,149 @@ jobs:
             xcrun stapler staple "${artifact}"
           done
 
+      - name: Install Google Cast SDK for iOS
+        shell: bash
+        run: ./scripts/install-ios-google-cast-sdk.sh
+
+      - name: Update iOS version info
+        shell: bash
+        run: |
+          plutil -replace CFBundleShortVersionString -string "${VERSION}" iosApp/iosApp/Info.plist
+          plutil -replace CFBundleVersion -string "${VERSION_CODE}" iosApp/iosApp/Info.plist
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          VERSION_CODE: ${{ needs.version.outputs.version_code }}
+
+      - name: Set up iOS code signing and profiles
+        shell: bash
+        run: |
+          if [[ -n "${IOS_PROVISIONING_PROFILE_BASE64}" && -n "${IOS_CERTIFICATE_BASE64}" ]]; then
+            echo "Setting up iOS code signing..."
+            
+            # Decode certificate
+            ios_cert_path="${RUNNER_TEMP}/ios-developer.p12"
+            echo "${IOS_CERTIFICATE_BASE64}" | base64 --decode > "${ios_cert_path}"
+            
+            # Import into temporary keychain created earlier in the workflow
+            keychain_path="${RUNNER_TEMP}/app-signing.keychain-db"
+            security import "${ios_cert_path}" -P "${IOS_CERTIFICATE_PASSWORD}" -A -t cert -f pkcs12 -k "${keychain_path}"
+            security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "${MACOS_KEYCHAIN_PASSWORD}" "${keychain_path}"
+            
+            # Decode provisioning profile
+            mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+            profile_path="${HOME}/Library/MobileDevice/Provisioning Profiles/profile.mobileprovision"
+            echo "${IOS_PROVISIONING_PROFILE_BASE64}" | base64 --decode > "${profile_path}"
+            
+            # Parse details from provisioning profile
+            security cms -D -i "${profile_path}" > "${RUNNER_TEMP}/profile.plist"
+            UUID=$(plutil -extract UUID raw "${RUNNER_TEMP}/profile.plist")
+            TEAM_ID=$(plutil -extract TeamIdentifier.0 raw "${RUNNER_TEMP}/profile.plist")
+            APPLICATION_ID=$(plutil -extract Entitlements.application-identifier raw "${RUNNER_TEMP}/profile.plist")
+            BUNDLE_ID="${APPLICATION_ID#*.}" # Remove TEAM_ID prefix
+            
+            # Rename profile to its UUID name so Xcode finds it
+            mv "${profile_path}" "${HOME}/Library/MobileDevice/Provisioning Profiles/${UUID}.mobileprovision"
+            
+            echo "Profile details:"
+            echo "  UUID: ${UUID}"
+            echo "  Team ID: ${TEAM_ID}"
+            echo "  Bundle ID: ${BUNDLE_ID}"
+            
+            # Generate ExportOptions.plist
+            cat << 'EOF' > "${RUNNER_TEMP}/ExportOptions.plist"
+            <?xml version="1.0" encoding="UTF-8"?>
+            <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+            <plist version="1.0">
+            <dict>
+                <key>method</key>
+                <string>development</string>
+                <key>signingStyle</key>
+                <string>manual</string>
+                <key>teamID</key>
+                <string>__TEAM_ID__</string>
+                <key>provisioningProfiles</key>
+                <dict>
+                    <key>__BUNDLE_ID__</key>
+                    <string>__UUID__</string>
+                </dict>
+            </dict>
+            </plist>
+            EOF
+            
+            # Replace placeholder variables in ExportOptions.plist
+            sed -i '' "s/__TEAM_ID__/${TEAM_ID}/g" "${RUNNER_TEMP}/ExportOptions.plist"
+            sed -i '' "s/__BUNDLE_ID__/${BUNDLE_ID}/g" "${RUNNER_TEMP}/ExportOptions.plist"
+            sed -i '' "s/__UUID__/${UUID}/g" "${RUNNER_TEMP}/ExportOptions.plist"
+            
+            # Share variables to following steps
+            echo "SIGN_IOS=true" >> "${GITHUB_ENV}"
+            echo "IOS_TEAM_ID=${TEAM_ID}" >> "${GITHUB_ENV}"
+            echo "IOS_PROVISIONING_PROFILE_UUID=${UUID}" >> "${GITHUB_ENV}"
+          else
+            echo "iOS signing secrets not fully provided. Building unsigned IPA."
+            echo "SIGN_IOS=false" >> "${GITHUB_ENV}"
+          fi
+        env:
+          IOS_CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+          MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+
+      - name: Build and Package iOS App
+        shell: bash
+        run: |
+          if [[ "${SIGN_IOS}" == "true" ]]; then
+            echo "Building signed iOS App..."
+            xcodebuild \
+              -project iosApp/iosApp.xcodeproj \
+              -scheme iosApp \
+              -configuration Release \
+              -sdk iphoneos \
+              -derivedDataPath "${RUNNER_TEMP}/ios-release-derived" \
+              -archivePath "${RUNNER_TEMP}/iosApp.xcarchive" \
+              DEVELOPMENT_TEAM="${IOS_TEAM_ID}" \
+              PROVISIONING_PROFILE_SPECIFIER="${IOS_PROVISIONING_PROFILE_UUID}" \
+              CODE_SIGN_STYLE="Manual" \
+              archive
+
+            xcodebuild -exportArchive \
+              -archivePath "${RUNNER_TEMP}/iosApp.xcarchive" \
+              -exportPath "${RUNNER_TEMP}/exported" \
+              -exportOptionsPlist "${RUNNER_TEMP}/ExportOptions.plist"
+
+            ipa_path="$(find "${RUNNER_TEMP}/exported" -name '*.ipa' -print -quit)"
+            if [[ -z "${ipa_path}" ]]; then
+              echo "::error::Could not find exported IPA file"
+              exit 1
+            fi
+            mkdir -p release-artifacts
+            cp "${ipa_path}" "release-artifacts/Phoebe-${VERSION}.ipa"
+          else
+            echo "Building unsigned iOS App..."
+            xcodebuild \
+              -project iosApp/iosApp.xcodeproj \
+              -scheme iosApp \
+              -configuration Release \
+              -sdk iphoneos \
+              -derivedDataPath "${RUNNER_TEMP}/ios-release-derived" \
+              CODE_SIGNING_ALLOWED=NO \
+              CODE_SIGNING_REQUIRED=NO \
+              clean build
+
+            app_path="$(find "${RUNNER_TEMP}/ios-release-derived/Build/Products/Release-iphoneos" -maxdepth 1 -name '*.app' -print -quit)"
+            if [[ -z "${app_path}" ]]; then
+              echo "::error::Could not find built iOS app"
+              exit 1
+            fi
+            mkdir -p Payload
+            cp -R "${app_path}" Payload/
+            mkdir -p release-artifacts
+            zip -r "release-artifacts/Phoebe-${VERSION}.ipa" Payload
+            rm -rf Payload
+          fi
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+
       - name: Collect macOS release artifacts
         shell: bash
         run: |
@@ -519,6 +662,7 @@ jobs:
             release-artifacts/**/*.msi
             release-artifacts/**/*.dmg
             release-artifacts/**/*.pkg
+            release-artifacts/**/*.ipa
 
   web-pages-deploy:
     name: Deploy web to GitHub Pages

@@ -264,3 +264,39 @@ The Windows job should:
 2. Authenticate to Azure using OIDC.
 3. Sign the MSI with Azure Artifact Signing.
 4. Upload the signed MSI to the draft GitHub Release.
+
+## iOS IPA Signing (Optional)
+
+If you have a paid Apple Developer Plan and want the release CI to automatically generate a signed `.ipa` file that you can drag and drop onto your phone from Finder, add these GitHub secrets:
+
+- `IOS_CERTIFICATE_BASE64`: A base64-encoded `.p12` file containing your iOS Developer or Distribution certificate.
+- `IOS_CERTIFICATE_PASSWORD`: The password you set when exporting the `.p12` file.
+- `IOS_PROVISIONING_PROFILE_BASE64`: A base64-encoded `.mobileprovision` file containing your provisioning profile with your device UDID.
+
+If these secrets are not set, the workflow will gracefully fall back to packaging an unsigned `.ipa` build.
+
+### 1. Export iOS certificate as P12
+1. On your Mac, open **Keychain Access**.
+2. Go to **login** (keychain) -> **My Certificates**.
+3. Find your active **Apple Development** or **Apple Distribution** certificate.
+4. Right-click the certificate and choose **Export**.
+5. Save it as `ios-certificate.p12` and set a secure password.
+6. Base64-encode this file via Terminal:
+   ```sh
+   base64 -i ios-certificate.p12 -o ios-cert-base64.txt
+   ```
+7. Paste the contents of `ios-cert-base64.txt` into the `IOS_CERTIFICATE_BASE64` secret.
+8. Add the certificate password as `IOS_CERTIFICATE_PASSWORD`.
+
+### 2. Download iOS Provisioning Profile
+1. Open your Apple Developer account profiles:
+   https://developer.apple.com/account/resources/profiles/list
+2. Click `+` to create a new profile (select **iOS App Development** or **Ad Hoc**).
+3. Select your App ID (e.g. `com.phoebe.app`), associate it with your certificate, and select your registered iPhone device.
+4. Download the generated `.mobileprovision` file.
+5. Base64-encode the file via Terminal:
+   ```sh
+   base64 -i YourProfile.mobileprovision -o ios-profile-base64.txt
+   ```
+6. Paste the contents of `ios-profile-base64.txt` into the `IOS_PROVISIONING_PROFILE_BASE64` secret.
+

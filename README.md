@@ -132,7 +132,7 @@ For UI architecture and navigation rules, see [Compose Architecture Guidelines](
 | **Windows** | [GitHub Releases](https://github.com/j-roskopf/Phoebe/releases) (`.msi`) | Yes (folder picker) | Chromecast | Signed MSI release; window caption/border colors follow the app theme; Cast supports remote HTTP(S) streams. |
 | **macOS** | [GitHub Releases](https://github.com/j-roskopf/Phoebe/releases) (`.dmg`) | Yes (folder picker) | Chromecast | Signed and notarized DMG; native bridge handles hardware media keys; Cast supports remote HTTP(S) streams. |
 | **Android** | [GitHub Releases](https://github.com/j-roskopf/Phoebe/releases) (`.apk`, `.aab`) | Yes (SAF tree URI) | Chromecast | Android Auto browse, Media3 playback, Cast queue/transport, and instrumented playback tests on CI. |
-| **iOS** | [GitHub Releases](https://github.com/j-roskopf/Phoebe/releases) | Yes (native folder picker) | Chromecast (manual SDK setup) | iOS app target with AVPlayer playback, Google Cast sender support, and CarPlay browse/play in code; release CI does not upload a signed IPA yet. |
+| **iOS** | [GitHub Releases](https://github.com/j-roskopf/Phoebe/releases) | Yes (native folder picker) | Chromecast (manual SDK setup) | iOS app target with AVPlayer playback, Google Cast sender support, and CarPlay browse/play in code; release CI uploads an unsigned IPA for sideloading/local signing. |
 
 ## What works now
 
