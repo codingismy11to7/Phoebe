@@ -1359,7 +1359,7 @@ private fun PhoebeRootStateHolder(
                         onPlayTracks = playTracksFromMobile,
                         onAddToUpNext = state::addToUpNext,
                         onDownload = state::download,
-                        onOpenNowPlaying = ::openMobilePlayer,
+                        onOpenNowPlaying = { openMobilePlayer() },
                         onTogglePlayPause = state::togglePlayPause,
                         onPreviousTrack = state::previous,
                         onNextTrack = state::next,
