@@ -54,6 +54,12 @@
     *;
 }
 
+# Java Sound SPI decoders (MP3/Vorbis/FLAC). Flatpak playback relies on these instead of JavaFX Media.
+-keep class javazoom.spi.** { *; }
+-keep class javazoom.jl.** { *; }
+-keep class org.jflac.** { *; }
+-keep class tritonus.** { *; }
+
 -keep class com.sun.prism.** {
     *;
 }
