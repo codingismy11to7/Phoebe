@@ -1,5 +1,6 @@
 package com.phoebe.app.data.db
 
+import com.phoebe.app.player.DesktopSandboxPlayback
 import app.cash.sqldelight.async.coroutines.synchronous
 import app.cash.sqldelight.db.QueryResult
 import app.cash.sqldelight.db.SqlDriver
@@ -55,7 +56,22 @@ private fun openDriver(
 
 internal fun desktopDatabaseRoot(): File =
     System.getProperty("phoebe.storage.root")?.let(::File)
+        ?: flatpakDesktopDatabaseRoot()
         ?: File(System.getProperty("user.home"), desktopDataDirectoryName()).also { it.mkdirs() }
+
+/**
+ * Flatpak sets [HOME] to the host path while mounting it read-only via `--filesystem=home:ro`.
+ * Use the per-app [XDG_DATA_HOME] directory for writable SQLite and prefs instead.
+ */
+internal var flatpakXdgDataHomeOverride: (() -> String?)? = null
+
+internal fun flatpakDesktopDatabaseRoot(): File? {
+    if (!DesktopSandboxPlayback.isFlatpakSandbox()) return null
+    val dataHome = flatpakXdgDataHomeOverride?.invoke()
+        ?: System.getenv("XDG_DATA_HOME")?.takeIf { it.isNotBlank() }
+        ?: return null
+    return File(dataHome, localStorageDirectoryName()).also { it.mkdirs() }
+}
 
 private fun checkpointDatabaseIfPresent(dbFile: File) {
     if (!dbFile.isFile) return
@@ -73,22 +89,37 @@ private fun checkpointDatabaseIfPresent(dbFile: File) {
  * `~/.phoebe` on the host. Copy the legacy tree once when the sandbox store is still empty.
  */
 private fun migrateLegacyDesktopStorageIfNeeded(targetRoot: File) {
-    if (!File("/.flatpak-info").exists()) return
+    if (!DesktopSandboxPlayback.isFlatpakSandbox()) return
     if (targetRoot.resolve(localDatabaseFileName()).isFile) return
-    val userName = System.getProperty("user.name")?.takeIf { it.isNotBlank() } ?: return
-    val hostLegacy = File("/home/$userName", desktopDataDirectoryName())
-    if (!hostLegacy.isDirectory) return
+    val legacyRoots = buildList {
+        flatpakSandboxHomeLegacyDirectory()?.let(::add)
+        hostLegacyDesktopDirectory()?.let(::add)
+    }.distinctBy { it.canonicalPath }
+    if (legacyRoots.isEmpty()) return
     targetRoot.mkdirs()
-    hostLegacy.listFiles()?.forEach { source ->
-        val destination = targetRoot.resolve(source.name)
-        if (!destination.exists()) {
-            runCatching {
-                if (source.isDirectory) {
-                    source.copyRecursively(destination, overwrite = false)
-                } else {
-                    source.copyTo(destination, overwrite = false)
+    legacyRoots.forEach { legacyRoot ->
+        legacyRoot.listFiles()?.forEach { source ->
+            val destination = targetRoot.resolve(source.name)
+            if (!destination.exists()) {
+                runCatching {
+                    if (source.isDirectory) {
+                        source.copyRecursively(destination, overwrite = false)
+                    } else {
+                        source.copyTo(destination, overwrite = false)
+                    }
                 }
             }
         }
     }
+}
+
+private fun hostLegacyDesktopDirectory(): File? {
+    val userName = System.getProperty("user.name")?.takeIf { it.isNotBlank() } ?: return null
+    return File("/home/$userName", desktopDataDirectoryName()).takeIf { it.isDirectory }
+}
+
+private fun flatpakSandboxHomeLegacyDirectory(): File? {
+    val appId = System.getenv("FLATPAK_ID")?.takeIf { it.isNotBlank() } ?: return null
+    val userName = System.getProperty("user.name")?.takeIf { it.isNotBlank() } ?: return null
+    return File("/home/$userName/.var/app/$appId", desktopDataDirectoryName()).takeIf { it.isDirectory }
 }

@@ -43,6 +43,17 @@ internal object DesktopSandboxPlayback {
     fun shouldStreamRemoteSampledPlayback(uri: String): Boolean =
         DesktopPlaybackStartupPolicy.isRemoteUri(uri) && !isFlatpakSandbox()
 
+    fun bufferedRemotePlaybackUri(activeUri: String, downloadUri: String?): String {
+        val download = downloadUri?.takeIf { it.isNotBlank() && DesktopPlaybackStartupPolicy.isRemoteUri(it) }
+            ?: return activeUri
+        if (isFlatpakSandbox() && download != activeUri) {
+            // Flatpak may rewrite AAC/M4A streams to MP3 transcode URLs while downloadUrl still
+            // points at the direct container, which Java Sound cannot decode in the sandbox.
+            return activeUri
+        }
+        return download
+    }
+
     fun shouldEagerlyBufferRemotePlayback(uri: String, preferredSampledExtension: String?): Boolean {
         if (!DesktopPlaybackStartupPolicy.isRemoteUri(uri)) return false
         if (isFlatpakSandbox()) {

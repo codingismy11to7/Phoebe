@@ -113,6 +113,23 @@ class DesktopPlaybackStartupPolicyTest {
     }
 
     @Test
+    fun flatpakSandboxBuffersTranscodeUrlInsteadOfDirectDownload() {
+        DesktopSandboxPlayback.flatpakSandboxOverride = { true }
+        try {
+            val transcodeUrl =
+                "https://plex.example:32400/music/:/transcode/universal/start.mp3?path=%2Flibrary%2Fmetadata%2F124&X-Plex-Token=token"
+            val directDownload =
+                "https://plex.example:32400/library/parts/2.m4a?X-Plex-Token=token&download=1"
+            assertEquals(
+                transcodeUrl,
+                DesktopSandboxPlayback.bufferedRemotePlaybackUri(transcodeUrl, directDownload),
+            )
+        } finally {
+            DesktopSandboxPlayback.flatpakSandboxOverride = null
+        }
+    }
+
+    @Test
     fun flatpakSandboxBuffersRemoteMp3WithSampledPlayback() {
         DesktopSandboxPlayback.flatpakSandboxOverride = { true }
         try {

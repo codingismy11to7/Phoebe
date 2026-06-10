@@ -1636,9 +1636,7 @@ internal class DesktopAudioPlayer(
         DesktopPlaybackStartupPolicy.isRemoteUri(uri)
 
     private fun bufferedRemotePlaybackUri(uri: String, downloadUri: String?): String =
-        downloadUri
-            ?.takeIf { it.isNotBlank() && isRemoteUri(it) }
-            ?: uri
+        DesktopSandboxPlayback.bufferedRemotePlaybackUri(uri, downloadUri)
 
     private fun startJavaFxProgressProbe(mediaPlayer: MediaPlayer, generation: Int) {
         stopJavaFxProgressProbe()
