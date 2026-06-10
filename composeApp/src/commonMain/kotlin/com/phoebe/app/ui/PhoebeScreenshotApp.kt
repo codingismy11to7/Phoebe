@@ -544,12 +544,29 @@ internal fun PhoebeMobileScreenshotScenario(
     } else {
         fixture.libraryUi
     }
+
+    val isPlayer = scenario.name.startsWith("Player", ignoreCase = true)
+    val isSignIn = scenario.name.startsWith("SignIn", ignoreCase = true)
+    val showChrome = !isPlayer && !isSignIn
+
+    val chromePadding = if (showChrome) {
+        MobileChromePadding(
+            top = MobileToolbarChromeHeight + MobileChromeScrollGap,
+            bottom = MobileBottomNavChromeHeight + MobileChromeScrollGap + MobileMiniPlayerChromeHeight,
+        )
+    } else {
+        LocalMobileChromePadding.current
+    }
+
     Box(
         modifier
             .background(PhoebeUi.shellTop)
             .statusBarsPadding(),
     ) {
-        when (scenario) {
+        CompositionLocalProvider(LocalMobileChromePadding provides chromePadding) {
+            Box(Modifier.fillMaxSize()) {
+                Box(Modifier.fillMaxSize()) {
+                    when (scenario) {
             PhoebeScreenshotScenario.SignIn -> MobileSignInWelcomeScreen(
                 message = "Sign in to Plex or add a local music folder to get started.",
                 pinCode = "PHOEBE",
@@ -720,6 +737,7 @@ internal fun PhoebeMobileScreenshotScenario(
                 onBack = {},
                 onSwipeDismiss = {},
                 initialUpNextExpanded = scenario == PhoebeScreenshotScenario.PlayerUpNextExpanded,
+                expansionFraction = 1f,
             )
             PhoebeScreenshotScenario.HomeAccordionsCollapsed,
             PhoebeScreenshotScenario.HomeAccordionsExpanded,
@@ -833,6 +851,56 @@ internal fun PhoebeMobileScreenshotScenario(
             )
         }
     }
+
+    if (showChrome) {
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+        ) {
+            MobilePlayer(
+                track = fixture.currentTrack,
+                upNext = fixture.upNext,
+                isPlaying = true,
+                shuffle = true,
+                repeat = RepeatMode.All,
+                positionMs = 96_000L,
+                bufferedPositionMs = 172_000L,
+                currentIndex = 0,
+                visualizerPreset = NowPlayingVisualizerPreset.Default,
+                audioAnalysis = AudioAnalysisFrame.Empty,
+                blurredArtworkAppearance = true,
+                onToggle = {},
+                onPrevious = {},
+                onNext = {},
+                onShuffle = {},
+                onRepeat = {},
+                onSeek = {},
+                onPlayQueue = {},
+                onMoveUpNext = { _, _ -> },
+                onRemoveUpNext = {},
+                onBack = {},
+                onSwipeDismiss = {},
+                expansionFraction = 0f,
+            )
+            MobileBottomNavigation(
+                section = when (scenario) {
+                    PhoebeScreenshotScenario.Library,
+                    PhoebeScreenshotScenario.LibraryScrollbar,
+                    PhoebeScreenshotScenario.LibraryFiveColumnGrid,
+                    -> BrowseSection.Library
+                    PhoebeScreenshotScenario.Search -> BrowseSection.Search
+                    PhoebeScreenshotScenario.Settings -> BrowseSection.Settings
+                    else -> BrowseSection.Home
+                },
+                onSection = {},
+                attachedToMiniPlayer = true,
+            )
+        }
+    }
+}
+}
+}
 }
 
 private fun CatalogSnapshot.withFiveColumnGridArtists(nowMs: Long): CatalogSnapshot =

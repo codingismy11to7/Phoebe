@@ -1011,4 +1011,41 @@ class PlexClientPlaylistEndToEndTest {
             plexLibraryStationKeysToTry("/library/sections/3/stations/deepCuts"),
         )
     }
+
+    @Test
+    fun playlistsParsesCompositeThumbFromMockPlex() = runTest {
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/playlists" -> respond(
+                    content = """
+                    {
+                      "MediaContainer": {
+                        "Metadata": [
+                          {
+                            "ratingKey": "p1",
+                            "title": "Playlist One",
+                            "leafCount": 5,
+                            "key": "/playlists/p1/items",
+                            "composite": "/playlists/p1/composite/12345"
+                          }
+                        ]
+                      }
+                    }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val client = PlexClient(testHttpClient(engine))
+        val server = PlexServer("server", "Plex", "https://plex.example:32400", owned = true)
+        val playlists = client.playlists(server, "token")
+
+        assertEquals(1, playlists.size)
+        val playlist = playlists.single()
+        assertEquals("p1", playlist.id)
+        assertNotNull(playlist.thumbUrl)
+        assertTrue(playlist.thumbUrl!!.contains("/playlists/p1/composite/12345"))
+    }
 }

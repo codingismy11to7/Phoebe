@@ -69,6 +69,8 @@ actual suspend fun platformStreamHttpDownloadToStorage(
 
 actual fun isDesktopPlatform(): Boolean = false
 
+actual fun isIosPlatform(): Boolean = true
+
 actual fun supportsPredictiveBack(): Boolean = false
 
 actual suspend fun discoverJellyfinServers(): List<PlexServer> = emptyList()
