@@ -182,7 +182,7 @@ kotlin {
     listOf(iosArm64(), iosSimulatorArm64()).forEach { iosTarget ->
         iosTarget.binaries.framework {
             baseName = "ComposeApp"
-            binaryOption("bundleId", "com.phoebe.app.ComposeApp")
+            binaryOption("bundleId", "com.joetr.phoebe.ComposeApp")
             isStatic = true
         }
     }
@@ -397,7 +397,7 @@ compose.desktop {
                 },
             )
             macOS {
-                bundleID = if (phoebeDebugDistribution.get()) "com.phoebe.app.debug" else "com.phoebe.app"
+                bundleID = if (phoebeDebugDistribution.get()) "com.joetr.phoebe.debug" else "com.joetr.phoebe"
                 packageVersion = phoebeJpackagePackageVersion.get()
                 iconFile.set(iconsDir.file("icon.icns").asFile)
                 val macEntitlements = project.layout.projectDirectory.file("desktop/macos/Phoebe.entitlements")
