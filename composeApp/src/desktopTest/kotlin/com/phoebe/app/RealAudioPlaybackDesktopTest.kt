@@ -12,6 +12,7 @@ import com.phoebe.app.player.PlaybackEnginePath
 import com.phoebe.app.platform.SecureCredentialKey
 import com.phoebe.app.testing.FakeListenBrainzAccountActions
 import com.phoebe.app.testing.FakeSecureCredentialStore
+import com.phoebe.app.testing.assumeLinux
 import com.phoebe.app.testing.testHttpClient
 import com.sun.net.httpserver.HttpServer
 import io.ktor.client.engine.mock.MockEngine
@@ -120,7 +121,7 @@ class RealAudioPlaybackDesktopTest {
 
     @Test
     fun flatpakLocalMp3UsesSampledStreamInsteadOfJavaFx() {
-        assumeRealAudioTestsEnabled()
+        assumeFlatpakRealAudioTestsEnabled()
         withFlatpakSandbox {
             val diagnostics = RecordingPlaybackDiagnostics()
             val player = DesktopAudioPlayer(diagnostics)
@@ -146,7 +147,7 @@ class RealAudioPlaybackDesktopTest {
 
     @Test
     fun flatpakLocalWavUsesSampledClipInsteadOfJavaFx() {
-        assumeRealAudioTestsEnabled()
+        assumeFlatpakRealAudioTestsEnabled()
         withFlatpakSandbox {
             val diagnostics = RecordingPlaybackDiagnostics()
             val player = DesktopAudioPlayer(diagnostics)
@@ -172,7 +173,7 @@ class RealAudioPlaybackDesktopTest {
 
     @Test
     fun flatpakRemoteMp3UsesSampledPlaybackInsteadOfJavaFx() {
-        assumeRealAudioTestsEnabled()
+        assumeFlatpakRealAudioTestsEnabled()
         val fixture = fixtureBytes("wikimedia-example.mp3")
         val requestEvents = Collections.synchronizedList(mutableListOf<String>())
         val server = createRemoteMp3HttpServer(fixture, requestEvents)
@@ -210,7 +211,7 @@ class RealAudioPlaybackDesktopTest {
 
     @Test
     fun flatpakRemoteAacUsesPlexTranscodeAndSampledPlayback() {
-        assumeRealAudioTestsEnabled()
+        assumeFlatpakRealAudioTestsEnabled()
         val fixture = fixtureBytes("wikimedia-example.mp3")
         val requestEvents = Collections.synchronizedList(mutableListOf<String>())
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
@@ -605,6 +606,11 @@ class RealAudioPlaybackDesktopTest {
 
     private fun assumeRealAudioTestsEnabled() {
         assumeTrue("Real audio playback tests are disabled", System.getProperty("phoebe.realAudioTests").toBoolean())
+    }
+
+    private fun assumeFlatpakRealAudioTestsEnabled() {
+        assumeRealAudioTestsEnabled()
+        assumeLinux()
     }
 
     private inline fun withFlatpakSandbox(block: () -> Unit) {

@@ -15,6 +15,32 @@ internal fun Track.plexRatingKey(): String? {
     return id.takeIf { it.isNotBlank() && it.all(Char::isDigit) }
 }
 
+/**
+ * Jellyfin and Emby expose `/Audio/{itemId}/stream`; request `/stream.mp3` when Java Sound cannot
+ * decode the source container (Flatpak sandboxes, Chromecast, etc.).
+ */
+internal fun Track.jellyfinFamilyMp3TranscodeUrl(): String? {
+    val parsed = runCatching { Url(streamUrl) }.getOrNull() ?: return null
+    val token = parsed.parameters["api_key"]?.takeIf { it.isNotBlank() } ?: return null
+    if (parsed.protocol.name.isBlank() || parsed.host.isBlank()) return null
+    val itemId = jellyfinFamilyAudioItemId(parsed.encodedPath) ?: return null
+    return runCatching {
+        URLBuilder()
+            .takeFrom(parsed)
+            .apply {
+                encodedPath = "/Audio/$itemId/stream.mp3"
+                parameters.clear()
+                parameters.append("static", "true")
+                parameters.append("audioCodec", "mp3")
+                parameters.append("api_key", token)
+            }
+            .buildString()
+    }.getOrNull()
+}
+
+internal fun jellyfinFamilyAudioItemId(encodedPath: String): String? =
+    Regex("""/Audio/([^/]+)/stream(?:\.[^/]+)?""").find(encodedPath)?.groupValues?.getOrNull(1)
+
 internal fun Track.plexUniversalMp3TranscodeUrl(): String? {
     val ratingKey = plexRatingKey() ?: return null
     val parsed = runCatching { Url(streamUrl) }.getOrNull() ?: return null
@@ -84,3 +110,7 @@ private fun normalizeAudioCodecSuffix(codec: String): String =
         "mpeg", "mpga" -> "mp3"
         else -> codec
     }
+
+/** MP3 transcode URL for formats Java Sound cannot decode in Flatpak (Plex, Jellyfin, Emby). */
+internal fun Track.flatpakSandboxTranscodeUrl(): String? =
+    plexUniversalMp3TranscodeUrl() ?: jellyfinFamilyMp3TranscodeUrl()
