@@ -251,7 +251,10 @@ internal class DesktopAudioPlayer(
                 }
                 if (file == null) {
                     val streamingExtension = preferredStreamingExtension ?: streamingSampledExtensionFromUri(activeUri)
-                    if (streamingExtension != null && tryStartSampledStream(activeUri, streamingExtension, generation)) {
+                    if (streamingExtension != null &&
+                        DesktopSandboxPlayback.shouldStreamRemoteSampledPlayback(activeUri) &&
+                        tryStartSampledStream(activeUri, streamingExtension, generation)
+                    ) {
                         return@execute
                     }
                     if (!isPlayRequestCurrent(generation)) return@execute
@@ -1633,9 +1636,7 @@ internal class DesktopAudioPlayer(
         DesktopPlaybackStartupPolicy.isRemoteUri(uri)
 
     private fun bufferedRemotePlaybackUri(uri: String, downloadUri: String?): String =
-        downloadUri
-            ?.takeIf { it.isNotBlank() && isRemoteUri(it) }
-            ?: uri
+        DesktopSandboxPlayback.bufferedRemotePlaybackUri(uri, downloadUri)
 
     private fun startJavaFxProgressProbe(mediaPlayer: MediaPlayer, generation: Int) {
         stopJavaFxProgressProbe()
