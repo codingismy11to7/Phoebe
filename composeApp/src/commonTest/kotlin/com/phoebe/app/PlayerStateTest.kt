@@ -723,6 +723,29 @@ class PlayerStateTest {
         assertEquals(loadsAfterPlay, player.playUriCalls)
         assertEquals(stopsAfterPlay + 1, player.stopCalls)
     }
+
+    @Test
+    fun suspendPlaybackDuringActiveCrossfadeCancelsTransitionAndStopsOutput() {
+        val player = CrossfadeTestPlayer()
+        val tracks = listOf(
+            Track("t1", "One", "Artist", "Album", 60_000, "http://a", ""),
+            Track("t2", "Two", "Artist", "Album", 90_000, "http://b", ""),
+        )
+
+        player.play(tracks, 0)
+        player.setCrossfadeDurationMs(6_000)
+        player.platformPlayback(positionMs = 55_000, durationMs = 60_000, bufferedPositionMs = 60_000)
+
+        assertEquals(1, player.crossfadeStarts)
+        assertEquals(tracks[0], player.state.value.currentTrack)
+
+        player.suspendPlayback(tracks, 0, positionMs = 55_000)
+
+        assertEquals(tracks[0], player.state.value.currentTrack)
+        assertEquals(55_000, player.state.value.positionMs)
+        assertFalse(player.state.value.isPlaying)
+        assertTrue(player.stopCalls >= 1)
+    }
 }
 
 private class TestPlayer : SimpleAudioPlayer() {
@@ -908,12 +931,17 @@ private class PlatformStateTestPlayer : SimpleAudioPlayer() {
 private class CrossfadeTestPlayer : SimpleAudioPlayer() {
     var crossfadeStarts = 0
     var lastTargetIndex = -1
+    var stopCalls = 0
     private var pendingQueue: List<Track> = emptyList()
     private var pendingTargetIndex = -1
     private var pendingGeneration = -1
 
     override fun playUri(uri: String) {
         markPlaybackReady()
+    }
+
+    override fun stopCurrentPlaybackImmediately() {
+        stopCalls++
     }
 
     override fun startCrossfadeOnPlatform(

@@ -1510,7 +1510,7 @@ internal fun MobilePlayer(
         dragCollapseProgress
     }
     val playerContentAlpha = 1f - collapseProgress
-    val playerBackgroundAlpha = 1f - collapseProgress
+    val playerBackgroundAlpha = playerContentAlpha
     SideEffect {
         val transition = artworkTransition ?: return@SideEffect
         transition.activeTrack = track
@@ -1775,7 +1775,7 @@ internal fun MobilePlayer(
                                     .align(Alignment.TopCenter)
                                     .graphicsLayer {
                                         translationY = -size.height * sheetProgress
-                                        alpha = 1f - sheetProgress
+                                        alpha = playerContentAlpha * (1f - sheetProgress)
                                     },
                             ) {
                                 val artworkShape = RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp, bottomStart = 0.dp, bottomEnd = 0.dp)

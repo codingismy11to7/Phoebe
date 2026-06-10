@@ -11,6 +11,22 @@ async function waitForPhoebeE2eResult(page, timeout = 60_000): Promise<PhoebeE2e
   return page.evaluate(() => (window as unknown as { phoebeE2eResults: PhoebeE2eResult }).phoebeE2eResults);
 }
 
+for (const provider of ['plex', 'jellyfin', 'emby', 'navidrome', 'musicassistant'] as const) {
+  test(`web provider ${provider} adapter smoke`, async ({ page }) => {
+    await page.goto(`/?e2e=providerSmoke:${provider}`, { waitUntil: 'domcontentloaded' });
+    const results = await waitForPhoebeE2eResult(page);
+    expect(results.passed, results.message).toBe(true);
+    expect(results.message).toContain('provider adapter smoke passed');
+  });
+}
+
+test('web all provider adapter smoke', async ({ page }) => {
+  await page.goto('/?e2e=providerSmoke:all', { waitUntil: 'domcontentloaded' });
+  const results = await waitForPhoebeE2eResult(page);
+  expect(results.passed, results.message).toBe(true);
+  expect(results.message).toContain('all provider adapter smoke passed');
+});
+
 test('web local library indexes mp3 and starts playback', async ({ page }) => {
   await page.goto('/?e2e=localLibrary', { waitUntil: 'domcontentloaded' });
   const results = await waitForPhoebeE2eResult(page);

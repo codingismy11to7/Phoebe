@@ -44,9 +44,10 @@ fun PhoebeWasmE2eApp(e2eMode: String? = null) {
     var details by remember { mutableStateOf("") }
 
     LaunchedEffect(e2eMode) {
-        val results = when (e2eMode) {
-            "castMock" -> runWasmCastMockE2eChecks()
-            "localPlaylist" -> runWasmLocalPlaylistE2eChecks()
+        val results = when {
+            e2eMode?.startsWith("providerSmoke:") == true -> runWasmProviderSmoke(e2eMode.removePrefix("providerSmoke:"))
+            e2eMode == "castMock" -> runWasmCastMockE2eChecks()
+            e2eMode == "localPlaylist" -> runWasmLocalPlaylistE2eChecks()
             else -> runWasmE2eChecks()
         }
         status = if (results.passed) "passed" else "failed"
@@ -126,7 +127,7 @@ private fun PhoebeWasmLocalPlaybackRegressionApp() {
     }
 }
 
-private data class WasmE2eResult(val passed: Boolean, val message: String)
+internal data class WasmE2eResult(val passed: Boolean, val message: String)
 
 private class WasmPlaybackStartupProbe : PlaybackDiagnostics {
     private val timeSource = TimeSource.Monotonic

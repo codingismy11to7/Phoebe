@@ -307,8 +307,99 @@ class DesktopCastControllerTest {
         assertEquals(0.32f, controller.state.value.volume)
     }
 
+    @Test
+    fun castHandoffDuringCrossfadeLoadsOutgoingTrackAndSuspendsLocalPlayback() = runTest {
+        val queue = listOf(testTrack("jellyfin:1"), testTrack("jellyfin:2"))
+        val player = CrossfadeCapableAudioPlayer()
+        player.setCrossfadeDurationMs(6_000)
+        player.play(queue, 0)
+        player.platformPlayback(positionMs = 55_000, durationMs = 60_000, bufferedPositionMs = 60_000)
+
+        assertEquals(1, player.crossfadeStarts)
+        assertEquals(queue[0], player.state.value.currentTrack)
+
+        val connection = FakeDesktopCastConnection()
+        val controller = newController(player, connection)
+        controller.showDevicePicker()
+        runCurrent()
+
+        assertEquals("jellyfin:1", connection.loadRequests.single().media.trackId)
+        assertFalse(player.state.value.isPlaying)
+        assertEquals(queue[0], player.state.value.currentTrack)
+        assertTrue(player.stopCalls >= 1)
+        assertTrue(controller.state.value.isConnected)
+    }
+
+    @Test
+    fun castHandoffAfterCrossfadeCommitLoadsIncomingTrack() = runTest {
+        val queue = listOf(testTrack("jellyfin:1"), testTrack("jellyfin:2"))
+        val player = CrossfadeCapableAudioPlayer()
+        player.setCrossfadeDurationMs(6_000)
+        player.play(queue, 0)
+        player.platformPlayback(positionMs = 55_000, durationMs = 60_000, bufferedPositionMs = 60_000)
+        player.commitCrossfade(positionMs = 6_000)
+
+        assertEquals(queue[1], player.state.value.currentTrack)
+
+        val connection = FakeDesktopCastConnection()
+        val controller = newController(player, connection)
+        controller.showDevicePicker()
+        runCurrent()
+
+        assertEquals("jellyfin:2", connection.loadRequests.single().media.trackId)
+        assertFalse(player.state.value.isPlaying)
+        assertTrue(controller.state.value.isConnected)
+    }
+
+    @Test
+    fun disconnectAfterCastRestoresLocalQueueWithCrossfadeStillEnabled() = runTest {
+        val queue = listOf(testTrack("jellyfin:1"), testTrack("jellyfin:2"))
+        val player = CrossfadeCapableAudioPlayer()
+        player.setCrossfadeDurationMs(6_000)
+        player.play(queue, 0)
+        val connection = FakeDesktopCastConnection()
+        val controller = newController(player, connection)
+        controller.showDevicePicker()
+        runCurrent()
+        controller.seekTo(12_000L)
+        runCurrent()
+
+        controller.disconnect()
+        runCurrent()
+
+        assertFalse(controller.state.value.isConnected)
+        assertEquals(queue, player.state.value.queue)
+        assertEquals(0, player.state.value.currentIndex)
+        assertEquals(12_000L, player.state.value.positionMs)
+        assertTrue(player.state.value.isPlaying)
+
+        player.platformPlayback(positionMs = 55_000, durationMs = 60_000, bufferedPositionMs = 60_000)
+        assertEquals(1, player.crossfadeStarts)
+    }
+
+    @Test
+    fun receiverTrackEndDoesNotStartLocalCrossfade() = runTest {
+        val queue = listOf(testTrack("jellyfin:1"), testTrack("jellyfin:2"))
+        val player = CrossfadeCapableAudioPlayer()
+        player.setCrossfadeDurationMs(6_000)
+        player.play(queue, 0)
+        val connection = FakeDesktopCastConnection()
+        val controller = newController(player, connection)
+        controller.showDevicePicker()
+        runCurrent()
+        val crossfadeStartsBeforeEnd = player.crossfadeStarts
+
+        connection.status = connection.status?.copy(isFinished = true, isPlaying = false)
+        advanceTimeBy(1_000L)
+        runCurrent()
+
+        assertEquals("jellyfin:2", controller.state.value.currentTrack?.id)
+        assertEquals(crossfadeStartsBeforeEnd, player.crossfadeStarts)
+        assertFalse(player.state.value.isPlaying)
+    }
+
     private fun TestScope.newController(
-        player: FakeAudioPlayer,
+        player: AudioPlayer,
         connection: FakeDesktopCastConnection,
         loadTimeoutMs: Long = 30_000L,
         dispatcher: CoroutineDispatcher = StandardTestDispatcher(testScheduler),
@@ -587,5 +678,55 @@ private class FakeAudioPlayer : AudioPlayer {
     override fun setUnityOutputVolume() = Unit
     override fun updateReportedVolume(volume: Float) {
         setVolume(volume)
+    }
+}
+
+private class CrossfadeCapableAudioPlayer : SimpleAudioPlayer() {
+    var crossfadeStarts = 0
+    var stopCalls = 0
+    private var pendingQueue: List<Track> = emptyList()
+    private var pendingTargetIndex = -1
+    private var pendingGeneration = -1
+
+    override fun playUri(uri: String) {
+        markPlaybackReady()
+    }
+
+    override fun stopCurrentPlaybackImmediately() {
+        stopCalls++
+    }
+
+    override fun startCrossfadeOnPlatform(
+        queue: List<Track>,
+        targetIndex: Int,
+        track: Track,
+        durationMs: Long,
+        baseVolume: Float,
+        generation: Int,
+    ): Boolean {
+        crossfadeStarts++
+        pendingQueue = queue
+        pendingTargetIndex = targetIndex
+        pendingGeneration = generation
+        return true
+    }
+
+    fun platformPlayback(
+        positionMs: Long,
+        durationMs: Long,
+        bufferedPositionMs: Long,
+        isPlaying: Boolean = true,
+    ) {
+        applyPlatformPlayback(
+            positionMs = positionMs,
+            durationMs = durationMs,
+            isPlaying = isPlaying,
+            isBuffering = false,
+            bufferedPositionMs = bufferedPositionMs,
+        )
+    }
+
+    fun commitCrossfade(positionMs: Long) {
+        adoptCrossfadeTarget(pendingQueue, pendingTargetIndex, positionMs, pendingGeneration)
     }
 }

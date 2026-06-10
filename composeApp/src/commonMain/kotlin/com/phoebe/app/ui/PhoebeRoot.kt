@@ -108,6 +108,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.key
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.setValue
@@ -700,6 +701,9 @@ private fun PhoebeRootStateHolder(
     }
     val shuffleAllTracksFromMobile: (List<Track>) -> Unit = { tracks ->
         requestMobilePlayback(tracks.shuffled(), 0, shuffleEnabled = true)
+    }
+    fun openMobilePlayer() {
+        navigator.openPlayer()
     }
     val mobilePlayerTrack = pendingMobilePlaybackPreview?.currentTrack ?: currentTrack
     val mobilePlayerUpNext = pendingMobilePlaybackPreview?.upNext ?: upNext
@@ -1355,7 +1359,7 @@ private fun PhoebeRootStateHolder(
                         onPlayTracks = playTracksFromMobile,
                         onAddToUpNext = state::addToUpNext,
                         onDownload = state::download,
-                        onOpenNowPlaying = { navigator.openPlayer() },
+                        onOpenNowPlaying = ::openMobilePlayer,
                         onTogglePlayPause = state::togglePlayPause,
                         onPreviousTrack = state::previous,
                         onNextTrack = state::next,
@@ -1411,7 +1415,7 @@ private fun PhoebeRootStateHolder(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
-                        .zIndex(3f),
+                        .zIndex(3.5f),
                 ) {
                     CompositionLocalProvider(
                         LocalAnimatedVisibilityScope provides this,
