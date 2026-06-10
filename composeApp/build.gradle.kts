@@ -31,6 +31,11 @@ val phoebeDebugDistribution = providers.gradleProperty("phoebe.debugDistribution
     .map(String::toBoolean)
     .orElse(false)
 
+val phoebeDesktopProguard = providers.gradleProperty("phoebe.desktopProguard")
+    .orElse(providers.environmentVariable("PHOEBE_DESKTOP_PROGUARD"))
+    .map(String::toBoolean)
+    .orElse(false)
+
 val phoebeBuildInfoOutput = layout.buildDirectory.dir("generated/phoebeBuildInfo/kotlin")
 val generatePhoebeBuildInfo = tasks.register("generatePhoebeBuildInfo") {
     val outputDir = phoebeBuildInfoOutput
@@ -376,6 +381,7 @@ compose.desktop {
             jvmArgs += listOf("-Dphoebe.mediakeys.lib=$mediaKeysDylibPath")
         }
         buildTypes.release.proguard {
+            isEnabled.set(phoebeDesktopProguard)
             configurationFiles.from(project.file("desktop-release.pro"))
         }
         nativeDistributions {
