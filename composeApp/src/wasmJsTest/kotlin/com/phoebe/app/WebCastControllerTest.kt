@@ -250,6 +250,103 @@ class WebCastControllerTest {
         assertTrue(player.state.value.queue.isNotEmpty(), "local player should keep a prepared queue after disconnect")
     }
 
+    @Test
+    fun castHandoffDuringCrossfadeLoadsOutgoingTrackAndSuspendsLocalPlayback() = runTest {
+        installSuccessfulPickerCastMock()
+        val player = CrossfadeCapableAudioPlayer()
+        val first = remoteTrack(id = "jellyfin:track:1", streamUrl = "https://jellyfin.example/Audio/1/stream.mp3")
+        val second = remoteTrack(id = "jellyfin:track:2", streamUrl = "https://jellyfin.example/Audio/2/stream.mp3")
+        player.setCrossfadeDurationMs(6_000)
+        player.play(listOf(first, second), startIndex = 0)
+        player.platformPlayback(positionMs = 55_000, durationMs = 60_000, bufferedPositionMs = 60_000)
+        assertEquals(1, player.crossfadeStarts)
+        assertEquals(first, player.state.value.currentTrack)
+
+        val controller = createCastController(player)
+        delay(1)
+        controller.showDevicePicker()
+        delay(250)
+
+        assertTrue(controller.state.value.isConnected)
+        assertEquals(first.streamUrl, lastCastContentId())
+        assertFalse(player.state.value.isPlaying)
+        assertEquals(first, player.state.value.currentTrack)
+        assertTrue(player.stopCalls >= 1)
+    }
+
+    @Test
+    fun castHandoffAfterCrossfadeCommitLoadsIncomingTrack() = runTest {
+        installSuccessfulPickerCastMock()
+        val player = CrossfadeCapableAudioPlayer()
+        val first = remoteTrack(id = "jellyfin:track:1", streamUrl = "https://jellyfin.example/Audio/1/stream.mp3")
+        val second = remoteTrack(id = "jellyfin:track:2", streamUrl = "https://jellyfin.example/Audio/2/stream.mp3")
+        player.setCrossfadeDurationMs(6_000)
+        player.play(listOf(first, second), startIndex = 0)
+        player.platformPlayback(positionMs = 55_000, durationMs = 60_000, bufferedPositionMs = 60_000)
+        player.commitCrossfade(positionMs = 6_000)
+        assertEquals(second, player.state.value.currentTrack)
+
+        val controller = createCastController(player)
+        delay(1)
+        controller.showDevicePicker()
+        delay(250)
+
+        assertTrue(controller.state.value.isConnected)
+        assertEquals(second.streamUrl, lastCastContentId())
+        assertFalse(player.state.value.isPlaying)
+    }
+
+    @Test
+    fun disconnectAfterCastRestoresLocalPlaybackWithCrossfadeStillEnabled() = runTest {
+        installSuccessfulPickerCastMock()
+        val player = CrossfadeCapableAudioPlayer()
+        val first = remoteTrack(id = "jellyfin:track:1", streamUrl = "https://jellyfin.example/Audio/1/stream.mp3")
+        val second = remoteTrack(id = "jellyfin:track:2", streamUrl = "https://jellyfin.example/Audio/2/stream.mp3")
+        player.setCrossfadeDurationMs(6_000)
+        player.play(listOf(first, second), startIndex = 0)
+        val controller = createCastController(player)
+        delay(1)
+        controller.showDevicePicker()
+        delay(250)
+        controller.seekTo(12_000L)
+        delay(50)
+
+        controller.disconnect()
+        delay(50)
+
+        assertFalse(controller.state.value.isConnected)
+        assertEquals(first, player.state.value.currentTrack)
+        assertEquals(12_000L, player.state.value.positionMs)
+        player.togglePlayPause()
+
+        player.platformPlayback(positionMs = 55_000, durationMs = 60_000, bufferedPositionMs = 60_000)
+        assertEquals(1, player.crossfadeStarts)
+    }
+
+    @Test
+    fun receiverTrackEndDoesNotStartLocalCrossfade() = runTest {
+        installSuccessfulPickerCastMock()
+        val player = CrossfadeCapableAudioPlayer()
+        val first = remoteTrack(id = "jellyfin:track:1", streamUrl = "https://jellyfin.example/Audio/1/stream.mp3")
+        val second = remoteTrack(id = "jellyfin:track:2", streamUrl = "https://jellyfin.example/Audio/2/stream.mp3")
+        player.setCrossfadeDurationMs(6_000)
+        player.play(listOf(first, second), startIndex = 0)
+        val controller = createCastController(player)
+        delay(1)
+        controller.showDevicePicker()
+        delay(250)
+        val crossfadeStartsBeforeEnd = player.crossfadeStarts
+
+        markCurrentCastMediaEnded()
+        delay(250)
+
+        assertTrue(controller.state.value.isConnected)
+        assertEquals(1, controller.state.value.currentIndex)
+        assertEquals(second.streamUrl, lastCastContentId())
+        assertEquals(crossfadeStartsBeforeEnd, player.crossfadeStarts)
+        assertFalse(player.state.value.isPlaying)
+    }
+
     private fun remoteTrack(
         id: String,
         streamUrl: String = "https://stream.example/song.mp3",
@@ -303,6 +400,56 @@ class WebCastControllerTest {
 
         override fun pause() {
             audible = false
+        }
+    }
+
+    private class CrossfadeCapableAudioPlayer : SimpleAudioPlayer() {
+        var crossfadeStarts = 0
+        var stopCalls = 0
+        private var pendingQueue: List<Track> = emptyList()
+        private var pendingTargetIndex = -1
+        private var pendingGeneration = -1
+
+        override fun playUri(uri: String) {
+            markPlaybackReady()
+        }
+
+        override fun stopCurrentPlaybackImmediately() {
+            stopCalls++
+        }
+
+        override fun startCrossfadeOnPlatform(
+            queue: List<Track>,
+            targetIndex: Int,
+            track: Track,
+            durationMs: Long,
+            baseVolume: Float,
+            generation: Int,
+        ): Boolean {
+            crossfadeStarts++
+            pendingQueue = queue
+            pendingTargetIndex = targetIndex
+            pendingGeneration = generation
+            return true
+        }
+
+        fun platformPlayback(
+            positionMs: Long,
+            durationMs: Long,
+            bufferedPositionMs: Long,
+            isPlaying: Boolean = true,
+        ) {
+            applyPlatformPlayback(
+                positionMs = positionMs,
+                durationMs = durationMs,
+                isPlaying = isPlaying,
+                isBuffering = false,
+                bufferedPositionMs = bufferedPositionMs,
+            )
+        }
+
+        fun commitCrossfade(positionMs: Long) {
+            adoptCrossfadeTarget(pendingQueue, pendingTargetIndex, positionMs, pendingGeneration)
         }
     }
 }
