@@ -12,7 +12,7 @@ Try the web build at [music.joetr.com](https://music.joetr.com), or grab native 
 
 Phoebe can sign in to one remote music source at a time (plus optional local folders). Catalog IDs are prefixed (`plex:`, `jellyfin:`, `emby:`, `navidrome:`, `music-assistant:`) so items from different backends can be merged with local files in search and the library.
 
-**Support policy:** Plex is the primary, best-tested integration. Jellyfin, Emby, Subsonic (Navidrome), and Music Assistant support is **experimental** — the maintainers do not offer real-world support or SLAs for these backends. Server API differences, incomplete coverage, and regressions are expected. If you use one of them and want it to improve, bug reports and pull requests are greatly appreciated.
+**Support policy:** Plex is the primary, best-tested integration. Jellyfin, Emby, Subsonic (Navidrome), and Music Assistant support also work, but are not my main hosting providers, so they get tested less frequently. 
 
 ### Capability overview
 
@@ -33,7 +33,7 @@ Phoebe can sign in to one remote music source at a time (plus optional local fol
 | Home library radio stations | Yes | No | No | No | Via MA² | — |
 | Artist radio / mix | Plex stations | Instant mix | Instant mix³ | Not wired⁴ | Via MA² | — |
 | Collections (genre / mood / style) | All three | Genre | Genre | Genre | Genre | From tags |
-| Import server play history | Yes | No | No | No | No | — |
+| Import server play history | Yes | Yes | Yes | Yes | No | — |
 | Chromecast | Yes | Yes | Yes | Yes | When stream URL is receiver-loadable | Remote HTTP(S) streams |
 
 ¹ Music Assistant items are modeled as **Library + Control**: Phoebe can browse the MA library and often delegates playback to Music Assistant’s default player queue. Direct stream URLs are used when the server exposes them; many upstream provider tracks are not guaranteed to play inside Phoebe alone.
@@ -50,11 +50,11 @@ Full-featured integration: PIN sign-in, relay/shared server discovery, music-lib
 
 ### Jellyfin & Emby (Jellyfin API family)
 
-Shared catalog and playback stack (Emby uses `/emby` path normalization). Password sign-in on the server URL; Jellyfin also supports **Quick Connect**. Music libraries, artists, albums, playlists, and tracks sync with optional quick (paged) or full catalog modes. Playlists can be created and edited; favorites and ratings sync to the server; Jellyfin/Emby track metadata can be edited from Phoebe. Streams and downloads use the server’s item URLs; playback position is reported to the session API. **Artist instant mix** works for Jellyfin; Emby uses the same server APIs but artist-radio UI entry points are not fully aligned yet. Genre-only collections (no Plex mood/style facets). No PIN flow, no Plex-style home radio stations, no server play-history import, and no Plex Liked Songs playlist semantics (hearts map to server favorites).
+Shared catalog and playback stack (Emby uses `/emby` path normalization). Password sign-in on the server URL; Jellyfin also supports **Quick Connect**. Music libraries, artists, albums, playlists, and tracks sync with optional quick (paged) or full catalog modes. Playlists can be created and edited; favorites and ratings sync to the server; Jellyfin/Emby track metadata can be edited from Phoebe. Streams and downloads use the server’s item URLs; playback position is reported to the session API. Server playback history can be imported to warm play counts and recently played panels. **Artist instant mix** works for Jellyfin; Emby uses the same server APIs but artist-radio UI entry points are not fully aligned yet. Genre-only collections (no Plex mood/style facets). No PIN flow, no Plex-style home radio stations, and no Plex Liked Songs playlist semantics (hearts map to server favorites).
 
 ### Subsonic — Navidrome and compatible servers
 
-Subsonic-compatible `/rest/*.view` JSON with token auth (`u`, `t`, `s`, `v=1.16.1`, `c=phoebe`, `f=json`). Music folders, artists, albums, songs, playlists, playlist create/add, stars, ratings, streaming, downloads, artwork, and scrobbling on track stop. Quick and paged full-catalog sync modes. Genre collections only. No server metadata editing, no Plex-style library radio, and artist radio is not exposed in the UI yet (depends on server Last.fm/similar-song configuration when enabled).
+Subsonic-compatible `/rest/*.view` JSON with token auth (`u`, `t`, `s`, `v=1.16.1`, `c=phoebe`, `f=json`). Music folders, artists, albums, songs, playlists, playlist create/add, stars, ratings, streaming, downloads, artwork, and scrobbling on track stop. Quick and paged full-catalog sync modes. Server play-history stats can be imported when Navidrome exposes them. Genre collections only. No server metadata editing, no Plex-style library radio, and artist radio is not exposed in the UI yet (depends on server Last.fm/similar-song configuration when enabled).
 
 ### Music Assistant
 
@@ -71,14 +71,15 @@ For UI architecture and navigation rules, see [Compose Architecture Guidelines](
 ### Library and catalog
 
 - **Remote providers** — See [Music providers](#music-providers) for per-backend capabilities; sign in from the welcome screen (Plex PIN or direct URL for the others).
-- **Lazy library loading** — Track lists load on demand for albums, artists, and playlists; opened detail views are preserved across catalog refreshes.
-- **Local music folders** — Add one or more local folder roots (desktop, Android, and iOS), enable or disable them individually, and merge them with a remote catalog in one library. You can add a folder from the sign-in screen to use Phoebe without signing in to a server.
+- **Lazy library loading** — Track lists load on demand for albums, artists, and playlists; opened detail views are preserved across catalog refreshes. Optional **scan library on launch** refreshes the catalog at startup.
+- **Local music folders** — Add one or more local folder roots (desktop, Android, iOS, and web), enable or disable them individually, and merge them with a remote catalog in one library. You can add a folder from the sign-in screen to use Phoebe without signing in to a server.
 - **Unified catalog** — Remote provider prefixes and local tracks appear together in search, library views, and playback.
-- **Home** — Configurable sections (mixes, collections, favorites, recents, listening history, random picks) with order controlled in Settings. Recently added songs, artists, and albums (7-day window), favorite rows, recently played and most-played panels, random artist/album picks, a **personal mix** seeded from listening history, and a **decade mix** for a chosen era. Plex library radio stations appear in mixes when signed in to Plex.
+- **Home** — Configurable sections (mixes, collections, favorite playlists/artists/albums, recents, listening history, random picks) with order controlled in Settings. Recently added songs, artists, and albums (7-day window), **heavy rotation** (frequently replayed tracks in a 14-day window), recently played and most-played panels, random artist/album picks, a **personal mix** seeded from listening history (weights tunable in Settings), and a **decade mix** for a chosen era. Plex library radio stations appear in mixes when signed in to Plex. Mobile home can use **Compact** or **Expanded** layout modes.
 - **Collections** — Browse artists and albums grouped by **genre**, **mood**, or **style** where the active source exposes them (Plex and local tags: all three; other providers: genre only).
-- **Play history** — Dedicated screens for recently played and most played tracks; per-play events power smarter home mixes. Last-played timestamps and play counts surface in the library and home UI. Plex playback history sync can warm missing track metadata from the server.
+- **Play history** — Dedicated screens for recently played and most played tracks; per-play events power smarter home mixes. Last-played timestamps and play counts surface in the library and home UI. Plex, Jellyfin/Emby, and Navidrome playback history can be imported from the server to warm play counts and missing track metadata.
 - **Rich library table** — Configurable columns (title, artist, album, year, genre, path, codec, bitrate, duration, rating, favorite, and related fields where available).
-- **Sorting and layout prefs** — Sort library and detail views; column visibility and sort preferences persist per platform.
+- **Sorting and layout prefs** — Sort library and detail views; column visibility and sort preferences persist per platform. Album and artist grid tile sizes are adjustable in Settings.
+- **Favorite screens** — Full-screen views for favorite playlists, artists, and albums (reachable from Home or navigation).
 
 ### Playlists, likes, favorites, and ratings
 
@@ -89,27 +90,29 @@ For UI architecture and navigation rules, see [Compose Architecture Guidelines](
 
 ### Playback and player
 
-- **Playback** — Play, pause, seek, next/previous, shuffle, repeat, and an Up Next queue you can add to, reorder, and play from.
-- **Now playing** — Full-screen player with artwork, progress, transport controls, queue, and a now-playing badge on the active track row.
+- **Playback** — Play, pause, seek, next/previous, shuffle, repeat, and an Up Next queue you can add to, reorder, and play from. Optional **crossfade** (0–12 seconds) on local playback paths.
+- **Now playing** — Full-screen player with artwork, waveform seek bar, transport controls, queue, audio-quality badges (FLAC/ALAC/MP3/hi-res labels from codec and bitrate), and a now-playing badge on the active track row. Optional **audio-reactive visualizers** (Alchemy, Battery, Bars & Waves, Blazing Colors, Plenoptic) or plain artwork; blurred-artwork backdrop can be toggled in Appearance.
 - **Graphic equalizer** — 5-, 10-, 15-, and 31-band EQ with ±12 dB gain, a draggable response curve, per-band sliders, reset, enable/disable, and optional persistence across app restarts. EQ is wired into local playback on Android, desktop, iOS, and web; remote paths such as Chromecast keep using their own audio pipeline.
 - **Lyrics** — Synced and plain lyrics from embedded tags, sidecar files, and [LRCLIB](https://lrclib.net); cached in SQLDelight with auto-scroll during playback (desktop lyrics section and mobile detail flow).
 - **Playback sync** — Plex timeline reporting; Jellyfin/Emby session progress; Subsonic scrobble on stop (see [Music providers](#music-providers)).
+- **ListenBrainz** — Optional separate scrobbling account (user token stored in the platform secure credential store). Submit now-playing and completed listens, plus love/hate feedback from the player when enabled.
 - **Search** — Search songs, artists, and albums across the merged catalog, with recent search history.
 
 ### Downloads and metadata
 
-- **Downloads** — Download remote tracks when the server exposes a URL (Plex original files, Jellyfin/Emby/Subsonic download endpoints); pick a download directory where supported.
+- **Downloads** — Download remote tracks when the server exposes a URL (Plex original files, Jellyfin/Emby/Subsonic download endpoints); pick a download directory where supported. Optional notification when a download finishes (Android).
 - **Metadata editing** — Edit title, artist, album, year, and genre; changes persist locally and sync to Plex, Jellyfin, or Emby when supported.
 
 ### Appearance and settings
 
-- **Appearance** — Album-art-inspired Material 3 UI with light and dark modes (preference stored in app storage).
-- **Settings** — Manage provider sign-in, local folders, library options, home section order, favorite-playlist export/import, downloads, and appearance (desktop settings shell includes additional category placeholders).
+- **Appearance** — Album-art-inspired Material 3 UI with light and dark modes, ten accent-color tints, now-playing visualizer preset, and blurred-artwork backdrop toggle (preferences stored in app storage).
+- **Settings** — Desktop category shell (Account, Personalization, Audio Playback, Library, Downloads, Appearance, Notifications, About, Advanced). Manage provider and ListenBrainz sign-in, crossfade, scan-library-on-launch, EQ/volume persistence, local folders, home section order and personal-mix weights, grid sizes, favorite-playlist export/import, downloads, notifications, and appearance.
 
 ### System integration
 
-- **Volume** — OS system volume where supported; on Linux Flatpak, volume can be adjusted via host `pactl` when sandboxed.
-- **Global media keys** — Desktop play/pause (Space when no text field is focused), media-key shortcuts, and a macOS native bridge for hardware media keys.
+- **Volume** — OS system volume where supported; optional volume persistence across restarts. On Linux Flatpak, volume can be adjusted via host `pactl` when sandboxed.
+- **Global media keys** — Desktop play/pause/next/previous (Space toggles play/pause when no text field is focused), media-key shortcuts, and a macOS native bridge for hardware media keys.
+- **Android playback service** — Media3 foreground `PlaybackService` with notification and lock-screen transport controls.
 - **Chromecast** — Google Cast queue and transport when a Cast device is connected. Android/iOS use the Google Cast SDK; desktop uses a native JVM CastV2 sender and requires local-network/mDNS access. Desktop and web cast remote HTTP(S) streams only; unsupported Plex codecs (for example FLAC) use Plex’s universal MP3 transcode URL where available. Local playback pauses only after the Cast load succeeds.
 - **Android Auto** — Media browse tree over the cached catalog for in-car browsing.
 - **CarPlay (iOS)** — Browse and play from the CarPlay template (requires the CarPlay audio entitlement on your App ID for distribution signing).
@@ -118,7 +121,7 @@ For UI architecture and navigation rules, see [Compose Architecture Guidelines](
 
 ### Multiplatform and data
 
-- **Multiplatform** — Android, iOS, desktop (JVM), and browser (Kotlin/Wasm) targets from a shared Compose UI and data layer.
+- **Multiplatform** — Android, iOS, desktop (JVM), and browser (Kotlin/Wasm) targets from a shared Compose UI and data layer. The web build supports URL routes (`/search`, `/library`, `/artist/…`, `/album/…`, `/player`, and related paths) for deep linking.
 - **Offline-friendly persistence** — SQLDelight-backed catalog, session, media sources, library preferences, downloads state, play history, and lyrics cached across restarts.
 
 ## Platforms
@@ -134,57 +137,6 @@ For UI architecture and navigation rules, see [Compose Architecture Guidelines](
 | **Android** | [GitHub Releases](https://github.com/j-roskopf/Phoebe/releases) (`.apk`, `.aab`) | Yes (SAF tree URI) | Chromecast | Android Auto browse, Media3 playback, Cast queue/transport, and instrumented playback tests on CI. |
 | **iOS** | [GitHub Releases](https://github.com/j-roskopf/Phoebe/releases) | Yes (native folder picker) | Chromecast (manual SDK setup) | iOS app target with AVPlayer playback, Google Cast sender support, and CarPlay browse/play in code; release CI uploads an unsigned IPA for sideloading/local signing. |
 
-## What works now
-
-### App shell and UI
-
-- Compose Multiplatform entry points for Android, iOS, desktop, and Wasm JS.
-- **Desktop layout** — Sidebar with Home, Search, Library, Lyrics, Playlists, and Settings; persistent player bar; drag-and-drop onto playlist rows.
-- **Mobile layout** — Tabbed library (albums, artists, playlists, downloads, settings), stack-based detail navigation, and system bar colors aligned to the theme.
-- Library table, configurable home discovery (mixes with Plex radio, favorites, recents, listening history), collection grids, play-history screens, lyrics, metadata editor, downloads, and now-playing surfaces.
-
-### Plex integration
-
-- PIN-based sign-in, server discovery (relay and shared connections), and music-library discovery.
-- Fetching artists, albums, playlists, and tracks; lazy loading with merge logic so opened detail views survive refresh.
-- Stream URLs with tokenized asset URLs and optional original-file download (`download=1`).
-- Playlists via server `/identity` machine id and `server://…/library/metadata/…` URIs.
-- Metadata `PUT` for supported fields; likes, ratings, and favorite artist/album collections pushed when the server allows.
-- Plex music stations and play queues for library and artist radio.
-- Playback history import with optional on-demand track metadata warming for history entries not yet in the catalog.
-- Collection facet values loaded from Plex where available, merged with local tag metadata.
-
-### Additional providers
-
-- `MusicProviderAdapter` registry with per-type capabilities; Jellyfin, Emby, Subsonic (`SubsonicClient`), and Music Assistant clients in `composeApp/src/commonMain/kotlin/com/phoebe/app/data/`.
-- Experimental Jellyfin / Emby / Subsonic / Music Assistant behavior is summarized in [Music providers](#music-providers); contributions welcome, but not officially supported.
-
-### Local media and merged catalog
-
-- Multiple local folder roots with labels and enable/disable flags in SQLDelight.
-- Desktop: folder walk + JAudioTagger. Android: SAF + `MediaMetadataRetriever`. iOS: native indexer. Web: stubs only.
-
-### Lyrics
-
-- Resolution order: SQLDelight cache → embedded/sidecar local lyrics → LRCLIB lookup.
-- Synced LRC-style lines with playback position; instrumental detection.
-
-### Web (Kotlin/Wasm)
-
-- Wasm JS target with Webpack dev and production browser runs.
-- SQLDelight **Web Worker** driver with **sql.js**, bundled worker script, and copied wasm assets.
-- HTML `<audio>` playback; Ktor JS client for Plex and downloads.
-
-### Audio and platform services
-
-- Shared `AudioPlayer` and `SystemVolumeController` with per-target implementations (Media3/ExoPlayer on Android, JavaFX on desktop, HTML audio on web).
-- Shared equalizer profile plumbing with persisted settings; Android, desktop, iOS, and web apply the EQ during local playback, with browser fallback notices when a stream blocks WebAudio access.
-- macOS `MediaKeysBridge` dylib; desktop JVM CastV2 sender; Android `PlaybackService` + Cast; iOS AVPlayer and CarPlay bridge.
-
-### Data layer
-
-- **SQLDelight** async `PhoebeDatabase` with Android, desktop SQLite, iOS Native, and Web Worker drivers.
-- Catalog, session, media sources, library UI prefs, play history, lyrics, and download state.
 
 ## Verify
 
@@ -257,12 +209,75 @@ Instrumented areas include catalog sync, Plex session and API calls, local folde
 
 ## UI
 
-| Platform | Screen | Screenshot |
-|----------|--------|------------|
-| Desktop | Home — mixes, collections, favorites, and recents | ![Desktop home](mockups/screenshots/desktop1.png) |
-| Desktop | Library — artists grid with sidebar and Up Next queue | ![Desktop library artists](mockups/screenshots/desktop2.png) |
-| Mobile | Home — discovery sections and bottom navigation | ![Mobile home](mockups/screenshots/mobile1.png) |
-| Mobile | Search — top result, songs, and albums for a query | ![Mobile search](mockups/screenshots/mobile2.png) |
-| Mobile | Library — artists grid with sort and view controls | ![Mobile library artists](mockups/screenshots/mobile3.png) |
-| Mobile | Now playing — artwork, waveform progress, and queue | ![Mobile now playing](mockups/screenshots/mobile4.png) |
-| Mobile | Lyrics — synced lines with LRCLIB attribution | ![Mobile lyrics](mockups/screenshots/mobile5.png) |
+Screenshots below come from CI screenshot baselines: [Roborazzi](composeApp/src/screenshotTest/roborazzi/) on desktop and Android, and [Playwright](web-screenshot-tests/phoebe.spec.ts-snapshots/) on web. Thumbnails are scaled to a uniform height (280px) inside a fixed-width column (420px), preserving aspect ratio; click any image to open the full-size file in a new tab.
+
+### Desktop
+
+<table>
+  <thead>
+    <tr>
+      <th>Screen</th>
+      <th width="420">Screenshot</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Home — mixes, collections, favorites, and listening history</td>
+      <td align="center" height="280" valign="middle"><a href="composeApp/src/screenshotTest/roborazzi/desktop-home-dark.png" target="_blank" rel="noopener noreferrer"><img src="composeApp/src/screenshotTest/roborazzi/desktop-home-dark.png" height="280" alt="Desktop home" /></a></td>
+    </tr>
+    <tr>
+      <td>Library — artists grid, sidebar, and Up Next queue</td>
+      <td align="center" height="280" valign="middle"><a href="composeApp/src/screenshotTest/roborazzi/desktop-library-dark.png" target="_blank" rel="noopener noreferrer"><img src="composeApp/src/screenshotTest/roborazzi/desktop-library-dark.png" height="280" alt="Desktop library" /></a></td>
+    </tr>
+    <tr>
+      <td>Now playing — Plenoptic visualizer, waveform progress, and queue</td>
+      <td align="center" height="280" valign="middle"><a href="composeApp/src/screenshotTest/roborazzi/desktop-player-visualizer-plenoptic-dark.png" target="_blank" rel="noopener noreferrer"><img src="composeApp/src/screenshotTest/roborazzi/desktop-player-visualizer-plenoptic-dark.png" height="280" alt="Desktop player" /></a></td>
+    </tr>
+  </tbody>
+</table>
+
+### Android
+
+<table>
+  <thead>
+    <tr>
+      <th>Screen</th>
+      <th width="420">Screenshot</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Home — expanded discovery sections and bottom navigation</td>
+      <td align="center" height="280" valign="middle"><a href="composeApp/src/screenshotTest/roborazzi/android-phone-home-expanded-dark.png" target="_blank" rel="noopener noreferrer"><img src="composeApp/src/screenshotTest/roborazzi/android-phone-home-expanded-dark.png" height="280" alt="Android home" /></a></td>
+    </tr>
+    <tr>
+      <td>Search — top result, songs, and albums</td>
+      <td align="center" height="280" valign="middle"><a href="composeApp/src/screenshotTest/roborazzi/android-phone-search-light.png" target="_blank" rel="noopener noreferrer"><img src="composeApp/src/screenshotTest/roborazzi/android-phone-search-light.png" height="280" alt="Android search" /></a></td>
+    </tr>
+    <tr>
+      <td>Now playing — artwork, waveform progress, and Up Next</td>
+      <td align="center" height="280" valign="middle"><a href="composeApp/src/screenshotTest/roborazzi/android-phone-player-dark.png" target="_blank" rel="noopener noreferrer"><img src="composeApp/src/screenshotTest/roborazzi/android-phone-player-dark.png" height="280" alt="Android player" /></a></td>
+    </tr>
+  </tbody>
+</table>
+
+### Web
+
+<table>
+  <thead>
+    <tr>
+      <th>Screen</th>
+      <th width="420">Screenshot</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Home — discovery sections and sidebar navigation</td>
+      <td align="center" height="280" valign="middle"><a href="web-screenshot-tests/phoebe.spec.ts-snapshots/web-home-light.png" target="_blank" rel="noopener noreferrer"><img src="web-screenshot-tests/phoebe.spec.ts-snapshots/web-home-light.png" height="280" alt="Web home" /></a></td>
+    </tr>
+    <tr>
+      <td>Now playing (phone) — Alchemy visualizer and blurred artwork</td>
+      <td align="center" height="280" valign="middle"><a href="web-screenshot-tests/phoebe.spec.ts-snapshots/web-phone-player-visualizer-alchemy-light.png" target="_blank" rel="noopener noreferrer"><img src="web-screenshot-tests/phoebe.spec.ts-snapshots/web-phone-player-visualizer-alchemy-light.png" height="280" alt="Web player" /></a></td>
+    </tr>
+  </tbody>
+</table>
