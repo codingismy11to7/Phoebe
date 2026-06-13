@@ -249,10 +249,14 @@ fun lookupTracksByIds(
     }
     if (remaining.isEmpty()) return resolved
 
-    val index = trackIndex ?: catalog.trackIndexMap
-
     for (id in remaining.toList()) {
-        playHistoryLookupIds(id).firstNotNullOfOrNull { lookupId -> index[lookupId] }?.let { track ->
+        val lookupIds = playHistoryLookupIds(id)
+        val track = if (trackIndex != null) {
+            lookupIds.firstNotNullOfOrNull { lookupId -> trackIndex[lookupId] }
+        } else {
+            catalog.findTrackByIds(lookupIds)
+        }
+        track?.let {
             resolved[id] = track
             remaining.remove(id)
         }
@@ -275,6 +279,14 @@ private fun playHistoryLookupIds(id: String): Set<String> {
             add("${provider.catalogPrefix}:$id")
         }
     }
+}
+
+private fun CatalogSnapshot.findTrackByIds(ids: Set<String>): Track? {
+    if (ids.isEmpty()) return null
+    tracksByParent.values.forEach { parentTracks ->
+        parentTracks.firstOrNull { track -> track.id in ids }?.let { return it }
+    }
+    return null
 }
 
 private fun <T> placeholderTrackForPlayHistoryEntry(entry: T, trackId: String): Track? {

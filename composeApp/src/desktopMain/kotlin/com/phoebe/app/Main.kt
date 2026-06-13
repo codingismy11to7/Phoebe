@@ -141,7 +141,7 @@ private fun installMacQuitHandler() {
                     Thread.sleep(2_000L)
                     Runtime.getRuntime().halt(0)
                 }
-                Thread.sleep(50L)
+                Thread.sleep(500L)
                 exitProcess(0)
             }
         }

@@ -37,15 +37,32 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 private const val AppearanceThemeFile = "appearance_theme"
 private const val AppearanceTintFile = "appearance_tint"
 private const val HomeScreenLayoutModeFile = "home_screen_layout_mode"
 
+private object AppDependencyRuntime {
+    private val mutex = Mutex()
+    private var dependencies: AppDependencies? = null
+
+    suspend fun getOrCreate(): AppDependencies =
+        mutex.withLock {
+            dependencies ?: withContext(Dispatchers.Default) {
+                AppDependencies.create()
+            }.also { dependencies = it }
+        }
+}
+
 private sealed interface AppBootstrapState {
     data object Loading : AppBootstrapState
-    data class Ready(val dependencies: AppDependencies) : AppBootstrapState
+    data class Ready(
+        val dependencies: AppDependencies,
+        val closeDependenciesOnDispose: Boolean,
+    ) : AppBootstrapState
     data class Failed(val message: String) : AppBootstrapState
 }
 
@@ -62,20 +79,26 @@ fun App(
     }
 
     val bootstrap by produceState<AppBootstrapState>(
-        initialValue = dependencies?.let { AppBootstrapState.Ready(it) } ?: AppBootstrapState.Loading,
+        initialValue = dependencies?.let {
+            AppBootstrapState.Ready(
+                dependencies = it,
+                closeDependenciesOnDispose = true,
+            )
+        } ?: AppBootstrapState.Loading,
         dependencies,
     ) {
         if (dependencies != null) {
-            value = AppBootstrapState.Ready(dependencies)
+            value = AppBootstrapState.Ready(
+                dependencies = dependencies,
+                closeDependenciesOnDispose = true,
+            )
             return@produceState
         }
         value = try {
-            val created = if (isDesktopPlatform()) {
-                withContext(Dispatchers.Default) { AppDependencies.create() }
-            } else {
-                AppDependencies.create()
-            }
-            AppBootstrapState.Ready(created)
+            AppBootstrapState.Ready(
+                dependencies = AppDependencyRuntime.getOrCreate(),
+                closeDependenciesOnDispose = isDesktopPlatform(),
+            )
         } catch (error: Throwable) {
             AppBootstrapState.Failed(error.message ?: error.toString())
         }
@@ -95,6 +118,7 @@ fun App(
         }
         is AppBootstrapState.Ready -> bootstrapState.dependencies
     }
+    val closeDependenciesOnDispose = (bootstrap as AppBootstrapState.Ready).closeDependenciesOnDispose
     val uiScope = rememberCoroutineScope()
     val desktopAppStateScope = remember(readyDependencies) {
         if (isDesktopPlatform()) {
@@ -109,6 +133,7 @@ fun App(
             dependencies = readyDependencies,
             scope = stateScope,
             playbackScope = uiScope,
+            closeDependenciesOnDispose = closeDependenciesOnDispose,
         )
     }
     DisposableEffect(state, desktopAppStateScope) {

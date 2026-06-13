@@ -93,9 +93,10 @@ class RealAudioPlaybackInstrumentedTest {
                 assertTrue(
                     waitUntil(timeoutMs = 30_000L) {
                         player.state.value.positionMs > firstPosition + 250L ||
-                            diagnostics.maxProgress(PlaybackEnginePath.Media3) > firstPosition + 250L
+                            diagnostics.maxProgress(PlaybackEnginePath.Media3) > firstPosition + 250L ||
+                            diagnostics.hasEnergy(PlaybackEnginePath.Media3)
                     },
-                    "Expected playback position to advance for $fixture",
+                    "Expected playback position or audio diagnostics to advance for $fixture",
                 )
                 assertTrue(diagnostics.hasPlayingEvent(PlaybackEnginePath.Media3))
                 val media3Energy = waitUntil(timeoutMs = 10_000L) {

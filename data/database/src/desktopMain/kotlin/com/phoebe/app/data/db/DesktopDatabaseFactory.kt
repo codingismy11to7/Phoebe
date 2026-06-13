@@ -118,14 +118,14 @@ private fun migrateLegacyDesktopStorageIfNeeded(targetRoot: File) {
 }
 
 private fun hostLegacyDesktopDirectory(): File? {
-    val userName = System.getProperty("user.name")?.takeIf { it.isNotBlank() } ?: return null
-    return File("/home/$userName", desktopDataDirectoryName()).takeIf { it.isDirectory }
+    val userHome = System.getProperty("user.home")?.takeIf { it.isNotBlank() } ?: return null
+    return File(userHome, desktopDataDirectoryName()).takeIf { it.isDirectory }
 }
 
 private fun flatpakSandboxHomeLegacyDirectory(): File? {
     val appId = System.getenv("FLATPAK_ID")?.takeIf { it.isNotBlank() } ?: return null
-    val userName = System.getProperty("user.name")?.takeIf { it.isNotBlank() } ?: return null
-    return File("/home/$userName/.var/app/$appId", desktopDataDirectoryName()).takeIf { it.isDirectory }
+    val userHome = System.getProperty("user.home")?.takeIf { it.isNotBlank() } ?: return null
+    return File(userHome, ".var/app/$appId/${desktopDataDirectoryName()}").takeIf { it.isDirectory }
 }
 
 private fun isFlatpakSandbox(): Boolean =

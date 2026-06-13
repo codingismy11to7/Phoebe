@@ -714,34 +714,7 @@ data class CatalogSnapshot(
     val collectionTags: List<CatalogCollectionTag> = emptyList(),
     val downloads: List<DownloadItem> = emptyList(),
     val remotePageInfo: CatalogPageInfo = CatalogPageInfo(),
-) {
-    @Transient
-    val trackIndexMap: Map<String, Track> by lazy {
-        buildMap {
-            tracksByParent.values.forEach { parentTracks ->
-                for (track in parentTracks) {
-                    if (track.id.isBlank()) continue
-                    put(track.id, track)
-                    var hasPrefix = false
-                    for (provider in MediaProviderType.entries) {
-                        val prefix = "${provider.catalogPrefix}:"
-                        if (track.id.startsWith(prefix)) {
-                            val bare = track.id.removePrefix(prefix)
-                            put(bare, track)
-                            hasPrefix = true
-                            break
-                        }
-                    }
-                    if (!hasPrefix) {
-                        for (provider in MediaProviderType.entries) {
-                            put("${provider.catalogPrefix}:${track.id}", track)
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
+)
 
 @Serializable
 data class CatalogPageInfo(

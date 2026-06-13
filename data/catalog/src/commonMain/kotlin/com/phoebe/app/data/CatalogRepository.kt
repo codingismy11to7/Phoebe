@@ -3721,10 +3721,8 @@ class CatalogRepository(
         val resolved = LinkedHashMap<String, Track>(ids.size)
         val remaining = ids.filterTo(LinkedHashSet()) { it.isNotBlank() }
 
-        val index = snapshot.trackIndexMap
-
         for (id in remaining.toList()) {
-            providerTrackLookupIds(id).firstNotNullOfOrNull { lookupId -> index[lookupId] }?.let { track ->
+            snapshot.findTrackByIds(providerTrackLookupIds(id))?.let { track ->
                 resolved[id] = track
                 remaining.remove(id)
             }
@@ -7614,6 +7612,14 @@ class CatalogRepository(
                 add("${provider.catalogPrefix}:$id")
             }
         }
+    }
+
+    private fun CatalogSnapshot.findTrackByIds(ids: Set<String>): Track? {
+        if (ids.isEmpty()) return null
+        tracksByParent.values.forEach { parentTracks ->
+            parentTracks.firstOrNull { track -> track.id in ids }?.let { return it }
+        }
+        return null
     }
 
     private fun jellyfinItemId(id: String): String? =

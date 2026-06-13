@@ -33,6 +33,7 @@ import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.TrackMetadataUpdate
 import com.phoebe.app.domain.canTogglePlexLike
+import com.phoebe.app.domain.catalogPrefix
 import com.phoebe.app.domain.hasPlayableSource
 import com.phoebe.app.domain.isEmbyFamily
 import com.phoebe.app.domain.isFromLocalFolder
@@ -99,6 +100,7 @@ class AppState(
     private val dependencies: AppDependencies,
     private val scope: CoroutineScope,
     private val playbackScope: CoroutineScope = scope,
+    private val closeDependenciesOnDispose: Boolean = true,
 ) {
     val session = dependencies.sessionRepository.session
     val catalog = dependencies.catalogRepository.catalog
@@ -299,6 +301,7 @@ class AppState(
         lightweightRemoteSyncJob = null
         downloadedArtworkCacheJob = null
         artistDetailPreloadJob = null
+        if (!closeDependenciesOnDispose) return
         if (isDesktopPlatform()) {
             CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
                 dependencies.close()
@@ -526,7 +529,25 @@ class AppState(
     }
 
     private fun Track.canonicalPlayHistoryTrack(): Track =
-        catalog.value.trackIndexMap[id] ?: this
+        catalog.value.findTrackById(id) ?: this
+
+    private fun CatalogSnapshot.findTrackById(trackId: String): Track? {
+        if (trackId.isBlank()) return null
+        tracksByParent.values.forEach { parentTracks ->
+            parentTracks.firstOrNull { track -> track.matchesTrackId(trackId) }?.let { return it }
+        }
+        return null
+    }
+
+    private fun Track.matchesTrackId(trackId: String): Boolean {
+        if (id == trackId) return true
+        for (provider in MediaProviderType.entries) {
+            val prefix = "${provider.catalogPrefix}:"
+            if (id.startsWith(prefix) && id.removePrefix(prefix) == trackId) return true
+            if (trackId.startsWith(prefix) && trackId.removePrefix(prefix) == id) return true
+        }
+        return false
+    }
 
     /**
      * When the OS exposes a system volume, the slider mirrors it: the per-player output
