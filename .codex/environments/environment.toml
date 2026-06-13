@@ -16,6 +16,11 @@ icon = "run"
 command = "ADB=\"${ANDROID_HOME:-$HOME/Library/Android/sdk}/platform-tools/adb\"; [ -x \"$ADB\" ] || ADB=adb; ./gradlew :androidApp:installDebug && \"$ADB\" shell monkey -p com.phoebe.app.debug -c android.intent.category.LAUNCHER 1"
 
 [[actions]]
+name = "iOS"
+icon = "run"
+command = "./scripts/run-ios-simulator.sh"
+
+[[actions]]
 name = "Web"
 icon = "debug"
 command = "./gradlew :composeApp:wasmJsBrowserDevelopmentRun"

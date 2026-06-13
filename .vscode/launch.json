@@ -23,6 +23,15 @@
       "cwd": "${workspaceFolder}"
     },
     {
+      "name": "iOS",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["${workspaceFolder}/scripts/run-ios-simulator.sh"],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}"
+    },
+    {
       "name": "Web",
       "type": "node",
       "request": "launch",
