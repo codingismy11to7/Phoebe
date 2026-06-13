@@ -27,6 +27,49 @@ import phoebe.composeapp.generated.resources.Res
 import phoebe.composeapp.generated.resources.phoebe_bird
 import phoebe.composeapp.generated.resources.phoebe_icon_rounded
 import org.jetbrains.compose.resources.painterResource
+import com.phoebe.app.feature.auth.AuthWelcomeMobileRoute
+import com.phoebe.app.feature.auth.AuthWelcomeRouteActions
+import com.phoebe.app.feature.auth.AuthWelcomeRouteState
+import com.phoebe.app.feature.collections.CollectionItemsRoute
+import com.phoebe.app.feature.collections.CollectionItemsRouteActions
+import com.phoebe.app.feature.collections.CollectionItemsRouteState
+import com.phoebe.app.feature.collections.CollectionsRoute
+import com.phoebe.app.feature.collections.CollectionsRouteActions
+import com.phoebe.app.feature.collections.CollectionsRouteState
+import com.phoebe.app.feature.details.AlbumDetailRoute
+import com.phoebe.app.feature.details.AlbumDetailRouteActions
+import com.phoebe.app.feature.details.AlbumDetailRouteState
+import com.phoebe.app.feature.details.ArtistDetailRoute
+import com.phoebe.app.feature.details.ArtistDetailRouteActions
+import com.phoebe.app.feature.details.ArtistDetailRouteState
+import com.phoebe.app.feature.details.PlaylistDetailRoute
+import com.phoebe.app.feature.details.PlaylistDetailRouteActions
+import com.phoebe.app.feature.details.PlaylistDetailRouteState
+import com.phoebe.app.feature.details.SongDetailRoute
+import com.phoebe.app.feature.details.SongDetailRouteActions
+import com.phoebe.app.feature.details.SongDetailRouteState
+import com.phoebe.app.feature.favorites.FavoriteAlbumsMobileRoute
+import com.phoebe.app.feature.favorites.FavoriteAlbumsRouteActions
+import com.phoebe.app.feature.favorites.FavoriteAlbumsRouteState
+import com.phoebe.app.feature.favorites.FavoriteArtistsMobileRoute
+import com.phoebe.app.feature.favorites.FavoriteArtistsRouteActions
+import com.phoebe.app.feature.favorites.FavoriteArtistsRouteState
+import com.phoebe.app.feature.favorites.FavoritePlaylistsMobileRoute
+import com.phoebe.app.feature.favorites.FavoritePlaylistsRouteActions
+import com.phoebe.app.feature.favorites.FavoritePlaylistsRouteState
+import com.phoebe.app.feature.home.*
+import com.phoebe.app.feature.home.deriveHomeUiState
+import com.phoebe.app.feature.library.*
+import com.phoebe.app.feature.playback.MobilePlaybackRoute
+import com.phoebe.app.feature.playback.MobilePlaybackRouteActions
+import com.phoebe.app.feature.playback.MobilePlaybackRouteState
+import com.phoebe.app.feature.playback.MobilePlayer
+import com.phoebe.app.feature.search.LocalSearchHistory
+import com.phoebe.app.feature.search.SearchResultsFactory
+import com.phoebe.app.feature.search.SearchHistoryState
+import com.phoebe.app.feature.settings.SettingsCategory
+import com.phoebe.app.feature.settings.SettingsDesktopView
+import com.phoebe.app.di.RouteViewModelFactory
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -136,6 +179,7 @@ import com.phoebe.app.AppState
 import com.phoebe.app.data.catalogAlbumsForArtist
 import com.phoebe.app.data.catalogTracksForArtist
 import com.phoebe.app.data.defaultPlexRadioStations
+import com.phoebe.app.data.PlayHistorySnapshot
 import com.phoebe.app.domain.AudioAnalysisFrame
 import com.phoebe.app.domain.AudioAnalysisSource
 import com.phoebe.app.domain.Album
@@ -372,6 +416,7 @@ internal fun PhoebeDesktopScreenshotScenario(
         else -> fixture.catalog
     }
     val visualizerPreset = scenario.visualizerPreset()
+    val routeViewModelFactory = rememberScreenshotRouteViewModelFactory()
     DesktopPlayer(
         shellState = DesktopShellState(
             screen = screen,
@@ -384,6 +429,7 @@ internal fun PhoebeDesktopScreenshotScenario(
             showQueue = showQueue,
             compact = compact,
             busy = false,
+            routeViewModelFactory = routeViewModelFactory,
         ),
         playbackState = PlaybackUiState(
             shellPlayback = ShellPlaybackState(
@@ -548,6 +594,7 @@ internal fun PhoebeMobileScreenshotScenario(
     val isPlayer = scenario.name.startsWith("Player", ignoreCase = true)
     val isSignIn = scenario.name.startsWith("SignIn", ignoreCase = true)
     val showChrome = !isPlayer && !isSignIn
+    val routeViewModelFactory = rememberScreenshotRouteViewModelFactory()
 
     val chromePadding = if (showChrome) {
         MobileChromePadding(
@@ -567,137 +614,155 @@ internal fun PhoebeMobileScreenshotScenario(
             Box(Modifier.fillMaxSize()) {
                 Box(Modifier.fillMaxSize()) {
                     when (scenario) {
-            PhoebeScreenshotScenario.SignIn -> MobileSignInWelcomeScreen(
-                message = "Sign in to Plex or add a local music folder to get started.",
-                pinCode = "PHOEBE",
-                jellyfinServers = emptyList(),
-                jellyfinDiscoveryLoading = false,
-                jellyfinQuickConnect = null,
-                onStartSignIn = {},
-                onFinishSignIn = {},
-                onSignInJellyfin = { _, _, _ -> },
-                onSignInProvider = { _, _, _, _, _ -> },
-                onDiscoverJellyfinServers = {},
-                onStartJellyfinQuickConnect = {},
-                onFinishJellyfinQuickConnect = {},
-                onAddLocalFolder = {},
+            PhoebeScreenshotScenario.SignIn -> AuthWelcomeMobileRoute(
+                state = AuthWelcomeRouteState(
+                    message = "Sign in to Plex or add a local music folder to get started.",
+                    pinCode = "PHOEBE",
+                    jellyfinServers = emptyList(),
+                    jellyfinDiscoveryLoading = false,
+                    jellyfinQuickConnect = null,
+                    authInProgress = false,
+                ),
+                actions = screenshotAuthActions(),
                 modifier = Modifier.fillMaxSize(),
             )
-            PhoebeScreenshotScenario.SignInProviders -> MobileSignInWelcomeScreen(
-                message = "Sign in to Plex, Jellyfin, or another media provider—or add a local music folder to get started.",
-                pinCode = null,
-                jellyfinServers = emptyList(),
-                jellyfinDiscoveryLoading = false,
-                jellyfinQuickConnect = null,
-                onStartSignIn = {},
-                onFinishSignIn = {},
-                onSignInJellyfin = { _, _, _ -> },
-                onSignInProvider = { _, _, _, _, _ -> },
-                onDiscoverJellyfinServers = {},
-                onStartJellyfinQuickConnect = {},
-                onFinishJellyfinQuickConnect = {},
-                onAddLocalFolder = {},
-                initialProvidersExpanded = true,
+            PhoebeScreenshotScenario.SignInProviders -> AuthWelcomeMobileRoute(
+                state = AuthWelcomeRouteState(
+                    message = "Sign in to Plex, Jellyfin, or another media provider—or add a local music folder to get started.",
+                    pinCode = null,
+                    jellyfinServers = emptyList(),
+                    jellyfinDiscoveryLoading = false,
+                    jellyfinQuickConnect = null,
+                    authInProgress = false,
+                    initialProvidersExpanded = true,
+                ),
+                actions = screenshotAuthActions(),
                 modifier = Modifier.fillMaxSize(),
             )
-            PhoebeScreenshotScenario.FavoritePlaylists -> FavoritePlaylistsMobileView(
-                searchQuery = "",
-                onSearchQuery = {},
-                onPlaylist = {},
-                onBack = {},
+            PhoebeScreenshotScenario.FavoritePlaylists -> FavoritePlaylistsMobileRoute(
+                state = FavoritePlaylistsRouteState(searchQuery = ""),
+                actions = FavoritePlaylistsRouteActions(
+                    onSearchQuery = {},
+                    onPlaylist = {},
+                    onBack = {},
+                ),
                 modifier = Modifier.fillMaxSize(),
             )
-            PhoebeScreenshotScenario.FavoriteArtists -> FavoriteArtistsMobileView(
-                catalog = catalog,
-                libraryUi = libraryUi,
-                onLibrarySortBy = {},
-                onLibraryAscending = {},
-                onLibraryColumns = {},
-                onArtist = {},
-                onBack = {},
+            PhoebeScreenshotScenario.FavoriteArtists -> FavoriteArtistsMobileRoute(
+                state = FavoriteArtistsRouteState(catalog = catalog, libraryUi = libraryUi),
+                actions = FavoriteArtistsRouteActions(
+                    onLibrarySortBy = {},
+                    onLibraryAscending = {},
+                    onLibraryColumns = {},
+                    onArtist = {},
+                    onBack = {},
+                ),
                 modifier = Modifier.fillMaxSize(),
             )
-            PhoebeScreenshotScenario.FavoriteAlbums -> FavoriteAlbumsMobileView(
-                catalog = catalog,
-                libraryUi = libraryUi,
-                onLibrarySortBy = {},
-                onLibraryAscending = {},
-                onLibraryColumns = {},
-                onAlbum = {},
-                onBack = {},
+            PhoebeScreenshotScenario.FavoriteAlbums -> FavoriteAlbumsMobileRoute(
+                state = FavoriteAlbumsRouteState(catalog = catalog, libraryUi = libraryUi),
+                actions = FavoriteAlbumsRouteActions(
+                    onLibrarySortBy = {},
+                    onLibraryAscending = {},
+                    onLibraryColumns = {},
+                    onAlbum = {},
+                    onBack = {},
+                ),
                 modifier = Modifier.fillMaxSize(),
             )
             PhoebeScreenshotScenario.Artist,
             PhoebeScreenshotScenario.ArtistRadio,
-            -> ArtistDetailPanel(
-                artist = fixture.artist,
-                catalog = catalog,
-                libraryUi = libraryUi,
+            -> ArtistDetailRoute(
+                state = ArtistDetailRouteState(
+                    artist = fixture.artist,
+                    catalog = catalog,
+                    libraryUi = libraryUi,
+                    artistRadioAvailability = if (scenario == PhoebeScreenshotScenario.ArtistRadio) {
+                        ArtistRadioAvailability.Available
+                    } else {
+                        null
+                    },
+                ),
+                actions = ArtistDetailRouteActions(
+                    onBack = {},
+                    onAlbum = {},
+                    onPlayTracks = { _, _ -> },
+                    onAddToUpNext = {},
+                    onDownload = {},
+                    onDownloadArtist = {},
+                    onPlayArtistRadio = {},
+                    onArtist = {},
+                    onLibraryColumns = {},
+                ),
                 modifier = Modifier.fillMaxSize(),
-                onBack = {},
-                onAlbum = {},
-                onPlayTracks = { _, _ -> },
-                onAddToUpNext = {},
-                onDownload = {},
-                onDownloadArtist = {},
-                artistRadioAvailability = if (scenario == PhoebeScreenshotScenario.ArtistRadio) {
-                    ArtistRadioAvailability.Available
-                } else {
-                    null
-                },
-                onPlayArtistRadio = {},
-                onArtist = {},
-                onLibraryColumns = {},
             )
-            PhoebeScreenshotScenario.Album -> AlbumDetailPanel(
-                album = fixture.album,
-                catalog = catalog,
-                libraryUi = libraryUi,
+            PhoebeScreenshotScenario.Album -> AlbumDetailRoute(
+                state = AlbumDetailRouteState(
+                    album = fixture.album,
+                    catalog = catalog,
+                    libraryUi = libraryUi,
+                ),
+                actions = AlbumDetailRouteActions(
+                    onBack = {},
+                    onPlayTracks = { _, _ -> },
+                    onAddToUpNext = {},
+                    onDownload = {},
+                    onDownloadAlbum = {},
+                    onArtist = {},
+                    onLibraryColumns = {},
+                ),
                 modifier = Modifier.fillMaxSize(),
-                onBack = {},
-                onPlayTracks = { _, _ -> },
-                onAddToUpNext = {},
-                onDownload = {},
-                onDownloadAlbum = {},
-                onArtist = {},
-                onLibraryColumns = {},
             )
-            PhoebeScreenshotScenario.Song -> SongDetailPanel(
-                track = fixture.currentTrack,
+            PhoebeScreenshotScenario.Song -> SongDetailRoute(
+                state = SongDetailRouteState(track = fixture.currentTrack),
+                actions = SongDetailRouteActions(
+                    onBack = {},
+                    onPlay = {},
+                    onAddToUpNext = {},
+                    onDownload = {},
+                ),
                 modifier = Modifier.fillMaxSize(),
-                onBack = {},
-                onPlay = {},
-                onAddToUpNext = {},
-                onDownload = {},
             )
-            PhoebeScreenshotScenario.Playlist -> PlaylistDetailPanel(
-                playlist = fixture.playlist,
-                catalog = catalog,
-                catalogRefreshing = false,
-                libraryUi = libraryUi,
+            PhoebeScreenshotScenario.Playlist -> PlaylistDetailRoute(
+                state = PlaylistDetailRouteState(
+                    playlist = fixture.playlist,
+                    catalog = catalog,
+                    catalogRefreshing = false,
+                    libraryUi = libraryUi,
+                ),
+                actions = PlaylistDetailRouteActions(
+                    onBack = {},
+                    onPlayTracks = { _, _ -> },
+                    onAddToUpNext = {},
+                    onDownload = {},
+                    onDownloadPlaylist = {},
+                    onLibraryColumns = {},
+                ),
                 modifier = Modifier.fillMaxSize(),
-                onBack = {},
-                onPlayTracks = { _, _ -> },
-                onAddToUpNext = {},
-                onDownload = {},
-                onDownloadPlaylist = {},
-                onLibraryColumns = {},
             )
-            PhoebeScreenshotScenario.CollectionValues -> CollectionsScreen(
-                entry = CollectionEntry(CollectionTarget.Artists, CollectionFacet.Genre),
-                catalog = catalog,
+            PhoebeScreenshotScenario.CollectionValues -> CollectionsRoute(
+                state = CollectionsRouteState(
+                    entry = CollectionEntry(CollectionTarget.Artists, CollectionFacet.Genre),
+                    catalog = catalog,
+                ),
+                actions = CollectionsRouteActions(
+                    onBack = {},
+                    onCollectionValue = { _, _ -> },
+                ),
                 modifier = Modifier.fillMaxSize(),
-                onBack = {},
-                onCollectionValue = { _, _ -> },
             )
-            PhoebeScreenshotScenario.CollectionItems -> CollectionItemsScreen(
-                entry = CollectionEntry(CollectionTarget.Artists, CollectionFacet.Genre),
-                value = "Dream pop",
-                catalog = catalog,
+            PhoebeScreenshotScenario.CollectionItems -> CollectionItemsRoute(
+                state = CollectionItemsRouteState(
+                    entry = CollectionEntry(CollectionTarget.Artists, CollectionFacet.Genre),
+                    value = "Dream pop",
+                    catalog = catalog,
+                ),
+                actions = CollectionItemsRouteActions(
+                    onBack = {},
+                    onArtist = {},
+                    onAlbum = {},
+                ),
                 modifier = Modifier.fillMaxSize(),
-                onBack = {},
-                onArtist = {},
-                onAlbum = {},
             )
             PhoebeScreenshotScenario.Player,
             PhoebeScreenshotScenario.PlayerBlurredArtworkOn,
@@ -709,35 +774,28 @@ internal fun PhoebeMobileScreenshotScenario(
             PhoebeScreenshotScenario.PlayerVisualizerBlazingColors,
             PhoebeScreenshotScenario.PlayerVisualizerPlenoptic,
             PhoebeScreenshotScenario.PlayerUpNextExpanded,
-            -> MobilePlayer(
-                track = fixture.currentTrack,
-                upNext = fixture.upNext,
-                isPlaying = true,
-                shuffle = true,
-                repeat = RepeatMode.All,
-                positionMs = 96_000L,
-                bufferedPositionMs = 172_000L,
-                currentIndex = 0,
-                visualizerPreset = scenario.visualizerPreset(),
-                audioAnalysis = if (scenario.visualizerPreset().isVisualizer) {
-                    ScreenshotAudioAnalysisFrame
-                } else {
-                    AudioAnalysisFrame.Empty
-                },
-                blurredArtworkAppearance = scenario != PhoebeScreenshotScenario.PlayerBlurredArtworkOff,
-                onToggle = {},
-                onPrevious = {},
-                onNext = {},
-                onShuffle = {},
-                onRepeat = {},
-                onSeek = {},
-                onPlayQueue = {},
-                onMoveUpNext = { _, _ -> },
-                onRemoveUpNext = {},
-                onBack = {},
-                onSwipeDismiss = {},
-                initialUpNextExpanded = scenario == PhoebeScreenshotScenario.PlayerUpNextExpanded,
-                expansionFraction = 1f,
+            -> MobilePlaybackRoute(
+                state = MobilePlaybackRouteState(
+                    track = fixture.currentTrack,
+                    upNext = fixture.upNext,
+                    isPlaying = true,
+                    shuffle = true,
+                    repeat = RepeatMode.All,
+                    positionMs = 96_000L,
+                    bufferedPositionMs = 172_000L,
+                    currentIndex = 0,
+                    visualizerPreset = scenario.visualizerPreset(),
+                    audioAnalysis = if (scenario.visualizerPreset().isVisualizer) {
+                        ScreenshotAudioAnalysisFrame
+                    } else {
+                        AudioAnalysisFrame.Empty
+                    },
+                    blurredArtworkAppearance = scenario != PhoebeScreenshotScenario.PlayerBlurredArtworkOff,
+                    initialUpNextExpanded = scenario == PhoebeScreenshotScenario.PlayerUpNextExpanded,
+                    expansionFraction = 1f,
+                ),
+                actions = screenshotPlaybackActions(),
+                modifier = Modifier.fillMaxSize(),
             )
             PhoebeScreenshotScenario.HomeAccordionsCollapsed,
             PhoebeScreenshotScenario.HomeAccordionsExpanded,
@@ -748,29 +806,22 @@ internal fun PhoebeMobileScreenshotScenario(
                     else -> null
                 },
             )
-            PhoebeScreenshotScenario.HomePlayedRows -> MobileHomeScreen(
-                state = deriveHomeUiState(catalog, fixture.playHistory, randomArtistSeed = 7, randomAlbumSeed = 11, nowMs = fixture.nowMs),
-                radioStations = fixture.radioStations,
-                homeSections = listOf(HomeSection.Played, HomeSection.Random),
+            PhoebeScreenshotScenario.HomePlayedRows -> MobileHomeRoute(
+                routeState = MobileHomeRouteState(
+                    homeUiState = deriveHomeUiState(catalog, fixture.playHistory, randomArtistSeed = 7, randomAlbumSeed = 11, nowMs = fixture.nowMs),
+                    catalogRefreshing = false,
+                    homeSections = listOf(HomeSection.Played, HomeSection.Random),
+                    supportedCollectionEntries = setOf(
+                        CollectionEntry(CollectionTarget.Artists, CollectionFacet.Genre),
+                        CollectionEntry(CollectionTarget.Albums, CollectionFacet.Genre),
+                    ),
+                    radioStations = fixture.radioStations,
+                    radioStartingIds = emptySet(),
+                    decadeMixNotice = null,
+                ),
                 listState = rememberLazyListState(),
+                callbacks = screenshotMobileHomeCallbacks(),
                 modifier = Modifier.fillMaxSize(),
-                onArtist = {},
-                onAlbum = {},
-                onPlaylist = {},
-                onRecentSongs = {},
-                onRecentArtists = {},
-                onRecentAlbums = {},
-                onFavoritePlaylists = {},
-                onFavoriteArtists = {},
-                onFavoriteAlbums = {},
-                onCollections = {},
-                onRecentlyPlayed = {},
-                onMostPlayed = {},
-                onRefreshArtists = {},
-                onRefreshAlbums = {},
-                onPlayTracks = { _, _ -> },
-                onAddToUpNext = {},
-                onDownload = {},
             )
             else -> MobileBrowseShell(
                 catalog = catalog,
@@ -792,6 +843,7 @@ internal fun PhoebeMobileScreenshotScenario(
                 currentTrack = fixture.currentTrack,
                 homeUiState = deriveHomeUiState(catalog, fixture.playHistory, randomArtistSeed = 7, randomAlbumSeed = 11, nowMs = fixture.nowMs),
                 isPlaying = true,
+                routeViewModelFactory = routeViewModelFactory,
                 homeScreenLayoutMode = if (scenario == PhoebeScreenshotScenario.HomeExpanded) {
                     HomeScreenLayoutMode.Expanded
                 } else {
@@ -911,11 +963,68 @@ private fun CatalogSnapshot.withFiveColumnGridArtists(nowMs: Long): CatalogSnaps
         ),
     )
 
+private fun screenshotAuthActions(): AuthWelcomeRouteActions =
+    AuthWelcomeRouteActions(
+        onStartSignIn = {},
+        onFinishSignIn = {},
+        onSignInJellyfin = { _, _, _ -> },
+        onSignInProvider = { _, _, _, _, _ -> },
+        onDiscoverJellyfinServers = {},
+        onStartJellyfinQuickConnect = {},
+        onFinishJellyfinQuickConnect = {},
+        onAddLocalFolder = {},
+    )
+
+private fun screenshotMobileHomeCallbacks(): MobileHomeCallbacks =
+    MobileHomeCallbacks(
+        onArtist = {},
+        onAlbum = {},
+        onPlaylist = {},
+        onRecentSongs = {},
+        onRecentArtists = {},
+        onRecentAlbums = {},
+        onFavoritePlaylists = {},
+        onFavoriteArtists = {},
+        onFavoriteAlbums = {},
+        onCollections = {},
+        onRecentlyPlayed = {},
+        onMostPlayed = {},
+        onRefreshArtists = {},
+        onRefreshAlbums = {},
+        onPlayDecadeMix = {},
+        onClearDecadeMixNotice = {},
+        onPlayRadioStation = {},
+        onPlayPersonalMix = {},
+        onPlayTracks = { _, _ -> },
+        onAddToUpNext = {},
+        onDownload = {},
+    )
+
+private fun screenshotPlaybackActions(): MobilePlaybackRouteActions =
+    MobilePlaybackRouteActions(
+        onToggle = {},
+        onPrevious = {},
+        onNext = {},
+        onShuffle = {},
+        onRepeat = {},
+        onSeek = {},
+        onPlayQueue = {},
+        onMoveUpNext = { _, _ -> },
+        onRemoveUpNext = {},
+        onBack = {},
+        onSwipeDismiss = {},
+    )
+
+@Composable
+private fun rememberScreenshotRouteViewModelFactory(): RouteViewModelFactory =
+    remember { RouteViewModelFactory(SearchResultsFactory()) }
+
 @Composable
 private fun MobileHomeAccordionScreenshot(
     fixture: PhoebeScreenshotFixtureData,
     expandedSection: PhoneHomeAccordionSection?,
 ) {
+    val routeViewModelFactory = rememberScreenshotRouteViewModelFactory()
     val homeSections = HomeAccordionScreenshotSections
     val listState = rememberLazyListState(
         initialFirstVisibleItemIndex = homeAccordionScreenshotScrollIndex(expandedSection, homeSections),
@@ -938,6 +1047,7 @@ private fun MobileHomeAccordionScreenshot(
             nowMs = fixture.nowMs,
         ),
         isPlaying = true,
+        routeViewModelFactory = routeViewModelFactory,
         onNavigate = {},
         onSearchQuery = {},
         onLibraryFilter = {},

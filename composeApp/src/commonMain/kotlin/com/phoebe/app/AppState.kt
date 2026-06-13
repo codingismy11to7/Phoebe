@@ -19,6 +19,7 @@ import com.phoebe.app.domain.MediaProviderType
 import com.phoebe.app.domain.MusicLibrary
 import com.phoebe.app.domain.NowPlayingVisualizerPreset
 import com.phoebe.app.domain.Playlist
+import com.phoebe.app.domain.PlayHistoryKind
 import com.phoebe.app.domain.PlayerQueueSnapshot
 import com.phoebe.app.domain.PlayerState
 import com.phoebe.app.domain.PlayerTransportState
@@ -31,13 +32,9 @@ import com.phoebe.app.domain.PersonalMixPreferences
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.TrackMetadataUpdate
-import com.phoebe.app.domain.canAddToLocalPlaylist
-import com.phoebe.app.domain.canAddToPlexPlaylist
 import com.phoebe.app.domain.canTogglePlexLike
+import com.phoebe.app.domain.catalogPrefix
 import com.phoebe.app.domain.hasPlayableSource
-import com.phoebe.app.domain.isLocalPlaylist
-import com.phoebe.app.domain.playlistEntryKey
-import com.phoebe.app.domain.isRemoteProviderPlaylist
 import com.phoebe.app.domain.isEmbyFamily
 import com.phoebe.app.domain.isFromLocalFolder
 import com.phoebe.app.domain.isMusicAssistant
@@ -47,22 +44,19 @@ import com.phoebe.app.domain.serverAuthToken
 import com.phoebe.app.domain.supportsCollectionEntry
 import com.phoebe.app.domain.displayName
 import com.phoebe.app.domain.supportsRemotePlaylists
-import com.phoebe.app.domain.supportsRemoteRatings
-import com.phoebe.app.domain.supportsTrackRemoval
 import com.phoebe.app.domain.isJellyfin
 import com.phoebe.app.domain.providerLabel
-import com.phoebe.app.data.DownloadBatchResult
-import com.phoebe.app.data.FavoriteSyncResult
-import com.phoebe.app.data.FavoritePlaylistsExport
+import com.phoebe.app.data.DownloadServiceResult
 import com.phoebe.app.data.JellyfinQuickConnectResult
 import com.phoebe.app.data.JellyfinPlayHistorySyncResult
 import com.phoebe.app.data.ListenBrainzFeedbackScore
 import com.phoebe.app.data.NavidromePlayHistorySyncResult
+import com.phoebe.app.data.PlayHistoryRankedEntries
 import com.phoebe.app.data.PlexPlayHistorySyncResult
 import com.phoebe.app.data.PlexClient
 import com.phoebe.app.data.defaultPlexRadioStations
 import com.phoebe.app.playlists.PlaylistExportFormat
-import com.phoebe.app.playlists.PlaylistExporter
+import com.phoebe.app.player.MusicAssistantRemotePlayback
 import com.phoebe.app.player.asPlayerState
 import com.phoebe.app.player.isPlaybackActive
 import com.phoebe.app.domain.RecentSearchItem
@@ -73,26 +67,25 @@ import com.phoebe.app.platform.currentTimeMs
 import com.phoebe.app.platform.isDesktopPlatform
 import com.phoebe.app.platform.discoverJellyfinServers as discoverJellyfinServersOnNetwork
 import com.phoebe.app.platform.openExternalUrl
+import com.phoebe.app.platform.requestNotificationPermission
+import com.phoebe.app.ui.AppNavigationRequest
+import com.phoebe.app.ui.CollectionMixSeed
 import com.phoebe.app.updates.AppUpdateState
-import com.phoebe.app.updates.AvailableUpdate
-import com.phoebe.app.updates.UpdateInstallResult
 import io.ktor.http.Url
 import io.ktor.http.encodeURLParameter
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -101,31 +94,13 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-
-data class MusicAssistantRemotePlayback(
-    val tracks: List<Track>,
-    val index: Int,
-    val target: String,
-    val shuffle: Boolean = false,
-)
-
-data class CollectionMixSeed(
-    val facet: CollectionFacet,
-    val value: String,
-)
-
-sealed interface AppNavigationRequest {
-    data object SignIn : AppNavigationRequest
-    data object ServerPicker : AppNavigationRequest
-    data object LibraryPicker : AppNavigationRequest
-    data object Home : AppNavigationRequest
-    data object Player : AppNavigationRequest
-    data class PlaylistDetail(val playlistId: String) : AppNavigationRequest
-}
+import kotlinx.coroutines.withTimeout
 
 class AppState(
     private val dependencies: AppDependencies,
     private val scope: CoroutineScope,
+    private val playbackScope: CoroutineScope = scope,
+    private val closeDependenciesOnDispose: Boolean = true,
 ) {
     val session = dependencies.sessionRepository.session
     val catalog = dependencies.catalogRepository.catalog
@@ -145,18 +120,10 @@ class AppState(
     ) { audio, castState, musicAssistantRemote ->
         when {
             castState.isPlaybackActive -> castState.asPlayerState(audio)
-            musicAssistantRemote != null -> PlayerState(
-                queue = musicAssistantRemote.tracks,
-                currentIndex = musicAssistantRemote.index,
-                isPlaying = true,
-                bufferedPositionMs = musicAssistantRemote.tracks.getOrNull(musicAssistantRemote.index)?.durationMs ?: 0L,
-                durationMs = musicAssistantRemote.tracks.getOrNull(musicAssistantRemote.index)?.durationMs ?: 0L,
-                shuffle = musicAssistantRemote.shuffle,
-                volume = audio.volume,
-            )
+            musicAssistantRemote != null -> musicAssistantRemote.asPlayerState(audio)
             else -> audio
         }
-    }.stateIn(scope, SharingStarted.Eagerly, dependencies.audioPlayer.state.value)
+    }.stateIn(playbackScope, SharingStarted.Eagerly, dependencies.audioPlayer.state.value)
     val audioAnalysis: StateFlow<AudioAnalysisFrame> = dependencies.audioPlayer.audioAnalysis
     val shellPlayback: StateFlow<ShellPlaybackState> = player
         .map { playback ->
@@ -168,7 +135,7 @@ class AppState(
         }
         .distinctUntilChanged()
         .stateIn(
-            scope,
+            playbackScope,
             SharingStarted.Eagerly,
             ShellPlaybackState(
                 currentTrack = player.value.currentTrack,
@@ -186,7 +153,7 @@ class AppState(
         }
         .distinctUntilChanged()
         .stateIn(
-            scope,
+            playbackScope,
             SharingStarted.Eagerly,
             PlayerTransportState(
                 shuffle = player.value.shuffle,
@@ -203,7 +170,7 @@ class AppState(
         }
         .distinctUntilChanged()
         .stateIn(
-            scope,
+            playbackScope,
             SharingStarted.Eagerly,
             PlayerQueueSnapshot(
                 queue = player.value.queue,
@@ -222,7 +189,7 @@ class AppState(
         mutableMusicAssistantRemotePlayback,
     ) { castState, musicAssistantRemote ->
         castState.isPlaybackActive || musicAssistantRemote != null
-    }.stateIn(scope, SharingStarted.Eagerly, false)
+    }.stateIn(playbackScope, SharingStarted.Eagerly, false)
     val lastPlayedByArtist = dependencies.playHistoryRepository.lastPlayedByArtist
     val lastPlayedByAlbum = dependencies.playHistoryRepository.lastPlayedByAlbum
     val lastPlayedByTrack = dependencies.playHistoryRepository.lastPlayedByTrack
@@ -233,18 +200,11 @@ class AppState(
     val recentSearchItems = dependencies.searchHistoryRepository.items
     val defaultDownloadDirectoryLabel: String = dependencies.platformStorage.defaultDownloadDirectoryLabel()
 
-    private val mutableAppUpdateState = MutableStateFlow<AppUpdateState>(AppUpdateState.Idle)
-    val appUpdateState: StateFlow<AppUpdateState> = mutableAppUpdateState.asStateFlow()
-    private val mutablePendingUpdateInstallConfirmation = MutableStateFlow<AvailableUpdate?>(null)
-    val pendingUpdateInstallConfirmation: StateFlow<AvailableUpdate?> =
-        mutablePendingUpdateInstallConfirmation.asStateFlow()
-    private var pendingUpdateInstallConfirmationResponse: CompletableDeferred<Boolean>? = null
+    val appUpdateState: StateFlow<AppUpdateState> = dependencies.appUpdateService.state
+    val pendingUpdateInstallConfirmation = dependencies.appUpdateService.pendingInstallConfirmation
 
-    private val mutableNavigationRequests = MutableSharedFlow<AppNavigationRequest>(
-        replay = 1,
-        extraBufferCapacity = 32,
-    )
-    val navigationRequests: SharedFlow<AppNavigationRequest> = mutableNavigationRequests.asSharedFlow()
+    val navigationRequests = dependencies.navigationService.requests
+    val routeViewModelFactory = dependencies.routeViewModelFactory
 
     private val mutableTab = MutableStateFlow(LibraryTab.Albums)
     val tab: StateFlow<LibraryTab> = mutableTab
@@ -315,7 +275,41 @@ class AppState(
     private var plexPlayCountRefreshJob: Job? = null
     private var lightweightRemoteSyncJob: Job? = null
     private var downloadedArtworkCacheJob: Job? = null
+    private var artistDetailPreloadKey: String? = null
+    private var artistDetailPreloadJob: Job? = null
     private val activeDownloadJobs = mutableSetOf<Job>()
+    private var lastPlaybackHistoryRecord = PlaybackHistoryRecord()
+    private var disposed = false
+
+    fun dispose() {
+        if (disposed) return
+        disposed = true
+        listOfNotNull(
+            catalogRefreshJob,
+            playHistorySyncJob,
+            providerPlayHistoryRefreshJob,
+            plexPlayCountRefreshJob,
+            lightweightRemoteSyncJob,
+            downloadedArtworkCacheJob,
+            artistDetailPreloadJob,
+        ).forEach { it.cancel() }
+        activeDownloadJobs.toList().forEach { it.cancel() }
+        catalogRefreshJob = null
+        playHistorySyncJob = null
+        providerPlayHistoryRefreshJob = null
+        plexPlayCountRefreshJob = null
+        lightweightRemoteSyncJob = null
+        downloadedArtworkCacheJob = null
+        artistDetailPreloadJob = null
+        if (!closeDependenciesOnDispose) return
+        if (isDesktopPlatform()) {
+            CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
+                dependencies.close()
+            }
+        } else {
+            dependencies.close()
+        }
+    }
 
     private fun publishActiveDownloadJobCount() {
         mutableActiveDownloadJobCount.value = activeDownloadJobs.size
@@ -402,19 +396,8 @@ class AppState(
 
     private fun checkForUpdatesInBackground() {
         scope.launch {
-            if (mutableAppUpdateState.value is AppUpdateState.Installing) return@launch
-            mutableAppUpdateState.value = AppUpdateState.Checking
-            runCatching {
-                dependencies.updateRepository.checkForUpdate()
-            }.onSuccess { update ->
-                mutableAppUpdateState.value = if (update == null) {
-                    AppUpdateState.Current
-                } else {
-                    AppUpdateState.Available(update)
-                }
-            }.onFailure { error ->
+            dependencies.appUpdateService.checkForUpdates { error ->
                 PhoebeLog.d("Update") { "release check failed: ${error.message}" }
-                mutableAppUpdateState.value = AppUpdateState.Failed(error.message ?: "Couldn't check for updates.")
             }
         }
     }
@@ -494,28 +477,76 @@ class AppState(
      */
     private fun recordPlaybackHistory() {
         scope.launch {
-            var lastRecordedTrackId: String? = null
-            dependencies.audioPlayer.state.collect { state ->
-                val track = state.currentTrack ?: run {
-                    lastRecordedTrackId = null
-                    return@collect
+            var lastObservedPlayingTrackId: String? = null
+            player
+                .map { state ->
+                    PlaybackHistorySignal(
+                        track = state.currentTrack,
+                        isPlaying = state.isPlaying,
+                        isBuffering = state.isBuffering,
+                    )
                 }
-                if (track.id == lastRecordedTrackId) return@collect
-                lastRecordedTrackId = track.id
-                val playedAtMs = currentTimeMs()
-                val recorded = runCatching {
-                    dependencies.playHistoryRepository.recordPlay(track, playedAtMs)
-                }.onFailure { error ->
-                    if (error is CancellationException) throw error
-                    PhoebeLog.d("AppState") { "play history record failed for '${track.id}': ${error.message}" }
-                }.isSuccess
-                if (recorded) {
-                    scope.launch {
-                        dependencies.plexPlaybackReporter.markPlayed(track, playedAtMs)
+                .distinctUntilChanged()
+                .collect { signal ->
+                    val track = signal.track ?: run {
+                        lastObservedPlayingTrackId = null
+                        return@collect
                     }
+                    if (!signal.isPlaying || signal.isBuffering) return@collect
+                    if (track.id == lastObservedPlayingTrackId) return@collect
+                    lastObservedPlayingTrackId = track.id
+                    recordPlaybackStarted(track)
+                }
+        }
+    }
+
+    private fun recordPlaybackStarted(track: Track, playedAtMs: Long = currentTimeMs()) {
+        val historyTrack = track.canonicalPlayHistoryTrack()
+        val trackId = historyTrack.id
+        if (trackId.isBlank()) return
+        val previous = lastPlaybackHistoryRecord
+        if (
+            previous.trackId == trackId &&
+            playedAtMs >= previous.playedAtMs &&
+            playedAtMs - previous.playedAtMs < PlaybackHistoryDedupeWindowMs
+        ) {
+            return
+        }
+        lastPlaybackHistoryRecord = PlaybackHistoryRecord(trackId = trackId, playedAtMs = playedAtMs)
+        scope.launch {
+            val recorded = runCatching {
+                dependencies.playHistoryRepository.recordPlay(historyTrack, playedAtMs)
+            }.onFailure { error ->
+                if (error is CancellationException) throw error
+                PhoebeLog.d("AppState") { "play history record failed for '$trackId': ${error.message}" }
+            }.isSuccess
+            if (recorded) {
+                scope.launch {
+                    dependencies.plexPlaybackReporter.markPlayed(historyTrack, playedAtMs)
                 }
             }
         }
+    }
+
+    private fun Track.canonicalPlayHistoryTrack(): Track =
+        catalog.value.findTrackById(id) ?: this
+
+    private fun CatalogSnapshot.findTrackById(trackId: String): Track? {
+        if (trackId.isBlank()) return null
+        tracksByParent.values.forEach { parentTracks ->
+            parentTracks.firstOrNull { track -> track.matchesTrackId(trackId) }?.let { return it }
+        }
+        return null
+    }
+
+    private fun Track.matchesTrackId(trackId: String): Boolean {
+        if (id == trackId) return true
+        for (provider in MediaProviderType.entries) {
+            val prefix = "${provider.catalogPrefix}:"
+            if (id.startsWith(prefix) && id.removePrefix(prefix) == trackId) return true
+            if (trackId.startsWith(prefix) && trackId.removePrefix(prefix) == id) return true
+        }
+        return false
     }
 
     /**
@@ -546,40 +577,24 @@ class AppState(
     }
 
     /**
-     * If the saved session (or local folders) implies a browse flow, notify the root coordinator.
+     * If the saved remote session implies a browse flow, notify the root coordinator.
      * Covers startup races and missed navigation after async restore.
      */
     fun reconcileBrowseScreenIfNeeded() {
-        val target = restoredBrowseRequest()
-        if (target != AppNavigationRequest.SignIn) {
-            requestNavigation(target)
-        }
-    }
-
-    /** Destination implied by a restored remote session only (not local folders). */
-    private fun restoredBrowseRequest(sessionSnapshot: PlexSession? = session.value): AppNavigationRequest {
-        return when {
-            sessionSnapshot?.selectedLibrary != null -> AppNavigationRequest.Home
-            sessionSnapshot?.selectedServer != null -> AppNavigationRequest.LibraryPicker
-            sessionSnapshot?.token?.isNotBlank() == true -> AppNavigationRequest.ServerPicker
-            else -> AppNavigationRequest.SignIn
-        }
+        dependencies.navigationService.reconcileBrowseScreenIfNeeded(session.value)
     }
 
     fun initialNavigationRequest(): AppNavigationRequest = defaultBrowseRequest()
 
     private fun defaultBrowseRequest(sessionSnapshot: PlexSession? = session.value): AppNavigationRequest {
-        return when {
-            sessionSnapshot?.selectedLibrary != null -> AppNavigationRequest.Home
-            sessionSnapshot?.selectedServer != null -> AppNavigationRequest.LibraryPicker
-            sessionSnapshot?.token?.isNotBlank() == true -> AppNavigationRequest.ServerPicker
-            mediaSources.value.localFolders.any { it.enabled } -> AppNavigationRequest.Home
-            else -> AppNavigationRequest.SignIn
-        }
+        return dependencies.navigationService.initialRequest(
+            session = sessionSnapshot,
+            hasEnabledLocalFolders = hasEnabledLocalFolders(),
+        )
     }
 
     private fun requestNavigation(request: AppNavigationRequest) {
-        mutableNavigationRequests.tryEmit(request)
+        dependencies.navigationService.request(request)
     }
 
     private fun CatalogSnapshot.hasBrowseableContent(): Boolean =
@@ -588,30 +603,52 @@ class AppState(
             playlists.isNotEmpty() ||
             tracksByParent.values.any { it.isNotEmpty() }
 
-    fun startPlexSignIn() = scope.launchBusy {
-        val newPin = dependencies.sessionRepository.createPin()
-        mutablePin.value = newPin
-        openExternalUrl(newPin.authUrl)
-        mutableMessage.value = "Plex opened in your browser. Approve code ${newPin.code}, then finish sign-in."
+    fun startPlexSignIn() = scope.launch {
+        mutableBusy.value = true
+        try {
+            val newPin = withTimeout(PLEX_SIGN_IN_TIMEOUT_MS) {
+                dependencies.sessionRepository.createPin()
+            }
+            mutablePin.value = newPin
+            openExternalUrl(newPin.authUrl)
+            mutableMessage.value = "Plex opened in your browser. Approve code ${newPin.code}, then finish sign-in."
+        } catch (error: TimeoutCancellationException) {
+            mutableMessage.value = "Plex did not respond. Check your connection and try again."
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            mutableMessage.value = error.message ?: "Couldn't start Plex sign-in."
+        } finally {
+            mutableBusy.value = false
+        }
     }
 
     fun finishPlexSignIn() = scope.launch {
         val currentPin = mutablePin.value ?: return@launch
         mutableBusy.value = true
         mutableMessage.value = "Signing in with Plex…"
-        val servers = runCatching {
-            dependencies.sessionRepository.completePinAndListServers(currentPin)
-        }.getOrNull()
-        mutableBusy.value = false
-        if (servers == null) {
-            mutableMessage.value = "That Plex code is not approved yet."
-            return@launch
+        try {
+            val servers = withTimeout(PLEX_SIGN_IN_TIMEOUT_MS) {
+                dependencies.sessionRepository.completePinAndListServers(currentPin)
+            }
+            if (servers == null) {
+                mutableMessage.value = "That Plex code is not approved yet."
+                return@launch
+            }
+            requestNavigation(AppNavigationRequest.ServerPicker)
+            mutableServers.value = servers
+            mutableLibraries.value = emptyList()
+            mutableLibrariesLoading.value = false
+            mutableMessage.value = "Signed in. Pick the Plex server that hosts your music."
+        } catch (error: TimeoutCancellationException) {
+            mutableMessage.value = "Plex did not finish signing in. Check your connection and try again."
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            mutableMessage.value = error.message ?: "Couldn't sign in to Plex."
+        } finally {
+            mutableBusy.value = false
         }
-        requestNavigation(AppNavigationRequest.ServerPicker)
-        mutableServers.value = servers
-        mutableLibraries.value = emptyList()
-        mutableLibrariesLoading.value = false
-        mutableMessage.value = "Signed in. Pick the Plex server that hosts your music."
     }
 
     fun signInJellyfin(serverUrl: String, username: String, password: String) = scope.launch {
@@ -807,6 +844,7 @@ class AppState(
     }
 
     fun selectServer(server: PlexServer) = scope.launch {
+        mutableBusy.value = true
         cancelRemotePlayHistorySync()
         cancelLightweightRemoteSync()
         mutableLibraries.value = emptyList()
@@ -814,9 +852,14 @@ class AppState(
         val resolved = runCatching {
             dependencies.sessionRepository.selectServer(server, refreshConnections = false)
         }.onFailure {
+            mutableBusy.value = false
             mutableLibrariesLoading.value = false
             mutableMessage.value = it.message ?: "Couldn't select ${session.value.providerLabel()} server."
-        }.getOrNull() ?: return@launch
+        }.getOrNull()
+        if (resolved == null) {
+            mutableBusy.value = false
+            return@launch
+        }
         requestNavigation(AppNavigationRequest.LibraryPicker)
         runCatching {
             mutableLibraries.value = dependencies.sessionRepository.libraries(resolved)
@@ -824,6 +867,7 @@ class AppState(
             mutableMessage.value = it.message ?: "Couldn't load ${session.value.providerLabel()} libraries."
         }
         mutableLibrariesLoading.value = false
+        mutableBusy.value = false
     }
 
     fun selectLibrary(library: MusicLibrary, jellyfinSyncMode: JellyfinSyncMode? = null) = scope.launch {
@@ -870,12 +914,18 @@ class AppState(
         catalogRefreshJob = currentJob
         try {
             withContext(Dispatchers.Default) {
-                dependencies.catalogRepository.refreshAggregated(session.value, backgroundIfCached = backgroundIfCached)
-                ensureLikedSongsPlaylistIfPossible()
+                dependencies.catalogSyncService.refreshAggregatedCatalog(
+                    session = session.value,
+                    backgroundIfCached = backgroundIfCached,
+                )
             }
             warmPlaylistTracksInBackground()
-            if (session.value.isPlex() || session.value.isEmbyFamily() || session.value.isNavidrome()) {
-                syncRemotePlayHistory(showMessage = false, recentOnly = backgroundIfCached)
+            val currentSession = session.value
+            if (currentSession.isPlex() || currentSession.isEmbyFamily() || currentSession.isNavidrome()) {
+                syncRemotePlayHistory(
+                    showMessage = false,
+                    recentOnly = backgroundIfCached && !currentSession.isPlex(),
+                )
             } else {
                 syncRemotePlayHistoryInBackground()
             }
@@ -895,10 +945,9 @@ class AppState(
     }
 
     private fun warmPlaylistTracksInBackground() {
-        if (!session.value.supportsRemotePlaylists()) return
         scope.launch {
             runCatching {
-                dependencies.catalogRepository.warmPlaylistTracks(session.value)
+                dependencies.catalogSyncService.warmPlaylistTracks(session.value)
             }.onFailure { error ->
                 PhoebeLog.d("AppState") { "playlist warm failed: ${error.message}" }
             }
@@ -911,7 +960,7 @@ class AppState(
         downloadedArtworkCacheJob = scope.launch {
             runCatching {
                 if (activeDownloadJobs.isNotEmpty()) return@runCatching 0
-                dependencies.catalogRepository.cacheDownloadedArtwork()
+                dependencies.catalogSyncService.cacheDownloadedArtwork()
             }.onSuccess { cached ->
                 if (cached > 0) {
                     PhoebeLog.d("AppState") { "cached artwork for $cached downloaded tracks" }
@@ -923,12 +972,7 @@ class AppState(
     }
 
     private suspend fun ensureLikedSongsPlaylistIfPossible(): Playlist? {
-        if (!session.value.supportsRemotePlaylists()) return null
-        return runCatching {
-            dependencies.catalogRepository.ensureLocalLikedSongsPlaylist(session.value)
-        }.onFailure { error ->
-            PhoebeLog.d("AppState") { "Liked Songs setup failed: ${error.message}" }
-        }.getOrNull()
+        return dependencies.catalogSyncService.ensureLikedSongsPlaylistIfPossible(session.value)
     }
 
     fun openLikedSongsPlaylist() = scope.launch {
@@ -958,15 +1002,11 @@ class AppState(
     fun refreshPlayHistory() = startRemotePlayHistorySync(showMessage = true)
 
     private fun syncLightweightRemoteStateInBackground() {
-        syncRemotePlayHistoryInBackground()
-        val currentSession = session.value
-        if (currentSession?.selectedLibrary == null || currentSession.selectedServer == null) return
+        syncStartupPlayHistoryInBackground()
         lightweightRemoteSyncJob?.cancel()
         lightweightRemoteSyncJob = scope.launch(Dispatchers.Default) {
             runCatching {
-                dependencies.catalogRepository.syncLightweightRemoteState(currentSession)
-                ensureLikedSongsPlaylistIfPossible()
-                warmPlaylistTracksInBackground()
+                dependencies.catalogSyncService.syncLightweightRemoteState(session.value)
             }.onFailure { error ->
                 if (error is CancellationException) throw error
                 PhoebeLog.d("AppState") { "lightweight remote sync failed: ${error.message}" }
@@ -975,6 +1015,26 @@ class AppState(
     }
 
     private fun syncRemotePlayHistoryInBackground() = startRemotePlayHistorySync(showMessage = false)
+
+    private fun syncStartupPlayHistoryInBackground() {
+        val currentSession = session.value
+        if (!currentSession.isPlex()) {
+            syncRemotePlayHistoryInBackground()
+            return
+        }
+        if (shouldDeferBackgroundPlayHistorySync()) {
+            PhoebeLog.d("AppState") { "startup play history sync deferred: background playback active" }
+            return
+        }
+        cancelPlexPlayCountRefresh()
+        playHistorySyncJob?.cancel()
+        playHistorySyncJob = scope.launch {
+            PhoebeLog.d("AppState") { "startup Plex play history sync requested: recent pass then full reconcile" }
+            syncRemotePlayHistory(showMessage = false, recentOnly = true)
+            cancelPlexPlayCountRefresh()
+            syncRemotePlayHistory(showMessage = false, recentOnly = false)
+        }
+    }
 
     private fun shouldDeferBackgroundPlayHistorySync(): Boolean {
         if (PhoebeAppLifecycle.isUiVisible) return false
@@ -990,6 +1050,7 @@ class AppState(
             if (showMessage) mutableMessage.value = "${currentSession.providerLabel()} play history sync is handled from playback progress."
             return
         }
+        val effectiveRecentOnly = recentOnly && !currentSession.isPlex()
         if (!showMessage && shouldDeferBackgroundPlayHistorySync()) {
             PhoebeLog.d("AppState") { "play history sync deferred: background playback active" }
             return
@@ -997,14 +1058,14 @@ class AppState(
         if (showMessage) mutableMessage.value = "Syncing ${currentSession.providerLabel()} play history..."
         PhoebeLog.d("AppState") {
             "play history sync requested provider=${currentSession.providerLabel()} " +
-                "recentOnly=$recentOnly " +
+                "recentOnly=$effectiveRecentOnly " +
                 "showMessage=$showMessage hasServer=${currentSession?.selectedServer != null} " +
                 "hasLibrary=${currentSession?.selectedLibrary != null}"
         }
         cancelPlexPlayCountRefresh()
         playHistorySyncJob?.cancel()
         playHistorySyncJob = scope.launch {
-            syncRemotePlayHistory(showMessage = showMessage, recentOnly = recentOnly)
+            syncRemotePlayHistory(showMessage = showMessage, recentOnly = effectiveRecentOnly)
         }
     }
 
@@ -1077,27 +1138,13 @@ class AppState(
                 "play history sync started provider=${currentSession.providerLabel()} " +
                     "recentOnly=$recentOnly catalogTracks=${catalog.value.tracksByParent.values.sumOf { it.size }}"
             }
-            val result = if (currentSession.isPlex()) {
-                if (!recentOnly) {
-                    runCatching {
-                        dependencies.catalogRepository.warmPlexHistoryTracks(currentSession)
-                    }.onFailure { error ->
-                        PhoebeLog.d("AppState") { "Plex history track warm failed: ${error.message}" }
-                    }
-                }
-                val syncResult = if (recentOnly) {
-                    dependencies.plexPlayHistorySyncer.syncRecent(currentSession, catalog.value)
-                } else {
-                    dependencies.plexPlayHistorySyncer.sync(currentSession, catalog.value)
-                }
-                if (recentOnly) {
-                    launchKnownPlexPlayCountRefresh(currentSession)
-                }
-                syncResult
-            } else if (currentSession.isNavidrome()) {
-                dependencies.navidromePlayHistorySyncer.sync(currentSession, catalog.value)
-            } else {
-                dependencies.jellyfinPlayHistorySyncer.sync(currentSession, catalog.value)
+            val result = dependencies.catalogSyncService.syncRemotePlayHistory(
+                session = currentSession,
+                catalog = catalog.value,
+                recentOnly = recentOnly,
+            )
+            if (currentSession.isPlex() && recentOnly) {
+                launchKnownPlexPlayCountRefresh(currentSession)
             }
             warmTracksForMostPlayed()
             result
@@ -1137,11 +1184,8 @@ class AppState(
         }
         plexPlayCountRefreshJob?.cancel()
         plexPlayCountRefreshJob = scope.launch {
-            val refreshTrackIds = buildList {
-                addAll(dependencies.playHistoryRepository.queryTopMostPlayed(60).map { it.trackId })
-                addAll(dependencies.playHistoryRepository.queryTopRecentlyPlayed(60).map { it.trackId })
-            }.distinct()
-            dependencies.plexPlayHistorySyncer.refreshViewCountsForTrackIds(
+            val refreshTrackIds = dependencies.catalogSyncService.topPlayHistoryTrackIds(60)
+            dependencies.catalogSyncService.refreshPlexViewCountsForTrackIds(
                 currentSession,
                 refreshTrackIds,
             )
@@ -1154,19 +1198,34 @@ class AppState(
     }
 
     fun preloadArtistDetail(artist: Artist) {
-        scope.launch {
-            runCatching {
-                dependencies.catalogRepository.ensurePopularTracksForArtist(session.value, artist)
-            }.onFailure {
-                PhoebeLog.d("AppState") { "artist popular tracks preload failed for '${artist.title}': ${it.message}" }
-            }
-            runCatching {
-                dependencies.catalogRepository.ensureSimilarArtistsForArtist(session.value, artist)
-            }.onFailure {
-                PhoebeLog.d("AppState") { "artist similar preload failed for '${artist.title}': ${it.message}" }
-            }
-            runCatching {
-                dependencies.catalogRepository.ensureTracksForArtistAlbums(session.value, artist.title)
+        val preloadKey = artist.id.ifBlank { artist.title }
+        artistDetailPreloadJob?.takeIf { artistDetailPreloadKey == preloadKey && it.isActive }?.let {
+            return
+        }
+        artistDetailPreloadJob?.cancel()
+        artistDetailPreloadKey = preloadKey
+        artistDetailPreloadJob = scope.launch {
+            delay(75)
+            withContext(Dispatchers.Default) {
+                val currentSession = session.value
+                runCatching {
+                    dependencies.catalogRepository.ensurePopularTracksForArtist(currentSession, artist)
+                }.onFailure {
+                    if (it is CancellationException) throw it
+                    PhoebeLog.d("AppState") { "artist popular tracks preload failed for '${artist.title}': ${it.message}" }
+                }
+                runCatching {
+                    dependencies.catalogRepository.ensureSimilarArtistsForArtist(currentSession, artist)
+                }.onFailure {
+                    if (it is CancellationException) throw it
+                    PhoebeLog.d("AppState") { "artist similar preload failed for '${artist.title}': ${it.message}" }
+                }
+                runCatching {
+                    dependencies.catalogRepository.ensureTracksForArtistAlbums(currentSession, artist.title)
+                }.onFailure {
+                    if (it is CancellationException) throw it
+                    PhoebeLog.d("AppState") { "artist album tracks preload failed for '${artist.title}': ${it.message}" }
+                }
             }
         }
     }
@@ -1274,6 +1333,9 @@ class AppState(
     suspend fun resolveTracksByIds(trackIds: Collection<String>): Map<String, Track> =
         dependencies.catalogRepository.resolveTracksByIds(trackIds)
 
+    suspend fun queryPlayHistoryEntries(kind: PlayHistoryKind, limit: Int): PlayHistoryRankedEntries =
+        dependencies.playHistoryRepository.queryRankedEntries(kind, limit)
+
     fun warmTracksForMostPlayed(maxTracks: Int = 20) {
         if (!session.value.canUsePlexBackgroundFetches()) return
         val entries = buildList {
@@ -1297,7 +1359,13 @@ class AppState(
         if (signature == mostPlayedWarmSignature) return
         mostPlayedWarmSignature = signature
         scope.launch {
-            dependencies.catalogRepository.warmTracksForMostPlayed(session.value, entries, maxTracks)
+            if (session.value.isPlex()) {
+                dependencies.catalogSyncService.refreshPlexViewCountsForTrackIds(
+                    session.value,
+                    entries.map { it.trackId },
+                )
+            }
+            dependencies.catalogSyncService.warmTracksForMostPlayed(session.value, entries, maxTracks)
         }
     }
 
@@ -1474,7 +1542,12 @@ class AppState(
                 mutableMessage.value = support.message ?: "This queue can't be cast to Chromecast."
                 return false
             }
-            dependencies.castController.loadQueue(playbackTracks, startIndex)
+            val currentPlayer = dependencies.audioPlayer.state.value
+            val startPositionMs = currentPlayer.positionMs.takeIf {
+                currentPlayer.queue.getOrNull(currentPlayer.currentIndex)?.id == track.id
+            } ?: 0L
+            dependencies.castController.loadQueue(playbackTracks, startIndex, startPositionMs)
+            recordPlaybackStarted(track)
             if (shuffleEnabled || clearShuffle) {
                 dependencies.audioPlayer.setShuffle(shuffleEnabled)
             }
@@ -1497,6 +1570,7 @@ class AppState(
                         target = target,
                         shuffle = shuffleEnabled,
                     )
+                    recordPlaybackStarted(musicAssistantTrack)
                     mutableMessage.value = "Playing ${musicAssistantTrack.title} on Music Assistant: $target."
                 }.onFailure { error ->
                     mutableMessage.value = error.message ?: "Couldn't start Music Assistant playback."
@@ -1517,6 +1591,7 @@ class AppState(
                 dependencies.audioPlayer.setShuffle(false)
             }
         }
+        recordPlaybackStarted(track)
         collectionMixSeed?.toCollectionMix()?.let { mix ->
             scheduleCollectionMix(mix, playbackTracks.map { it.id }.toSet())
         }
@@ -1572,10 +1647,8 @@ class AppState(
         val remoteTarget = mutableMusicAssistantRemotePlayback.value?.target
         if (remoteTarget != null) {
             mutableMessage.value = "Music Assistant playback is running on $remoteTarget. Use Music Assistant for pause/resume."
-        } else if (dependencies.castController.state.value.isPlaybackActive) {
-            dependencies.castController.togglePlayPause()
         } else {
-            dependencies.audioPlayer.togglePlayPause()
+            dependencies.playbackTransportService.togglePlayPause()
         }
     }
 
@@ -1602,22 +1675,19 @@ class AppState(
     fun clearQueue() {
         if (mutableMusicAssistantRemotePlayback.value != null) {
             mutableMusicAssistantRemotePlayback.value = null
-        } else if (dependencies.castController.state.value.isPlaybackActive) {
-            dependencies.castController.disconnect()
         } else {
-            dependencies.audioPlayer.clearQueue()
+            dependencies.playbackTransportService.clearQueue()
         }
     }
 
     private fun stopPlayback() {
         mutableMusicAssistantRemotePlayback.value = null
-        dependencies.castController.disconnect()
-        dependencies.audioPlayer.stopPlayback()
+        dependencies.playbackTransportService.stopPlayback()
     }
-    fun addToUpNext(track: Track) = dependencies.audioPlayer.addToUpNext(track)
-    fun appendToQueue(tracks: List<Track>) = dependencies.audioPlayer.appendToQueue(tracks)
-    fun moveUpNext(fromIndex: Int, toIndex: Int) = dependencies.audioPlayer.moveUpNext(fromIndex, toIndex)
-    fun removeUpNext(index: Int) = dependencies.audioPlayer.removeUpNext(index)
+    fun addToUpNext(track: Track) = dependencies.playbackTransportService.addToUpNext(track)
+    fun appendToQueue(tracks: List<Track>) = dependencies.playbackTransportService.appendToQueue(tracks)
+    fun moveUpNext(fromIndex: Int, toIndex: Int) = dependencies.playbackTransportService.moveUpNext(fromIndex, toIndex)
+    fun removeUpNext(index: Int) = dependencies.playbackTransportService.removeUpNext(index)
     fun playUpNext(index: Int) {
         val current = player.value
         val target = current.currentIndex + 1 + index
@@ -1629,20 +1699,16 @@ class AppState(
         val remote = mutableMusicAssistantRemotePlayback.value
         if (remote != null) {
             playTracks(remote.tracks, (remote.index + 1).coerceIn(0, remote.tracks.lastIndex))
-        } else if (dependencies.castController.state.value.isPlaybackActive) {
-            dependencies.castController.next()
         } else {
-            dependencies.audioPlayer.next()
+            dependencies.playbackTransportService.next()
         }
     }
     fun previous() {
         val remote = mutableMusicAssistantRemotePlayback.value
         if (remote != null) {
             playTracks(remote.tracks, (remote.index - 1).coerceIn(0, remote.tracks.lastIndex))
-        } else if (dependencies.castController.state.value.isPlaybackActive) {
-            dependencies.castController.previous()
         } else {
-            dependencies.audioPlayer.previous()
+            dependencies.playbackTransportService.previous()
         }
     }
     fun skipQueueBy(delta: Int) {
@@ -1653,35 +1719,14 @@ class AppState(
         if (target == current.currentIndex) return
         playTracks(current.queue, target)
     }
-    fun seekTo(positionMs: Long) {
-        if (dependencies.castController.state.value.isPlaybackActive) {
-            dependencies.castController.seekTo(positionMs)
-        } else {
-            dependencies.audioPlayer.seekTo(positionMs)
-        }
-    }
+    fun seekTo(positionMs: Long) = dependencies.playbackTransportService.seekTo(positionMs)
     suspend fun loadLyrics(track: Track, forceRefresh: Boolean = false): LyricsLoadState =
         dependencies.lyricsRepository.lyricsFor(track, forceRefresh)
 
-    fun toggleShuffle() = dependencies.audioPlayer.setShuffle(!player.value.shuffle)
-    fun cycleRepeat() {
-        val next = when (player.value.repeat) {
-            RepeatMode.Off -> RepeatMode.One
-            RepeatMode.One -> RepeatMode.All
-            RepeatMode.All -> RepeatMode.Off
-        }
-        dependencies.audioPlayer.setRepeat(next)
-    }
+    fun toggleShuffle() = dependencies.playbackTransportService.toggleShuffle(player.value.shuffle)
+    fun cycleRepeat() = dependencies.playbackTransportService.cycleRepeat(player.value.repeat)
     fun setVolume(volume: Float) {
-        if (dependencies.castController.state.value.isConnected && dependencies.castController.setVolume(volume)) {
-            return
-        }
-        val controller = dependencies.systemVolume
-        if (controller.controlsPlayerOutput) {
-            controller.setVolume(volume)
-        } else {
-            dependencies.audioPlayer.setVolume(volume)
-        }
+        dependencies.playbackTransportService.setVolume(volume)
         if (isDesktopPlatform() && appSettings.value.persistVolumeSettings) {
             scope.launch(start = CoroutineStart.UNDISPATCHED) {
                 dependencies.appSettingsRepository.setSavedVolume(volume.coerceIn(0f, 1f))
@@ -1705,178 +1750,121 @@ class AppState(
     }
 
     fun setLibrarySortBy(sortBy: LibrarySortBy) = scope.launch {
-        dependencies.libraryUiRepository.setSortBy(sortBy)
+        dependencies.libraryPreferencesService.setSortBy(sortBy)
     }
 
     fun setLibrarySortAscending(ascending: Boolean) = scope.launch {
-        dependencies.libraryUiRepository.setAscending(ascending)
+        dependencies.libraryPreferencesService.setAscending(ascending)
     }
 
     fun setLibraryColumns(columns: LibraryColumnVisibility) {
-        dependencies.libraryUiRepository.applyColumns(columns)
+        dependencies.libraryPreferencesService.applyColumns(columns)
         scope.launch(Dispatchers.Default) {
-            dependencies.libraryUiRepository.persistCurrentToDisk()
+            dependencies.libraryPreferencesService.persistCurrentToDisk()
         }
     }
 
     fun setHomeSections(sections: List<HomeSection>) = scope.launch {
-        dependencies.libraryUiRepository.setHomeSections(sections)
+        dependencies.libraryPreferencesService.setHomeSections(sections)
     }
 
     fun setPersonalMixPreferences(preferences: PersonalMixPreferences) = scope.launch {
-        dependencies.libraryUiRepository.setPersonalMix(preferences)
+        dependencies.libraryPreferencesService.setPersonalMix(preferences)
     }
 
     fun setAlbumGridItemSize(sizeDp: Int) = scope.launch {
-        dependencies.libraryUiRepository.setAlbumGridItemSize(sizeDp)
+        dependencies.libraryPreferencesService.setAlbumGridItemSize(sizeDp)
     }
 
     fun setArtistGridItemSize(sizeDp: Int) = scope.launch {
-        dependencies.libraryUiRepository.setArtistGridItemSize(sizeDp)
+        dependencies.libraryPreferencesService.setArtistGridItemSize(sizeDp)
     }
 
     fun prependRecentSearch(item: RecentSearchItem) = scope.launch {
-        dependencies.searchHistoryRepository.prepend(item)
+        dependencies.settingsService.prependRecentSearch(item)
     }
 
     fun removeRecentSearch(item: RecentSearchItem) = scope.launch {
-        dependencies.searchHistoryRepository.remove(item)
+        dependencies.settingsService.removeRecentSearch(item)
     }
 
     fun clearRecentSearches() = scope.launch {
-        dependencies.searchHistoryRepository.clear()
+        dependencies.settingsService.clearRecentSearches()
     }
 
     fun setCrossfadeSeconds(seconds: Int) = scope.launch {
-        dependencies.appSettingsRepository.setCrossfadeSeconds(seconds)
+        dependencies.settingsService.setCrossfadeSeconds(seconds)
     }
 
     fun setScanLibraryOnLaunch(enabled: Boolean) = scope.launch {
-        dependencies.appSettingsRepository.setScanLibraryOnLaunch(enabled)
+        dependencies.settingsService.setScanLibraryOnLaunch(enabled)
     }
 
     fun setNotifyWhenDownloadFinishes(enabled: Boolean) = scope.launch {
-        dependencies.appSettingsRepository.setNotifyWhenDownloadFinishes(enabled)
+        dependencies.settingsService.setNotifyWhenDownloadFinishes(enabled)
+        if (enabled) {
+            requestNotificationPermission()
+        }
     }
 
     fun setNowPlayingVisualizerPreset(preset: NowPlayingVisualizerPreset) = scope.launch {
-        dependencies.appSettingsRepository.setNowPlayingVisualizerPreset(preset)
+        dependencies.settingsService.setNowPlayingVisualizerPreset(preset)
     }
 
     fun setBlurredArtworkAppearance(enabled: Boolean) = scope.launch {
-        dependencies.appSettingsRepository.setBlurredArtworkAppearance(enabled)
+        dependencies.settingsService.setBlurredArtworkAppearance(enabled)
     }
 
     fun installAvailableUpdate() = scope.launch {
-        val update = when (val state = mutableAppUpdateState.value) {
-            is AppUpdateState.Available -> state.update
-            is AppUpdateState.Failed -> state.lastKnownUpdate
-            is AppUpdateState.Installing -> return@launch
-            else -> null
-        } ?: return@launch
-
-        val initialMessage = "Downloading Phoebe ${update.versionName}..."
-        mutableAppUpdateState.value = AppUpdateState.Installing(update, initialMessage)
-        mutableMessage.value = initialMessage
-        mutablePlaybackSnackbar.value = initialMessage
-        runCatching {
-            dependencies.updateInstaller.install(
-                update = update,
-                onProgress = { progress ->
-                    mutableAppUpdateState.value = AppUpdateState.Installing(
-                        update = update,
-                        message = progress.message,
-                        progress = progress.fraction,
-                    )
-                },
-                confirmInstall = { readyUpdate ->
-                    mutableAppUpdateState.value = AppUpdateState.Installing(
-                        update = update,
-                        message = "Ready to install Phoebe ${readyUpdate.versionName}.",
-                        progress = 1f,
-                    )
-                    requestUpdateInstallConfirmation(readyUpdate)
-                },
-            )
-        }.onSuccess { result ->
-            mutableMessage.value = result.message
-            mutablePlaybackSnackbar.value = result.message
-            mutableAppUpdateState.value = when (result) {
-                is UpdateInstallResult.Started -> AppUpdateState.Installing(update, result.message)
-                is UpdateInstallResult.OpenedReleasePage,
-                is UpdateInstallResult.RequiresUserAction,
-                -> AppUpdateState.Available(update)
-            }
-        }.onFailure { error ->
-            val message = error.message ?: "Couldn't install the update."
+        dependencies.appUpdateService.installAvailableUpdate { message ->
             mutableMessage.value = message
             mutablePlaybackSnackbar.value = message
-            mutableAppUpdateState.value = AppUpdateState.Failed(message, update)
         }
     }
 
     fun respondToUpdateInstallConfirmation(install: Boolean) {
-        pendingUpdateInstallConfirmationResponse?.complete(install)
-    }
-
-    private suspend fun requestUpdateInstallConfirmation(update: AvailableUpdate): Boolean {
-        pendingUpdateInstallConfirmationResponse?.complete(false)
-        val response = CompletableDeferred<Boolean>()
-        pendingUpdateInstallConfirmationResponse = response
-        mutablePendingUpdateInstallConfirmation.value = update
-        return try {
-            response.await()
-        } finally {
-            if (pendingUpdateInstallConfirmationResponse === response) {
-                pendingUpdateInstallConfirmationResponse = null
-                mutablePendingUpdateInstallConfirmation.value = null
-            }
-        }
+        dependencies.appUpdateService.respondToInstallConfirmation(install)
     }
 
     fun connectListenBrainz(userToken: String) = scope.launch {
         mutableMessage.value = "Connecting ListenBrainz…"
         runCatching {
-            kotlinx.coroutines.withTimeout(LISTEN_BRAINZ_CONNECT_TIMEOUT_MS) {
-                dependencies.listenBrainzAccountRepository.connect(userToken)
-            }
-        }.onSuccess { validation ->
-            mutableMessage.value = "ListenBrainz connected as ${validation.username}."
+            dependencies.listenBrainzService.connect(userToken, LISTEN_BRAINZ_CONNECT_TIMEOUT_MS)
+        }.onSuccess { message ->
+            mutableMessage.value = message
         }.onFailure { error ->
-            mutableMessage.value = error.message ?: "Couldn't connect ListenBrainz."
+            mutableMessage.value = if (error is TimeoutCancellationException) {
+                "ListenBrainz did not respond. Check the token and try again."
+            } else {
+                error.message ?: "Couldn't connect ListenBrainz."
+            }
         }
     }
 
     fun disconnectListenBrainz() = scope.launch {
         runCatching {
-            dependencies.listenBrainzAccountRepository.disconnect()
-        }.onSuccess {
-            mutableMessage.value = "ListenBrainz disconnected."
+            dependencies.listenBrainzService.disconnect()
+        }.onSuccess { message ->
+            mutableMessage.value = message
         }.onFailure { error ->
             mutableMessage.value = error.message ?: "Couldn't disconnect ListenBrainz."
         }
     }
 
     fun setListenBrainzSubmitNowPlaying(enabled: Boolean) = scope.launch {
-        dependencies.listenBrainzAccountRepository.setSubmitNowPlaying(enabled)
+        dependencies.listenBrainzService.setSubmitNowPlaying(enabled)
     }
 
     fun setListenBrainzSubmitListens(enabled: Boolean) = scope.launch {
-        dependencies.listenBrainzAccountRepository.setSubmitListens(enabled)
+        dependencies.listenBrainzService.setSubmitListens(enabled)
     }
 
     fun setListenBrainzSubmitCurrentTrackFeedback(enabled: Boolean) = scope.launch {
-        dependencies.listenBrainzAccountRepository.setSubmitCurrentTrackFeedback(enabled)
+        dependencies.listenBrainzService.setSubmitCurrentTrackFeedback(enabled)
     }
 
     fun submitListenBrainzFeedback(score: ListenBrainzFeedbackScore) = scope.launch {
-        val submitted = dependencies.listenBrainzPlaybackReporter.submitCurrentTrackFeedback(score)
-        mutableMessage.value = when {
-            !submitted -> "ListenBrainz feedback is not available for this play yet."
-            score == ListenBrainzFeedbackScore.Love -> "Marked loved on ListenBrainz."
-            score == ListenBrainzFeedbackScore.Hate -> "Marked hated on ListenBrainz."
-            else -> "Cleared ListenBrainz feedback."
-        }
+        mutableMessage.value = dependencies.listenBrainzService.submitCurrentTrackFeedback(score)
     }
 
     fun setEqualizerEnabled(enabled: Boolean) {
@@ -1927,40 +1915,32 @@ class AppState(
 
     fun download(track: Track) = launchDownload {
         mutableMessage.value = "Downloading ${track.title}…"
-        val result = dependencies.catalogRepository.download(track)
-        mutableMessage.value = downloadMessage(result, singular = "song", plural = "songs")
-        result
+        dependencies.downloadService.download(track)
     }
 
     fun download(album: Album) = launchDownload {
         mutableMessage.value = "Downloading ${album.title}…"
-        val result = dependencies.catalogRepository.downloadAlbum(session.value, album)
-        mutableMessage.value = downloadMessage(result, singular = "song from ${album.title}", plural = "songs from ${album.title}")
-        result
+        dependencies.downloadService.download(session.value, album)
     }
 
     fun download(artist: Artist) = launchDownload {
         mutableMessage.value = "Downloading ${artist.title}…"
-        val result = dependencies.catalogRepository.downloadArtist(session.value, artist)
-        mutableMessage.value = downloadMessage(result, singular = "song by ${artist.title}", plural = "songs by ${artist.title}")
-        result
+        dependencies.downloadService.download(session.value, artist)
     }
 
     fun download(playlist: Playlist) = launchDownload {
         mutableMessage.value = "Downloading ${playlist.title}…"
-        dependencies.catalogRepository.previewQueuedDownloadsForPlaylist(playlist)
-        val result = dependencies.catalogRepository.downloadPlaylist(session.value, playlist)
-        mutableMessage.value = downloadMessage(result, singular = "song from ${playlist.title}", plural = "songs from ${playlist.title}")
-        result
+        dependencies.downloadService.download(session.value, playlist)
     }
 
-    private fun launchDownload(block: suspend () -> DownloadBatchResult): Job {
+    private fun launchDownload(block: suspend () -> DownloadServiceResult): Job {
         lateinit var downloadJob: Job
         downloadJob = scope.launch {
             try {
                 downloadedArtworkCacheJob?.cancel()
                 val result = block()
-                notifyDownloadFinishedIfNeeded(result)
+                mutableMessage.value = result.message
+                dependencies.downloadService.notifyDownloadFinishedIfNeeded(result.batch)
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Throwable) {
@@ -1978,36 +1958,16 @@ class AppState(
         return downloadJob
     }
 
-    private suspend fun notifyDownloadFinishedIfNeeded(result: DownloadBatchResult) {
-        if (!appSettings.value.notifyWhenDownloadFinishes || result.completed <= 0) return
-        val title = "Download complete"
-        val body = if (result.completed == 1) {
-            "Downloaded 1 song."
-        } else {
-            "Downloaded ${result.completed} songs."
-        }
-        dependencies.downloadNotifier.notifyDownloadFinished(title, body)
-    }
-
     fun setDownloadDirectory(uri: String?) = scope.launch {
-        dependencies.platformStorage.writeDownloadDirectory(uri)
-        mutableDownloadDirectory.value = dependencies.platformStorage.readDownloadDirectory()
-        mutableMessage.value = if (mutableDownloadDirectory.value == null) {
-            "Downloads will use ${dependencies.platformStorage.defaultDownloadDirectoryLabel()}."
-        } else {
-            "Download location updated."
-        }
+        val result = dependencies.downloadService.setDownloadDirectory(uri)
+        mutableDownloadDirectory.value = result.uri
+        mutableMessage.value = result.message
     }
 
     fun resetDownloadDirectory() = setDownloadDirectory(null)
 
     fun deleteAllDownloads() = scope.launch {
-        val deleted = dependencies.catalogRepository.deleteAllDownloads()
-        mutableMessage.value = if (deleted == 0) {
-            "No downloads to delete."
-        } else {
-            "Deleted $deleted downloaded ${if (deleted == 1) "song" else "songs"}."
-        }
+        mutableMessage.value = dependencies.downloadService.deleteAllDownloads()
     }
 
     fun deleteDownloads(tracks: List<Track>) = scope.launch {
@@ -2015,7 +1975,7 @@ class AppState(
     }
 
     fun deleteDownloads(playlist: Playlist) = scope.launch {
-        val tracks = dependencies.catalogRepository.tracksForPlaylist(session.value, playlist)
+        val tracks = dependencies.downloadService.tracksForPlaylist(session.value, playlist)
         deleteResolvedDownloads(tracks)
     }
 
@@ -2025,68 +1985,21 @@ class AppState(
 
     fun cancelDownloads(playlist: Playlist) = scope.launch {
         mutableMessage.value = "Preparing to cancel ${playlist.title}…"
-        val tracks = dependencies.catalogRepository.tracksForPlaylist(session.value, playlist)
+        val tracks = dependencies.downloadService.tracksForPlaylist(session.value, playlist)
         cancelResolvedDownloads(tracks)
     }
 
     private suspend fun deleteResolvedDownloads(tracks: List<Track>) {
-        val deleted = dependencies.catalogRepository.deleteDownloadsForTracks(tracks)
-        mutableMessage.value = if (deleted == 0) {
-            "No downloaded songs to delete."
-        } else {
-            "Deleted $deleted downloaded ${if (deleted == 1) "song" else "songs"}."
-        }
+        mutableMessage.value = dependencies.downloadService.deleteDownloadsForTracks(tracks)
     }
 
     private suspend fun cancelResolvedDownloads(tracks: List<Track>) {
         mutableMessage.value = "Cancelling download…"
         val jobs = activeDownloadJobs.toList()
-        dependencies.catalogRepository.cancelDownloadsForTracks(tracks)
         jobs.forEach { it.cancel() }
-        val deleted = dependencies.catalogRepository.deleteDownloadsForTracks(tracks)
+        val message = dependencies.downloadService.cancelDownloadsForTracks(tracks)
         jobs.forEach { it.join() }
-        mutableMessage.value = if (deleted == 0) {
-            "Cancelled download."
-        } else {
-            "Cancelled download and deleted $deleted downloaded ${if (deleted == 1) "song" else "songs"}."
-        }
-    }
-
-    private fun downloadMessage(result: DownloadBatchResult, singular: String, plural: String): String =
-        when {
-            result.total == 0 -> "Nothing to download yet."
-            result.failed == 0 && result.completed == result.total -> {
-                val noun = if (result.completed == 1) singular else plural
-                "Downloaded ${result.completed} $noun."
-            }
-            result.failed == 0 && result.completed > 0 && result.skipped > 0 -> {
-                val noun = if (result.completed == 1) singular else plural
-                "Downloaded ${result.completed} $noun. ${result.skipped} unavailable."
-            }
-            result.failed == 0 && result.skipped > 0 -> "No downloadable songs found."
-            result.completed > 0 -> {
-                val percent = ((result.completed.toFloat() / result.total.toFloat()) * 100f).toInt().coerceIn(0, 100)
-                val skipped = result.skipped.takeIf { it > 0 }?.let { " $it unavailable." }.orEmpty()
-                "Downloaded ${result.completed} of ${result.total} songs ($percent%). " +
-                    "${result.failed} failed.$skipped${result.downloadFailureDetailMessage()}"
-            }
-            else -> "Couldn't download those songs. 0% downloaded.${result.downloadFailureDetailMessage()}"
-        }
-
-    private fun DownloadBatchResult.downloadFailureDetailMessage(): String {
-        val topReason = failureReasons.firstOrNull() ?: return ""
-        val count = topReason.count.takeIf { it > 1 }?.let { " ($it)" }.orEmpty()
-        val sample = failedSamples.firstOrNull()
-            ?.title
-            ?.takeIf { it.isNotBlank() }
-            ?.let { " Example: ${it.compactDownloadMessageDetail(52)}." }
-            .orEmpty()
-        return " Top reason: ${topReason.reason.compactDownloadMessageDetail(96)}$count.$sample"
-    }
-
-    private fun String.compactDownloadMessageDetail(maxLength: Int): String {
-        val compact = replace(Regex("\\s+"), " ").trim()
-        return if (compact.length <= maxLength) compact else compact.take(maxLength - 1).trimEnd() + "…"
+        mutableMessage.value = message
     }
 
     /**
@@ -2098,103 +2011,34 @@ class AppState(
         initialTracks: List<Track> = emptyList(),
         onCreated: ((com.phoebe.app.domain.Playlist) -> Unit)? = null,
     ) = scope.launch {
-        val allLocalEligible = initialTracks.isNotEmpty() && initialTracks.all { it.canAddToLocalPlaylist() }
-        val allPlexEligible = initialTracks.isNotEmpty() && initialTracks.all { it.canAddToPlexPlaylist() }
-        val hasLocalOnlyTracks = initialTracks.any { it.canAddToLocalPlaylist() && !it.canAddToPlexPlaylist() }
-        val hasPlexTracks = initialTracks.any { it.canAddToPlexPlaylist() }
-        if (hasLocalOnlyTracks && hasPlexTracks) {
-            mutableMessage.value = "Can't mix local files and streaming songs in one playlist."
-            return@launch
-        }
-        val playlist = when {
-            allPlexEligible && session.value.supportsRemotePlaylists() -> {
-                if (initialTracks.any { !it.canAddToPlexPlaylist() }) {
-                    mutableMessage.value = "Only streaming library songs can be added to streaming playlists."
-                    return@launch
-                }
-                dependencies.catalogRepository.createPlaylist(session.value, title, initialTracks)
-            }
-            allLocalEligible || (initialTracks.isEmpty() && !session.value.supportsRemotePlaylists() && hasEnabledLocalFolders()) -> {
-                if (!hasEnabledLocalFolders()) {
-                    mutableMessage.value = "Add a local music folder to create playlists."
-                    return@launch
-                }
-                if (initialTracks.any { !it.canAddToLocalPlaylist() }) {
-                    mutableMessage.value = "Only local audio files can be added to local playlists."
-                    return@launch
-                }
-                dependencies.catalogRepository.createLocalPlaylist(title, initialTracks)
-            }
-            initialTracks.isEmpty() && session.value.supportsRemotePlaylists() -> {
-                dependencies.catalogRepository.createPlaylist(session.value, title, initialTracks)
-            }
-            else -> {
-                mutableMessage.value = "Sign in to your provider, or add a local music folder to use playlists."
-                return@launch
-            }
-        }
-        if (playlist != null) {
-            onCreated?.invoke(playlist)
+        val result = dependencies.playlistService.createPlaylist(
+            session = session.value,
+            hasEnabledLocalFolders = hasEnabledLocalFolders(),
+            title = title,
+            initialTracks = initialTracks,
+        )
+        val createdPlaylist = result.playlist
+        if (createdPlaylist != null) {
+            onCreated?.invoke(createdPlaylist)
         } else {
-            mutableMessage.value = "Couldn't create playlist '$title'."
+            mutableMessage.value = result.message ?: "Couldn't create playlist '$title'."
         }
     }
 
     /** Append [track] to [playlist] when the session, playlist type, and track are eligible. */
     fun addToPlaylist(playlist: com.phoebe.app.domain.Playlist, track: Track) = scope.launch {
-        if (playlist.isLocalPlaylist()) {
-            if (!track.canAddToLocalPlaylist()) {
-                mutableMessage.value = "Only local audio files can be added to local playlists."
-                return@launch
-            }
-        } else {
-            if (!session.value.supportsRemotePlaylists()) {
-                mutableMessage.value = "Sign in and select a music library to use streaming playlists."
-                return@launch
-            }
-            if (!playlist.isRemoteProviderPlaylist()) {
-                mutableMessage.value = "This playlist can't be edited in Phoebe."
-                return@launch
-            }
-            if (!track.canAddToPlexPlaylist()) {
-                mutableMessage.value = "Only streaming library songs can be added to streaming playlists."
-                return@launch
-            }
-        }
-        val before = catalog.value.tracksByParent[playlist.id].orEmpty()
-        val trackKey = track.playlistEntryKey()
-        val alreadyPresent = before.any { it.playlistEntryKey() == trackKey || it.id == track.id }
         PhoebeLog.d("AppState") { "addToPlaylist → playlist='${playlist.title}' (${playlist.id}), track='${track.title}' (${track.id})" }
-        dependencies.catalogRepository.addTracksToPlaylist(session.value, playlist, listOf(track))
-        val after = catalog.value.tracksByParent[playlist.id].orEmpty()
-        mutableMessage.value = when {
-            alreadyPresent && after.size == before.size -> "${track.title} is already in ${playlist.title}."
-            after.any { it.playlistEntryKey() == trackKey || it.id == track.id } || after.size > before.size ->
-                "Added to ${playlist.title}."
-            else -> "Couldn't add to ${playlist.title}."
-        }
+        mutableMessage.value = dependencies.playlistService.addToPlaylist(session.value, catalog.value, playlist, track)
     }
 
     fun movePlaylistTrack(playlist: Playlist, fromIndex: Int, toIndex: Int) = scope.launch {
-        val moved = dependencies.catalogRepository.movePlaylistTrack(session.value, playlist, fromIndex, toIndex)
-        if (!moved && fromIndex != toIndex) {
-            mutableMessage.value = "Couldn't reorder ${playlist.title}."
-        }
+        dependencies.playlistService.movePlaylistTrack(session.value, playlist, fromIndex, toIndex)
+            ?.let { mutableMessage.value = it }
     }
 
     fun removePlaylistTracks(playlist: Playlist, tracks: List<Track>) = scope.launch {
-        if (tracks.isEmpty()) return@launch
-        if (!playlist.supportsTrackRemoval()) {
-            mutableMessage.value = "This playlist can't be edited in Phoebe."
-            return@launch
-        }
-        val removed = dependencies.catalogRepository.removeTracksFromPlaylist(session.value, playlist, tracks)
-        mutableMessage.value = if (removed) {
-            val count = tracks.size
-            "Removed $count ${if (count == 1) "song" else "songs"} from ${playlist.title}."
-        } else {
-            "Couldn't remove songs from ${playlist.title}."
-        }
+        dependencies.playlistService.removePlaylistTracks(session.value, playlist, tracks)
+            ?.let { mutableMessage.value = it }
     }
 
     fun toggleLikedTrack(track: Track) = scope.launch {
@@ -2244,41 +2088,15 @@ class AppState(
         source: com.phoebe.app.domain.Playlist,
         target: com.phoebe.app.domain.Playlist,
     ) = scope.launch {
-        if (source.id == target.id) return@launch
-        if (!source.id.startsWith("plex:") || !target.id.startsWith("plex:")) {
-            mutableMessage.value = "Playlist copying supports Plex playlists only."
-            return@launch
-        }
-        val copied = dependencies.catalogRepository.copyPlexPlaylistIntoPlaylist(session.value, source, target)
-        mutableMessage.value = if (copied > 0) {
-            "Copied $copied songs to ${target.title}."
-        } else {
-            "No new songs to copy."
-        }
+        dependencies.playlistService.copyPlaylistIntoPlaylist(session.value, source, target)
+            ?.let { mutableMessage.value = it }
     }
 
     fun exportLocalPlaylist(
         playlist: com.phoebe.app.domain.Playlist,
         format: PlaylistExportFormat,
     ) = scope.launch {
-        if (!playlist.isLocalPlaylist()) {
-            mutableMessage.value = "Only local playlists can be exported."
-            return@launch
-        }
-        val tracks = dependencies.catalogRepository.tracksForPlaylist(session.value, playlist)
-        if (tracks.isEmpty()) {
-            mutableMessage.value = "Nothing to export — playlist is empty."
-            return@launch
-        }
-        val content = PlaylistExporter.export(tracks, format)
-        val fileName = PlaylistExporter.suggestedFileName(playlist.title, format)
-        runCatching {
-            dependencies.platformStorage.writeText("exports/$fileName", content)
-        }.onSuccess {
-            mutableMessage.value = "Exported ${tracks.size} songs to $fileName."
-        }.onFailure {
-            mutableMessage.value = it.message ?: "Couldn't export playlist."
-        }
+        mutableMessage.value = dependencies.playlistService.exportLocalPlaylist(session.value, playlist, format)
     }
 
     private fun hasEnabledLocalFolders(): Boolean =
@@ -2293,129 +2111,44 @@ class AppState(
     }
 
     fun updateTrackMetadata(update: TrackMetadataUpdate) = scope.launch {
-        val result = dependencies.catalogRepository.updateTrackMetadata(session.value, update)
-        val provider = session.value.providerLabel()
-        mutableMessage.value = when {
-            !result.savedLocally -> "Couldn't find that song in the library."
-            result.plexAttempted && result.plexSynced -> "Metadata saved and synced to $provider."
-            result.plexAttempted -> "Metadata saved locally, but $provider sync failed."
-            else -> "Metadata saved."
-        }
+        mutableMessage.value = dependencies.catalogItemMutationService.updateTrackMetadata(session.value, update)
     }
 
     fun rateTrack(track: Track, rating: Float?) = scope.launch {
-        val result = dependencies.catalogRepository.rateTrack(session.value, track, rating)
-        mutableMessage.value = ratingMessage(result.savedLocally, result.plexAttempted, result.plexSynced)
+        mutableMessage.value = dependencies.catalogItemMutationService.rateTrack(session.value, track, rating)
     }
 
     fun rateArtist(artist: Artist, rating: Float?) = scope.launch {
-        val result = dependencies.catalogRepository.rateArtist(session.value, artist, rating)
-        mutableMessage.value = ratingMessage(result.savedLocally, result.plexAttempted, result.plexSynced)
+        mutableMessage.value = dependencies.catalogItemMutationService.rateArtist(session.value, artist, rating)
     }
 
     fun rateAlbum(album: Album, rating: Float?) = scope.launch {
-        val result = dependencies.catalogRepository.rateAlbum(session.value, album, rating)
-        mutableMessage.value = ratingMessage(result.savedLocally, result.plexAttempted, result.plexSynced)
+        mutableMessage.value = dependencies.catalogItemMutationService.rateAlbum(session.value, album, rating)
     }
 
     fun ratePlaylist(playlist: Playlist, rating: Float?) = scope.launch {
-        val result = dependencies.catalogRepository.ratePlaylist(session.value, playlist, rating)
-        mutableMessage.value = ratingMessage(result.savedLocally, result.plexAttempted, result.plexSynced)
+        mutableMessage.value = dependencies.catalogItemMutationService.ratePlaylist(session.value, playlist, rating)
     }
 
     fun toggleFavoriteArtist(artist: Artist) = scope.launch {
-        mutableMessage.value = favoriteMessage(
-            label = "Artist",
-            result = dependencies.catalogRepository.toggleFavoriteArtist(session.value, artist),
-            plexUnavailableMessage = null,
-        )
+        mutableMessage.value = dependencies.catalogItemMutationService.toggleFavoriteArtist(session.value, artist)
     }
 
     fun toggleFavoriteAlbum(album: Album) = scope.launch {
-        mutableMessage.value = favoriteMessage(
-            label = "Album",
-            result = dependencies.catalogRepository.toggleFavoriteAlbum(session.value, album),
-            plexUnavailableMessage = null,
-        )
+        mutableMessage.value = dependencies.catalogItemMutationService.toggleFavoriteAlbum(session.value, album)
     }
 
     fun toggleFavoritePlaylist(playlist: Playlist) = scope.launch {
-        mutableMessage.value = favoriteMessage(
-            label = "Playlist",
-            result = dependencies.catalogRepository.toggleFavoritePlaylist(session.value, playlist),
-            plexUnavailableMessage = null,
-        )
+        mutableMessage.value = dependencies.catalogItemMutationService.toggleFavoritePlaylist(session.value, playlist)
     }
 
     fun exportFavoritePlaylists() = scope.launch {
-        val export = dependencies.catalogRepository.favoritePlaylistsExport()
-        if (export.playlists.isEmpty()) {
-            mutableMessage.value = "No favorite playlists to export."
-            return@launch
-        }
-        runCatching {
-            dependencies.platformStorage.writeText(
-                FavoritePlaylistsExportPath,
-                PlexClient.PlexJson.encodeToString(FavoritePlaylistsExport.serializer(), export),
-            )
-        }.onSuccess {
-            mutableMessage.value = "Exported ${export.playlists.size} favorite playlists."
-        }.onFailure { error ->
-            mutableMessage.value = error.message ?: "Couldn't export favorite playlists."
-        }
+        mutableMessage.value = dependencies.catalogItemMutationService.exportFavoritePlaylists()
     }
 
     fun importFavoritePlaylists() = scope.launch {
-        val content = dependencies.platformStorage.readText(FavoritePlaylistsExportPath)
-        if (content.isNullOrBlank()) {
-            mutableMessage.value = "No favorite playlist export found."
-            return@launch
-        }
-        runCatching {
-            val export = PlexClient.PlexJson.decodeFromString(FavoritePlaylistsExport.serializer(), content)
-            dependencies.catalogRepository.importFavoritePlaylists(export)
-        }.onSuccess { imported ->
-            mutableMessage.value = if (imported > 0) {
-                "Imported $imported favorite playlists."
-            } else {
-                "No matching playlists found to import."
-            }
-        }.onFailure { error ->
-            mutableMessage.value = error.message ?: "Couldn't import favorite playlists."
-        }
+        mutableMessage.value = dependencies.catalogItemMutationService.importFavoritePlaylists()
     }
-
-    private fun favoriteMessage(
-        label: String,
-        result: FavoriteSyncResult,
-        plexUnavailableMessage: String?,
-    ): String {
-        val provider = session.value.providerLabel()
-        return when (result.favorite) {
-            null -> "Couldn't find that item in the library."
-            true -> when {
-                result.plexAttempted && result.plexSynced -> "$label added to favorites and synced to $provider."
-                result.plexAttempted -> "$label added to favorites, but $provider sync failed."
-                plexUnavailableMessage != null -> "$label added to favorites. $plexUnavailableMessage"
-                else -> "$label added to favorites."
-            }
-            false -> when {
-                result.plexAttempted && result.plexSynced -> "$label removed from favorites and synced to $provider."
-                result.plexAttempted -> "$label removed from favorites, but $provider sync failed."
-                plexUnavailableMessage != null -> "$label removed from favorites. $plexUnavailableMessage"
-                else -> "$label removed from favorites."
-            }
-        }
-    }
-
-    private fun ratingMessage(savedLocally: Boolean, plexAttempted: Boolean, plexSynced: Boolean): String =
-        when {
-            !savedLocally -> "Couldn't find that item in the library."
-            plexAttempted && plexSynced -> "Rating saved and synced to ${session.value.providerLabel()}."
-            plexAttempted -> "Rating saved locally, but ${session.value.providerLabel()} sync failed."
-            session.value.supportsRemoteRatings() -> "Rating saved."
-            else -> "Rating saved locally."
-        }
 
     fun addLocalFolderFromUri(rootUri: String?) = scope.launch {
         if (rootUri.isNullOrBlank()) return@launch
@@ -2512,7 +2245,8 @@ class AppState(
 private fun PlexSession?.canUsePlexBackgroundFetches(): Boolean {
     val server = this?.selectedServer ?: return false
     if (isNavidrome() || isEmbyFamily()) return server.uri.isNotBlank()
-    return server.connectionUris.isNotEmpty() ||
+    return server.uri.isNotBlank() ||
+        server.connectionUris.isNotEmpty() ||
         server.advertisedConnectionUris.isNotEmpty() ||
         server.localConnectionUris.isNotEmpty()
 }
@@ -2596,7 +2330,21 @@ private fun withQueryParameters(url: Url, vararg replacements: Pair<String, Stri
     return rebuilt
 }
 
+private data class PlaybackHistorySignal(
+    val track: Track?,
+    val isPlaying: Boolean,
+    val isBuffering: Boolean,
+)
+
+private data class PlaybackHistoryRecord(
+    val trackId: String? = null,
+    val playedAtMs: Long = Long.MIN_VALUE,
+)
+
+private const val PlaybackHistoryDedupeWindowMs = 30_000L
+
 private const val ProviderPlayHistoryDebounceMs = 8_000L
 
-private const val FavoritePlaylistsExportPath = "exports/favorite-playlists.json"
+private const val PLEX_SIGN_IN_TIMEOUT_MS = 20_000L
+
 private const val LISTEN_BRAINZ_CONNECT_TIMEOUT_MS = 45_000L

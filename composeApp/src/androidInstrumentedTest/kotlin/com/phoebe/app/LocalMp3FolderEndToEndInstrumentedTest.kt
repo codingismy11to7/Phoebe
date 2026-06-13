@@ -3,10 +3,10 @@ package com.phoebe.app
 import android.app.Application
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import com.phoebe.app.data.CatalogRepository
 import com.phoebe.app.data.MediaSourcesRepository
 import com.phoebe.app.data.PlexClient
 import com.phoebe.app.platform.PlatformStorage
+import com.phoebe.app.player.SimpleAudioPlayer
 import com.phoebe.app.testing.minimalMp3Bytes
 import com.phoebe.app.testing.newAndroidTestPhoebeDatabase
 import io.ktor.client.HttpClient
@@ -63,7 +63,7 @@ class LocalMp3FolderEndToEndInstrumentedTest {
         dbName = testDb.sqliteName
         val http = HttpClient(MockEngine { respond("", HttpStatusCode.NotFound) })
         val mediaSources = MediaSourcesRepository(testDb.database, PlatformStorage())
-        val catalog = CatalogRepository(
+        val catalog = testCatalogRepository(
             plexClient = PlexClient(http),
             database = testDb.database,
             storage = PlatformStorage(),
@@ -91,7 +91,7 @@ class LocalMp3FolderEndToEndInstrumentedTest {
         dbName = testDb.sqliteName
         val http = HttpClient(MockEngine { respond("", HttpStatusCode.NotFound) })
         val mediaSources = MediaSourcesRepository(testDb.database, PlatformStorage())
-        val catalog = CatalogRepository(
+        val catalog = testCatalogRepository(
             plexClient = PlexClient(http),
             database = testDb.database,
             storage = PlatformStorage(),
@@ -113,4 +113,13 @@ class LocalMp3FolderEndToEndInstrumentedTest {
 
 private fun File.writeMinimalMp3Bytes() {
     writeBytes(minimalMp3Bytes())
+}
+
+private class RecordingAudioPlayer : SimpleAudioPlayer() {
+    var lastUri: String? = null
+
+    override fun playUri(uri: String) {
+        lastUri = uri
+        markPlaybackReady()
+    }
 }

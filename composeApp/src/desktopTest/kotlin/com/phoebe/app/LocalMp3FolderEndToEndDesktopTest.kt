@@ -4,6 +4,7 @@ import app.cash.sqldelight.db.SqlDriver
 import com.phoebe.app.data.CatalogRepository
 import com.phoebe.app.data.MediaSourcesRepository
 import com.phoebe.app.data.PlexClient
+import com.phoebe.app.player.SimpleAudioPlayer
 import com.phoebe.app.platform.PlatformStorage
 import com.phoebe.app.testing.minimalMp3Bytes
 import com.phoebe.app.testing.newInMemoryPhoebeDatabase
@@ -50,7 +51,7 @@ class LocalMp3FolderEndToEndDesktopTest {
         driver = sqlDriver
         val http = testHttpClient(MockEngine { respond("", HttpStatusCode.NotFound) })
         val mediaSources = MediaSourcesRepository(db, PlatformStorage())
-        val catalog = CatalogRepository(
+        val catalog = testCatalogRepository(
             plexClient = PlexClient(http),
             database = db,
             storage = PlatformStorage(),
@@ -77,7 +78,7 @@ class LocalMp3FolderEndToEndDesktopTest {
         driver = sqlDriver
         val http = testHttpClient(MockEngine { respond("", HttpStatusCode.NotFound) })
         val mediaSources = MediaSourcesRepository(db, PlatformStorage())
-        val catalog = CatalogRepository(
+        val catalog = testCatalogRepository(
             plexClient = PlexClient(http),
             database = db,
             storage = PlatformStorage(),
@@ -108,7 +109,7 @@ class LocalMp3FolderEndToEndDesktopTest {
         driver = sqlDriver
         val http = testHttpClient(MockEngine { respond("", HttpStatusCode.NotFound) })
         val mediaSources = MediaSourcesRepository(db, PlatformStorage())
-        val catalog = CatalogRepository(
+        val catalog = testCatalogRepository(
             plexClient = PlexClient(http),
             database = db,
             storage = PlatformStorage(),
@@ -135,4 +136,13 @@ class LocalMp3FolderEndToEndDesktopTest {
 
 private fun File.writeMinimalMp3Bytes() {
     writeBytes(minimalMp3Bytes())
+}
+
+private class RecordingAudioPlayer : SimpleAudioPlayer() {
+    var lastUri: String? = null
+
+    override fun playUri(uri: String) {
+        lastUri = uri
+        markPlaybackReady()
+    }
 }

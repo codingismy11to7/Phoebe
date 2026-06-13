@@ -14,8 +14,10 @@ import com.phoebe.app.data.CatalogRepository
 import com.phoebe.app.data.MediaSourcesRepository
 import com.phoebe.app.data.PlexClient
 import com.phoebe.app.domain.Track
+import com.phoebe.app.feature.library.TrackList
 import com.phoebe.app.platform.PlatformStorage
 import com.phoebe.app.player.DesktopAudioPlayer
+import com.phoebe.app.testCatalogRepository
 import com.phoebe.app.testing.PlaybackStartupProbe
 import com.phoebe.app.testing.PlaybackStartupThresholds
 import com.phoebe.app.testing.newInMemoryPhoebeDatabase
@@ -107,7 +109,7 @@ class PlaybackStartupRegressionDesktopTest {
         val http = testHttpClient(MockEngine { respond("", HttpStatusCode.NotFound) })
         val storage = PlatformStorage()
         val mediaSources = MediaSourcesRepository(db, storage)
-        val catalog = CatalogRepository(
+        val catalog = testCatalogRepository(
             plexClient = PlexClient(http),
             database = db,
             storage = storage,

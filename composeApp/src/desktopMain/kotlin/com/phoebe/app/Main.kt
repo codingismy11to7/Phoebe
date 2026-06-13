@@ -29,14 +29,22 @@ import com.sun.jna.Library
 import com.sun.jna.Native
 import com.sun.jna.Pointer
 import java.awt.Component
+import java.awt.Desktop
 import java.awt.EventQueue
 import java.awt.Image
 import java.awt.event.HierarchyEvent
 import java.awt.event.HierarchyListener
 import java.awt.event.WindowAdapter
 import java.awt.event.WindowEvent
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import javax.imageio.ImageIO
 import javax.swing.RootPaneContainer
+import kotlin.concurrent.thread
+import kotlin.system.exitProcess
+
+private val desktopAppState = AtomicReference<AppState?>()
+private val desktopShutdownStarted = AtomicBoolean(false)
 
 fun main(args: Array<String>) {
     configureDesktopApplicationName()
@@ -44,6 +52,7 @@ fun main(args: Array<String>) {
     configureSandboxedNativeLibraries()
     if (runDesktopPlaybackSmokeIfRequested(args)) return
 
+    installMacQuitHandler()
     applyMacDockIcon(isDebugBuild())
     application {
         PhoebeLog.d("Phoebe") { "desktop launched (debug=${isDebugBuild()})" }
@@ -65,8 +74,13 @@ fun main(args: Array<String>) {
             onDispose {}
         }
         var useLightAppearance by remember { mutableStateOf(false) }
+        var appState by remember { mutableStateOf<AppState?>(null) }
+        val closeApplication = {
+            requestDesktopShutdown(appState)
+            exitApplication()
+        }
         Window(
-            onCloseRequest = ::exitApplication,
+            onCloseRequest = closeApplication,
             title = if (useCustomWindowsTitleBar) "" else appDisplayName(),
             state = windowState,
             icon = icon,
@@ -85,7 +99,7 @@ fun main(args: Array<String>) {
                 if (useCustomWindowsTitleBar) {
                     DesktopWindowTitleBar(
                         useLightAppearance = useLightAppearance,
-                        onClose = ::exitApplication,
+                        onClose = closeApplication,
                     )
                 }
                 CompositionLocalProvider(LocalDesktopMergesTitleBar provides useCustomWindowsTitleBar) {
@@ -96,10 +110,43 @@ fun main(args: Array<String>) {
                                 WindowsWindowChrome.apply(window, light)
                             }
                         },
+                        onAppStateReady = {
+                            appState = it
+                            desktopAppState.set(it)
+                        },
                     )
                 }
             }
         }
+    }
+}
+
+private fun requestDesktopShutdown(appState: AppState?) {
+    if (desktopShutdownStarted.compareAndSet(false, true)) {
+        appState?.dispose()
+    }
+}
+
+private fun installMacQuitHandler() {
+    if (!isMacOs()) return
+    runCatching {
+        if (!Desktop.isDesktopSupported()) return
+        val desktop = Desktop.getDesktop()
+        if (!desktop.isSupported(Desktop.Action.APP_QUIT_HANDLER)) return
+        desktop.setQuitHandler { _, response ->
+            requestDesktopShutdown(desktopAppState.get())
+            response.cancelQuit()
+            thread(name = "Phoebe-mac-quit", isDaemon = false) {
+                thread(name = "Phoebe-mac-quit-halt", isDaemon = true) {
+                    Thread.sleep(2_000L)
+                    Runtime.getRuntime().halt(0)
+                }
+                Thread.sleep(500L)
+                exitProcess(0)
+            }
+        }
+    }.onFailure { error ->
+        PhoebeLog.d("Phoebe") { "macOS quit handler install failed: ${error.message}" }
     }
 }
 

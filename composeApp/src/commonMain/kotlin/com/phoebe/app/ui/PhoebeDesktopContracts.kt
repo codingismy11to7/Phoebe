@@ -3,6 +3,13 @@ package com.phoebe.app.ui
 import com.phoebe.app.data.JellyfinQuickConnectResult
 import com.phoebe.app.data.ListenBrainzFeedbackScore
 import com.phoebe.app.data.ListenBrainzFeedbackTarget
+import com.phoebe.app.data.PlayHistoryRankedEntries
+import com.phoebe.app.data.PlayHistorySnapshot
+import com.phoebe.app.data.rankedEntries
+import com.phoebe.app.feature.home.HomeUiState
+import com.phoebe.app.feature.library.LibraryFilterTab
+import com.phoebe.app.feature.settings.SettingsCategory
+import com.phoebe.app.di.RouteViewModelFactory
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.AppSettings
 import com.phoebe.app.domain.AppScreen
@@ -29,6 +36,7 @@ import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.PlayerState
 import com.phoebe.app.domain.PlayerTransportState
+import com.phoebe.app.domain.PlayHistoryKind
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.ShellPlaybackState
 import com.phoebe.app.domain.Track
@@ -50,6 +58,7 @@ internal data class DesktopShellState(
     val compact: Boolean,
     val busy: Boolean,
     val updateState: AppUpdateState = AppUpdateState.Idle,
+    val routeViewModelFactory: RouteViewModelFactory,
 )
 
 internal data class PlaybackUiState(
@@ -98,6 +107,9 @@ internal data class PlaybackActions(
 internal data class BrowseUiState(
     val homeUiState: HomeUiState,
     val playHistory: PlayHistorySnapshot,
+    val loadPlayHistoryEntries: suspend (PlayHistoryKind, Int) -> PlayHistoryRankedEntries = { kind, limit ->
+        playHistory.rankedEntries(kind, limit)
+    },
     val resolvedTracksById: Map<String, Track> = emptyMap(),
     val searchQuery: String,
     val libraryFilter: LibraryFilterTab,

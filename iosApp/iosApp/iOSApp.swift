@@ -28,7 +28,7 @@ struct iOSApp: App {
 }
 
 private struct IosPlaybackSmokeView: View {
-    @State private var started = false
+    @SwiftUI.State private var started = false
 
     var body: some View {
         Color.clear

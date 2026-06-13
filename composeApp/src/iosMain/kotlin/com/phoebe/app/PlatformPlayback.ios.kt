@@ -13,5 +13,6 @@ actual fun bindCarPlayPlayback(state: AppState) {
 }
 
 fun ensureIosPlaybackRuntime() {
+    IosPlaybackRuntime.installFactory { AppDependencies.create() }
     IosPlaybackRuntime.ensureInstalled()
 }

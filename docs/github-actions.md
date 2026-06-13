@@ -7,6 +7,7 @@ Pull requests targeting `main` run:
 - `./gradlew :composeApp:desktopTest` across Linux, macOS, and Windows. Linux and macOS enable `-Pphoebe.realAudioTests=true`; Linux runs under `xvfb-run` with a PulseAudio null sink, while Windows keeps real-audio tests skipped.
 - `./gradlew :composeApp:wasmJsTest`
 - `./gradlew :composeApp:verifyRoborazziAndroidHostTest`
+- `./gradlew :composeApp:verifyRoborazziDesktop`
 - `npm run web:screenshots`
 - `./gradlew :composeApp:compileAndroidDeviceTestSources`
 - `./gradlew :composeApp:connectedAndroidDeviceTest` on a GitHub-hosted Android emulator
@@ -30,7 +31,7 @@ Verify screenshot baselines locally with:
 
 ```sh
 ./gradlew :composeApp:verifyRoborazziAndroidHostTest
-./gradlew :composeApp:desktopTest
+./gradlew :composeApp:verifyRoborazziDesktop
 npm run web:screenshots
 ```
 

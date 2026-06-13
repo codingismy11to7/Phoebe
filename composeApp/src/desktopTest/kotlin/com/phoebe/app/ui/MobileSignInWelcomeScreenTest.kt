@@ -11,6 +11,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
+import com.phoebe.app.feature.auth.MobileSignInWelcomeScreen
 import kotlin.test.Test
 import kotlin.test.assertTrue
 

@@ -55,7 +55,7 @@ class LocalPlaylistEndToEndDesktopTest {
         val http = testHttpClient(MockEngine { respond("", HttpStatusCode.NotFound) })
         val storage = PlatformStorage()
         val mediaSources = MediaSourcesRepository(db, storage)
-        val catalog = CatalogRepository(
+        val catalog = testCatalogRepository(
             plexClient = PlexClient(http),
             database = db,
             storage = storage,

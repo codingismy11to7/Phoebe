@@ -1,5 +1,13 @@
 package com.phoebe.app.ui
 
+import com.phoebe.app.feature.details.AlbumDetailPanel
+import com.phoebe.app.feature.details.ArtistDetailPanel
+import com.phoebe.app.feature.details.PlaylistDetailPanel
+import com.phoebe.app.feature.details.SongDetailPanel
+import com.phoebe.app.feature.library.LibraryDesktopView
+import com.phoebe.app.feature.library.LibraryFilterTab
+import com.phoebe.app.feature.library.TrackList
+import com.phoebe.app.feature.playback.UpNextList
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.CompositionLocalProvider

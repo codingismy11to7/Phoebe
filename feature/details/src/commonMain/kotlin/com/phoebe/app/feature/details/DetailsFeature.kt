@@ -1,0 +1,189 @@
+package com.phoebe.app.feature.details
+
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
+import androidx.compose.ui.Modifier
+import com.phoebe.app.domain.Album
+import com.phoebe.app.domain.Artist
+import com.phoebe.app.domain.ArtistRadioAvailability
+import com.phoebe.app.domain.CatalogSnapshot
+import com.phoebe.app.domain.LibraryColumnVisibility
+import com.phoebe.app.domain.LibraryUiPreferences
+import com.phoebe.app.domain.Playlist
+import com.phoebe.app.domain.Track
+
+@Immutable
+data class ArtistDetailRouteState(
+    val artist: Artist,
+    val catalog: CatalogSnapshot,
+    val libraryUi: LibraryUiPreferences,
+    val catalogRefreshing: Boolean = false,
+    val searchQuery: String = "",
+    val artistRadioAvailability: ArtistRadioAvailability? = null,
+    val artistRadioStarting: Boolean = false,
+)
+
+class ArtistDetailRouteActions(
+    val onBack: () -> Unit,
+    val onAlbum: (Album) -> Unit,
+    val onPlayTracks: (List<Track>, Int) -> Unit,
+    val onAddToUpNext: (Track) -> Unit,
+    val onDownload: (Track) -> Unit,
+    val onDownloadArtist: (Artist) -> Unit,
+    val onPlayArtistRadio: (Artist) -> Unit,
+    val onArtist: (Artist) -> Unit,
+    val onLibraryColumns: (LibraryColumnVisibility) -> Unit,
+    val onPlayAllTracks: (List<Track>) -> Unit = { tracks -> onPlayTracks(tracks, 0) },
+    val onShuffleAllTracks: (List<Track>) -> Unit = { tracks -> onPlayTracks(tracks.shuffled(), 0) },
+    val onProbeArtistRadio: (Artist) -> Unit = {},
+)
+
+@Immutable
+data class AlbumDetailRouteState(
+    val album: Album,
+    val catalog: CatalogSnapshot,
+    val libraryUi: LibraryUiPreferences,
+    val catalogRefreshing: Boolean = false,
+    val searchQuery: String = "",
+)
+
+class AlbumDetailRouteActions(
+    val onBack: () -> Unit,
+    val onPlayTracks: (List<Track>, Int) -> Unit,
+    val onAddToUpNext: (Track) -> Unit,
+    val onDownload: (Track) -> Unit,
+    val onDownloadAlbum: (Album) -> Unit,
+    val onArtist: (Artist) -> Unit,
+    val onLibraryColumns: (LibraryColumnVisibility) -> Unit,
+)
+
+@Immutable
+data class SongDetailRouteState(
+    val track: Track,
+)
+
+class SongDetailRouteActions(
+    val onBack: () -> Unit,
+    val onPlay: () -> Unit,
+    val onAddToUpNext: (Track) -> Unit,
+    val onDownload: (Track) -> Unit,
+    val onOpenLyrics: (Track) -> Unit = {},
+)
+
+@Immutable
+data class PlaylistDetailRouteState(
+    val playlist: Playlist,
+    val catalog: CatalogSnapshot,
+    val catalogRefreshing: Boolean,
+    val libraryUi: LibraryUiPreferences,
+    val searchQuery: String = "",
+)
+
+class PlaylistDetailRouteActions(
+    val onBack: () -> Unit,
+    val onPlayTracks: (List<Track>, Int) -> Unit,
+    val onAddToUpNext: (Track) -> Unit,
+    val onDownload: (Track) -> Unit,
+    val onDownloadPlaylist: (Playlist) -> Unit,
+    val onLibraryColumns: (LibraryColumnVisibility) -> Unit,
+    val onSearchQuery: (String) -> Unit = {},
+    val onCancelDownloadPlaylist: (Playlist) -> Unit = {},
+    val onDeleteDownloadPlaylist: (Playlist) -> Unit = {},
+    val onMovePlaylistTrack: (Playlist, Int, Int) -> Unit = { _, _, _ -> },
+)
+
+@Composable
+fun ArtistDetailRoute(
+    state: ArtistDetailRouteState,
+    actions: ArtistDetailRouteActions,
+    modifier: Modifier = Modifier,
+) {
+    ArtistDetailPanel(
+        artist = state.artist,
+        catalog = state.catalog,
+        libraryUi = state.libraryUi,
+        catalogRefreshing = state.catalogRefreshing,
+        modifier = modifier,
+        searchQuery = state.searchQuery,
+        onBack = actions.onBack,
+        onAlbum = actions.onAlbum,
+        onPlayTracks = actions.onPlayTracks,
+        onPlayAllTracks = actions.onPlayAllTracks,
+        onShuffleAllTracks = actions.onShuffleAllTracks,
+        onAddToUpNext = actions.onAddToUpNext,
+        onDownload = actions.onDownload,
+        onDownloadArtist = actions.onDownloadArtist,
+        artistRadioAvailability = state.artistRadioAvailability,
+        artistRadioStarting = state.artistRadioStarting,
+        onProbeArtistRadio = actions.onProbeArtistRadio,
+        onPlayArtistRadio = actions.onPlayArtistRadio,
+        onArtist = actions.onArtist,
+        onLibraryColumns = actions.onLibraryColumns,
+    )
+}
+
+@Composable
+fun AlbumDetailRoute(
+    state: AlbumDetailRouteState,
+    actions: AlbumDetailRouteActions,
+    modifier: Modifier = Modifier,
+) {
+    AlbumDetailPanel(
+        album = state.album,
+        catalog = state.catalog,
+        libraryUi = state.libraryUi,
+        catalogRefreshing = state.catalogRefreshing,
+        modifier = modifier,
+        searchQuery = state.searchQuery,
+        onBack = actions.onBack,
+        onPlayTracks = actions.onPlayTracks,
+        onAddToUpNext = actions.onAddToUpNext,
+        onDownload = actions.onDownload,
+        onDownloadAlbum = actions.onDownloadAlbum,
+        onArtist = actions.onArtist,
+        onLibraryColumns = actions.onLibraryColumns,
+    )
+}
+
+@Composable
+fun SongDetailRoute(
+    state: SongDetailRouteState,
+    actions: SongDetailRouteActions,
+    modifier: Modifier = Modifier,
+) {
+    SongDetailPanel(
+        track = state.track,
+        modifier = modifier,
+        onBack = actions.onBack,
+        onPlay = actions.onPlay,
+        onAddToUpNext = actions.onAddToUpNext,
+        onDownload = actions.onDownload,
+        onOpenLyrics = actions.onOpenLyrics,
+    )
+}
+
+@Composable
+fun PlaylistDetailRoute(
+    state: PlaylistDetailRouteState,
+    actions: PlaylistDetailRouteActions,
+    modifier: Modifier = Modifier,
+) {
+    PlaylistDetailPanel(
+        playlist = state.playlist,
+        catalog = state.catalog,
+        catalogRefreshing = state.catalogRefreshing,
+        libraryUi = state.libraryUi,
+        modifier = modifier,
+        searchQuery = state.searchQuery,
+        onSearchQuery = actions.onSearchQuery,
+        onBack = actions.onBack,
+        onPlayTracks = actions.onPlayTracks,
+        onAddToUpNext = actions.onAddToUpNext,
+        onDownload = actions.onDownload,
+        onDownloadPlaylist = actions.onDownloadPlaylist,
+        onCancelDownloadPlaylist = actions.onCancelDownloadPlaylist,
+        onDeleteDownloadPlaylist = actions.onDeleteDownloadPlaylist,
+        onMovePlaylistTrack = actions.onMovePlaylistTrack,
+        onLibraryColumns = actions.onLibraryColumns,
+    )
+}

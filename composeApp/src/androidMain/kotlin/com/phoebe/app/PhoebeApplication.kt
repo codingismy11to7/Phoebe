@@ -22,6 +22,7 @@ class PhoebeApplication : Application() {
         registerComponentCallbacks(memoryPressureCallbacks)
         runCatching { CastContext.getSharedInstance(this) }
         cancelPlatformDownloadRunner()
+        AndroidPlaybackRuntime.installFactory { AppDependencies.create() }
         appScope.launch {
             AndroidPlaybackRuntime.ensureInstalled()
         }

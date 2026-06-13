@@ -1,5 +1,6 @@
 package com.phoebe.app.ui
 
+import com.phoebe.app.feature.library.*
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
@@ -134,6 +135,9 @@ import kotlin.math.roundToInt
 import com.phoebe.app.AppState
 import com.phoebe.app.data.catalogAlbumsForArtist
 import com.phoebe.app.data.catalogTracksForArtist
+import com.phoebe.app.data.filterPlaylistsByQuery
+import com.phoebe.app.data.filterTracksByQuery
+import com.phoebe.app.data.sortTracksForLibrary
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.AppScreen
 import com.phoebe.app.domain.Artist
@@ -173,144 +177,6 @@ import kotlinx.coroutines.yield
 import kotlin.math.max
 
 @Composable
-internal fun LibraryTopBar(searchQuery: String, onSearchQuery: (String) -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 36.dp, vertical = 16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center,
-    ) {
-        SearchPill(searchQuery, onSearchQuery, Modifier.width(380.dp))
-    }
-}
-
-@Composable
-internal fun MainFeature(track: Track?, modifier: Modifier) {
-    Column(modifier.padding(36.dp), verticalArrangement = Arrangement.spacedBy(26.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                GlassIcon(PhoebeIcon.Back, "Back")
-                GlassIcon(PhoebeIcon.Forward, "Forward")
-            }
-            Spacer(Modifier.weight(1f))
-            GlassIcon(PhoebeIcon.Bell, "Notifications")
-        }
-
-        if (track == null) {
-            HomeNothingPlayingHero()
-        } else {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(40.dp),
-            ) {
-                FlippableSongArtwork(track = track, modifier = Modifier.size(292.dp))
-                Column(Modifier.widthIn(max = 280.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    SectionLabel("Now Playing", PhoebeUi.accentLight)
-                    Text(track.title, color = PhoebeUi.primaryText, fontSize = 34.sp, lineHeight = 39.sp, fontWeight = FontWeight.Black)
-                    Text(track.artist.uppercase(), color = PhoebeUi.secondaryText, fontSize = 20.sp, letterSpacing = 0.05.em)
-                    Row(horizontalArrangement = Arrangement.spacedBy(22.dp), verticalAlignment = Alignment.CenterVertically) {
-                        PhoebeIconView(PhoebeIcon.Heart, tint = PhoebeUi.accentLight, modifier = Modifier.size(30.dp), filled = true)
-                        PhoebeIconView(PhoebeIcon.Queue, tint = PhoebeUi.secondaryText, modifier = Modifier.size(24.dp))
-                        PhoebeIconView(PhoebeIcon.More, tint = PhoebeUi.secondaryText, modifier = Modifier.size(24.dp))
-                    }
-                }
-            }
-
-            Column(Modifier.widthIn(max = 380.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                SectionLabel("About The Album", PhoebeUi.mutedText)
-                Text(
-                    buildString {
-                        if (track.album.isNotBlank()) {
-                            append("Notes for ")
-                            append(track.album)
-                            append(" will appear here when your library provides them.")
-                        } else {
-                            append("Album notes from your library appear here when available.")
-                        }
-                    },
-                    color = PhoebeUi.secondaryText,
-                    fontSize = 15.sp,
-                    lineHeight = 23.sp,
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(24.dp), verticalAlignment = Alignment.CenterVertically) {
-                    if (track.durationMs > 0L) {
-                        WaveformDurationBar(
-                            seed = trackWaveformSeed(track),
-                            durationMs = track.durationMs,
-                            progress = null,
-                            bufferedProgress = null,
-                            contentDescription = "Track length ${formatDuration(track.durationMs)}",
-                            modifier = Modifier.width(132.dp).height(22.dp),
-                        )
-                        Text(formatDuration(track.durationMs), color = PhoebeUi.secondaryText, fontSize = 14.sp)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-internal fun HomeNothingPlayingHero() {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(40.dp),
-    ) {
-        EmptyNowPlayingArtworkSlot(Modifier.size(292.dp), glyphSp = 52.sp)
-        Column(Modifier.widthIn(max = 360.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            SectionLabel("Now Playing", PhoebeUi.accentLight)
-            Text("Nothing playing", color = PhoebeUi.primaryText, fontSize = 34.sp, lineHeight = 39.sp, fontWeight = FontWeight.Black)
-            Text(
-                "When you start a track, it appears here. Use search or your library to pick something.",
-                color = PhoebeUi.secondaryText,
-                fontSize = 15.sp,
-                lineHeight = 23.sp,
-            )
-        }
-    }
-    Column(Modifier.widthIn(max = 380.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        SectionLabel("Listening", PhoebeUi.mutedText)
-        Text(
-            "The queue and transport below stay ready. Nothing is queued until you play music.",
-            color = PhoebeUi.mutedText,
-            fontSize = 14.sp,
-            lineHeight = 22.sp,
-        )
-    }
-}
-
-@Composable
-internal fun EmptyNowPlayingArtworkSlot(
-    modifier: Modifier = Modifier,
-    glyphSp: TextUnit = 52.sp,
-    shadowElevation: Dp = 18.dp,
-    shadowAlpha: Float = 0.28f,
-) {
-    val shape = RoundedCornerShape(14.dp)
-    val shadowColor = Color.Black.copy(alpha = shadowAlpha)
-    val decorationModifier = if (shadowElevation > 0.dp && !prefersReducedArtworkEffects()) {
-        modifier.shadow(
-            shadowElevation,
-            shape,
-            ambientColor = shadowColor,
-            spotColor = shadowColor,
-        )
-    } else {
-        modifier
-    }
-    Box(
-        decorationModifier
-            .clip(shape)
-            .background(PhoebeUi.glass)
-            .border(BorderStroke(1.dp, PhoebeUi.border), shape),
-        contentAlignment = Alignment.Center,
-    ) {
-        PhoebeIconView(PhoebeIcon.Music, tint = PhoebeUi.mutedText.copy(alpha = 0.42f), modifier = Modifier.size(glyphSp.value.dp))
-    }
-}
-
-@Composable
 internal fun DesktopContent(
     catalog: CatalogSnapshot,
     catalogRefreshing: Boolean,
@@ -341,7 +207,50 @@ internal fun DesktopContent(
 ) {
     val selectedPlaylist = catalog.playlists.firstOrNull { it.id == selectedPlaylistId }
     val playlistTracks = selectedPlaylistId?.let { catalog.tracksByParent[it].orEmpty() }.orEmpty()
-    val favoriteActions = LocalFavoriteActions.current
+    if (selectedPlaylist != null) {
+        PlaylistDetailDesktopRoute(
+            state = PlaylistDetailDesktopRouteState(
+                playlist = selectedPlaylist,
+                tracks = playlistTracks,
+                catalogRefreshing = catalogRefreshing,
+                searchQuery = searchQuery,
+                libraryUi = libraryUi,
+            ),
+            actions = PlaylistDetailDesktopRouteActions(
+                onSearchQuery = onSearchQuery,
+                onPlayTracks = onPlayTracks,
+                onAddToUpNext = onAddToUpNext,
+                onDownload = onDownload,
+                onLibraryColumns = onLibraryColumns,
+                onDownloadPlaylist = onDownloadPlaylist,
+            ),
+            modifier = modifier,
+            edgePadding = edgePadding,
+            headlineFontSize = headlineFontSize,
+            headlineLineHeight = headlineLineHeight,
+            searchPillModifier = searchPillModifier,
+        )
+        return
+    }
+
+    if (section == BrowseSection.Playlists) {
+        PlaylistsDesktopRoute(
+            state = PlaylistsRouteState(
+                catalogRefreshing = catalogRefreshing,
+                searchQuery = searchQuery,
+            ),
+            actions = PlaylistsRouteActions(
+                onSearchQuery = onSearchQuery,
+                onPlaylist = onPlaylist,
+            ),
+            modifier = modifier,
+            edgePadding = edgePadding,
+            headlineFontSize = headlineFontSize,
+            headlineLineHeight = headlineLineHeight,
+            searchPillModifier = searchPillModifier,
+        )
+        return
+    }
 
     Column(
         modifier.padding(
@@ -353,27 +262,21 @@ internal fun DesktopContent(
         verticalArrangement = Arrangement.spacedBy(22.dp),
     ) {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val sectionLabel = when {
-                selectedPlaylist != null -> "Playlist"
-                section == BrowseSection.Search -> "Search"
-                section == BrowseSection.Library -> "Your Library"
-                section == BrowseSection.Lyrics -> "Lyrics"
-                section == BrowseSection.Playlists -> "Playlists"
-                section == BrowseSection.Settings -> "Settings"
-                else -> "Home"
+            val sectionLabel = when (section) {
+                BrowseSection.Search -> "Search"
+                BrowseSection.Library -> "Your Library"
+                BrowseSection.Lyrics -> "Lyrics"
+                BrowseSection.Settings -> "Settings"
+                BrowseSection.Home -> "Home"
+                BrowseSection.Playlists -> "Playlists"
             }
-            val headline = selectedPlaylist?.title ?: when (section) {
+            val headline = when (section) {
                 BrowseSection.Search -> "Find your sound"
                 BrowseSection.Library -> "Albums, artists, and songs"
                 BrowseSection.Lyrics -> "Follow along"
-                BrowseSection.Playlists -> "Your playlists"
                 BrowseSection.Settings -> "Customize your listening experience"
                 BrowseSection.Home -> "Now playing"
-            }
-            val searchPlaceholder = when {
-                selectedPlaylist != null -> "Search songs and artists"
-                section == BrowseSection.Playlists -> "Search playlists"
-                else -> "Search songs, artists, albums"
+                BrowseSection.Playlists -> "Your playlists"
             }
             val titleBlock: @Composable () -> Unit = {
                 SectionLabel(sectionLabel, PhoebeUi.accentLight)
@@ -388,325 +291,42 @@ internal fun DesktopContent(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false),
                     )
-                    selectedPlaylist?.let { playlist ->
-                        LikeButton(
-                            liked = favoriteActions.isFavorite(playlist),
-                            enabled = true,
-                            onClick = { favoriteActions.onTogglePlaylist(playlist) },
-                        )
-                    }
                 }
             }
             if (maxWidth < 640.dp) {
                 Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     Column(Modifier.fillMaxWidth()) { titleBlock() }
-                    SearchPill(searchQuery, onSearchQuery, searchPillModifier, searchPlaceholder)
+                    SearchPill(searchQuery, onSearchQuery, searchPillModifier)
                 }
             } else {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) { titleBlock() }
-                    SearchPill(searchQuery, onSearchQuery, searchPillModifier, searchPlaceholder)
+                    SearchPill(searchQuery, onSearchQuery, searchPillModifier)
                 }
             }
         }
 
-        when {
-            selectedPlaylist != null -> {
-                val playlistActions = LocalPlaylistActions.current
-                var playlistSortBy by remember(selectedPlaylist.id) { mutableStateOf(LibrarySortBy.PlaylistOrder) }
-                var playlistAscending by remember(selectedPlaylist.id) { mutableStateOf(true) }
-                var editModeEnabled by remember(selectedPlaylist.id) { mutableStateOf(false) }
-                var selectedTrackKeys by remember(selectedPlaylist.id) { mutableStateOf(setOf<String>()) }
-                var confirmRemove by remember(selectedPlaylist.id) { mutableStateOf(false) }
-                LaunchedEffect(editModeEnabled) {
-                    if (!editModeEnabled) selectedTrackKeys = emptySet()
-                }
-                val sortedPlaylistTracks = remember(playlistTracks, playlistSortBy, playlistAscending) {
-                    sortTracksForLibrary(playlistTracks, playlistSortBy, playlistAscending)
-                }
-                val filteredPlaylistTracks = remember(sortedPlaylistTracks, searchQuery) {
-                    filterTracksByQuery(sortedPlaylistTracks, searchQuery)
-                }
-                val editModeAvailable = filteredPlaylistTracks.isNotEmpty() &&
-                    selectedPlaylist.supportsTrackRemoval()
-                val editEnabled = editModeEnabled && editModeAvailable
-                val selectedTracks = remember(filteredPlaylistTracks, selectedTrackKeys) {
-                    filteredPlaylistTracks.filter { it.playlistRemovalKey() in selectedTrackKeys }
-                }
-                val toggleTrackSelection = { track: Track ->
-                    val key = track.playlistRemovalKey()
-                    selectedTrackKeys = if (key in selectedTrackKeys) {
-                        selectedTrackKeys - key
-                    } else {
-                        selectedTrackKeys + key
-                    }
-                }
-                val playFilteredPlaylistTracks: (List<Track>, Int) -> Unit = { visible, visibleIndex ->
-                    val sourceTracks = if (
-                        playlistSortBy == LibrarySortBy.PlaylistOrder &&
-                        playlistAscending &&
-                        searchQuery.isBlank()
-                    ) {
-                        visible
-                    } else {
-                        sortedPlaylistTracks
-                    }
-                    val (queueTracks, queueIndex) = playbackQueueForVisibleTrack(
-                        sourceTracks,
-                        visible,
-                        visibleIndex,
-                    )
-                    onPlayTracks(queueTracks, queueIndex)
-                }
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    PlaylistTrackSummaryLine(
-                        totalCount = sortedPlaylistTracks.size,
-                        visibleCount = filteredPlaylistTracks.size,
-                        searchQuery = searchQuery,
-                    )
-                    DetailSectionToolbar(
-                        sortBy = playlistSortBy,
-                        sortKeys = listOf(
-                            LibrarySortBy.PlaylistOrder,
-                            LibrarySortBy.Name,
-                            LibrarySortBy.Album,
-                            LibrarySortBy.Year,
-                        ),
-                        sortLabel = { key ->
-                            when (key) {
-                                LibrarySortBy.PlaylistOrder -> "Playlist order"
-                                LibrarySortBy.Album -> "Album name"
-                                LibrarySortBy.Year -> "Release date"
-                                else -> "Song name"
-                            }
-                        },
-                        onSortBy = {
-                            playlistSortBy = it
-                            if (it != LibrarySortBy.PlaylistOrder) editModeEnabled = false
-                        },
-                        ascending = playlistAscending,
-                        onAscending = {
-                            playlistAscending = it
-                            if (!it) editModeEnabled = false
-                        },
-                        columns = libraryUi.columns,
-                        onColumns = onLibraryColumns,
-                        editMode = editModeEnabled,
-                        editModeAvailable = editModeAvailable,
-                        onEditMode = { enabled ->
-                            editModeEnabled = enabled
-                            if (!enabled) selectedTrackKeys = emptySet()
-                        },
-                        actions = {
-                            DownloadActionButton("Download Playlist", sortedPlaylistTracks) { onDownloadPlaylist(selectedPlaylist) }
-                            PlaylistExportMenu(playlist = selectedPlaylist)
-                        },
-                    )
-                    if (editEnabled) {
-                        PlaylistEditActionBar(
-                            selectedCount = selectedTrackKeys.size,
-                            totalCount = filteredPlaylistTracks.size,
-                            onRemove = { confirmRemove = true },
-                            onSelectAll = {
-                                selectedTrackKeys = filteredPlaylistTracks.map { it.playlistRemovalKey() }.toSet()
-                            },
-                            onClearSelection = { selectedTrackKeys = emptySet() },
-                        )
-                    }
-                    TrackList(
-                        tracks = filteredPlaylistTracks,
-                        empty = if (searchQuery.isNotBlank()) {
-                            "No tracks / artists in ${selectedPlaylist.title} match \"$searchQuery\"."
-                        } else {
-                            "No tracks loaded for ${selectedPlaylist.title}."
-                        },
-                        catalogRefreshing = catalogRefreshing,
-                        showLoadingWhenEmpty = searchQuery.isBlank(),
-                        onPlayTracks = playFilteredPlaylistTracks,
-                        onAddToUpNext = onAddToUpNext,
-                        onDownload = onDownload,
-                        libraryColumns = libraryUi.columns,
-                        onMoveTrack = if (
-                            playlistSortBy == LibrarySortBy.PlaylistOrder &&
-                            playlistAscending &&
-                            searchQuery.isBlank() &&
-                            !editEnabled
-                        ) {
-                            { from, to -> playlistActions.onMovePlaylistTrack(selectedPlaylist, from, to) }
-                        } else {
-                            null
-                        },
-                        editModeEnabled = editEnabled,
-                        selectedTrackKeys = selectedTrackKeys,
-                        onToggleTrackSelection = toggleTrackSelection,
-                    )
-                    if (confirmRemove) {
-                        val count = selectedTracks.size
-                        ConfirmDeleteDownloadsDialog(
-                            title = "Remove from playlist?",
-                            body = "Remove $count ${if (count == 1) "song" else "songs"} from ${selectedPlaylist.title}?",
-                            confirmLabel = "Remove",
-                            onDismiss = { confirmRemove = false },
-                            onConfirm = {
-                                playlistActions.onRemovePlaylistTracks(selectedPlaylist, selectedTracks)
-                                confirmRemove = false
-                                editModeEnabled = false
-                                selectedTrackKeys = emptySet()
-                            },
-                        )
-                    }
-                }
-            }
-            section == BrowseSection.Search -> {
-                val query = searchQuery.trim()
-                val allTracks = remember(catalog.tracksByParent) {
-                    catalog.tracksByParent.values.asSequence().flatten().distinctBy { it.id }.toList()
-                }
-                val results = if (query.isBlank()) {
-                    allTracks.take(8)
-                } else {
-                    allTracks.filter {
-                        it.title.contains(query, ignoreCase = true) ||
-                            it.artist.contains(query, ignoreCase = true) ||
-                            it.album.contains(query, ignoreCase = true)
-                    }
-                }
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    DetailSectionToolbar(
-                        sortBy = null,
-                        sortKeys = emptyList(),
-                        sortLabel = { "" },
-                        onSortBy = null,
-                        ascending = null,
-                        onAscending = null,
-                        columns = libraryUi.columns,
-                        onColumns = onLibraryColumns,
-                    )
-                    TrackList(
-                        results,
-                        if (query.isBlank()) "Start typing to search songs, artists, and albums." else "No matches for \"$query\".",
-                        catalogRefreshing,
-                        onPlayTracks,
-                        onAddToUpNext,
-                        onDownload,
-                        libraryColumns = libraryUi.columns,
-                    )
-                }
-            }
-            section == BrowseSection.Library -> LibraryPanel(
-                catalog,
+        val firstTracks = catalog.tracksByParent.values.firstOrNull().orEmpty()
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            DetailSectionToolbar(
+                sortBy = null,
+                sortKeys = emptyList(),
+                sortLabel = { "" },
+                onSortBy = null,
+                ascending = null,
+                onAscending = null,
+                columns = libraryUi.columns,
+                onColumns = onLibraryColumns,
+            )
+            TrackList(
+                firstTracks,
+                "Your library is empty.",
                 catalogRefreshing,
-                jellyfinPagination,
-                libraryFilter,
-                libraryUi,
-                onLibraryFilter,
-                onLibrarySortBy,
-                onLibraryAscending,
-                onLibraryColumns,
-                onPlaylist,
-                onArtist,
-                onAlbum,
                 onPlayTracks,
                 onAddToUpNext,
                 onDownload,
-                onJellyfinPage,
+                libraryColumns = libraryUi.columns,
             )
-            section == BrowseSection.Playlists -> {
-                val playlistActions = LocalPlaylistActions.current
-                val catalogSyncInProgress = LocalCatalogSyncInProgress.current
-                val sourcePlaylists = playlistActions.playlists
-                var visiblePlaylists by remember { mutableStateOf<List<Playlist>?>(null) }
-                LaunchedEffect(sourcePlaylists, searchQuery) {
-                    visiblePlaylists = withContext(Dispatchers.Default) {
-                        filterPlaylistsByQuery(sourcePlaylists, searchQuery)
-                    }
-                }
-                val preparedVisiblePlaylists = visiblePlaylists
-                    ?: if (searchQuery.isBlank()) sourcePlaylists else emptyList()
-                val preparingPlaylists = visiblePlaylists == null &&
-                    preparedVisiblePlaylists.isEmpty() &&
-                    sourcePlaylists.isNotEmpty()
-                val showPlaylistSyncProgress = catalogSyncInProgress && searchQuery.isBlank()
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    if (!playlistActions.playlistsEnabled) {
-                        Text(
-                            "Sign in to your provider, or add a local music folder to use playlists.",
-                            color = PhoebeUi.mutedText,
-                            fontSize = 14.sp,
-                        )
-                    } else {
-                        if (showPlaylistSyncProgress) {
-                            CatalogLoadingStrip()
-                        }
-                        if (preparingPlaylists) {
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                LibraryLoadingStrip()
-                                Text(
-                                    "Loading playlists...",
-                                    color = PhoebeUi.mutedText,
-                                    fontSize = 14.sp,
-                                )
-                            }
-                        } else if (preparedVisiblePlaylists.isEmpty()) {
-                            if (!showPlaylistSyncProgress) {
-                                Text(
-                                    if (searchQuery.isNotBlank()) {
-                                        "No playlists match \"$searchQuery\"."
-                                    } else {
-                                        "No playlists yet. Create one from the sidebar."
-                                    },
-                                    color = PhoebeUi.mutedText,
-                                    fontSize = 14.sp,
-                                )
-                            }
-                        } else {
-                            LazyColumn(
-                                modifier = Modifier.fillMaxSize(),
-                                verticalArrangement = Arrangement.spacedBy(6.dp),
-                            ) {
-                                items(preparedVisiblePlaylists, key = { it.id }, contentType = { "playlist" }) { playlist ->
-                                    val liked = playlist.isLikedSongsPlaylist()
-                                    Box(Modifier.draggablePlaylist(playlist).playlistDropTarget(playlist)) {
-                                        PlaylistRow(
-                                            icon = if (liked) PhoebeIcon.Heart else null,
-                                            title = playlist.title,
-                                            subtitle = "${playlist.trackCount} songs",
-                                            thumbUrl = playlist.thumbUrl,
-                                            accent = liked,
-                                            onClick = { onPlaylist(playlist) },
-                                            onLongClick = { playlistActions.onShufflePlaylist(playlist) },
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            else -> {
-                val firstTracks = catalog.tracksByParent.values.firstOrNull().orEmpty()
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    DetailSectionToolbar(
-                        sortBy = null,
-                        sortKeys = emptyList(),
-                        sortLabel = { "" },
-                        onSortBy = null,
-                        ascending = null,
-                        onAscending = null,
-                        columns = libraryUi.columns,
-                        onColumns = onLibraryColumns,
-                    )
-                    TrackList(
-                        firstTracks,
-                        "Your library is empty.",
-                        catalogRefreshing,
-                        onPlayTracks,
-                        onAddToUpNext,
-                        onDownload,
-                        libraryColumns = libraryUi.columns,
-                    )
-                }
-            }
         }
     }
 }
