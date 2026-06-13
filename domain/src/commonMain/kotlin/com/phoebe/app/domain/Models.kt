@@ -1140,10 +1140,12 @@ fun Track.playHistoryIdentityKey(): String {
     return "$normalizedTitle|$normalizedArtist|$normalizedAlbum|$durationKey"
 }
 
+private val WhitespaceRegex = Regex("""\s+""")
+
 private fun String.normalizedTrackIdentityField(): String =
     trim()
         .lowercase()
-        .replace(Regex("""\s+"""), " ")
+        .replace(WhitespaceRegex, " ")
         .removePrefix("the ")
 
 private fun Track.providerEquivalentTrackIdForIdentity(): String {

@@ -238,14 +238,20 @@ private fun <T> collectResolvedPlayedRows(
     }
     val seenIdentityKeys = LinkedHashSet<String>()
     val rows = ArrayList<HomePlayedTrack>(limit.coerceAtMost(ranked.size))
-    val resolved = lookupTracksByIds(catalog, ranked.map(trackId).toSet(), resolvedTracksById, trackIndex)
-    for (entry in ranked) {
-        if (rows.size >= limit) break
-        val id = trackId(entry)
-        val track = resolved[id] ?: placeholderTrackForPlayHistoryEntry(entry, id) ?: continue
-        val identityKey = track.playHistoryIdentityKey()
-        if (!seenIdentityKeys.add(identityKey)) continue
-        rows += buildRow(entry, track)
+    val chunkSize = (limit * 2).coerceAtLeast(10)
+    var offset = 0
+    while (rows.size < limit && offset < ranked.size) {
+        val chunk = ranked.subList(offset, (offset + chunkSize).coerceAtMost(ranked.size))
+        offset += chunkSize
+        val resolved = lookupTracksByIds(catalog, chunk.map(trackId).toSet(), resolvedTracksById, trackIndex)
+        for (entry in chunk) {
+            if (rows.size >= limit) break
+            val id = trackId(entry)
+            val track = resolved[id] ?: placeholderTrackForPlayHistoryEntry(entry, id) ?: continue
+            val identityKey = track.playHistoryIdentityKey()
+            if (!seenIdentityKeys.add(identityKey)) continue
+            rows += buildRow(entry, track)
+        }
     }
     return rows
 }
