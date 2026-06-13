@@ -312,6 +312,14 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           allow-no-subscriptions: true
 
+      - name: Ensure PowerShell Gallery is registered
+        shell: pwsh
+        run: |
+          if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) {
+            Register-PSRepository -Default
+          }
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+
       - name: Sign Windows installer
         uses: azure/artifact-signing-action@v1
         with:
