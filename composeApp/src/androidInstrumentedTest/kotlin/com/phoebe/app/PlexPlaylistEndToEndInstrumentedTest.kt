@@ -102,7 +102,7 @@ class PlexPlaylistEndToEndInstrumentedTest {
 
     private fun catalogRepository(db: com.phoebe.app.db.PhoebeDatabase, http: HttpClient): CatalogRepository {
         val mediaSources = MediaSourcesRepository(db, PlatformStorage())
-        return CatalogRepository(
+        return testCatalogRepository(
             plexClient = PlexClient(http),
             database = db,
             storage = PlatformStorage(),

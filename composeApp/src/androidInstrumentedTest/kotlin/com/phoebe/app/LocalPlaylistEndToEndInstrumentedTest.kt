@@ -3,7 +3,6 @@ package com.phoebe.app
 import android.app.Application
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import com.phoebe.app.data.CatalogRepository
 import com.phoebe.app.data.MediaSourcesRepository
 import com.phoebe.app.data.PlexClient
 import com.phoebe.app.domain.isLocalPlaylist
@@ -67,7 +66,7 @@ class LocalPlaylistEndToEndInstrumentedTest {
         val http = HttpClient(MockEngine { respond("", HttpStatusCode.NotFound) })
         val storage = PlatformStorage()
         val mediaSources = MediaSourcesRepository(testDb.database, storage)
-        val catalog = CatalogRepository(
+        val catalog = testCatalogRepository(
             plexClient = PlexClient(http),
             database = testDb.database,
             storage = storage,

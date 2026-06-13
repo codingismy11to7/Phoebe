@@ -281,7 +281,7 @@ object RemoteArtworkCache {
 
     internal val httpClient: HttpClient by lazy { createPlatformHttpClient() }
     private val storage: PlatformStorage by lazy { PlatformStorage() }
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var gate = Semaphore(permits = DefaultLoadPermits)
     private val inFlightMutex = Mutex()
     private val inFlight = mutableMapOf<CacheKey, Deferred<ImageBitmap?>>()
