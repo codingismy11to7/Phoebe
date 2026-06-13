@@ -12,11 +12,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -68,7 +71,12 @@ fun LyricsView(
         modifier
             .fillMaxSize()
             .background(PhoebeUi.shellTop)
-            .padding(horizontal = 24.dp, vertical = 22.dp),
+            .padding(
+                start = 24.dp,
+                top = 22.dp + WindowInsets.statusBars.asPaddingValues().calculateTopPadding(),
+                end = 24.dp,
+                bottom = 22.dp,
+            ),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         LyricsHeader(track = track, source = (state as? LyricsLoadState.Loaded)?.document?.source, onBack = onBack)

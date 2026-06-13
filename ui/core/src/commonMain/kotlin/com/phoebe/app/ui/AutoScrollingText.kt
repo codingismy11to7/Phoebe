@@ -21,8 +21,9 @@ fun AutoScrollingText(
     fontWeight: FontWeight? = null,
     lineHeight: TextUnit = TextUnit.Unspecified,
     textAlign: TextAlign? = null,
+    marqueeEnabled: Boolean = true,
 ) {
-    val textModifier = if (LocalContinuousMotionEnabled.current) {
+    val textModifier = if (marqueeEnabled && LocalContinuousMotionEnabled.current) {
         modifier.basicMarquee(iterations = Int.MAX_VALUE)
     } else {
         modifier

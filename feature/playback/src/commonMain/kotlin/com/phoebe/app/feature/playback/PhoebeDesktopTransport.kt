@@ -857,7 +857,13 @@ fun UpNextToggleIcon(visible: Boolean, enabled: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-fun CastIcon(active: Boolean, loading: Boolean, enabled: Boolean, onClick: () -> Unit) {
+fun CastIcon(
+    active: Boolean,
+    loading: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val strokeColor = when {
         loading -> PhoebeUi.accentLight
         active -> PhoebeUi.accentLight
@@ -865,7 +871,7 @@ fun CastIcon(active: Boolean, loading: Boolean, enabled: Boolean, onClick: () ->
         else -> PhoebeUi.mutedText.copy(alpha = 0.45f)
     }
     Box(
-        Modifier
+        modifier
             .size(40.dp)
             .clip(CircleShape)
             .background(if (active || loading) PhoebeUi.accent.copy(alpha = 0.14f) else Color.Transparent)

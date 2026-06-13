@@ -88,6 +88,19 @@ val aarch64C1OsrWorkaroundJvmArgs = if (usesJvmWithAarch64C1OsrBug()) {
     emptyList()
 }
 
+fun usesLinuxX64SuperWordCrashProneJvm(): Boolean =
+    System.getProperty("os.name").startsWith("Linux", ignoreCase = true) &&
+        System.getProperty("os.arch") == "amd64" &&
+        Runtime.version().feature() == 17
+
+val linuxX64SuperWordWorkaroundJvmArgs = if (usesLinuxX64SuperWordCrashProneJvm()) {
+    // Temurin 17 can crash Linux x64 desktop UI tests with
+    // "scalar-to-vector conversion failed" during C2 vectorization.
+    listOf("-XX:-UseSuperWord")
+} else {
+    emptyList()
+}
+
 fun windowsSkikoJvmArgs(): List<String> {
     if (!System.getProperty("os.name").orEmpty().lowercase().contains("win")) return emptyList()
     val renderApi = System.getenv("PHOEBE_SKIKO_RENDER_API")
@@ -495,6 +508,7 @@ tasks.withType<Test>().configureEach {
 
     if (name.contains("desktop", ignoreCase = true)) {
         systemProperty("phoebe.debug", "true")
+        jvmArgs(linuxX64SuperWordWorkaroundJvmArgs)
     }
     systemProperty("phoebe.realAudioTests", phoebeRealAudioTests.get().toString())
     if (phoebeRealAudioTests.get() && name.contains("desktop", ignoreCase = true)) {
