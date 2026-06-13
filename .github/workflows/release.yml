@@ -315,10 +315,32 @@ jobs:
       - name: Ensure PowerShell Gallery is registered
         shell: pwsh
         run: |
-          if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) {
-            Register-PSRepository -Default
+          $ErrorActionPreference = "Stop"
+
+          $maxAttempts = 3
+          for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+            try {
+              $repository = Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue
+              if (-not $repository) {
+                Register-PSRepository `
+                  -Name PSGallery `
+                  -SourceLocation "https://www.powershellgallery.com/api/v2" `
+                  -InstallationPolicy Trusted
+              } else {
+                Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+              }
+
+              Get-PSRepository -Name PSGallery
+              break
+            } catch {
+              if ($attempt -eq $maxAttempts) {
+                throw
+              }
+
+              Write-Warning "Failed to configure PSGallery on attempt $attempt of $maxAttempts. Retrying in 10 seconds. $($_.Exception.Message)"
+              Start-Sleep -Seconds 10
+            }
           }
-          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
 
       - name: Sign Windows installer
         uses: azure/artifact-signing-action@v1
