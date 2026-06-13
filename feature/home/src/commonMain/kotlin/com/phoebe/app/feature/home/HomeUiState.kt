@@ -16,6 +16,7 @@ import com.phoebe.app.domain.PersonalMixPreferences
 import com.phoebe.app.domain.PlayHistoryKind
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.Track
+import com.phoebe.app.domain.playHistoryIdentityKey
 import kotlin.random.Random
 
 const val RecentlyAddedWindowMs = 7L * 24L * 60L * 60L * 1000L
@@ -921,19 +922,4 @@ private fun mixSliceCounts(target: Int, weights: List<Int>): List<Int> {
 
 private fun Double.roundToInt(): Int = kotlin.math.round(this).toInt()
 
-fun Track.personalMixIdentityKey(): String {
-    val metadataKey = listOf(title, artist, album)
-        .map { it.trim().lowercase() }
-        .takeIf { parts -> parts.any { it.isNotBlank() } }
-        ?.joinToString("|", prefix = "meta:", postfix = "|${durationMs.coerceAtLeast(0L)}")
-    return metadataKey ?: providerEquivalentId()
-}
-
-private fun Track.providerEquivalentId(): String {
-    val normalized = id.trim()
-    val prefix = normalized.substringBefore(':', missingDelimiterValue = "")
-    return when (prefix) {
-        "plex", "jellyfin", "emby", "navidrome", "musicassistant" -> normalized.substringAfter(':')
-        else -> normalized
-    }
-}
+fun Track.personalMixIdentityKey(): String = playHistoryIdentityKey()

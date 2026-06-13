@@ -667,8 +667,7 @@ jobs:
       - linux
       - windows
       - macos
-      - ios
-    if: always() && needs.version.result == 'success' && needs.android.result == 'success' && needs.linux.result == 'success' && needs.windows.result == 'success' && needs.macos.result == 'success' && needs.ios.result == 'success'
+    if: always() && needs.version.result == 'success' && needs.android.result == 'success' && needs.linux.result == 'success' && needs.windows.result == 'success' && needs.macos.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -693,7 +692,29 @@ jobs:
             release-artifacts/**/*.msi
             release-artifacts/**/*.dmg
             release-artifacts/**/*.pkg
-            release-artifacts/**/*.ipa
+
+  attach-ios-release:
+    name: Attach iOS to release
+    needs:
+      - version
+      - ios
+      - github-release
+    if: always() && needs.ios.result == 'success' && needs.github-release.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Download iOS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ios-release
+          path: release-artifacts
+
+      - name: Upload iOS IPA to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag_name }}
+          files: release-artifacts/**/*.ipa
 
   web-pages-deploy:
     name: Deploy web to GitHub Pages
