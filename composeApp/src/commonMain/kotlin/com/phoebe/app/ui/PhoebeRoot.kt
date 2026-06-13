@@ -1038,7 +1038,11 @@ private fun PhoebeRootStateHolder(
 
                 val mobileRoutes = navigator.routes
                 val mobilePlayerAsSheet = mobileRoutes.lastOrNull() == PhoebeRoute.Player && mobileRoutes.size > 1
-                val playerExpansionFraction = remember { Animatable(if (mobilePlayerAsSheet) 1f else 0f) }
+                val playerExpansionFraction = remember {
+                    Animatable(if (mobilePlayerAsSheet) 1f else 0f).apply {
+                        updateBounds(lowerBound = 0f, upperBound = 1f)
+                    }
+                }
                 var bottomBarHeightPx by remember { mutableFloatStateOf(0f) }
                 LaunchedEffect(mobilePlayerAsSheet) {
                     if (mobilePlayerAsSheet) {

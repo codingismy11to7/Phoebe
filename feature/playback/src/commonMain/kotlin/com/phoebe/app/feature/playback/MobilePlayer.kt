@@ -235,19 +235,20 @@ fun MobilePlayer(
         onBack = { onBack() }
     )
 
+    val clampedExpansionFraction = expansionFraction.coerceIn(0f, 1f)
     val navBarColor = PhoebeUi.navBar
     val shellRadialTint = PhoebeUi.shellRadialTint
     val shellTop = PhoebeUi.shellTop
     val canvasBackground = PhoebeUi.canvasBackground
     val borderColor = PhoebeUi.border
 
-    val cornerRadius = lerp(14.dp, 0.dp, expansionFraction)
+    val cornerRadius = lerp(14.dp, 0.dp, clampedExpansionFraction)
     val containerShape = RoundedCornerShape(topStart = cornerRadius, topEnd = cornerRadius)
 
     BoxWithConstraints(
         modifier = modifier
             .playerDragGestures(
-                expansionFraction = expansionFraction,
+                expansionFraction = clampedExpansionFraction,
                 onDragStart = onDragStart,
                 onDrag = onDrag,
                 onDragEnd = onDragEnd,
@@ -255,15 +256,15 @@ fun MobilePlayer(
             .clip(containerShape)
             .border(
                 width = 1.dp,
-                color = borderColor.copy(alpha = borderColor.alpha * (1f - expansionFraction)),
+                color = borderColor.copy(alpha = borderColor.alpha * (1f - clampedExpansionFraction)),
                 shape = containerShape,
             )
             .drawBehind {
-                drawRect(color = navBarColor.copy(alpha = 1f - expansionFraction))
-                if (expansionFraction > 0f) {
+                drawRect(color = navBarColor.copy(alpha = 1f - clampedExpansionFraction))
+                if (clampedExpansionFraction > 0f) {
                     drawRect(
                         brush = Brush.radialGradient(
-                            colors = listOf(shellRadialTint.copy(alpha = expansionFraction), Color.Transparent),
+                            colors = listOf(shellRadialTint.copy(alpha = clampedExpansionFraction), Color.Transparent),
                             center = Offset(210f * this.density, 50f * this.density),
                             radius = 380f * this.density,
                         )
@@ -271,8 +272,8 @@ fun MobilePlayer(
                     drawRect(
                         brush = Brush.verticalGradient(
                             colors = listOf(
-                                shellTop.copy(alpha = expansionFraction),
-                                canvasBackground.copy(alpha = expansionFraction),
+                                shellTop.copy(alpha = clampedExpansionFraction),
+                                canvasBackground.copy(alpha = clampedExpansionFraction),
                             ),
                         )
                     )
@@ -294,17 +295,17 @@ fun MobilePlayer(
             (screenHeight - 56.dp - 24.dp - metadataReserve - 130.dp - 72.dp).coerceAtLeast(180.dp),
         )
 
-        val currentArtworkSize = lerp(44.dp, fullArtworkSize, expansionFraction)
-        val currentArtworkX = lerp(12.dp, 20.dp, expansionFraction)
+        val currentArtworkSize = lerp(44.dp, fullArtworkSize, clampedExpansionFraction)
+        val currentArtworkX = lerp(12.dp, 20.dp, clampedExpansionFraction)
         val statusBarTopPadding = with(density) {
             WindowInsets.statusBars.getTop(this).toDp()
         }
-        val currentArtworkY = lerp(14.dp, 80.dp + statusBarTopPadding, expansionFraction)
+        val currentArtworkY = lerp(14.dp, 80.dp + statusBarTopPadding, clampedExpansionFraction)
 
-        val miniPlayerAlpha = (1f - expansionFraction * 3f).coerceAtLeast(0f)
-        val fullPlayerAlpha = ((expansionFraction - 0.2f) * 1.25f).coerceIn(0f, 1f)
-        val overlayActionsAlpha = ((expansionFraction - 0.7f) / 0.2f).coerceIn(0f, 1f)
-        val fullPlayerElementsAlpha = ((expansionFraction - 0.8f) / 0.2f).coerceIn(0f, 1f)
+        val miniPlayerAlpha = (1f - clampedExpansionFraction * 3f).coerceAtLeast(0f)
+        val fullPlayerAlpha = ((clampedExpansionFraction - 0.2f) * 1.25f).coerceIn(0f, 1f)
+        val overlayActionsAlpha = ((clampedExpansionFraction - 0.7f) / 0.2f).coerceIn(0f, 1f)
+        val fullPlayerElementsAlpha = ((clampedExpansionFraction - 0.8f) / 0.2f).coerceIn(0f, 1f)
         val collapsedSheetHeight = with(density) {
             val navBarBottom = WindowInsets.navigationBars.getBottom(this).toDp()
             88.dp + navBarBottom
@@ -319,7 +320,7 @@ fun MobilePlayer(
         val swipeThresholdPx = with(density) { 56.dp.toPx() }
 
         val useBlurredArtworkChrome = track != null && visualizerPreset == NowPlayingVisualizerPreset.Artwork && blurredArtworkAppearance
-        val bottomCorner = lerp(10.dp, 0.dp, expansionFraction)
+        val bottomCorner = lerp(10.dp, 0.dp, clampedExpansionFraction)
         val artworkContentShape = if (visualizerPreset == NowPlayingVisualizerPreset.Artwork && !blurredArtworkAppearance) {
             RoundedCornerShape(10.dp)
         } else {
@@ -444,7 +445,7 @@ fun MobilePlayer(
                     .height(MobileMiniPlayerChromeHeight)
                     .graphicsLayer {
                         alpha = miniPlayerAlpha
-                        if (expansionFraction < 0.1f) {
+                        if (clampedExpansionFraction < 0.1f) {
                             translationX = currentSwipeOffset
                             val swipeProgress = (abs(currentSwipeOffset) / swipeThresholdPx).coerceIn(0f, 1f)
                             alpha = miniPlayerAlpha * (1f - swipeProgress * 0.14f)
@@ -453,7 +454,7 @@ fun MobilePlayer(
                             scaleY = scale
                         }
                     }
-                    .then(if (expansionFraction < 0.1f) horizontalDragModifier else Modifier)
+                    .then(if (clampedExpansionFraction < 0.1f) horizontalDragModifier else Modifier)
                     .padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -466,7 +467,7 @@ fun MobilePlayer(
 
         if (useBlurredArtworkChrome) {
             val scale = currentArtworkSize.value / fullArtworkSize.value
-            val currentMetadataOverlap = lerp(0.dp, metadataOverlap, expansionFraction)
+            val currentMetadataOverlap = lerp(0.dp, metadataOverlap, clampedExpansionFraction)
             val currentReflectionHeight = (metadataReserve + metadataOverlap) * scale
             val reflectionY = currentArtworkY + currentArtworkSize - currentMetadataOverlap
 
@@ -693,7 +694,7 @@ fun MobilePlayer(
                     .offset(x = currentArtworkX, y = currentArtworkY)
                     .size(currentArtworkSize)
                     .clip(artworkContentShape)
-                    .then(if (expansionFraction > 0.8f) horizontalDragModifier else Modifier)
+                    .then(if (clampedExpansionFraction > 0.8f) horizontalDragModifier else Modifier)
             ) {
                 SwipeableMobileArtwork(
                     track = track,
@@ -712,7 +713,7 @@ fun MobilePlayer(
                             val artworkFadeHeight = if (artworkFlipRotation > 90f) {
                                 0.dp
                             } else {
-                                lerp(0.dp, metadataOverlap, expansionFraction)
+                                lerp(0.dp, metadataOverlap, clampedExpansionFraction)
                             }
                             FlippableSongArtwork(
                                 track = t,
@@ -770,23 +771,23 @@ fun MobilePlayer(
             val metadataTitleColor = if (metadataUsesArtworkChrome) Color.White else PhoebeUi.primaryText
             val metadataArtistColor = if (metadataUsesArtworkChrome) Color.White.copy(alpha = 0.82f) else PhoebeUi.secondaryText
 
-            val titleColor = androidx.compose.ui.graphics.lerp(PhoebeUi.primaryText, metadataTitleColor, expansionFraction)
-            val artistColor = androidx.compose.ui.graphics.lerp(PhoebeUi.secondaryText, metadataArtistColor, expansionFraction)
+            val titleColor = androidx.compose.ui.graphics.lerp(PhoebeUi.primaryText, metadataTitleColor, clampedExpansionFraction)
+            val artistColor = androidx.compose.ui.graphics.lerp(PhoebeUi.secondaryText, metadataArtistColor, clampedExpansionFraction)
 
-            val currentTextX = lerp(68.dp, 36.dp, expansionFraction)
-            val currentTextY = lerp(17.dp, 80.dp + statusBarTopPadding + fullArtworkSize + 12.dp, expansionFraction)
-            val currentTextWidth = lerp(screenWidth - 128.dp, fullArtworkSize - 32.dp, expansionFraction)
+            val currentTextX = lerp(68.dp, 36.dp, clampedExpansionFraction)
+            val currentTextY = lerp(17.dp, 80.dp + statusBarTopPadding + fullArtworkSize + 12.dp, clampedExpansionFraction)
+            val currentTextWidth = lerp(screenWidth - 128.dp, fullArtworkSize - 32.dp, clampedExpansionFraction)
 
-            val titleFontSize = (14f + (20f - 14f) * expansionFraction).sp
-            val artistFontSize = (12f + (14f - 12f) * expansionFraction).sp
-            val titleFontWeight = if (expansionFraction > 0.5f) FontWeight.Black else FontWeight.Bold
+            val titleFontSize = (14f + (20f - 14f) * clampedExpansionFraction).sp
+            val artistFontSize = (12f + (14f - 12f) * clampedExpansionFraction).sp
+            val titleFontWeight = if (clampedExpansionFraction > 0.5f) FontWeight.Black else FontWeight.Bold
 
             Column(
                 modifier = Modifier
                     .offset(x = currentTextX, y = currentTextY)
                     .width(currentTextWidth)
                     .then(
-                        if (expansionFraction < 0.15f) {
+                        if (clampedExpansionFraction < 0.15f) {
                             Modifier
                                 .clip(RoundedCornerShape(10.dp))
                                 .clickable { onDragEnd(-1000f) }
@@ -795,7 +796,7 @@ fun MobilePlayer(
                         }
                     )
                     .graphicsLayer {
-                        if (expansionFraction < 0.1f) {
+                        if (clampedExpansionFraction < 0.1f) {
                             translationX = currentSwipeOffset
                             val swipeProgress = (abs(currentSwipeOffset) / swipeThresholdPx).coerceIn(0f, 1f)
                             alpha = miniPlayerAlpha * (1f - swipeProgress * 0.14f)
@@ -815,14 +816,14 @@ fun MobilePlayer(
                     text = track.artist,
                     color = artistColor,
                     fontSize = artistFontSize,
-                    modifier = if (expansionFraction >= 0.85f && track.artist.isNotBlank()) {
+                    modifier = if (clampedExpansionFraction >= 0.85f && track.artist.isNotBlank()) {
                         Modifier.clickable { trackNavigationActions.onOpenArtistForTrack(track) }
                     } else {
                         Modifier
                     }
                 )
-                if (expansionFraction > 0.5f) {
-                    val fadeAlpha = ((expansionFraction - 0.5f) / 0.5f).coerceIn(0f, 1f)
+                if (clampedExpansionFraction > 0.5f) {
+                    val fadeAlpha = ((clampedExpansionFraction - 0.5f) / 0.5f).coerceIn(0f, 1f)
                     val metadataAlbumColor = if (metadataUsesArtworkChrome) Color.White.copy(alpha = 0.65f) else PhoebeUi.mutedText
                     if (track.album.isNotBlank()) {
                         AutoScrollingText(
@@ -853,16 +854,16 @@ fun MobilePlayer(
         if (track != null || fullPlayerAlpha > 0f) {
             val collapsedPlayButtonSize = 40.dp
             val expandedPlayButtonSize = 58.dp
-            val playButtonSize = lerp(collapsedPlayButtonSize, expandedPlayButtonSize, expansionFraction)
+            val playButtonSize = lerp(collapsedPlayButtonSize, expandedPlayButtonSize, clampedExpansionFraction)
             val collapsedPlayButtonX = screenWidth - 12.dp - collapsedPlayButtonSize
             val collapsedPlayButtonY = (MobileMiniPlayerChromeHeight - collapsedPlayButtonSize) / 2f
             val expandedPlayButtonX = (screenWidth - expandedPlayButtonSize) / 2f
             val expandedPlayButtonY = screenHeight - collapsedSheetHeight - 12.dp - expandedPlayButtonSize
             val swipeProgress = (abs(currentSwipeOffset) / swipeThresholdPx).coerceIn(0f, 1f)
-            val swipeScale = if (expansionFraction < 0.1f) 1f - swipeProgress * 0.025f else 1f
+            val swipeScale = if (clampedExpansionFraction < 0.1f) 1f - swipeProgress * 0.025f else 1f
             val playButtonAlpha = when {
                 track == null -> fullPlayerElementsAlpha
-                expansionFraction < 0.1f -> miniPlayerAlpha * (1f - swipeProgress * 0.14f)
+                clampedExpansionFraction < 0.1f -> miniPlayerAlpha * (1f - swipeProgress * 0.14f)
                 else -> 1f
             }
 
@@ -874,17 +875,17 @@ fun MobilePlayer(
                 modifier = Modifier
                     .offset {
                         IntOffset(
-                            x = lerp(collapsedPlayButtonX, expandedPlayButtonX, expansionFraction).roundToPx(),
-                            y = lerp(collapsedPlayButtonY, expandedPlayButtonY, expansionFraction).roundToPx(),
+                            x = lerp(collapsedPlayButtonX, expandedPlayButtonX, clampedExpansionFraction).roundToPx(),
+                            y = lerp(collapsedPlayButtonY, expandedPlayButtonY, clampedExpansionFraction).roundToPx(),
                         )
                     }
                     .graphicsLayer {
                         alpha = playButtonAlpha
-                        translationX = if (expansionFraction < 0.1f) currentSwipeOffset else 0f
+                        translationX = if (clampedExpansionFraction < 0.1f) currentSwipeOffset else 0f
                         scaleX = swipeScale
                         scaleY = swipeScale
                     }
-                    .then(if (expansionFraction < 0.1f) horizontalDragModifier else Modifier),
+                    .then(if (clampedExpansionFraction < 0.1f) horizontalDragModifier else Modifier),
                 enabled = track != null,
             )
         }
