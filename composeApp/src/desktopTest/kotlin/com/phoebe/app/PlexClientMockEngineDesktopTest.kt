@@ -10,6 +10,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import java.io.IOException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.junit.Test
 import kotlin.test.assertEquals
@@ -111,6 +112,43 @@ class PlexClientMockEngineDesktopTest {
         assertEquals("secret-token", capturedToken)
         assertEquals("com.plexapp.plugins.library", capturedIdentifier)
         assertEquals("123", capturedKey)
+    }
+
+    @Test
+    fun musicLibrariesTimesOutStuckFirstBaseAndRetriesNext() = runBlocking {
+        val attemptedHosts = mutableListOf<String>()
+        val engine = MockEngine { request ->
+            attemptedHosts += request.url.host
+            when (request.url.host) {
+                "first.example" -> {
+                    delay(5_000)
+                    respond("", HttpStatusCode.GatewayTimeout)
+                }
+                "second.example" -> respond(
+                    content = """{"MediaContainer":{"Directory":[{"key":"1","title":"Music","type":"artist"}]}}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val client = PlexClient(testHttpClient(engine))
+
+        val libraries = client.musicLibraries(
+            server = PlexServer(
+                id = "id",
+                name = "plex",
+                uri = "http://first.example:32400",
+                owned = true,
+                connectionUris = listOf("http://first.example:32400", "http://second.example:32400"),
+                advertisedConnectionUris = listOf("http://first.example:32400", "http://second.example:32400"),
+            ),
+            token = "secret-token",
+            baseTimeoutMs = 50,
+        )
+
+        assertEquals(listOf("first.example", "second.example"), attemptedHosts)
+        assertEquals(listOf("Music"), libraries.map { it.title })
     }
 
     @Test

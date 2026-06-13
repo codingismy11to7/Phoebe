@@ -13,6 +13,7 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import java.io.IOException
 import kotlinx.coroutines.runBlocking
 import org.junit.Test
 import kotlin.test.assertEquals
@@ -33,10 +34,11 @@ class SessionRepositoryDesktopTest {
                 else -> respond("", HttpStatusCode.NotFound)
             }
         }
-        val repository = SessionRepository(
+        val repository = testSessionRepository(
             plexClient = PlexClient(testHttpClient(engine)),
             database = database,
             storage = PlatformStorage(),
+            httpClient = testHttpClient(engine),
         )
         val server = PlexServer(
             id = "server-id",
@@ -88,12 +90,12 @@ class SessionRepositoryDesktopTest {
         )
 
         try {
-            val repository = SessionRepository(client, database, storage)
+            val repository = testSessionRepository(plexClient = client, database = database, storage = storage, httpClient = testHttpClient(engine))
             repository.completePin(PlexPin(id = 1, code = "ABCD", authUrl = "https://plex.example/auth"))
             repository.selectServer(server, refreshConnections = false)
             resourcesCalls = 0
 
-            val restored = SessionRepository(client, database, storage)
+            val restored = testSessionRepository(plexClient = client, database = database, storage = storage, httpClient = testHttpClient(engine))
             restored.restore(refreshConnections = false)
 
             assertEquals("server-id", restored.session.value?.selectedServer?.id)
@@ -104,6 +106,53 @@ class SessionRepositoryDesktopTest {
             assertEquals("server-token", restored.session.value?.selectedServer?.accessToken)
             assertEquals(true, restored.session.value?.selectedServer?.httpsRequired)
             assertEquals(0, resourcesCalls)
+        } finally {
+            driver.close()
+        }
+    }
+
+    @Test
+    fun selectServerPersistsResolvedPlexApiBase() = runBlocking {
+        val (database, driver) = newInMemoryPhoebeDatabase()
+        val engine = MockEngine { request ->
+            when {
+                request.url.encodedPath == "/api/v2/pins/1" -> {
+                    respondJson("""{"id":1,"code":"ABCD","authToken":"user-token"}""")
+                }
+                request.url.encodedPath == "/api/v2/user" -> {
+                    respondJson("""{"username":"Plex listener"}""")
+                }
+                request.url.host == "first.example" && request.url.encodedPath == "/identity" -> {
+                    throw IOException("connection refused")
+                }
+                request.url.host == "second.example" && request.url.encodedPath == "/identity" -> {
+                    respondJson("""{"MediaContainer":{"machineIdentifier":"server-id"}}""")
+                }
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val repository = testSessionRepository(
+            plexClient = PlexClient(testHttpClient(engine)),
+            database = database,
+            storage = PlatformStorage(),
+            httpClient = testHttpClient(engine),
+        )
+        val server = PlexServer(
+            id = "server-id",
+            name = "Studio Plex",
+            uri = "http://first.example:32400",
+            owned = true,
+            connectionUris = listOf("http://first.example:32400", "http://second.example:32400"),
+            advertisedConnectionUris = listOf("http://first.example:32400", "http://second.example:32400"),
+            accessToken = "server-token",
+        )
+
+        try {
+            repository.completePin(PlexPin(id = 1, code = "ABCD", authUrl = "https://plex.example/auth"))
+            val selected = repository.selectServer(server, refreshConnections = false)
+
+            assertEquals("http://second.example:32400", selected.uri)
+            assertEquals("http://second.example:32400", repository.session.value?.selectedServer?.uri)
         } finally {
             driver.close()
         }

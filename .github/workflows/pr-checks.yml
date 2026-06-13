@@ -130,6 +130,38 @@ jobs:
             composeApp/build/outputs/roborazzi/**
             composeApp/build/test-results/testAndroidHostTest/**
 
+  desktop-screenshots:
+    name: Desktop screenshots
+    runs-on: macos-26
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Verify desktop screenshots
+        run: ./gradlew :composeApp:verifyRoborazziDesktop
+
+      - name: Upload desktop screenshot artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-screenshot-artifacts
+          if-no-files-found: ignore
+          path: |
+            composeApp/build/reports/roborazzi/**
+            composeApp/build/outputs/roborazzi/**
+            composeApp/build/test-results/desktopTest/**
+
   ios-build:
     name: iOS build
     # Compose 1.11 links UIViewLayoutRegion (iOS 26 SDK); Xcode 16.x only supports deployment targets up to 18.5.

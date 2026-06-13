@@ -11,9 +11,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -31,7 +31,68 @@ import com.phoebe.app.domain.MediaProviderType
 import com.phoebe.app.domain.PlayerState
 import com.phoebe.app.domain.isEmbyFamily
 import com.phoebe.app.domain.isNavidrome
+import com.phoebe.app.feature.auth.AuthWelcomeDesktopRoute
+import com.phoebe.app.feature.auth.AuthWelcomeRouteActions
+import com.phoebe.app.feature.auth.AuthWelcomeRouteState
+import com.phoebe.app.feature.auth.PlexLibraryPickerRoute
+import com.phoebe.app.feature.auth.PlexLibraryPickerRouteActions
+import com.phoebe.app.feature.auth.PlexLibraryPickerRouteState
+import com.phoebe.app.feature.auth.PlexServerPickerRoute
+import com.phoebe.app.feature.auth.PlexServerPickerRouteActions
+import com.phoebe.app.feature.auth.PlexServerPickerRouteState
+import com.phoebe.app.feature.collections.CollectionItemsRoute
+import com.phoebe.app.feature.collections.CollectionItemsRouteActions
+import com.phoebe.app.feature.collections.CollectionItemsRouteState
+import com.phoebe.app.feature.collections.CollectionsRoute
+import com.phoebe.app.feature.collections.CollectionsRouteActions
+import com.phoebe.app.feature.collections.CollectionsRouteState
+import com.phoebe.app.feature.details.AlbumDetailRoute
+import com.phoebe.app.feature.details.AlbumDetailRouteActions
+import com.phoebe.app.feature.details.AlbumDetailRouteState
+import com.phoebe.app.feature.details.ArtistDetailRoute
+import com.phoebe.app.feature.details.ArtistDetailRouteActions
+import com.phoebe.app.feature.details.ArtistDetailRouteState
+import com.phoebe.app.feature.details.SongDetailRoute
+import com.phoebe.app.feature.details.SongDetailRouteActions
+import com.phoebe.app.feature.details.SongDetailRouteState
+import com.phoebe.app.feature.favorites.FavoriteAlbumsDesktopRoute
+import com.phoebe.app.feature.favorites.FavoriteAlbumsRouteActions
+import com.phoebe.app.feature.favorites.FavoriteAlbumsRouteState
+import com.phoebe.app.feature.favorites.FavoriteArtistsDesktopRoute
+import com.phoebe.app.feature.favorites.FavoriteArtistsRouteActions
+import com.phoebe.app.feature.favorites.FavoriteArtistsRouteState
+import com.phoebe.app.feature.favorites.FavoritePlaylistsDesktopRoute
+import com.phoebe.app.feature.favorites.FavoritePlaylistsRouteActions
+import com.phoebe.app.feature.favorites.FavoritePlaylistsRouteState
+import com.phoebe.app.feature.history.HistoryNowPlayingState
+import com.phoebe.app.feature.history.PlayHistoryRoute
+import com.phoebe.app.feature.history.PlayHistoryRouteState
+import com.phoebe.app.feature.home.DesktopHomeRoute
+import com.phoebe.app.feature.home.DesktopHomeRouteActions
+import com.phoebe.app.feature.home.DesktopHomeRouteState
+import com.phoebe.app.feature.home.RecentlyAddedNowPlayingState
+import com.phoebe.app.feature.home.RecentlyAddedRoute
+import com.phoebe.app.feature.home.RecentlyAddedRouteActions
+import com.phoebe.app.feature.home.RecentlyAddedRouteState
+import com.phoebe.app.feature.library.LibraryDesktopRoute
+import com.phoebe.app.feature.library.LibraryRouteActions
+import com.phoebe.app.feature.library.LibraryRouteState
+import com.phoebe.app.feature.lyrics.LyricsRoute
+import com.phoebe.app.feature.lyrics.LyricsRouteState
+import com.phoebe.app.feature.playback.DesktopVisualizerRoute
+import com.phoebe.app.feature.playback.DesktopVisualizerRouteState
+import com.phoebe.app.feature.playback.DesktopTransport
+import com.phoebe.app.feature.playback.QueueRoute
+import com.phoebe.app.feature.playback.QueueRouteActions
+import com.phoebe.app.feature.playback.QueueRouteState
+import com.phoebe.app.feature.search.SearchDesktopRoute
+import com.phoebe.app.feature.search.SearchDesktopRouteActions
+import com.phoebe.app.feature.settings.SettingsDesktopRoute
+import com.phoebe.app.feature.settings.SettingsRouteActions
+import com.phoebe.app.feature.settings.SettingsRouteState
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
@@ -58,10 +119,26 @@ internal fun DesktopPlayer(
     val showQueue = shellState.showQueue
     val compact = shellState.compact
     val busy = shellState.busy
+    val routeViewModelFactory = shellState.routeViewModelFactory
     val shellPlayback = playbackState.shellPlayback
     val playerTransport = playbackState.playerTransport
-    val track = playbackState.track
-    val upNext = playbackState.upNext
+    val playerChromeFlow = remember(playerFlow) {
+        playerFlow
+            ?.map { player -> player.withoutProgressTicks() }
+            ?.distinctUntilChanged()
+    }
+    val playerChromeInitial = remember(playerFlow, playbackState.player) {
+        (playerFlow?.value ?: playbackState.player).withoutProgressTicks()
+    }
+    val playerChrome = if (playerChromeFlow != null) {
+        val collected by playerChromeFlow.collectAsState(playerChromeInitial)
+        collected
+    } else {
+        playerChromeInitial
+    }
+    val hasLivePlayerChrome = playerFlow != null
+    val track = if (hasLivePlayerChrome) playerChrome.currentTrack else playbackState.track
+    val upNext = if (hasLivePlayerChrome) playerChrome.upNext else playbackState.upNext
     val lyricsTrack = playbackState.lyricsTrack
     val lyricsState = playbackState.lyricsState
     val castState = playbackState.castState
@@ -203,11 +280,11 @@ internal fun DesktopPlayer(
     val onListenBrainzSubmitNowPlaying = settingsActions.onListenBrainzSubmitNowPlaying
     val onListenBrainzSubmitListens = settingsActions.onListenBrainzSubmitListens
     val onListenBrainzSubmitCurrentTrackFeedback = settingsActions.onListenBrainzSubmitCurrentTrackFeedback
-    val isPlaying = shellPlayback.isPlaying
-    val isBuffering = shellPlayback.isBuffering
-    val shuffle = playerTransport.shuffle
-    val repeat = playerTransport.repeat
-    val volume = playerTransport.volume
+    val isPlaying = if (hasLivePlayerChrome) playerChrome.isPlaying else shellPlayback.isPlaying
+    val isBuffering = if (hasLivePlayerChrome) playerChrome.isBuffering else shellPlayback.isBuffering
+    val shuffle = if (hasLivePlayerChrome) playerChrome.shuffle else playerTransport.shuffle
+    val repeat = if (hasLivePlayerChrome) playerChrome.repeat else playerTransport.repeat
+    val volume = if (hasLivePlayerChrome) playerChrome.volume else playerTransport.volume
     val displayRoutes = routes.ifEmpty { previewRoutesFor(screen, section) }
     var desktopUpNextExpanded by remember { mutableStateOf(true) }
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -245,12 +322,10 @@ internal fun DesktopPlayer(
                         Row(Modifier.weight(1f).fillMaxWidth()) {
                             SharedTransitionLayout(Modifier.weight(1f).fillMaxHeight()) {
                                 val sharedTransitionScope = this
-                                var previousScreen by remember { mutableStateOf<AppScreen?>(null) }
+                                val previousRoute = displayRoutes.dropLast(1).lastOrNull()
+                                val targetRoute = displayRoutes.lastOrNull()
                                 val sharedElementsEnabled = LocalSharedElementTransitionsEnabled.current &&
-                                    shouldUseDesktopSharedElements(previousScreen, screen)
-                                LaunchedEffect(screen) {
-                                    previousScreen = screen
-                                }
+                                    shouldUseDesktopSharedElements(previousRoute, targetRoute)
                                 CompositionLocalProvider(
                                     LocalSharedTransitionScope provides sharedTransitionScope,
                                     LocalSharedElementTransitionsEnabled provides sharedElementsEnabled,
@@ -274,105 +349,129 @@ internal fun DesktopPlayer(
                                             )
                                         } else {
                             when (targetScreen) {
-                                is AppScreen.ServerPicker -> PlexServerPickerPanel(
-                                    servers = servers,
-                                    busy = busy,
-                                    serversLoading = serversLoading,
-                                    onSelectServer = onSelectServer,
-                                    onCancel = onCancelPlexSetup,
-                                    onRetry = onRetryServers,
+                                is AppScreen.ServerPicker -> PlexServerPickerRoute(
+                                    state = PlexServerPickerRouteState(
+                                        servers = servers,
+                                        busy = busy,
+                                        serversLoading = serversLoading,
+                                    ),
+                                    actions = PlexServerPickerRouteActions(
+                                        onSelectServer = onSelectServer,
+                                        onCancel = onCancelPlexSetup,
+                                        onRetry = onRetryServers,
+                                    ),
                                     modifier = Modifier.fillMaxSize(),
                                 )
-                                is AppScreen.LibraryPicker -> PlexLibraryPickerPanel(
-                                    libraries = libraries,
-                                    serverName = session?.selectedServer?.name,
-                                    providerType = session?.providerType ?: MediaProviderType.Plex,
-                                    busy = busy,
-                                    librariesLoading = librariesLoading,
-                                    isJellyfin = session.isEmbyFamily(),
-                                    onSelectLibrary = onSelectLibrary,
-                                    onBack = onBackToServerPicker,
-                                    onCancel = onCancelPlexSetup,
+                                is AppScreen.LibraryPicker -> PlexLibraryPickerRoute(
+                                    state = PlexLibraryPickerRouteState(
+                                        libraries = libraries,
+                                        serverName = session?.selectedServer?.name,
+                                        providerType = session?.providerType ?: MediaProviderType.Plex,
+                                        busy = busy,
+                                        librariesLoading = librariesLoading,
+                                        isJellyfin = session.isEmbyFamily(),
+                                    ),
+                                    actions = PlexLibraryPickerRouteActions(
+                                        onSelectLibrary = onSelectLibrary,
+                                        onBack = onBackToServerPicker,
+                                        onCancel = onCancelPlexSetup,
+                                    ),
                                     modifier = Modifier.fillMaxSize(),
                                 )
-                                is AppScreen.SignIn -> SignInWelcomeScreen(
-                                    message = appMessage,
-                                    pinCode = pinCode,
-                                    jellyfinServers = jellyfinServers,
-                                    jellyfinDiscoveryLoading = jellyfinDiscoveryLoading,
-                                    jellyfinQuickConnect = jellyfinQuickConnect,
-                                    authInProgress = authInProgress,
-                                    onStartSignIn = onStartSignIn,
-                                    onFinishSignIn = onFinishSignIn,
-                                    onSignInJellyfin = onSignInJellyfin,
-                                    onSignInProvider = onSignInProvider,
-                                    onDiscoverJellyfinServers = onDiscoverJellyfinServers,
-                                    onStartJellyfinQuickConnect = onStartJellyfinQuickConnect,
-                                    onFinishJellyfinQuickConnect = onFinishJellyfinQuickConnect,
-                                    showLocalFolderHint = true,
+                                is AppScreen.SignIn -> AuthWelcomeDesktopRoute(
+                                    state = AuthWelcomeRouteState(
+                                        message = appMessage,
+                                        pinCode = pinCode,
+                                        jellyfinServers = jellyfinServers,
+                                        jellyfinDiscoveryLoading = jellyfinDiscoveryLoading,
+                                        jellyfinQuickConnect = jellyfinQuickConnect,
+                                        authInProgress = authInProgress,
+                                        showLocalFolderHint = true,
+                                    ),
+                                    actions = AuthWelcomeRouteActions(
+                                        onStartSignIn = onStartSignIn,
+                                        onFinishSignIn = onFinishSignIn,
+                                        onSignInJellyfin = onSignInJellyfin,
+                                        onSignInProvider = onSignInProvider,
+                                        onDiscoverJellyfinServers = onDiscoverJellyfinServers,
+                                        onStartJellyfinQuickConnect = onStartJellyfinQuickConnect,
+                                        onFinishJellyfinQuickConnect = onFinishJellyfinQuickConnect,
+                                    ),
                                     modifier = Modifier.fillMaxSize(),
                                 )
                                 is AppScreen.ArtistDetail -> Column(Modifier.fillMaxSize()) {
                                     LibraryTopBar(searchQuery = searchQuery, onSearchQuery = onSearchQuery)
-                                    ArtistDetailPanel(
-                                        artist = targetScreen.artist,
-                                        catalog = catalog,
-                                        libraryUi = libraryUi,
-                                        catalogRefreshing = catalogRefreshing,
+                                    ArtistDetailRoute(
+                                        state = ArtistDetailRouteState(
+                                            artist = targetScreen.artist,
+                                            catalog = catalog,
+                                            libraryUi = libraryUi,
+                                            catalogRefreshing = catalogRefreshing,
+                                            searchQuery = searchQuery,
+                                            artistRadioAvailability = artistRadioAvailability[targetScreen.artist.id],
+                                            artistRadioStarting = targetScreen.artist.id in radioStartingIds,
+                                        ),
+                                        actions = ArtistDetailRouteActions(
+                                            onBack = onPopDetail,
+                                            onAlbum = onAlbum,
+                                            onPlayTracks = onPlayTracks,
+                                            onPlayAllTracks = onPlayAllTracks,
+                                            onShuffleAllTracks = onShuffleAllTracks,
+                                            onAddToUpNext = onAddToUpNext,
+                                            onDownload = onDownload,
+                                            onDownloadArtist = onDownloadArtist,
+                                            onProbeArtistRadio = onProbeArtistRadio,
+                                            onPlayArtistRadio = onPlayArtistRadio,
+                                            onArtist = onArtist,
+                                            onLibraryColumns = onLibraryColumns,
+                                        ),
                                         modifier = Modifier.weight(1f).fillMaxWidth(),
-                                        searchQuery = searchQuery,
-                                        onBack = onPopDetail,
-                                        onAlbum = onAlbum,
-                                        onPlayTracks = onPlayTracks,
-                                        onPlayAllTracks = onPlayAllTracks,
-                                        onShuffleAllTracks = onShuffleAllTracks,
-                                        onAddToUpNext = onAddToUpNext,
-                                        onDownload = onDownload,
-                                        onDownloadArtist = onDownloadArtist,
-                                        artistRadioAvailability = artistRadioAvailability[targetScreen.artist.id],
-                                        artistRadioStarting = targetScreen.artist.id in radioStartingIds,
-                                        onProbeArtistRadio = onProbeArtistRadio,
-                                        onPlayArtistRadio = onPlayArtistRadio,
-                                        onArtist = onArtist,
-                                        onLibraryColumns = onLibraryColumns,
                                     )
                                 }
                                 is AppScreen.AlbumDetail -> Column(Modifier.fillMaxSize()) {
                                     LibraryTopBar(searchQuery = searchQuery, onSearchQuery = onSearchQuery)
-                                    AlbumDetailPanel(
-                                        album = targetScreen.album,
-                                        catalog = catalog,
-                                        libraryUi = libraryUi,
-                                        catalogRefreshing = catalogRefreshing,
+                                    AlbumDetailRoute(
+                                        state = AlbumDetailRouteState(
+                                            album = targetScreen.album,
+                                            catalog = catalog,
+                                            libraryUi = libraryUi,
+                                            catalogRefreshing = catalogRefreshing,
+                                            searchQuery = searchQuery,
+                                        ),
+                                        actions = AlbumDetailRouteActions(
+                                            onBack = onPopDetail,
+                                            onPlayTracks = onPlayTracks,
+                                            onAddToUpNext = onAddToUpNext,
+                                            onDownload = onDownload,
+                                            onDownloadAlbum = onDownloadAlbum,
+                                            onArtist = onArtist,
+                                            onLibraryColumns = onLibraryColumns,
+                                        ),
                                         modifier = Modifier.weight(1f).fillMaxWidth(),
-                                        searchQuery = searchQuery,
-                                        onBack = onPopDetail,
-                                        onPlayTracks = onPlayTracks,
-                                        onAddToUpNext = onAddToUpNext,
-                                        onDownload = onDownload,
-                                        onDownloadAlbum = onDownloadAlbum,
-                                        onArtist = onArtist,
-                                        onLibraryColumns = onLibraryColumns,
                                     )
                                 }
                                 is AppScreen.SongDetail -> Column(Modifier.fillMaxSize()) {
                                     LibraryTopBar(searchQuery = searchQuery, onSearchQuery = onSearchQuery)
-                                    SongDetailPanel(
-                                        track = targetScreen.track,
+                                    SongDetailRoute(
+                                        state = SongDetailRouteState(track = targetScreen.track),
+                                        actions = SongDetailRouteActions(
+                                            onBack = onPopDetail,
+                                            onPlay = { onPlayTracks(listOf(targetScreen.track), 0) },
+                                            onAddToUpNext = onAddToUpNext,
+                                            onDownload = onDownload,
+                                            onOpenLyrics = onOpenLyrics,
+                                        ),
                                         modifier = Modifier.weight(1f).fillMaxWidth(),
-                                        onBack = onPopDetail,
-                                        onPlay = { onPlayTracks(listOf(targetScreen.track), 0) },
-                                        onAddToUpNext = onAddToUpNext,
-                                        onDownload = onDownload,
-                                        onOpenLyrics = onOpenLyrics,
                                     )
                                 }
                                 is AppScreen.Lyrics -> DesktopPlayerProgressScope(playerFlow, playbackState.player) { positionMs ->
-                                    LyricsView(
-                                        track = lyricsTrack,
-                                        currentTrackId = track?.id,
-                                        positionMs = positionMs,
-                                        state = lyricsState,
+                                    LyricsRoute(
+                                        state = LyricsRouteState(
+                                            track = lyricsTrack,
+                                            currentTrackId = track?.id,
+                                            positionMs = positionMs,
+                                            loadState = lyricsState,
+                                        ),
                                         modifier = Modifier.fillMaxSize(),
                                         onBack = onPopDetail,
                                         onRetry = onRetryLyrics,
@@ -380,54 +479,85 @@ internal fun DesktopPlayer(
                                 }
                                 is AppScreen.RecentlyAdded -> Column(Modifier.fillMaxSize()) {
                                     LibraryTopBar(searchQuery = searchQuery, onSearchQuery = onSearchQuery)
-                                    RecentlyAddedScreen(
-                                        kind = targetScreen.kind,
-                                        catalog = catalog,
-                                        nowMs = LocalNowMs.current,
+                                    val nowPlaying = LocalNowPlaying.current
+                                    RecentlyAddedRoute(
+                                        state = RecentlyAddedRouteState(
+                                            kind = targetScreen.kind,
+                                            catalog = catalog,
+                                            nowMs = LocalNowMs.current,
+                                            nowPlaying = RecentlyAddedNowPlayingState(
+                                                trackId = nowPlaying.trackId,
+                                                isPlaying = nowPlaying.isPlaying,
+                                                isBuffering = nowPlaying.isBuffering,
+                                            ),
+                                        ),
+                                        actions = RecentlyAddedRouteActions(
+                                            onBack = onPopDetail,
+                                            onArtist = onArtist,
+                                            onAlbum = onAlbum,
+                                            onPlayTracks = onPlayTracks,
+                                            onAddToUpNext = onAddToUpNext,
+                                            onDownload = onDownload,
+                                        ),
                                         modifier = Modifier.weight(1f).fillMaxWidth(),
-                                        onBack = onPopDetail,
-                                        onArtist = onArtist,
-                                        onAlbum = onAlbum,
-                                        onPlayTracks = onPlayTracks,
-                                        onAddToUpNext = onAddToUpNext,
-                                        onDownload = onDownload,
                                     )
                                 }
                                 is AppScreen.Collections -> Column(Modifier.fillMaxSize()) {
                                     LibraryTopBar(searchQuery = searchQuery, onSearchQuery = onSearchQuery)
-                                    CollectionsScreen(
-                                        entry = targetScreen.entry,
-                                        catalog = catalog,
-                                        searchQuery = searchQuery,
+                                    CollectionsRoute(
+                                        state = CollectionsRouteState(
+                                            entry = targetScreen.entry,
+                                            catalog = catalog,
+                                            searchQuery = searchQuery,
+                                        ),
+                                        actions = CollectionsRouteActions(
+                                            onBack = onPopDetail,
+                                            onCollectionValue = { entry, value -> onCollectionValue(entry, value) },
+                                            onEnsureValuesLoaded = { onEnsureCollectionValuesLoaded(targetScreen.entry) },
+                                        ),
                                         modifier = Modifier.weight(1f).fillMaxWidth(),
-                                        onBack = onPopDetail,
-                                        onCollectionValue = { entry, value -> onCollectionValue(entry, value) },
-                                        onEnsureValuesLoaded = { onEnsureCollectionValuesLoaded(targetScreen.entry) },
                                     )
                                 }
                                 is AppScreen.CollectionItems -> Column(Modifier.fillMaxSize()) {
                                     LibraryTopBar(searchQuery = searchQuery, onSearchQuery = onSearchQuery)
-                                    CollectionItemsScreen(
-                                        entry = targetScreen.entry,
-                                        value = targetScreen.value,
-                                        catalog = catalog,
-                                        searchQuery = searchQuery,
+                                    CollectionItemsRoute(
+                                        state = CollectionItemsRouteState(
+                                            entry = targetScreen.entry,
+                                            value = targetScreen.value,
+                                            catalog = catalog,
+                                            searchQuery = searchQuery,
+                                        ),
+                                        actions = CollectionItemsRouteActions(
+                                            onBack = onPopDetail,
+                                            onArtist = onArtist,
+                                            onAlbum = onAlbum,
+                                            onEnsureItemsLoaded = {
+                                                onEnsureCollectionItemsLoaded(targetScreen.entry, targetScreen.value)
+                                            },
+                                        ),
                                         modifier = Modifier.weight(1f).fillMaxWidth(),
-                                        onBack = onPopDetail,
-                                        onArtist = onArtist,
-                                        onAlbum = onAlbum,
-                                        onEnsureItemsLoaded = {
-                                            onEnsureCollectionItemsLoaded(targetScreen.entry, targetScreen.value)
-                                        },
                                     )
                                 }
                                 is AppScreen.PlayHistory -> Column(Modifier.fillMaxSize()) {
                                     LibraryTopBar(searchQuery = searchQuery, onSearchQuery = onSearchQuery)
-                                    PlayHistoryScreen(
-                                        kind = targetScreen.kind,
-                                        catalog = catalog,
-                                        playHistory = playHistory,
-                                        resolvedTracksById = browseState.resolvedTracksById,
+                                    val nowPlaying = LocalNowPlaying.current
+                                    val viewModel = remember(routeViewModelFactory, targetScreen.kind) {
+                                        routeViewModelFactory.playHistory()
+                                    }
+                                    PlayHistoryRoute(
+                                        viewModel = viewModel,
+                                        state = PlayHistoryRouteState(
+                                            kind = targetScreen.kind,
+                                            catalog = catalog,
+                                            playHistory = playHistory,
+                                            resolvedTracksById = browseState.resolvedTracksById,
+                                            nowPlaying = HistoryNowPlayingState(
+                                                trackId = nowPlaying.trackId,
+                                                isPlaying = nowPlaying.isPlaying,
+                                                isBuffering = nowPlaying.isBuffering,
+                                            ),
+                                            loadRankedEntries = browseState.loadPlayHistoryEntries,
+                                        ),
                                         modifier = Modifier.weight(1f).fillMaxWidth(),
                                         onBack = onPopDetail,
                                         onPlayTracks = onPlayTracks,
@@ -435,43 +565,57 @@ internal fun DesktopPlayer(
                                         onDownload = onDownload,
                                     )
                                 }
-                                AppScreen.FavoritePlaylists -> FavoritePlaylistsDesktopView(
-                                    playlists = LocalPlaylistActions.current.playlists,
-                                    searchQuery = searchQuery,
-                                    onSearchQuery = onSearchQuery,
-                                    onPlaylist = onPlaylist,
-                                    onBack = onPopDetail,
+                                AppScreen.FavoritePlaylists -> FavoritePlaylistsDesktopRoute(
+                                    state = FavoritePlaylistsRouteState(
+                                        playlists = LocalPlaylistActions.current.playlists,
+                                        searchQuery = searchQuery,
+                                    ),
+                                    actions = FavoritePlaylistsRouteActions(
+                                        onSearchQuery = onSearchQuery,
+                                        onPlaylist = onPlaylist,
+                                        onBack = onPopDetail,
+                                    ),
                                     modifier = Modifier.fillMaxSize(),
                                 )
-                                AppScreen.FavoriteArtists -> FavoriteArtistsDesktopView(
-                                    catalog = catalog,
-                                    libraryUi = libraryUi,
-                                    searchQuery = searchQuery,
-                                    onSearchQuery = onSearchQuery,
-                                    onLibrarySortBy = onLibrarySortBy,
-                                    onLibraryAscending = onLibraryAscending,
-                                    onArtist = onArtist,
-                                    onBack = onPopDetail,
+                                AppScreen.FavoriteArtists -> FavoriteArtistsDesktopRoute(
+                                    state = FavoriteArtistsRouteState(
+                                        catalog = catalog,
+                                        libraryUi = libraryUi,
+                                        searchQuery = searchQuery,
+                                    ),
+                                    actions = FavoriteArtistsRouteActions(
+                                        onSearchQuery = onSearchQuery,
+                                        onLibrarySortBy = onLibrarySortBy,
+                                        onLibraryAscending = onLibraryAscending,
+                                        onArtist = onArtist,
+                                        onBack = onPopDetail,
+                                    ),
                                     modifier = Modifier.fillMaxSize(),
                                 )
-                                AppScreen.FavoriteAlbums -> FavoriteAlbumsDesktopView(
-                                    catalog = catalog,
-                                    libraryUi = libraryUi,
-                                    searchQuery = searchQuery,
-                                    onSearchQuery = onSearchQuery,
-                                    onLibrarySortBy = onLibrarySortBy,
-                                    onLibraryAscending = onLibraryAscending,
-                                    onAlbum = onAlbum,
-                                    onBack = onPopDetail,
+                                AppScreen.FavoriteAlbums -> FavoriteAlbumsDesktopRoute(
+                                    state = FavoriteAlbumsRouteState(
+                                        catalog = catalog,
+                                        libraryUi = libraryUi,
+                                        searchQuery = searchQuery,
+                                    ),
+                                    actions = FavoriteAlbumsRouteActions(
+                                        onSearchQuery = onSearchQuery,
+                                        onLibrarySortBy = onLibrarySortBy,
+                                        onLibraryAscending = onLibraryAscending,
+                                        onAlbum = onAlbum,
+                                        onBack = onPopDetail,
+                                    ),
                                     modifier = Modifier.fillMaxSize(),
                                 )
                                 AppScreen.Player -> DesktopPlayerProgressScope(playerFlow, playbackState.player) { positionMs ->
-                                    DesktopNowPlayingVisualizerView(
-                                        track = track,
-                                        preset = visualizerPreset,
-                                        audioAnalysis = audioAnalysis,
-                                        isPlaying = isPlaying,
-                                        positionMs = positionMs,
+                                    DesktopVisualizerRoute(
+                                        state = DesktopVisualizerRouteState(
+                                            track = track,
+                                            preset = visualizerPreset,
+                                            audioAnalysis = audioAnalysis,
+                                            isPlaying = isPlaying,
+                                            positionMs = positionMs,
+                                        ),
                                         onPreset = onVisualizerPreset,
                                         modifier = Modifier.fillMaxSize(),
                                     )
@@ -479,124 +623,151 @@ internal fun DesktopPlayer(
                                 else -> when {
                                     section == BrowseSection.Home && selectedPlaylistId == null -> {
                                         val homeListState = RetainedLazyListStates.remember("desktop-home")
-                                        DesktopHomeScreen(
-                                        state = homeUiState,
-                                        catalogRefreshing = catalogRefreshing,
-                                        listState = homeListState,
-                                        modifier = Modifier.fillMaxSize(),
-                                        onTrack = onSong,
-                                        onArtist = onArtist,
-                                        onAlbum = onAlbum,
-                                        onPlaylist = onPlaylist,
-                                        onRecentSongs = onRecentSongs,
-                                        onRecentArtists = onRecentArtists,
-                                        onRecentAlbums = onRecentAlbums,
-                                        onFavoritePlaylists = onFavoritePlaylists,
-                                        onFavoriteArtists = onFavoriteArtists,
-                                        onFavoriteAlbums = onFavoriteAlbums,
-                                        onRecentlyPlayed = onRecentlyPlayed,
-                                        onMostPlayed = onMostPlayed,
-                                        onCollections = onCollections,
-                                        onRefreshArtists = onRefreshRandomArtists,
-                                        onRefreshAlbums = onRefreshRandomAlbums,
-                                        onPrefetchArtist = onPrefetchHomeArtist,
-                                        onPrefetchAlbum = onPrefetchHomeAlbum,
-                                        onPlayDecadeMix = onPlayDecadeMix,
-                                        decadeMixNotice = decadeMixNotice,
-                                        onClearDecadeMixNotice = onClearDecadeMixNotice,
-                                        radioStations = radioStations,
-                                        radioStartingIds = radioStartingIds,
-                                        onPlayRadioStation = onPlayRadioStation,
-                                        onPlayPersonalMix = onPlayPersonalMix,
-                                        onPlayTracks = onPlayTracks,
-                                        onAddToUpNext = onAddToUpNext,
-                                        onDownload = onDownload,
-                                        homeSections = libraryUi.homeSections,
-                                        supportedCollectionEntries = supportedCollectionEntries,
-                                    )
+                                        DesktopHomeRoute(
+                                            state = DesktopHomeRouteState(
+                                                home = homeUiState,
+                                                catalogRefreshing = catalogRefreshing,
+                                                homeSections = libraryUi.homeSections,
+                                                supportedCollectionEntries = supportedCollectionEntries,
+                                                decadeMixNotice = decadeMixNotice,
+                                                radioStations = radioStations,
+                                                radioStartingIds = radioStartingIds,
+                                            ),
+                                            actions = DesktopHomeRouteActions(
+                                                onTrack = onSong,
+                                                onArtist = onArtist,
+                                                onAlbum = onAlbum,
+                                                onPlaylist = onPlaylist,
+                                                onRecentSongs = onRecentSongs,
+                                                onRecentArtists = onRecentArtists,
+                                                onRecentAlbums = onRecentAlbums,
+                                                onFavoritePlaylists = onFavoritePlaylists,
+                                                onFavoriteArtists = onFavoriteArtists,
+                                                onFavoriteAlbums = onFavoriteAlbums,
+                                                onRecentlyPlayed = onRecentlyPlayed,
+                                                onMostPlayed = onMostPlayed,
+                                                onCollections = onCollections,
+                                                onRefreshArtists = onRefreshRandomArtists,
+                                                onRefreshAlbums = onRefreshRandomAlbums,
+                                                onPrefetchArtist = onPrefetchHomeArtist,
+                                                onPrefetchAlbum = onPrefetchHomeAlbum,
+                                                onPlayDecadeMix = onPlayDecadeMix,
+                                                onClearDecadeMixNotice = onClearDecadeMixNotice,
+                                                onPlayRadioStation = onPlayRadioStation,
+                                                onPlayPersonalMix = onPlayPersonalMix,
+                                                onPlayTracks = onPlayTracks,
+                                                onAddToUpNext = onAddToUpNext,
+                                                onDownload = onDownload,
+                                            ),
+                                            listState = homeListState,
+                                            modifier = Modifier.fillMaxSize(),
+                                        )
                                     }
-                                    section == BrowseSection.Search && selectedPlaylistId == null -> SearchDesktopView(
+                                    section == BrowseSection.Search && selectedPlaylistId == null -> SearchDesktopRoute(
+                                        viewModel = remember(routeViewModelFactory) { routeViewModelFactory.search() },
                                         catalog = catalog,
                                         catalogRefreshing = catalogRefreshing,
                                         searchQuery = searchQuery,
-                                        modifier = Modifier.fillMaxSize(),
-                                        onSearchQuery = onSearchQuery,
-                                        onArtist = onArtist,
-                                        onAlbum = onAlbum,
-                                        onPlayTracks = onPlayTracks,
-                                        onAddToUpNext = onAddToUpNext,
-                                        onDownload = onDownload,
-                                    )
-                                    section == BrowseSection.Library && selectedPlaylistId == null -> {
-                                        LibraryDesktopView(
-                                            catalog = catalog,
-                                            catalogRefreshing = catalogRefreshing,
-                                            filter = libraryFilter,
-                                            libraryUi = libraryUi,
-                                            jellyfinPagination = (session.isEmbyFamily() || session.isNavidrome()) && session?.jellyfinSyncMode == JellyfinSyncMode.Quick,
-                                            onJellyfinPage = onJellyfinPage,
-                                            onFilter = onLibraryFilter,
-                                            onLibrarySortBy = onLibrarySortBy,
-                                            onLibraryAscending = onLibraryAscending,
-                                            onLibraryColumns = onLibraryColumns,
+                                        actions = SearchDesktopRouteActions(
+                                            onQuery = onSearchQuery,
                                             onArtist = onArtist,
                                             onAlbum = onAlbum,
                                             onPlayTracks = onPlayTracks,
-                                            searchQuery = searchQuery,
-                                            onSearchQuery = onSearchQuery,
                                             onAddToUpNext = onAddToUpNext,
                                             onDownload = onDownload,
+                                        ),
+                                        modifier = Modifier.fillMaxSize(),
+                                        loadingContent = { CatalogLoadingStrip() },
+                                        trackMenuContent = { track, expanded, onDismiss, onAddToUpNext, onDownload ->
+                                            TrackActionMenu(
+                                                expanded = expanded,
+                                                onDismiss = onDismiss,
+                                                onAddToUpNext = onAddToUpNext,
+                                                onDownload = onDownload,
+                                                track = track,
+                                            )
+                                        },
+                                    )
+                                    section == BrowseSection.Library && selectedPlaylistId == null -> {
+                                        LibraryDesktopRoute(
+                                            state = LibraryRouteState(
+                                                catalog = catalog,
+                                                catalogRefreshing = catalogRefreshing,
+                                                filter = libraryFilter,
+                                                libraryUi = libraryUi,
+                                                jellyfinPagination = (session.isEmbyFamily() || session.isNavidrome()) && session?.jellyfinSyncMode == JellyfinSyncMode.Quick,
+                                                searchQuery = searchQuery,
+                                            ),
+                                            actions = LibraryRouteActions(
+                                                onJellyfinPage = onJellyfinPage,
+                                                onFilter = onLibraryFilter,
+                                                onLibrarySortBy = onLibrarySortBy,
+                                                onLibraryAscending = onLibraryAscending,
+                                                onLibraryColumns = onLibraryColumns,
+                                                onArtist = onArtist,
+                                                onAlbum = onAlbum,
+                                                onPlayTracks = onPlayTracks,
+                                                onSearchQuery = onSearchQuery,
+                                                onAddToUpNext = onAddToUpNext,
+                                                onDownload = onDownload,
+                                            ),
                                             modifier = Modifier.fillMaxSize(),
                                         )
                                     }
                                     section == BrowseSection.Lyrics && selectedPlaylistId == null ->
                                         DesktopPlayerProgressScope(playerFlow, playbackState.player) { positionMs ->
-                                            LyricsView(
-                                                track = lyricsTrack,
-                                                currentTrackId = track?.id,
-                                                positionMs = positionMs,
-                                                state = lyricsState,
+                                            LyricsRoute(
+                                                state = LyricsRouteState(
+                                                    track = lyricsTrack,
+                                                    currentTrackId = track?.id,
+                                                    positionMs = positionMs,
+                                                    loadState = lyricsState,
+                                                ),
                                                 modifier = Modifier.fillMaxSize(),
                                                 onBack = null,
                                                 onRetry = onRetryLyrics,
                                             )
                                         }
-                                    section == BrowseSection.Settings && selectedPlaylistId == null -> SettingsDesktopView(
-                                        isLightMode = useLightAppearance,
-                                        onLightModeChange = onUseLightAppearanceChange,
-                                        tintId = appearanceTintId,
-                                        onTintChange = onAppearanceTintChange,
-                                        homeScreenLayoutMode = settingsState.homeScreenLayoutMode,
-                                        onHomeScreenLayoutModeChange = settingsActions.onHomeScreenLayoutModeChange,
-                                        downloadDirectory = downloadDirectory,
-                                        downloadCount = downloadCount,
-                                        appSettings = appSettings,
-                                        libraryUi = libraryUi,
-                                        defaultDownloadDirectoryLabel = defaultDownloadDirectoryLabel,
-                                        onDownloadDirectory = onDownloadDirectory,
-                                        onDeleteAllDownloads = onDeleteAllDownloads,
-                                        onCrossfadeSeconds = onCrossfadeSeconds,
-                                        onScanLibraryOnLaunch = onScanLibraryOnLaunch,
-                                        onNotifyWhenDownloadFinishes = onNotifyWhenDownloadFinishes,
-                                        onPersistEqualizerSettings = onPersistEqualizerSettingsFromSettings,
-                                        onPersistVolumeSettings = onPersistVolumeSettingsFromSettings,
-                                        onVisualizerPreset = onVisualizerPresetFromSettings,
-                                        onBlurredArtworkAppearance = onBlurredArtworkAppearance,
-                                        onHomeSections = onHomeSections,
-                                        onPersonalMix = onPersonalMix,
-                                        onAlbumGridItemSize = onAlbumGridItemSize,
-                                        onArtistGridItemSize = onArtistGridItemSize,
-                                        onExportFavoritePlaylists = onExportFavoritePlaylists,
-                                        onImportFavoritePlaylists = onImportFavoritePlaylists,
-                                        session = session,
-                                        listenBrainzCredentialAvailability = listenBrainzCredentialAvailability,
-                                        onConnectListenBrainz = onConnectListenBrainz,
-                                        onDisconnectListenBrainz = onDisconnectListenBrainz,
-                                        onListenBrainzSubmitNowPlaying = onListenBrainzSubmitNowPlaying,
-                                        onListenBrainzSubmitListens = onListenBrainzSubmitListens,
-                                        onListenBrainzSubmitCurrentTrackFeedback = onListenBrainzSubmitCurrentTrackFeedback,
+                                    section == BrowseSection.Settings && selectedPlaylistId == null -> SettingsDesktopRoute(
+                                        state = SettingsRouteState(
+                                            isLightMode = useLightAppearance,
+                                            tintId = appearanceTintId,
+                                            downloadDirectory = downloadDirectory,
+                                            downloadCount = downloadCount,
+                                            appSettings = appSettings,
+                                            libraryUi = libraryUi,
+                                            defaultDownloadDirectoryLabel = defaultDownloadDirectoryLabel,
+                                            homeScreenLayoutMode = settingsState.homeScreenLayoutMode,
+                                            session = session,
+                                            listenBrainzCredentialAvailability = listenBrainzCredentialAvailability,
+                                            initialCategory = settingsInitialCategory,
+                                        ),
+                                        actions = SettingsRouteActions(
+                                            onLightModeChange = onUseLightAppearanceChange,
+                                            onTintChange = onAppearanceTintChange,
+                                            onDownloadDirectory = onDownloadDirectory,
+                                            onDeleteAllDownloads = onDeleteAllDownloads,
+                                            onCrossfadeSeconds = onCrossfadeSeconds,
+                                            onScanLibraryOnLaunch = onScanLibraryOnLaunch,
+                                            onNotifyWhenDownloadFinishes = onNotifyWhenDownloadFinishes,
+                                            onPersistEqualizerSettings = onPersistEqualizerSettingsFromSettings,
+                                            onPersistVolumeSettings = onPersistVolumeSettingsFromSettings,
+                                            onVisualizerPreset = onVisualizerPresetFromSettings,
+                                            onBlurredArtworkAppearance = onBlurredArtworkAppearance,
+                                            onHomeSections = onHomeSections,
+                                            onPersonalMix = onPersonalMix,
+                                            onAlbumGridItemSize = onAlbumGridItemSize,
+                                            onArtistGridItemSize = onArtistGridItemSize,
+                                            onExportFavoritePlaylists = onExportFavoritePlaylists,
+                                            onImportFavoritePlaylists = onImportFavoritePlaylists,
+                                            onHomeScreenLayoutModeChange = settingsActions.onHomeScreenLayoutModeChange,
+                                            onConnectListenBrainz = onConnectListenBrainz,
+                                            onDisconnectListenBrainz = onDisconnectListenBrainz,
+                                            onListenBrainzSubmitNowPlaying = onListenBrainzSubmitNowPlaying,
+                                            onListenBrainzSubmitListens = onListenBrainzSubmitListens,
+                                            onListenBrainzSubmitCurrentTrackFeedback = onListenBrainzSubmitCurrentTrackFeedback,
+                                        ),
                                         modifier = Modifier.fillMaxSize(),
-                                        initialCategory = settingsInitialCategory,
                                     )
                                     else -> DesktopContent(
                                         catalog = catalog,
@@ -636,17 +807,22 @@ internal fun DesktopPlayer(
                                         .width(1.dp)
                                         .background(PhoebeUi.border),
                                 )
-                                QueuePanel(
-                                    upNext = upNext,
-                                    currentTrack = track,
-                                    repeat = repeat,
+                                QueueRoute(
+                                    state = QueueRouteState(
+                                        upNext = upNext,
+                                        currentTrack = track,
+                                        repeat = repeat,
+                                        currentTrackClickOpensDetail = true,
+                                    ),
+                                    actions = QueueRouteActions(
+                                        onPlayQueue = onPlayQueue,
+                                        onClearQueue = onClearQueue,
+                                        onMoveUpNext = onMoveUpNext,
+                                        onRemoveUpNext = onRemoveUpNext,
+                                        onOpenTrackDetail = onSong,
+                                    ),
                                     modifier = Modifier.width(330.dp).fillMaxHeight().padding(start = 24.dp),
-                                    onPlayQueue = onPlayQueue,
-                                    onClearQueue = onClearQueue,
-                                    onMoveUpNext = onMoveUpNext,
-                                    onRemoveUpNext = onRemoveUpNext,
-                                    onOpenTrackDetail = onSong,
-                                    currentTrackClickOpensDetail = true,
+                                    listState = rememberLazyListState(),
                                 )
                             }
                         }
@@ -696,33 +872,40 @@ internal fun DesktopPlayer(
         }
 }
 
-private fun shouldUseDesktopSharedElements(initial: AppScreen?, target: AppScreen): Boolean =
+private fun shouldUseDesktopSharedElements(initial: PhoebeRoute?, target: PhoebeRoute?): Boolean =
     initial != null &&
+        target != null &&
         initial.hasDesktopSharedElements() &&
         target.hasDesktopSharedElements()
 
-private fun AppScreen.hasDesktopSharedElements(): Boolean = when (this) {
-    AppScreen.Home,
-    is AppScreen.AlbumDetail,
-    is AppScreen.ArtistDetail,
-    is AppScreen.CollectionItems,
-    is AppScreen.PlayHistory,
-    AppScreen.FavoritePlaylists,
-    AppScreen.FavoriteArtists,
-    AppScreen.FavoriteAlbums,
-    is AppScreen.PlaylistDetail,
-    is AppScreen.RecentlyAdded,
-    is AppScreen.SongDetail,
-    is AppScreen.Lyrics,
+private fun PhoebeRoute.hasDesktopSharedElements(): Boolean = when (this) {
+    is PhoebeRoute.Browse,
+    is PhoebeRoute.AlbumDetail,
+    is PhoebeRoute.ArtistAlbumSlugDetail,
+    is PhoebeRoute.ArtistDetail,
+    is PhoebeRoute.ArtistSlugDetail,
+    is PhoebeRoute.CollectionItems,
+    is PhoebeRoute.PlayHistory,
+    PhoebeRoute.FavoritePlaylists,
+    PhoebeRoute.FavoriteArtists,
+    PhoebeRoute.FavoriteAlbums,
+    is PhoebeRoute.PlaylistDetail,
+    is PhoebeRoute.PlaylistSlugDetail,
+    is PhoebeRoute.RecentlyAdded,
+    is PhoebeRoute.SongDetail,
+    is PhoebeRoute.Lyrics,
     -> true
 
-    is AppScreen.Collections,
-    AppScreen.LibraryPicker,
-    AppScreen.Player,
-    AppScreen.ServerPicker,
-    AppScreen.SignIn,
+    is PhoebeRoute.Collections,
+    PhoebeRoute.LibraryPicker,
+    PhoebeRoute.Player,
+    PhoebeRoute.ServerPicker,
+    PhoebeRoute.SignIn,
     -> false
 }
+
+private fun PlayerState.withoutProgressTicks(): PlayerState =
+    copy(positionMs = 0L, bufferedPositionMs = 0L)
 
 private fun previewRoutesFor(screen: AppScreen, section: BrowseSection): List<PhoebeRoute> {
     val root = PhoebeRoute.Browse(section)

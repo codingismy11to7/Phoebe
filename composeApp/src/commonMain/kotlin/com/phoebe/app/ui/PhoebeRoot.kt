@@ -1,5 +1,6 @@
 package com.phoebe.app.ui
 
+import com.phoebe.app.feature.library.*
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExperimentalSharedTransitionApi
@@ -152,9 +153,67 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.zIndex
 import kotlin.math.roundToInt
 import com.phoebe.app.AppState
+import com.phoebe.app.feature.auth.AuthWelcomeMobileRoute
+import com.phoebe.app.feature.auth.AuthWelcomeRouteActions
+import com.phoebe.app.feature.auth.AuthWelcomeRouteState
+import com.phoebe.app.feature.auth.PlexLibraryPickerRoute
+import com.phoebe.app.feature.auth.PlexLibraryPickerRouteActions
+import com.phoebe.app.feature.auth.PlexLibraryPickerRouteState
+import com.phoebe.app.feature.auth.PlexServerPickerRoute
+import com.phoebe.app.feature.auth.PlexServerPickerRouteActions
+import com.phoebe.app.feature.auth.PlexServerPickerRouteState
+import com.phoebe.app.feature.collections.CollectionItemsRoute
+import com.phoebe.app.feature.collections.CollectionItemsRouteActions
+import com.phoebe.app.feature.collections.CollectionItemsRouteState
+import com.phoebe.app.feature.collections.CollectionsRoute
+import com.phoebe.app.feature.collections.CollectionsRouteActions
+import com.phoebe.app.feature.collections.CollectionsRouteState
+import com.phoebe.app.feature.details.AlbumDetailRoute
+import com.phoebe.app.feature.details.AlbumDetailRouteActions
+import com.phoebe.app.feature.details.AlbumDetailRouteState
+import com.phoebe.app.feature.details.ArtistDetailRoute
+import com.phoebe.app.feature.details.ArtistDetailRouteActions
+import com.phoebe.app.feature.details.ArtistDetailRouteState
+import com.phoebe.app.feature.details.PlaylistDetailRoute
+import com.phoebe.app.feature.details.PlaylistDetailRouteActions
+import com.phoebe.app.feature.details.PlaylistDetailRouteState
+import com.phoebe.app.feature.details.SongDetailRoute
+import com.phoebe.app.feature.details.SongDetailRouteActions
+import com.phoebe.app.feature.details.SongDetailRouteState
+import com.phoebe.app.feature.favorites.FavoriteAlbumsMobileRoute
+import com.phoebe.app.feature.favorites.FavoriteAlbumsRouteActions
+import com.phoebe.app.feature.favorites.FavoriteAlbumsRouteState
+import com.phoebe.app.feature.favorites.FavoriteArtistsMobileRoute
+import com.phoebe.app.feature.favorites.FavoriteArtistsRouteActions
+import com.phoebe.app.feature.favorites.FavoriteArtistsRouteState
+import com.phoebe.app.feature.favorites.FavoritePlaylistsMobileRoute
+import com.phoebe.app.feature.favorites.FavoritePlaylistsRouteActions
+import com.phoebe.app.feature.favorites.FavoritePlaylistsRouteState
+import com.phoebe.app.feature.history.HistoryNowPlayingState
+import com.phoebe.app.feature.history.PlayHistoryRoute
+import com.phoebe.app.feature.history.PlayHistoryRouteState
+import com.phoebe.app.feature.home.HomeUiState
+import com.phoebe.app.feature.home.RecentlyAddedNowPlayingState
+import com.phoebe.app.feature.home.RecentlyAddedRoute
+import com.phoebe.app.feature.home.RecentlyAddedRouteActions
+import com.phoebe.app.feature.home.RecentlyAddedRouteState
+import com.phoebe.app.feature.home.RecentlyAddedWindowMs
+import com.phoebe.app.feature.home.personalMix
+import com.phoebe.app.feature.home.personalMixIdentityKey
+import com.phoebe.app.feature.home.rememberHomeFeatureState
+import com.phoebe.app.feature.lyrics.LyricsRoute
+import com.phoebe.app.feature.lyrics.LyricsRouteState
+import com.phoebe.app.feature.playback.MobilePlaybackRoute
+import com.phoebe.app.feature.playback.MobilePlaybackRouteActions
+import com.phoebe.app.feature.playback.MobilePlaybackRouteState
+import com.phoebe.app.feature.search.LocalSearchHistory
+import com.phoebe.app.feature.search.rememberSearchHistoryState
 import com.phoebe.app.domain.ShellPlaybackState
 import com.phoebe.app.data.catalogAlbumsForArtist
 import com.phoebe.app.data.catalogTracksForArtist
+import com.phoebe.app.data.PlayHistoryRankedEntries
+import com.phoebe.app.data.PlayHistorySnapshot
+import com.phoebe.app.data.trackIndexKey
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.AppScreen
 import com.phoebe.app.domain.Artist
@@ -172,7 +231,6 @@ import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.PlayHistoryKind
-import com.phoebe.app.domain.RecentSearchItem
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.RecentlyAddedKind
 import com.phoebe.app.domain.supportedCollectionEntries
@@ -204,7 +262,6 @@ import com.phoebe.app.updates.AvailableUpdate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import com.phoebe.app.sources.rememberPickLocalFolder
@@ -219,7 +276,6 @@ import kotlinx.coroutines.yield
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.random.Random
 
 private data class PendingMobilePlaybackPreview(
     val tracks: List<Track>,
@@ -504,6 +560,8 @@ private fun PhoebeRootStateHolder(
     val artworkLoadingEnabled by produceState(!catalogSyncInProgress, catalogSyncInProgress) {
         if (catalogSyncInProgress) {
             value = false
+            delay(1_000L)
+            value = true
         } else {
             delay(250L)
             value = true
@@ -564,8 +622,6 @@ private fun PhoebeRootStateHolder(
             topRecentlyPlayed = topRecentlyPlayed,
         )
     }
-    var randomArtistSeed by remember { mutableStateOf(Random.nextInt()) }
-    var randomAlbumSeed by remember { mutableStateOf(Random.nextInt()) }
     // Re-tick "now" every minute so relative timestamps in the library refresh
     // without requiring an unrelated recomposition. We also re-read the clock
     // immediately whenever the play history changes — without that nudge, a
@@ -581,55 +637,22 @@ private fun PhoebeRootStateHolder(
     LaunchedEffect(lastPlayedByTrack) {
         nowMs = currentTimeMs()
     }
-    val homeTrackIndexCache = remember { HomeCatalogIndexCache() }
-    val catalogHomeMetadataKey = if (catalogSyncInProgress) {
-        catalog.homeMetadataRevisionKey()
-    } else {
-        catalog.homeMetadataKey()
-    }
-    val catalogTrackIndexKey = if (trackHeavySectionsEnabled) catalog.trackBatchRevisionKey() else 0L
-    val mostPlayedPrefetchIds = remember(topMostPlayed, topRecentlyPlayed) {
-        (topMostPlayed.take(30).map { it.trackId } + topRecentlyPlayed.take(15).map { it.trackId }).distinct()
-    }
-    val resolvedTracksById by produceState(emptyMap<String, Track>(), mostPlayedPrefetchIds, catalogTrackIndexKey) {
-        if (mostPlayedPrefetchIds.isEmpty()) {
-            value = emptyMap()
-            return@produceState
-        }
-        value = state.resolveTracksByIds(mostPlayedPrefetchIds)
-    }
-    val resolvedTracksKey = resolvedTracksById.keys.fold(0L) { acc, id -> acc * 31L + id.hashCode() }
-    val playHistoryDerivationKey = playHistory.derivationKey()
-    val homeUiState by produceState(
-        initialValue = HomeUiState(),
-        catalogTrackIndexKey,
-        catalogHomeMetadataKey,
-        playHistoryDerivationKey,
-        randomArtistSeed,
-        randomAlbumSeed,
-        nowMs,
-        trackHeavySectionsEnabled,
-        resolvedTracksKey,
-    ) {
-        delay(if (catalogSyncInProgress) 250L else if (trackHeavySectionsEnabled) 80L else 50L)
-        value = withContext(Dispatchers.Default) {
-            deriveHomeUiState(
-                catalog = catalog,
-                playHistory = playHistory,
-                randomArtistSeed = randomArtistSeed,
-                randomAlbumSeed = randomAlbumSeed,
-                nowMs = nowMs,
-                trackIndexCache = homeTrackIndexCache,
-                includeTrackDerivedSections = trackHeavySectionsEnabled,
-                resolvedTracksById = resolvedTracksById,
-            )
-        }
-    }
-    val playedPanelMaxRows = 3
-    val mostPlayedResolving = playHistory.mostPlayedPendingResolution(
-        resolvedCount = homeUiState.mostPlayedTracks.size,
-        limit = playedPanelMaxRows,
+    val homeFeatureState = rememberHomeFeatureState(
+        catalog = catalog,
+        playHistory = playHistory,
+        catalogSyncInProgress = catalogSyncInProgress,
+        trackHeavySectionsEnabled = trackHeavySectionsEnabled,
+        nowMs = nowMs,
+        resolveTracksByIds = state::resolveTracksByIds,
     )
+    val homeUiState = homeFeatureState.uiState
+    val mostPlayedResolving = homeFeatureState.mostPlayedResolving
+    val catalogHomeMetadataKey = homeFeatureState.catalogHomeMetadataKey
+    val catalogTrackIndexKey = homeFeatureState.catalogTrackIndexKey
+    val resolvedTracksById = homeFeatureState.resolvedTracksById
+    val loadPlayHistoryEntries: suspend (PlayHistoryKind, Int) -> PlayHistoryRankedEntries = remember(state) {
+        { kind: PlayHistoryKind, limit: Int -> state.queryPlayHistoryEntries(kind, limit) }
+    }
     val playTracks: (List<Track>, Int) -> Unit = { tracks, index ->
         state.playTracks(
             tracks = tracks,
@@ -746,8 +769,7 @@ private fun PhoebeRootStateHolder(
             state.warmRecentAlbumTracks(cutoffMs = nowMs - RecentlyAddedWindowMs, maxAlbums = 10)
         }
     }
-    LaunchedEffect(screen, browseSection, topMostPlayed, topRecentlyPlayed, session?.selectedServer, trackHeavySectionsEnabled) {
-        if (!trackHeavySectionsEnabled) return@LaunchedEffect
+    LaunchedEffect(screen, browseSection, topMostPlayed, topRecentlyPlayed, session?.selectedServer) {
         if (screen == AppScreen.Home && browseSection == BrowseSection.Home &&
             (topMostPlayed.isNotEmpty() || topRecentlyPlayed.isNotEmpty())
         ) {
@@ -821,19 +843,12 @@ private fun PhoebeRootStateHolder(
             navigator.open(PhoebeRoute.CollectionItems(entry, value))
         }
     }
-    fun prependRecentSearch(item: RecentSearchItem) {
-        state.prependRecentSearch(item)
-    }
-    val searchHistory = remember(recentSearchItems) {
-        SearchHistoryState(
-            recentItems = recentSearchItems,
-            recordArtist = { artist -> prependRecentSearch(RecentSearchItem.ArtistHit(artist)) },
-            recordAlbum = { album -> prependRecentSearch(RecentSearchItem.AlbumHit(album)) },
-            recordTrack = { track -> prependRecentSearch(RecentSearchItem.TrackHit(track)) },
-            removeItem = { item -> state.removeRecentSearch(item) },
-            clearItems = { state.clearRecentSearches() },
-        )
-    }
+    val searchHistory = rememberSearchHistoryState(
+        recentItems = recentSearchItems,
+        onPrependRecentSearch = state::prependRecentSearch,
+        onRemoveRecentSearch = state::removeRecentSearch,
+        onClearRecentSearches = state::clearRecentSearches,
+    )
     var createPlaylistFor by remember { mutableStateOf<List<Track>?>(null) }
     var metadataEditorTrack by remember { mutableStateOf<Track?>(null) }
     val catalogActionsKey = catalogHomeMetadataKey to catalog.playlists.size
@@ -940,7 +955,7 @@ private fun PhoebeRootStateHolder(
         LocalArtworkLoadingEnabled provides artworkLoadingEnabled,
         LocalHomeTrackSectionsReady provides trackHeavySectionsEnabled,
         LocalMostPlayedResolving provides mostPlayedResolving,
-        LocalSharedElementTransitionsEnabled provides trackHeavySectionsEnabled,
+        LocalSharedElementTransitionsEnabled provides true,
         LocalTracksLoading provides tracksLoading,
         LocalDownloadStatus provides downloadStatus,
         LocalDownloadActions provides downloadActions,
@@ -976,16 +991,9 @@ private fun PhoebeRootStateHolder(
             CompositionLocalProvider(LocalPlaylistDragEnabled provides !compact) {
             val mergesTitleBar = LocalDesktopMergesTitleBar.current
             val shellModifier = if (compact) {
-                val base = Modifier
+                Modifier
                     .fillMaxSize()
                     .background(PhoebeUi.shellTop)
-                if (isDesktopPlatform() && mergesTitleBar) {
-                    // Main.kt already places content below the custom title bar; status-bar
-                    // insets on Windows would leave an unpainted strip with transparent windows.
-                    base
-                } else {
-                    base.statusBarsPadding()
-                }
             } else {
                 val shellInsets = if (mergesTitleBar) {
                     WindowInsets.safeDrawing.only(
@@ -1042,7 +1050,7 @@ private fun PhoebeRootStateHolder(
 
                 CompositionLocalProvider(
                     LocalSharedTransitionScope provides sharedTransitionScope,
-                    LocalSharedElementTransitionsEnabled provides trackHeavySectionsEnabled,
+                    LocalSharedElementTransitionsEnabled provides true,
                     LocalMobileChromePadding provides mobileChromePadding,
                 ) {
                 val mobileContentRoutes = if (mobilePlayerAsSheet) mobileRoutes.dropLast(1) else mobileRoutes
@@ -1071,89 +1079,111 @@ private fun PhoebeRootStateHolder(
                     )
                 } else {
                 when (scr) {
-                    is AppScreen.ServerPicker -> PlexServerPickerPanel(
-                        servers = servers,
-                        busy = busy,
-                        serversLoading = serversLoading,
-                        onSelectServer = state::selectServer,
-                        onCancel = state::signOut,
-                        onRetry = state::loadServers,
+                    is AppScreen.ServerPicker -> PlexServerPickerRoute(
+                        state = PlexServerPickerRouteState(
+                            servers = servers,
+                            busy = busy,
+                            serversLoading = serversLoading,
+                        ),
+                        actions = PlexServerPickerRouteActions(
+                            onSelectServer = state::selectServer,
+                            onCancel = state::signOut,
+                            onRetry = state::loadServers,
+                        ),
                         modifier = Modifier.fillMaxSize(),
                     )
-                    is AppScreen.LibraryPicker -> PlexLibraryPickerPanel(
-                        libraries = libraries,
-                        serverName = session?.selectedServer?.name,
-                        providerType = session?.providerType ?: com.phoebe.app.domain.MediaProviderType.Plex,
-                        busy = busy,
-                        librariesLoading = librariesLoading,
-                        isJellyfin = session.isEmbyFamily(),
-                        onSelectLibrary = { library, mode -> state.selectLibrary(library, mode) },
-                        onBack = state::returnToServerPicker,
-                        onCancel = state::signOut,
+                    is AppScreen.LibraryPicker -> PlexLibraryPickerRoute(
+                        state = PlexLibraryPickerRouteState(
+                            libraries = libraries,
+                            serverName = session?.selectedServer?.name,
+                            providerType = session?.providerType ?: com.phoebe.app.domain.MediaProviderType.Plex,
+                            busy = busy,
+                            librariesLoading = librariesLoading,
+                            isJellyfin = session.isEmbyFamily(),
+                        ),
+                        actions = PlexLibraryPickerRouteActions(
+                            onSelectLibrary = { library, mode -> state.selectLibrary(library, mode) },
+                            onBack = state::returnToServerPicker,
+                            onCancel = state::signOut,
+                        ),
                         modifier = Modifier.fillMaxSize(),
                     )
-                    is AppScreen.SignIn -> MobileSignInWelcomeScreen(
-                        message = message,
-                        pinCode = pin?.code,
-                        jellyfinServers = jellyfinServers,
-                        jellyfinDiscoveryLoading = jellyfinDiscoveryLoading,
-                        jellyfinQuickConnect = jellyfinQuickConnect,
-                        authInProgress = authInProgress,
-                        onStartSignIn = state::startPlexSignIn,
-                        onFinishSignIn = state::finishPlexSignIn,
-                        onSignInJellyfin = state::signInJellyfin,
-                        onSignInProvider = state::signInProvider,
-                        onDiscoverJellyfinServers = state::discoverJellyfinServers,
-                        onStartJellyfinQuickConnect = state::startJellyfinQuickConnect,
-                        onFinishJellyfinQuickConnect = state::finishJellyfinQuickConnect,
-                        onAddLocalFolder = state::addLocalFolderFromUri,
+                    is AppScreen.SignIn -> AuthWelcomeMobileRoute(
+                        state = AuthWelcomeRouteState(
+                            message = message,
+                            pinCode = pin?.code,
+                            jellyfinServers = jellyfinServers,
+                            jellyfinDiscoveryLoading = jellyfinDiscoveryLoading,
+                            jellyfinQuickConnect = jellyfinQuickConnect,
+                            authInProgress = authInProgress,
+                        ),
+                        actions = AuthWelcomeRouteActions(
+                            onStartSignIn = state::startPlexSignIn,
+                            onFinishSignIn = state::finishPlexSignIn,
+                            onSignInJellyfin = state::signInJellyfin,
+                            onSignInProvider = state::signInProvider,
+                            onDiscoverJellyfinServers = state::discoverJellyfinServers,
+                            onStartJellyfinQuickConnect = state::startJellyfinQuickConnect,
+                            onFinishJellyfinQuickConnect = state::finishJellyfinQuickConnect,
+                            onAddLocalFolder = state::addLocalFolderFromUri,
+                        ),
                         modifier = Modifier.fillMaxSize(),
                     )
-                    is AppScreen.ArtistDetail -> ArtistDetailPanel(
-                        artist = scr.artist,
-                        catalog = catalog,
-                        libraryUi = libraryUi,
-                        catalogRefreshing = catalogRefreshing,
+                    is AppScreen.ArtistDetail -> ArtistDetailRoute(
+                        state = ArtistDetailRouteState(
+                            artist = scr.artist,
+                            catalog = catalog,
+                            libraryUi = libraryUi,
+                            catalogRefreshing = catalogRefreshing,
+                            searchQuery = searchQuery,
+                            artistRadioAvailability = artistRadioAvailability[scr.artist.id],
+                            artistRadioStarting = scr.artist.id in radioStartingIds,
+                        ),
+                        actions = ArtistDetailRouteActions(
+                            onBack = { navigator.pop() },
+                            onAlbum = { navigator.open(it.route()) },
+                            onPlayTracks = playTracksFromMobile,
+                            onPlayAllTracks = playAllTracksFromMobile,
+                            onShuffleAllTracks = shuffleAllTracksFromMobile,
+                            onAddToUpNext = state::addToUpNext,
+                            onDownload = state::download,
+                            onDownloadArtist = state::download,
+                            onProbeArtistRadio = state::probeArtistRadio,
+                            onPlayArtistRadio = state::playArtistRadio,
+                            onArtist = { navigator.open(it.route()) },
+                            onLibraryColumns = state::setLibraryColumns,
+                        ),
                         modifier = Modifier.fillMaxSize(),
-                        searchQuery = searchQuery,
-                        onBack = { navigator.pop() },
-                        onAlbum = { navigator.open(it.route()) },
-                        onPlayTracks = playTracksFromMobile,
-                        onPlayAllTracks = playAllTracksFromMobile,
-                        onShuffleAllTracks = shuffleAllTracksFromMobile,
-                        onAddToUpNext = state::addToUpNext,
-                        onDownload = state::download,
-                        onDownloadArtist = state::download,
-                        artistRadioAvailability = artistRadioAvailability[scr.artist.id],
-                        artistRadioStarting = scr.artist.id in radioStartingIds,
-                        onProbeArtistRadio = state::probeArtistRadio,
-                        onPlayArtistRadio = state::playArtistRadio,
-                        onArtist = { navigator.open(it.route()) },
-                        onLibraryColumns = state::setLibraryColumns,
                     )
-                    is AppScreen.AlbumDetail -> AlbumDetailPanel(
-                        album = scr.album,
-                        catalog = catalog,
-                        libraryUi = libraryUi,
-                        catalogRefreshing = catalogRefreshing,
+                    is AppScreen.AlbumDetail -> AlbumDetailRoute(
+                        state = AlbumDetailRouteState(
+                            album = scr.album,
+                            catalog = catalog,
+                            libraryUi = libraryUi,
+                            catalogRefreshing = catalogRefreshing,
+                            searchQuery = searchQuery,
+                        ),
+                        actions = AlbumDetailRouteActions(
+                            onBack = { navigator.pop() },
+                            onPlayTracks = playTracksFromMobile,
+                            onAddToUpNext = state::addToUpNext,
+                            onDownload = state::download,
+                            onDownloadAlbum = state::download,
+                            onArtist = { navigator.open(it.route()) },
+                            onLibraryColumns = state::setLibraryColumns,
+                        ),
                         modifier = Modifier.fillMaxSize(),
-                        searchQuery = searchQuery,
-                        onBack = { navigator.pop() },
-                        onPlayTracks = playTracksFromMobile,
-                        onAddToUpNext = state::addToUpNext,
-                        onDownload = state::download,
-                        onDownloadAlbum = state::download,
-                        onArtist = { navigator.open(it.route()) },
-                        onLibraryColumns = state::setLibraryColumns,
                     )
-                    is AppScreen.SongDetail -> SongDetailPanel(
-                        track = scr.track,
+                    is AppScreen.SongDetail -> SongDetailRoute(
+                        state = SongDetailRouteState(track = scr.track),
+                        actions = SongDetailRouteActions(
+                            onBack = { navigator.pop() },
+                            onPlay = { playTracksFromMobile(listOf(scr.track), 0) },
+                            onAddToUpNext = state::addToUpNext,
+                            onDownload = state::download,
+                            onOpenLyrics = { navigator.open(PhoebeRoute.Lyrics(it.id)) },
+                        ),
                         modifier = Modifier.fillMaxSize(),
-                        onBack = { navigator.pop() },
-                        onPlay = { playTracksFromMobile(listOf(scr.track), 0) },
-                        onAddToUpNext = state::addToUpNext,
-                        onDownload = state::download,
-                        onOpenLyrics = { navigator.open(PhoebeRoute.Lyrics(it.id)) },
                     )
                     is AppScreen.Lyrics -> LyricsScreenHost(
                         appState = state,
@@ -1164,95 +1194,148 @@ private fun PhoebeRootStateHolder(
                         onRetry = retryLyrics,
                         modifier = Modifier.fillMaxSize(),
                     )
-                    is AppScreen.RecentlyAdded -> RecentlyAddedScreen(
-                        kind = scr.kind,
-                        catalog = catalog,
-                        nowMs = nowMs,
+                    is AppScreen.RecentlyAdded -> {
+                        val nowPlaying = LocalNowPlaying.current
+                        RecentlyAddedRoute(
+                            state = RecentlyAddedRouteState(
+                                kind = scr.kind,
+                                catalog = catalog,
+                                nowMs = nowMs,
+                                nowPlaying = RecentlyAddedNowPlayingState(
+                                    trackId = nowPlaying.trackId,
+                                    isPlaying = nowPlaying.isPlaying,
+                                    isBuffering = nowPlaying.isBuffering,
+                                ),
+                                bottomContentPadding = LocalMobileChromePadding.current.bottom,
+                            ),
+                            actions = RecentlyAddedRouteActions(
+                                onBack = { navigator.pop() },
+                                onArtist = { navigator.open(it.route()) },
+                                onAlbum = { navigator.open(it.route()) },
+                                onPlayTracks = playTracksFromMobile,
+                                onAddToUpNext = state::addToUpNext,
+                                onDownload = state::download,
+                            ),
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                    is AppScreen.Collections -> CollectionsRoute(
+                        state = CollectionsRouteState(
+                            entry = scr.entry,
+                            catalog = catalog,
+                            supportedCollectionEntries = supportedCollectionEntries,
+                            bottomContentPadding = LocalMobileChromePadding.current.bottom,
+                        ),
+                        actions = CollectionsRouteActions(
+                            onBack = { navigator.pop() },
+                            onCollectionValue = openCollectionValue,
+                            onEnsureValuesLoaded = { state.preloadCollections(scr.entry) },
+                        ),
                         modifier = Modifier.fillMaxSize(),
-                        onBack = { navigator.pop() },
-                        onArtist = { navigator.open(it.route()) },
-                        onAlbum = { navigator.open(it.route()) },
-                        onPlayTracks = playTracksFromMobile,
-                        onAddToUpNext = state::addToUpNext,
-                        onDownload = state::download,
                     )
-                    is AppScreen.Collections -> CollectionsScreen(
-                        entry = scr.entry,
-                        catalog = catalog,
+                    is AppScreen.CollectionItems -> CollectionItemsRoute(
+                        state = CollectionItemsRouteState(
+                            entry = scr.entry,
+                            value = scr.value,
+                            catalog = catalog,
+                            supportedCollectionEntries = supportedCollectionEntries,
+                            bottomContentPadding = LocalMobileChromePadding.current.bottom,
+                        ),
+                        actions = CollectionItemsRouteActions(
+                            onBack = { navigator.pop() },
+                            onArtist = { navigator.open(it.route()) },
+                            onAlbum = { navigator.open(it.route()) },
+                            onEnsureItemsLoaded = { state.preloadCollectionItems(scr.entry, scr.value) },
+                        ),
                         modifier = Modifier.fillMaxSize(),
-                        supportedCollectionEntries = supportedCollectionEntries,
-                        onBack = { navigator.pop() },
-                        onCollectionValue = openCollectionValue,
-                        onEnsureValuesLoaded = { state.preloadCollections(scr.entry) },
                     )
-                    is AppScreen.CollectionItems -> CollectionItemsScreen(
-                        entry = scr.entry,
-                        value = scr.value,
-                        catalog = catalog,
+                    is AppScreen.PlayHistory -> {
+                        val nowPlaying = LocalNowPlaying.current
+                        val viewModel = remember(state.routeViewModelFactory, scr.kind) {
+                            state.routeViewModelFactory.playHistory()
+                        }
+                        PlayHistoryRoute(
+                            viewModel = viewModel,
+                            state = PlayHistoryRouteState(
+                                kind = scr.kind,
+                                catalog = catalog,
+                                playHistory = playHistory,
+                                resolvedTracksById = resolvedTracksById,
+                                nowPlaying = HistoryNowPlayingState(
+                                    trackId = nowPlaying.trackId,
+                                    isPlaying = nowPlaying.isPlaying,
+                                    isBuffering = nowPlaying.isBuffering,
+                                ),
+                                loadRankedEntries = loadPlayHistoryEntries,
+                            ),
+                            modifier = Modifier.fillMaxSize(),
+                            bottomContentPadding = LocalMobileChromePadding.current.bottom,
+                            onBack = { navigator.pop() },
+                            onPlayTracks = playTracksFromMobile,
+                            onAddToUpNext = state::addToUpNext,
+                            onDownload = state::download,
+                        )
+                    }
+                    AppScreen.FavoritePlaylists -> FavoritePlaylistsMobileRoute(
+                        state = FavoritePlaylistsRouteState(searchQuery = searchQuery),
+                        actions = FavoritePlaylistsRouteActions(
+                            onSearchQuery = { searchQuery = it },
+                            onBack = { navigator.pop() },
+                            onPlaylist = { playlist ->
+                                navigator.open(playlist.route())
+                            },
+                        ),
                         modifier = Modifier.fillMaxSize(),
-                        supportedCollectionEntries = supportedCollectionEntries,
-                        onBack = { navigator.pop() },
-                        onArtist = { navigator.open(it.route()) },
-                        onAlbum = { navigator.open(it.route()) },
-                        onEnsureItemsLoaded = { state.preloadCollectionItems(scr.entry, scr.value) },
                     )
-                    is AppScreen.PlayHistory -> PlayHistoryScreen(
-                        kind = scr.kind,
-                        catalog = catalog,
-                        playHistory = playHistory,
-                        resolvedTracksById = resolvedTracksById,
+                    AppScreen.FavoriteArtists -> FavoriteArtistsMobileRoute(
+                        state = FavoriteArtistsRouteState(
+                            catalog = catalog,
+                            libraryUi = libraryUi,
+                        ),
+                        actions = FavoriteArtistsRouteActions(
+                            onBack = { navigator.pop() },
+                            onLibrarySortBy = state::setLibrarySortBy,
+                            onLibraryAscending = state::setLibrarySortAscending,
+                            onLibraryColumns = state::setLibraryColumns,
+                            onArtist = { navigator.open(it.route()) },
+                        ),
                         modifier = Modifier.fillMaxSize(),
-                        onBack = { navigator.pop() },
-                        onPlayTracks = playTracksFromMobile,
-                        onAddToUpNext = state::addToUpNext,
-                        onDownload = state::download,
                     )
-                    AppScreen.FavoritePlaylists -> FavoritePlaylistsMobileView(
-                        searchQuery = searchQuery,
-                        onSearchQuery = { searchQuery = it },
+                    AppScreen.FavoriteAlbums -> FavoriteAlbumsMobileRoute(
+                        state = FavoriteAlbumsRouteState(
+                            catalog = catalog,
+                            libraryUi = libraryUi,
+                        ),
+                        actions = FavoriteAlbumsRouteActions(
+                            onBack = { navigator.pop() },
+                            onLibrarySortBy = state::setLibrarySortBy,
+                            onLibraryAscending = state::setLibrarySortAscending,
+                            onLibraryColumns = state::setLibraryColumns,
+                            onAlbum = { navigator.open(it.route()) },
+                        ),
                         modifier = Modifier.fillMaxSize(),
-                        onBack = { navigator.pop() },
-                        onPlaylist = { playlist ->
-                            navigator.open(playlist.route())
-                        },
                     )
-                    AppScreen.FavoriteArtists -> FavoriteArtistsMobileView(
-                        catalog = catalog,
-                        libraryUi = libraryUi,
+                    is AppScreen.PlaylistDetail -> PlaylistDetailRoute(
+                        state = PlaylistDetailRouteState(
+                            playlist = scr.playlist,
+                            catalog = catalog,
+                            catalogRefreshing = catalogRefreshing,
+                            libraryUi = libraryUi,
+                            searchQuery = searchQuery,
+                        ),
+                        actions = PlaylistDetailRouteActions(
+                            onSearchQuery = { searchQuery = it },
+                            onBack = exitPlaylistDetail,
+                            onPlayTracks = playTracksFromMobile,
+                            onAddToUpNext = state::addToUpNext,
+                            onDownload = state::download,
+                            onDownloadPlaylist = state::download,
+                            onCancelDownloadPlaylist = state::cancelDownloads,
+                            onDeleteDownloadPlaylist = state::deleteDownloads,
+                            onMovePlaylistTrack = state::movePlaylistTrack,
+                            onLibraryColumns = state::setLibraryColumns,
+                        ),
                         modifier = Modifier.fillMaxSize(),
-                        onBack = { navigator.pop() },
-                        onLibrarySortBy = state::setLibrarySortBy,
-                        onLibraryAscending = state::setLibrarySortAscending,
-                        onLibraryColumns = state::setLibraryColumns,
-                        onArtist = { navigator.open(it.route()) },
-                    )
-                    AppScreen.FavoriteAlbums -> FavoriteAlbumsMobileView(
-                        catalog = catalog,
-                        libraryUi = libraryUi,
-                        modifier = Modifier.fillMaxSize(),
-                        onBack = { navigator.pop() },
-                        onLibrarySortBy = state::setLibrarySortBy,
-                        onLibraryAscending = state::setLibrarySortAscending,
-                        onLibraryColumns = state::setLibraryColumns,
-                        onAlbum = { navigator.open(it.route()) },
-                    )
-                    is AppScreen.PlaylistDetail -> PlaylistDetailPanel(
-                        playlist = scr.playlist,
-                        catalog = catalog,
-                        catalogRefreshing = catalogRefreshing,
-                        libraryUi = libraryUi,
-                        modifier = Modifier.fillMaxSize(),
-                        searchQuery = searchQuery,
-                        onSearchQuery = { searchQuery = it },
-                        onBack = exitPlaylistDetail,
-                        onPlayTracks = playTracksFromMobile,
-                        onAddToUpNext = state::addToUpNext,
-                        onDownload = state::download,
-                        onDownloadPlaylist = state::download,
-                        onCancelDownloadPlaylist = state::cancelDownloads,
-                        onDeleteDownloadPlaylist = state::deleteDownloads,
-                        onMovePlaylistTrack = state::movePlaylistTrack,
-                        onLibraryColumns = state::setLibraryColumns,
                     )
                     AppScreen.Player -> MobilePlayerHost(
                         appState = state,
@@ -1285,7 +1368,7 @@ private fun PhoebeRootStateHolder(
                     AppScreen.Home -> {
                     val onHomeBrowse = browseSection == BrowseSection.Home && selectedPlaylistId == null
                     val catalogForMobileBrowse = if (onHomeBrowse) {
-                        remember(catalog.homeMetadataKey(), catalog.trackIndexKey()) { catalog }
+                        remember(catalogHomeMetadataKey, catalog.trackIndexKey()) { catalog }
                     } else {
                         catalog
                     }
@@ -1346,8 +1429,8 @@ private fun PhoebeRootStateHolder(
                         onMostPlayed = openMostPlayed,
                         onCollections = openCollections,
                         supportedCollectionEntries = supportedCollectionEntries,
-                        onRefreshRandomArtists = { randomArtistSeed = Random.nextInt() },
-                        onRefreshRandomAlbums = { randomAlbumSeed = Random.nextInt() },
+                        onRefreshRandomArtists = homeFeatureState.onRefreshRandomArtists,
+                        onRefreshRandomAlbums = homeFeatureState.onRefreshRandomAlbums,
                         onPrefetchHomeArtist = state::prefetchHomeArtistStats,
                         onPrefetchHomeAlbum = state::prefetchHomeAlbumStats,
                         onPlayDecadeMix = state::playDecadeMix,
@@ -1402,6 +1485,7 @@ private fun PhoebeRootStateHolder(
                         onListenBrainzSubmitListens = state::setListenBrainzSubmitListens,
                         onListenBrainzSubmitCurrentTrackFeedback = state::setListenBrainzSubmitCurrentTrackFeedback,
                         appUpdateState = appUpdateState,
+                        routeViewModelFactory = state.routeViewModelFactory,
                         onInstallUpdate = state::installAvailableUpdate,
                         showBottomChrome = false,
                     )
@@ -1579,6 +1663,7 @@ private fun PhoebeRootStateHolder(
                         compact = !wideDesktop,
                         busy = busy,
                         updateState = appUpdateState,
+                        routeViewModelFactory = state.routeViewModelFactory,
                     ),
                     playbackState = PlaybackUiState(
                         shellPlayback = shellPlayback,
@@ -1639,6 +1724,7 @@ private fun PhoebeRootStateHolder(
                     browseState = BrowseUiState(
                         homeUiState = homeUiState,
                         playHistory = playHistory,
+                        loadPlayHistoryEntries = loadPlayHistoryEntries,
                         resolvedTracksById = resolvedTracksById,
                         searchQuery = searchQuery,
                         libraryFilter = libraryFilter,
@@ -1704,8 +1790,8 @@ private fun PhoebeRootStateHolder(
                         onCollectionValue = openCollectionValue,
                         onEnsureCollectionValuesLoaded = state::preloadCollections,
                         onEnsureCollectionItemsLoaded = state::preloadCollectionItems,
-                        onRefreshRandomArtists = { randomArtistSeed = Random.nextInt() },
-                        onRefreshRandomAlbums = { randomAlbumSeed = Random.nextInt() },
+                        onRefreshRandomArtists = homeFeatureState.onRefreshRandomArtists,
+                        onRefreshRandomAlbums = homeFeatureState.onRefreshRandomAlbums,
                         onPrefetchHomeArtist = state::prefetchHomeArtistStats,
                         onPrefetchHomeAlbum = state::prefetchHomeAlbumStats,
                         onPlayDecadeMix = state::playDecadeMix,
@@ -2053,11 +2139,13 @@ private fun LyricsScreenHost(
 ) {
     val player by appState.player.collectAsState()
     val chromePadding = LocalMobileChromePadding.current
-    LyricsView(
-        track = track,
-        currentTrackId = currentTrackId,
-        positionMs = player.positionMs,
-        state = lyricsState,
+    LyricsRoute(
+        state = LyricsRouteState(
+            track = track,
+            currentTrackId = currentTrackId,
+            positionMs = player.positionMs,
+            loadState = lyricsState,
+        ),
         modifier = modifier.padding(bottom = chromePadding.bottom),
         onBack = onBack,
         onRetry = onRetry,
@@ -2103,53 +2191,57 @@ private fun MobilePlayerHost(
     val equalizerRemoteUnavailable by appState.equalizerRemoteUnavailable.collectAsState()
     val listenBrainzFeedbackTarget by appState.listenBrainzFeedbackTarget.collectAsState()
     val showStartingState = playbackStarting && track?.id != player.currentTrack?.id
-    MobilePlayer(
-        track = track,
-        upNext = upNext,
-        previousTrack = previousTrack,
-        isPlaying = if (showStartingState) false else player.isPlaying,
-        isBuffering = player.isBuffering || showStartingState,
-        shuffle = player.shuffle,
-        repeat = player.repeat,
-        positionMs = if (showStartingState) 0L else player.positionMs,
-        bufferedPositionMs = if (showStartingState) 0L else player.bufferedPositionMs,
-        currentIndex = currentIndex,
-        castState = castState,
-        remotePlaybackTarget = remotePlaybackTarget,
-        listenBrainzFeedbackTarget = listenBrainzFeedbackTarget,
-        equalizerProfile = equalizerProfile,
-        persistEqualizerSettings = appSettings.persistEqualizerSettings,
-        equalizerRemoteUnavailable = equalizerRemoteUnavailable,
-        visualizerPreset = appSettings.nowPlayingVisualizerPreset,
-        blurredArtworkAppearance = appSettings.blurredArtworkAppearance,
-        audioAnalysis = audioAnalysis,
-        onToggle = onToggle,
-        onPrevious = onPrevious,
-        onNext = onNext,
-        onSkipQueueBy = onSkipQueueBy,
-        onShuffle = onShuffle,
-        onRepeat = onRepeat,
-        onSeek = onSeek,
-        onPlayQueue = onPlayQueue,
-        onMoveUpNext = onMoveUpNext,
-        onRemoveUpNext = onRemoveUpNext,
-        onOpenSongDetail = onOpenSongDetail,
-        onCast = onCast,
-        onLyrics = onLyrics,
-        onEqualizerEnabled = appState::setEqualizerEnabled,
-        onEqualizerBandCount = appState::setEqualizerBandCount,
-        onEqualizerGain = appState::setEqualizerGain,
-        onEqualizerReset = appState::resetEqualizer,
-        onPersistEqualizerSettings = appState::setPersistEqualizerSettings,
-        onVisualizerPreset = appState::setNowPlayingVisualizerPreset,
-        onListenBrainzFeedback = appState::submitListenBrainzFeedback,
-        onBack = onBack,
-        onSwipeDismiss = onSwipeDismiss,
-        handleSystemBack = handleSystemBack,
-        expansionFraction = expansionFraction,
-        onDragStart = onDragStart,
-        onDrag = onDrag,
-        onDragEnd = onDragEnd,
+    MobilePlaybackRoute(
+        state = MobilePlaybackRouteState(
+            track = track,
+            upNext = upNext,
+            previousTrack = previousTrack,
+            isPlaying = if (showStartingState) false else player.isPlaying,
+            isBuffering = player.isBuffering || showStartingState,
+            shuffle = player.shuffle,
+            repeat = player.repeat,
+            positionMs = if (showStartingState) 0L else player.positionMs,
+            bufferedPositionMs = if (showStartingState) 0L else player.bufferedPositionMs,
+            currentIndex = currentIndex,
+            castState = castState,
+            remotePlaybackTarget = remotePlaybackTarget,
+            listenBrainzFeedbackTarget = listenBrainzFeedbackTarget,
+            equalizerProfile = equalizerProfile,
+            persistEqualizerSettings = appSettings.persistEqualizerSettings,
+            equalizerRemoteUnavailable = equalizerRemoteUnavailable,
+            visualizerPreset = appSettings.nowPlayingVisualizerPreset,
+            blurredArtworkAppearance = appSettings.blurredArtworkAppearance,
+            audioAnalysis = audioAnalysis,
+            handleSystemBack = handleSystemBack,
+            expansionFraction = expansionFraction,
+        ),
+        actions = MobilePlaybackRouteActions(
+            onToggle = onToggle,
+            onPrevious = onPrevious,
+            onNext = onNext,
+            onSkipQueueBy = onSkipQueueBy,
+            onShuffle = onShuffle,
+            onRepeat = onRepeat,
+            onSeek = onSeek,
+            onPlayQueue = onPlayQueue,
+            onMoveUpNext = onMoveUpNext,
+            onRemoveUpNext = onRemoveUpNext,
+            onOpenSongDetail = onOpenSongDetail,
+            onCast = onCast,
+            onLyrics = onLyrics,
+            onEqualizerEnabled = appState::setEqualizerEnabled,
+            onEqualizerBandCount = appState::setEqualizerBandCount,
+            onEqualizerGain = appState::setEqualizerGain,
+            onEqualizerReset = appState::resetEqualizer,
+            onPersistEqualizerSettings = appState::setPersistEqualizerSettings,
+            onVisualizerPreset = appState::setNowPlayingVisualizerPreset,
+            onListenBrainzFeedback = appState::submitListenBrainzFeedback,
+            onBack = onBack,
+            onSwipeDismiss = onSwipeDismiss,
+            onDragStart = onDragStart,
+            onDrag = onDrag,
+            onDragEnd = onDragEnd,
+        ),
         modifier = modifier,
     )
 }

@@ -144,6 +144,7 @@ For UI architecture and navigation rules, see [Compose Architecture Guidelines](
 ./gradlew :composeApp:desktopTest
 ./gradlew :composeApp:wasmJsBrowserTest
 ./gradlew :composeApp:verifyRoborazziAndroidHostTest
+./gradlew :composeApp:verifyRoborazziDesktop
 npm run web:screenshots
 ./gradlew :composeApp:compileAndroidDeviceTestSources
 ./gradlew :androidApp:assembleDebug

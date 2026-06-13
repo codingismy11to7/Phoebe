@@ -5,6 +5,7 @@ import com.phoebe.app.data.MediaSourcesRepository
 import com.phoebe.app.data.PlexClient
 import com.phoebe.app.platform.PlatformStorage
 import com.phoebe.app.db.PhoebeDatabase
+import com.phoebe.app.testCatalogRepository
 import io.ktor.client.HttpClient
 import kotlin.test.assertTrue
 
@@ -14,7 +15,7 @@ fun ProviderSmokeHarness.catalogRepository(
     http: HttpClient,
 ): CatalogRepository {
     val mediaSources = MediaSourcesRepository(database, storage)
-    return CatalogRepository(
+    return testCatalogRepository(
         plexClient = PlexClient(http),
         jellyfinClient = com.phoebe.app.data.JellyfinClient(http),
         embyClient = com.phoebe.app.data.EmbyClient(http),

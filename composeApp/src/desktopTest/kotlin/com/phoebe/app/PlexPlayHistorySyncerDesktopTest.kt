@@ -169,11 +169,47 @@ class PlexPlayHistorySyncerDesktopTest {
 
         assertEquals(2, result.imported)
         assertTrue(capturedStatsQuery.single().contains("includeUserState=1"))
-        assertTrue(capturedStatsQuery.single().contains("sort=lastViewedAt%3Adesc"))
+        assertTrue(capturedStatsQuery.single().contains("sort=viewCount%3Adesc"))
         assertEquals(listOf<String?>("1"), capturedPlayedOnlyFilters)
         val counts = repo.playCountsByTrack.first { it["plex:t1"] == 42L }
         assertEquals(42L, counts["plex:t1"])
         val top = repo.topMostPlayed.first { list -> list.any { it.trackId == "plex:t1" && it.playCount == 42L } }
+        assertEquals(42L, top.first { it.trackId == "plex:t1" }.playCount)
+    }
+
+    @Test
+    fun syncKeepsPlexViewCountsWhenHistoryEndpointFails() = runBlocking {
+        val engine = MockEngine { request ->
+            when {
+                request.url.encodedPath.endsWith("/history/all") -> respond(
+                    content = """{"error":"history unavailable"}""",
+                    status = HttpStatusCode.InternalServerError,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+                else -> respond(
+                    content = statsJson(
+                        metadata = statsTrack(
+                            ratingKey = "t1",
+                            viewCount = 42,
+                            lastViewedAt = 1700000000,
+                        ),
+                    ),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+            }
+        }
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        val repo = PlayHistoryRepository(db)
+        repository = repo
+
+        val result = assertIs<PlexPlayHistorySyncResult.Synced>(
+            newSyncer(engine, db, repo).sync(testSession(), testCatalog()),
+        )
+
+        assertEquals(1, result.imported)
+        val top = repo.topMostPlayed.first { list -> list.any { it.trackId == "plex:t1" } }
         assertEquals(42L, top.first { it.trackId == "plex:t1" }.playCount)
     }
 
@@ -218,6 +254,70 @@ class PlexPlayHistorySyncerDesktopTest {
     }
 
     @Test
+    fun syncResolvesHistoryTracksFromCachedCatalogWhenSnapshotIsEmpty() = runBlocking {
+        var historyRequests = 0
+        val engine = MockEngine { request ->
+            when {
+                request.url.encodedPath.endsWith("/history/all") -> {
+                    historyRequests += 1
+                    respond(
+                        content = historyJson(
+                            offset = 0,
+                            size = 1,
+                            totalSize = 1,
+                            metadata = historyTrack("t9", "history-9", 1700000500),
+                        ),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+                else -> respond(
+                    content = statsJson(metadata = ""),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+            }
+        }
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        db.catalogQueries.upsertTrack(
+            id = "plex:t9",
+            title = "Cached Song",
+            artist = "Cached Artist",
+            album = "Cached Album",
+            durationMs = 180_000L,
+            streamUrl = "https://plex.example/track/t9",
+            downloadUrl = "https://plex.example/track/t9/download",
+            thumbUrl = null,
+            localArtworkUri = null,
+            localUri = null,
+            year = null,
+            genre = null,
+            mood = null,
+            style = null,
+            filepath = null,
+            audioCodec = null,
+            bitrateKbps = null,
+            dateAddedMs = null,
+            rating = null,
+            parentAlbumId = null,
+        )
+        val repo = PlayHistoryRepository(db)
+        repository = repo
+        val result = assertIs<PlexPlayHistorySyncResult.Synced>(
+            newSyncer(engine, db, repo).sync(testSession(), CatalogSnapshot()),
+        )
+
+        assertEquals(1, historyRequests)
+        assertEquals(1, result.imported)
+        assertEquals(1, result.seen)
+        val counts = repo.playCountsByTrack.first { it["plex:t9"] == 1L }
+        assertEquals(1L, counts["plex:t9"])
+        val recent = repo.topRecentlyPlayed.first { list -> list.any { it.trackId == "plex:t9" } }
+        assertEquals("Cached Artist", recent.first { it.trackId == "plex:t9" }.artist)
+    }
+
+    @Test
     fun syncRecentOnlyFetchesFirstStatsPage() = runBlocking {
         val statsStarts = mutableListOf<String?>()
         val statsSizes = mutableListOf<String?>()
@@ -232,16 +332,18 @@ class PlexPlayHistorySyncerDesktopTest {
                 )
                 request.url.encodedPath.endsWith("/history/all") -> error("recent sync should not call Plex history")
                 else -> {
+                    val encodedQuery = request.url.encodedQuery
                     statsStarts += request.url.parameters["X-Plex-Container-Start"]
                     statsSizes += request.url.parameters["X-Plex-Container-Size"]
-                    encodedQueries += request.url.encodedQuery
+                    encodedQueries += encodedQuery
                     contentDirectoryIds += request.url.parameters["contentDirectoryID"]
+                    val isRecentQuery = encodedQuery.contains("sort=lastViewedAt%3Adesc")
                     respond(
                         content = statsJson(
                             metadata = statsTrack(
-                                ratingKey = "t1",
-                                viewCount = 3,
-                                lastViewedAt = 1700000000,
+                                ratingKey = if (isRecentQuery) "t1" else "top",
+                                viewCount = if (isRecentQuery) 3 else 15,
+                                lastViewedAt = if (isRecentQuery) 1700000000 else 1700000100,
                             ),
                         ),
                         status = HttpStatusCode.OK,
@@ -259,13 +361,24 @@ class PlexPlayHistorySyncerDesktopTest {
             newSyncer(engine, db, repo).syncRecent(testSession(), testCatalog()),
         )
 
-        assertEquals(1, result.seen)
-        assertEquals(listOf<String?>("0"), statsStarts)
-        assertEquals(listOf<String?>("${PlexPlayHistorySyncer.RecentStatsPageSize}"), statsSizes)
-        assertTrue(encodedQueries.single().contains("viewCount%3E%3D=1"))
-        assertTrue(encodedQueries.single().contains("sort=lastViewedAt%3Adesc"))
-        assertEquals(listOf<String?>("1"), contentDirectoryIds)
-        assertFalse(encodedQueries.single().contains("includeUserState"))
+        assertEquals(2, result.seen)
+        assertEquals(listOf<String?>("0", "0"), statsStarts)
+        assertEquals(
+            listOf<String?>(
+                "${PlexPlayHistorySyncer.StartupMostPlayedStatsPageSize}",
+                "${PlexPlayHistorySyncer.RecentStatsPageSize}",
+            ),
+            statsSizes,
+        )
+        val mostPlayedQuery = encodedQueries.first { it.contains("sort=viewCount%3Adesc") }
+        val recentQuery = encodedQueries.first { it.contains("sort=lastViewedAt%3Adesc") }
+        assertTrue(mostPlayedQuery.contains("viewCount%3E%3D=1"))
+        assertTrue(mostPlayedQuery.contains("includeUserState=1"))
+        assertTrue(recentQuery.contains("viewCount%3E%3D=1"))
+        assertFalse(recentQuery.contains("includeUserState"))
+        assertEquals(listOf<String?>(null, "1"), contentDirectoryIds)
+        val mostPlayed = repo.topMostPlayed.first { list -> list.any { it.trackId == "plex:top" && it.playCount == 15L } }
+        assertEquals(15L, mostPlayed.first { it.trackId == "plex:top" }.playCount)
         val recent = repo.topRecentlyPlayed.first { list -> list.any { it.trackId == "plex:t1" } }
         assertEquals(1700000000L * 1000L, recent.first { it.trackId == "plex:t1" }.lastPlayedMs)
     }
@@ -374,7 +487,7 @@ class PlexPlayHistorySyncerDesktopTest {
 
     private fun newCatalogRepository(engine: MockEngine, db: PhoebeDatabase): CatalogRepository {
         val storage = PlatformStorage()
-        return CatalogRepository(
+        return testCatalogRepository(
             plexClient = PlexClient(testHttpClient(engine)),
             providerRegistry = MusicProviderRegistry(emptyList()),
             database = db,

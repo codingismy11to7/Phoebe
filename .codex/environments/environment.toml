@@ -23,4 +23,4 @@ command = "./gradlew :composeApp:wasmJsBrowserDevelopmentRun"
 [[actions]]
 name = "Screenshots"
 icon = "test"
-command = "./gradlew :composeApp:recordRoborazziAndroidHostTest && npm run web:screenshots:update"
+command = "./gradlew :composeApp:recordRoborazziAndroidHostTest :composeApp:recordRoborazziDesktop && npm run web:screenshots:update"

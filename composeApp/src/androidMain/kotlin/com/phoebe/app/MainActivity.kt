@@ -22,7 +22,7 @@ import com.google.android.gms.cast.framework.CastButtonFactory
 import com.phoebe.app.platform.PhoebeAppLifecycle
 import com.phoebe.app.player.AndroidPlaybackBridge
 
-class MainActivity : FragmentActivity() {
+class MainActivity : FragmentActivity(), AndroidCastRoutePickerHost {
     private var castRouteButton: MediaRouteButton? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -30,7 +30,6 @@ class MainActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
         AndroidContextHolder.application = application
         AndroidContextHolder.activity = this
-        requestNotificationPermissionIfNeeded()
         setContent { App() }
         installCastRouteButton()
         handlePlayFromSearchIntent(intent)
@@ -73,7 +72,7 @@ class MainActivity : FragmentActivity() {
         return super.dispatchKeyEvent(event)
     }
 
-    fun showCastRoutePicker(): Boolean {
+    override fun showCastRoutePicker(): Boolean {
         val button = castRouteButton ?: return false
         button.post {
             button.showDialog()
@@ -95,20 +94,6 @@ class MainActivity : FragmentActivity() {
         )
     }
 
-    private fun requestNotificationPermissionIfNeeded() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-            == PackageManager.PERMISSION_GRANTED
-        ) {
-            return
-        }
-        ActivityCompat.requestPermissions(
-            this,
-            arrayOf(Manifest.permission.POST_NOTIFICATIONS),
-            REQUEST_POST_NOTIFICATIONS,
-        )
-    }
-
     private fun handlePlayFromSearchIntent(intent: Intent?) {
         if (intent?.action != MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH) return
         val serviceIntent = Intent(this, com.phoebe.app.player.PlaybackService::class.java)
@@ -120,9 +105,4 @@ class MainActivity : FragmentActivity() {
     private companion object {
         private const val REQUEST_POST_NOTIFICATIONS = 1001
     }
-}
-
-object AndroidContextHolder {
-    lateinit var application: android.app.Application
-    var activity: MainActivity? = null
 }

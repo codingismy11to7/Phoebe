@@ -85,7 +85,7 @@ class NavidromePlayHistorySyncerDesktopTest {
         repository = repo
         val storage = PlatformStorage()
         val mediaSources = MediaSourcesRepository(db, storage)
-        val catalogRepository = CatalogRepository(
+        val catalogRepository = testCatalogRepository(
             plexClient = PlexClient(testHttpClient(engine)),
             providerRegistry = MusicProviderRegistry(emptyList()),
             database = db,

@@ -50,7 +50,7 @@ class ProviderArtistDetailPreloadDesktopTest {
             respond("", HttpStatusCode.InternalServerError)
         }
         val http = testHttpClient(engine)
-        val repo = CatalogRepository(
+        val repo = testCatalogRepository(
             plexClient = PlexClient(http),
             database = db,
             storage = PlatformStorage(),
@@ -99,7 +99,7 @@ class ProviderArtistDetailPreloadDesktopTest {
             }
         }
         val http = testHttpClient(engine)
-        val repo = CatalogRepository(
+        val repo = testCatalogRepository(
             plexClient = PlexClient(http),
             database = db,
             storage = PlatformStorage(),

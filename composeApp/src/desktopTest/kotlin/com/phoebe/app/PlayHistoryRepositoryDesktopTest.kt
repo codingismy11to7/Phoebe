@@ -2,7 +2,9 @@ package com.phoebe.app
 
 import app.cash.sqldelight.async.coroutines.awaitAsList
 import app.cash.sqldelight.db.SqlDriver
+import com.phoebe.app.data.PlayHistoryTopListCapacity
 import com.phoebe.app.data.PlayHistoryRepository
+import com.phoebe.app.domain.PlayHistoryKind
 import com.phoebe.app.domain.Track
 import com.phoebe.app.testing.newInMemoryPhoebeDatabase
 import kotlinx.coroutines.runBlocking
@@ -171,5 +173,95 @@ class PlayHistoryRepositoryDesktopTest {
         assertEquals(9_000L, recent.first { it.trackId == "plex:t1" }.lastPlayedMs)
         val lastPlayed = repo.lastPlayedByTrack.first { it["plex:t1"] == 9_000L }
         assertEquals(9_000L, lastPlayed["plex:t1"])
+    }
+
+    @Test
+    fun localPlayAfterRemoteAggregateIncrementsDisplayedCount() = runBlocking {
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        val repo = PlayHistoryRepository(db)
+        repository = repo
+        val track = Track("plex:t1", "Song", "Art", "Alb", 30_000L, "", "")
+
+        repo.importRemotePlayCountFallback(
+            track = track,
+            source = "plex",
+            serverId = "server",
+            lastPlayedAtMs = 9_000L,
+            playCount = 12L,
+            importedAtMs = 10_000L,
+        )
+        repo.recordPlay(track, 12_000L)
+
+        val counts = repo.playCountsByTrack.first { it["plex:t1"] == 13L }
+        assertEquals(13L, counts["plex:t1"])
+        val top = repo.queryRankedEntries(PlayHistoryKind.MostPlayed, limit = 10)
+        assertEquals(1, top.totalCount)
+        assertEquals(13L, top.mostPlayed.single { it.trackId == "plex:t1" }.playCount)
+    }
+
+    @Test
+    fun providerClaimedPlayAfterRemoteAggregateStillIncrementsDisplayedCount() = runBlocking {
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        val repo = PlayHistoryRepository(db)
+        repository = repo
+        val track = Track("plex:t1", "Song", "Art", "Alb", 30_000L, "", "")
+
+        repo.importRemotePlayCountFallback(
+            track = track,
+            source = "plex",
+            serverId = "server",
+            lastPlayedAtMs = 9_000L,
+            playCount = 12L,
+            importedAtMs = 10_000L,
+        )
+        repo.recordPlay(track, 12_000L)
+        assertTrue(
+            repo.importRemotePlay(
+                track = track,
+                source = "plex",
+                serverId = "server",
+                historyKey = "history-12",
+                playedAtMs = 12_100L,
+                importedAtMs = 13_000L,
+            ),
+        )
+
+        val counts = repo.playCountsByTrack.first { it["plex:t1"] == 13L }
+        assertEquals(13L, counts["plex:t1"])
+        val top = repo.queryRankedEntries(PlayHistoryKind.MostPlayed, limit = 10)
+        assertEquals(13L, top.mostPlayed.single { it.trackId == "plex:t1" }.playCount)
+        val recent = repo.queryRankedEntries(PlayHistoryKind.RecentlyPlayed, limit = 10)
+        assertEquals(12_100L, recent.recentlyPlayed.single { it.trackId == "plex:t1" }.lastPlayedMs)
+    }
+
+    @Test
+    fun rankedHistoryQueriesCanReturnMoreThanHomeCapacity() = runBlocking {
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        val repo = PlayHistoryRepository(db)
+        repository = repo
+
+        repeat(PlayHistoryTopListCapacity + 25) { index ->
+            repo.recordPlay(
+                Track("track-$index", "Song $index", "Art", "Alb", 30_000L, "", ""),
+                index.toLong(),
+            )
+        }
+
+        val mostPlayed = repo.queryRankedEntries(
+            PlayHistoryKind.MostPlayed,
+            limit = PlayHistoryTopListCapacity + 25,
+        )
+        val recentlyPlayed = repo.queryRankedEntries(
+            PlayHistoryKind.RecentlyPlayed,
+            limit = PlayHistoryTopListCapacity + 25,
+        )
+
+        assertEquals(PlayHistoryTopListCapacity + 25, mostPlayed.totalCount)
+        assertEquals(PlayHistoryTopListCapacity + 25, mostPlayed.mostPlayed.size)
+        assertEquals(PlayHistoryTopListCapacity + 25, recentlyPlayed.totalCount)
+        assertEquals(PlayHistoryTopListCapacity + 25, recentlyPlayed.recentlyPlayed.size)
     }
 }

@@ -36,32 +36,6 @@ val phoebeDesktopProguard = providers.gradleProperty("phoebe.desktopProguard")
     .map(String::toBoolean)
     .orElse(false)
 
-val phoebeBuildInfoOutput = layout.buildDirectory.dir("generated/phoebeBuildInfo/kotlin")
-val generatePhoebeBuildInfo = tasks.register("generatePhoebeBuildInfo") {
-    val outputDir = phoebeBuildInfoOutput
-    inputs.property("versionName", phoebeVersionName)
-    inputs.property("versionCode", phoebeVersionCode)
-    inputs.property("githubOwner", "j-roskopf")
-    inputs.property("githubRepo", "Phoebe")
-    outputs.dir(outputDir)
-    doLast {
-        val file = outputDir.get().file("com/phoebe/app/platform/PhoebeBuildInfo.kt").asFile
-        file.parentFile.mkdirs()
-        file.writeText(
-            """
-            package com.phoebe.app.platform
-
-            object PhoebeBuildInfo {
-                const val versionName: String = "${phoebeVersionName.get()}"
-                const val versionCode: Int = ${phoebeVersionCode.get()}
-                const val githubOwner: String = "j-roskopf"
-                const val githubRepo: String = "Phoebe"
-            }
-            """.trimIndent() + "\n",
-        )
-    }
-}
-
 val phoebeRealAudioTests = providers.gradleProperty("phoebe.realAudioTests")
     .orElse(providers.environmentVariable("PHOEBE_REAL_AUDIO_TESTS"))
     .map(String::toBoolean)
@@ -135,7 +109,6 @@ plugins {
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
     alias(libs.plugins.kotlinSerialization)
-    alias(libs.plugins.sqldelight)
     alias(libs.plugins.roborazzi)
     alias(libs.plugins.sentryJvm)
 }
@@ -184,14 +157,14 @@ kotlin {
             baseName = "ComposeApp"
             binaryOption("bundleId", "com.joetr.phoebe.ComposeApp")
             isStatic = true
+            export(project(":playback"))
+            transitiveExport = true
         }
     }
 
 
     sourceSets {
-        val commonMain by getting {
-            kotlin.srcDir(phoebeBuildInfoOutput)
-        }
+        val commonMain by getting
         val commonTest by getting
         val desktopMain by getting
         val desktopTest by getting
@@ -204,6 +177,40 @@ kotlin {
             resources.srcDir("src/commonTest/resources")
         }
         commonMain.dependencies {
+            implementation(project(":core:platform"))
+            implementation(project(":core:di"))
+            implementation(project(":data:artwork"))
+            implementation(project(":data:catalog"))
+            implementation(project(":data:database"))
+            implementation(project(":data:listenbrainz"))
+            implementation(project(":data:local-media"))
+            implementation(project(":data:lyrics"))
+            implementation(project(":data:network"))
+            implementation(project(":data:play-history"))
+            implementation(project(":data:playlists"))
+            implementation(project(":data:providers:jellyfin"))
+            implementation(project(":data:providers:musicassistant"))
+            implementation(project(":data:providers:plex"))
+            implementation(project(":data:providers:subsonic"))
+            implementation(project(":data:session"))
+            implementation(project(":data:settings"))
+            implementation(project(":data:updates"))
+            implementation(project(":domain"))
+            implementation(project(":feature:auth"))
+            implementation(project(":feature:collections"))
+            implementation(project(":feature:details"))
+            implementation(project(":feature:favorites"))
+            implementation(project(":feature:history"))
+            implementation(project(":feature:home"))
+            implementation(project(":feature:library"))
+            implementation(project(":feature:lyrics"))
+            implementation(project(":feature:playback"))
+            implementation(project(":feature:search"))
+            implementation(project(":feature:settings"))
+            implementation(project(":navigation"))
+            api(project(":playback"))
+            implementation(project(":ui:core"))
+            implementation(project(":ui:media"))
             implementation(libs.compose.runtime)
             implementation(libs.compose.foundation)
             implementation(libs.compose.material3)
@@ -211,6 +218,7 @@ kotlin {
             implementation(libs.jetbrains.navigation3.ui)
             implementation(libs.haze.blur)
             implementation(libs.coroutines.core)
+            implementation(libs.lifecycle.viewmodel)
             implementation(libs.ktor.client.core)
             implementation(libs.ktor.client.content.negotiation)
             implementation(libs.ktor.serialization.json)
@@ -339,15 +347,6 @@ kotlin {
     }
 }
 
-sqldelight {
-    databases {
-        create("PhoebeDatabase") {
-            packageName.set("com.phoebe.app.db")
-            generateAsync.set(true)
-        }
-    }
-}
-
 roborazzi {
     outputDir.set(layout.projectDirectory.dir("src/screenshotTest/roborazzi"))
 }
@@ -426,15 +425,6 @@ compose.desktop {
                 iconFile.set(iconsDir.file("icon.png").asFile)
             }
         }
-    }
-}
-
-tasks.configureEach {
-    val compileUsesCommonMainSources =
-        name.startsWith("compile") &&
-            (name.contains("Kotlin") || name.startsWith("compileAndroid"))
-    if (compileUsesCommonMainSources) {
-        dependsOn(generatePhoebeBuildInfo)
     }
 }
 

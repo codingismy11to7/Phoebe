@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -21,16 +22,22 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.phoebe.app.ui.DesktopKeyboardShortcutsEffect
-import com.phoebe.app.ui.GlobalMediaKeysEffect
+import com.phoebe.app.feature.playback.GlobalMediaKeysEffect
 import com.phoebe.app.ui.HomeScreenLayoutMode
 import com.phoebe.app.ui.PhoebePaletteDark
 import com.phoebe.app.ui.PhoebeTheme
 import com.phoebe.app.ui.PhoebeTintOption
 import com.phoebe.app.ui.PhoebeRoot
 import com.phoebe.app.ui.PlatformInteractionLocals
-import com.phoebe.app.ui.mediaPlaybackShortcuts
+import com.phoebe.app.feature.playback.mediaPlaybackShortcuts
+import com.phoebe.app.platform.isDesktopPlatform
 import com.phoebe.app.telemetry.Telemetry
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private const val AppearanceThemeFile = "appearance_theme"
 private const val AppearanceTintFile = "appearance_tint"
@@ -46,6 +53,7 @@ private sealed interface AppBootstrapState {
 fun App(
     dependencies: AppDependencies? = null,
     onAppearanceChange: ((Boolean) -> Unit)? = null,
+    onAppStateReady: ((AppState?) -> Unit)? = null,
     navigationPath: String? = null,
     onNavigationPathChange: ((path: String, replace: Boolean) -> Unit)? = null,
 ) {
@@ -62,7 +70,12 @@ fun App(
             return@produceState
         }
         value = try {
-            AppBootstrapState.Ready(AppDependencies.create())
+            val created = if (isDesktopPlatform()) {
+                withContext(Dispatchers.Default) { AppDependencies.create() }
+            } else {
+                AppDependencies.create()
+            }
+            AppBootstrapState.Ready(created)
         } catch (error: Throwable) {
             AppBootstrapState.Failed(error.message ?: error.toString())
         }
@@ -82,8 +95,30 @@ fun App(
         }
         is AppBootstrapState.Ready -> bootstrapState.dependencies
     }
-    val scope = rememberCoroutineScope()
-    val state = remember(readyDependencies, scope) { AppState(readyDependencies, scope) }
+    val uiScope = rememberCoroutineScope()
+    val desktopAppStateScope = remember(readyDependencies) {
+        if (isDesktopPlatform()) {
+            CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        } else {
+            null
+        }
+    }
+    val stateScope = desktopAppStateScope ?: uiScope
+    val state = remember(readyDependencies, stateScope, uiScope) {
+        AppState(
+            dependencies = readyDependencies,
+            scope = stateScope,
+            playbackScope = uiScope,
+        )
+    }
+    DisposableEffect(state, desktopAppStateScope) {
+        onAppStateReady?.invoke(state)
+        onDispose {
+            state.dispose()
+            desktopAppStateScope?.cancel()
+            onAppStateReady?.invoke(null)
+        }
+    }
     val session by state.session.collectAsState()
     val mediaSources by state.mediaSources.collectAsState()
 
@@ -152,7 +187,7 @@ fun App(
                 useLightAppearance = useLightAppearance,
                 onUseLightAppearanceChange = { value ->
                     useLightAppearance = value
-                    scope.launch {
+                    uiScope.launch {
                         readyDependencies.platformStorage.writeText(
                             AppearanceThemeFile,
                             if (value) "light" else "dark",
@@ -163,7 +198,7 @@ fun App(
                 onAppearanceTintChange = { value ->
                     val tintId = PhoebeTintOption.fromId(value).id
                     appearanceTintId = tintId
-                    scope.launch {
+                    uiScope.launch {
                         readyDependencies.platformStorage.writeText(
                             AppearanceTintFile,
                             tintId,
@@ -173,7 +208,7 @@ fun App(
                 homeScreenLayoutMode = resolvedHomeScreenLayoutMode,
                 onHomeScreenLayoutModeChange = { value ->
                     homeScreenLayoutMode = value
-                    scope.launch {
+                    uiScope.launch {
                         readyDependencies.platformStorage.writeText(
                             HomeScreenLayoutModeFile,
                             value.storageValue,

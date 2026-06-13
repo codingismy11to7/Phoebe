@@ -4,6 +4,7 @@ package com.phoebe.app
 
 import com.phoebe.app.domain.LocalFolderMediaSourceConfig
 import com.phoebe.app.domain.Track
+import com.phoebe.app.player.SimpleAudioPlayer
 import com.phoebe.app.sources.LocalFolderCatalogBuilder
 import com.phoebe.app.sources.LocalLibraryIO
 import com.phoebe.app.sources.resolveWebLocalAudioUri
@@ -73,6 +74,16 @@ class LocalMp3FolderWebTest {
         assertTrue(tracks.all { LocalLibraryIO.fileExists(it.localUri.orEmpty()) })
         assertTrue(resolveWebLocalAudioUri(tracks.first().localUri.orEmpty()).startsWith("blob:"))
         assertEquals("[00:01.00]hello", LocalLibraryIO.readLyrics(tracks.first().localUri.orEmpty()))
+    }
+}
+
+private class RecordingAudioPlayer : SimpleAudioPlayer() {
+    var lastUri: String? = null
+        private set
+
+    override fun playUri(uri: String) {
+        lastUri = uri
+        markPlaybackReady()
     }
 }
 
