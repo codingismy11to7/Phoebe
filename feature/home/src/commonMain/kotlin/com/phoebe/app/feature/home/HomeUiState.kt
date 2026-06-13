@@ -40,6 +40,7 @@ data class HomeUiState(
     val randomArtists: List<Artist> = emptyList(),
     val randomAlbums: List<Album> = emptyList(),
     val artistThumbs: Map<String, String> = emptyMap(),
+    val albumArtworkFallbacks: Map<String, String> = emptyMap(),
     val randomArtistStats: HomeFeaturedArtistStats? = null,
     val randomAlbumStats: HomeFeaturedAlbumStats? = null,
 )
@@ -285,6 +286,10 @@ fun deriveHomeUiState(
             artists = (recentArtists + favoriteArtists + randomArtists).distinctBy { it.id },
             albums = catalog.albums,
         ),
+        albumArtworkFallbacks = albumArtworkFallbacksForHome(
+            albums = (recentAlbums + favoriteAlbums + randomAlbums).distinctBy { it.id },
+            catalog = catalog,
+        ),
         randomArtistStats = randomArtistStats,
         randomAlbumStats = randomAlbumStats,
     )
@@ -470,6 +475,20 @@ private fun artistThumbsForHome(artists: List<Artist>, albums: List<Album>): Map
         artists.forEach { artist ->
             val thumb = artist.thumbUrl ?: albumThumbByArtist[artist.title.lowercase()]
             if (thumb != null) put(artist.id, thumb)
+        }
+    }
+}
+
+private fun albumArtworkFallbacksForHome(albums: List<Album>, catalog: CatalogSnapshot): Map<String, String> {
+    if (albums.isEmpty()) return emptyMap()
+    return buildMap {
+        albums.forEach { album ->
+            val fallback = catalog.tracksByParent[album.id]
+                ?.firstNotNullOfOrNull { track ->
+                    track.localArtworkUri?.takeIf { it.isNotBlank() }
+                        ?: track.thumbUrl?.takeIf { it.isNotBlank() }
+                }
+            if (fallback != null) put(album.id, fallback)
         }
     }
 }

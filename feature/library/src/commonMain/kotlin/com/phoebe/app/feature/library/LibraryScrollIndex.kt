@@ -26,11 +26,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -69,6 +71,7 @@ private const val MaxVisibleSectionIndexLabels = 28
 private const val SectionIndexInteractionLingerMs = 3_000L
 private const val ActiveSectionIndexLabelMs = 1_100L
 private const val ScrollHintVisibleMs = 650L
+private const val SectionIndexSelectionCoalesceMs = 32L
 private const val MillisPerDay = 86_400_000L
 private val AlphaLabels = ('A'..'Z').map { it.toString() }
 private val MonthLabels = listOf(
@@ -121,10 +124,19 @@ data class LibraryScrollbarState(
 
 class LibrarySectionIndexSelectionDispatcher {
     private var job: Job? = null
+    private var pendingBlock: (suspend CoroutineScope.() -> Unit)? = null
 
     fun launch(scope: CoroutineScope, block: suspend CoroutineScope.() -> Unit) {
-        job?.cancel()
-        job = scope.launch(block = block)
+        pendingBlock = block
+        if (job?.isActive == true) return
+        job = scope.launch {
+            while (true) {
+                val next = pendingBlock ?: break
+                pendingBlock = null
+                next.invoke(this)
+                delay(SectionIndexSelectionCoalesceMs)
+            }
+        }
     }
 }
 
@@ -141,8 +153,24 @@ fun LibrarySectionIndex(
     revealSignal: Boolean = false,
     scrollbarState: LibraryScrollbarState? = null,
     scrollbarStateProvider: (() -> LibraryScrollbarState?)? = null,
+    onScrubbingChanged: (Boolean) -> Unit = {},
 ) {
-    if (entries.map { it.itemIndex }.distinct().size < 2) return
+    val currentOnScrubbingChanged by rememberUpdatedState(onScrubbingChanged)
+
+    DisposableEffect(Unit) {
+        onDispose { currentOnScrubbingChanged(false) }
+    }
+
+    val hasMultipleIndices = remember(entries) {
+        val firstIndex = entries.firstOrNull()?.itemIndex
+        entries.any { it.itemIndex != firstIndex }
+    }
+    if (!hasMultipleIndices) {
+        LaunchedEffect(entries) {
+            currentOnScrubbingChanged(false)
+        }
+        return
+    }
 
     var activeEntry by remember(entries) { mutableStateOf<LibraryScrollIndexEntry?>(null) }
     var scrubbing by remember(entries) { mutableStateOf(false) }
@@ -155,6 +183,10 @@ fun LibrarySectionIndex(
     val mobileMode = mode == LibrarySectionIndexMode.MobileScrollbar
     val forceScrub = LocalLibrarySectionIndexForceScrub.current
     val shouldShowScrollHint = revealSignal && !forceScrub
+
+    LaunchedEffect(scrubbing) {
+        currentOnScrubbingChanged(scrubbing)
+    }
 
     LaunchedEffect(shouldShowScrollHint, forceScrub) {
         if (scrollbarMode && shouldShowScrollHint) {

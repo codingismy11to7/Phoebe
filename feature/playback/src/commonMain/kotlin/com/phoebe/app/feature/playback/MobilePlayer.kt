@@ -305,6 +305,10 @@ fun MobilePlayer(
         val fullPlayerAlpha = ((expansionFraction - 0.2f) * 1.25f).coerceIn(0f, 1f)
         val overlayActionsAlpha = ((expansionFraction - 0.7f) / 0.2f).coerceIn(0f, 1f)
         val fullPlayerElementsAlpha = ((expansionFraction - 0.8f) / 0.2f).coerceIn(0f, 1f)
+        val collapsedSheetHeight = with(density) {
+            val navBarBottom = WindowInsets.navigationBars.getBottom(this).toDp()
+            88.dp + navBarBottom
+        }
 
         val nextTrack = upNext.firstOrNull()
         val currentSwipeOffset = when {
@@ -456,7 +460,7 @@ fun MobilePlayer(
                 Spacer(modifier = Modifier.size(44.dp))
                 Spacer(modifier = Modifier.width(12.dp))
                 Spacer(modifier = Modifier.weight(1f))
-                PlayButton(isPlaying, isBuffering, 40.dp, onToggle, enabled = true)
+                Spacer(modifier = Modifier.size(40.dp))
             }
         }
 
@@ -540,10 +544,6 @@ fun MobilePlayer(
         }
 
         if (fullPlayerAlpha > 0f) {
-            val collapsedSheetHeight = with(density) {
-                val navBarBottom = WindowInsets.navigationBars.getBottom(this).toDp()
-                88.dp + navBarBottom
-            }
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -678,7 +678,7 @@ fun MobilePlayer(
                 ) {
                     ShuffleIcon(active = shuffle, onClick = onShuffle)
                     TransportIcon(PhoebeIcon.Previous, "Previous Track", onPrevious, iconSize = 16.dp)
-                    PlayButton(isPlaying, isBuffering, 58.dp, onToggle, enabled = track != null)
+                    Spacer(Modifier.size(58.dp))
                     TransportIcon(PhoebeIcon.Next, "Next Track", onNext, iconSize = 16.dp)
                     RepeatIcon(mode = repeat, onClick = onRepeat)
                 }
@@ -848,6 +848,45 @@ fun MobilePlayer(
                     }
                 }
             }
+        }
+
+        if (track != null || fullPlayerAlpha > 0f) {
+            val collapsedPlayButtonSize = 40.dp
+            val expandedPlayButtonSize = 58.dp
+            val playButtonSize = lerp(collapsedPlayButtonSize, expandedPlayButtonSize, expansionFraction)
+            val collapsedPlayButtonX = screenWidth - 12.dp - collapsedPlayButtonSize
+            val collapsedPlayButtonY = (MobileMiniPlayerChromeHeight - collapsedPlayButtonSize) / 2f
+            val expandedPlayButtonX = (screenWidth - expandedPlayButtonSize) / 2f
+            val expandedPlayButtonY = screenHeight - collapsedSheetHeight - 12.dp - expandedPlayButtonSize
+            val swipeProgress = (abs(currentSwipeOffset) / swipeThresholdPx).coerceIn(0f, 1f)
+            val swipeScale = if (expansionFraction < 0.1f) 1f - swipeProgress * 0.025f else 1f
+            val playButtonAlpha = when {
+                track == null -> fullPlayerElementsAlpha
+                expansionFraction < 0.1f -> miniPlayerAlpha * (1f - swipeProgress * 0.14f)
+                else -> 1f
+            }
+
+            PlayButton(
+                isPlaying = isPlaying,
+                isBuffering = isBuffering,
+                size = playButtonSize,
+                onClick = onToggle,
+                modifier = Modifier
+                    .offset {
+                        IntOffset(
+                            x = lerp(collapsedPlayButtonX, expandedPlayButtonX, expansionFraction).roundToPx(),
+                            y = lerp(collapsedPlayButtonY, expandedPlayButtonY, expansionFraction).roundToPx(),
+                        )
+                    }
+                    .graphicsLayer {
+                        alpha = playButtonAlpha
+                        translationX = if (expansionFraction < 0.1f) currentSwipeOffset else 0f
+                        scaleX = swipeScale
+                        scaleY = swipeScale
+                    }
+                    .then(if (expansionFraction < 0.1f) horizontalDragModifier else Modifier),
+                enabled = track != null,
+            )
         }
 
             if (fullPlayerAlpha > 0f) {

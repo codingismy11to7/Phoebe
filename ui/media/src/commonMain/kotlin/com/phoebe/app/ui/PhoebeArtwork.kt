@@ -18,6 +18,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -69,6 +70,9 @@ import kotlin.math.sin
 
 val LocalArtworkLoadingEnabled = compositionLocalOf { true }
 
+/** When true, artwork keeps showing cached images but defers new decode/network work. */
+val LocalDeferredArtworkLoading = compositionLocalOf { false }
+
 @Composable
 fun ArtworkImage(
     seed: String,
@@ -90,30 +94,32 @@ fun ArtworkImage(
             .clip(shape)
     }
 
-    Crossfade(targetState = imageState, label = "artwork-load-state") { state ->
+    val visualState = remember(imageState) {
+        when (imageState) {
+            is RemoteImageLoadState.Preview,
+            is RemoteImageLoadState.Ready,
+                -> RemoteArtworkVisualState.Image
+            RemoteImageLoadState.Loading -> RemoteArtworkVisualState.Loading
+            RemoteImageLoadState.Missing -> RemoteArtworkVisualState.Missing
+        }
+    }
+
+    Crossfade(targetState = visualState, label = "artwork-load-state") { state ->
         when (state) {
-            is RemoteImageLoadState.Ready -> {
+            RemoteArtworkVisualState.Image -> {
+                val image = imageState.image ?: return@Crossfade
                 Image(
-                    bitmap = state.image,
+                    bitmap = image,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     alignment = alignment,
                     modifier = imageModifier,
                 )
             }
-            is RemoteImageLoadState.Preview -> {
-                Image(
-                    bitmap = state.image,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    alignment = alignment,
-                    modifier = imageModifier,
-                )
-            }
-            RemoteImageLoadState.Loading -> {
+            RemoteArtworkVisualState.Loading -> {
                 ArtworkLoadingSlot(modifier, radius, shape = shape, elevated = elevated)
             }
-            RemoteImageLoadState.Missing -> {
+            RemoteArtworkVisualState.Missing -> {
                 AlbumArtwork(seed, modifier, radius, shape = shape, elevated = elevated)
             }
         }
@@ -168,6 +174,12 @@ private sealed interface RemoteImageLoadState {
     data class Ready(override val image: ImageBitmap) : RemoteImageLoadState
 }
 
+private enum class RemoteArtworkVisualState {
+    Image,
+    Loading,
+    Missing,
+}
+
 @Composable
 private fun rememberRemoteImageState(
     url: String?,
@@ -180,6 +192,7 @@ private fun rememberRemoteImageState(
     val target = primary ?: fallbackSource ?: return RemoteImageLoadState.Missing
     val fallback = fallbackSource?.takeIf { it != target }
     val artworkLoadsEnabled = LocalArtworkLoadingEnabled.current
+    val deferArtworkLoads = LocalDeferredArtworkLoading.current
     val previewDecodeDimensions = progressivePreviewDecodeDimensions(maxDecodeDimension)
     return produceState(
         initialValue = cachedStateForDisplay(target, maxDecodeDimension, fallback),
@@ -187,6 +200,7 @@ private fun rememberRemoteImageState(
         fallback,
         maxDecodeDimension,
         artworkLoadsEnabled,
+        deferArtworkLoads,
         artworkStaggerMs,
     ) {
         value = cachedStateForDisplay(target, maxDecodeDimension, fallback)
@@ -197,6 +211,10 @@ private fun rememberRemoteImageState(
             }
             if (!artworkLoadsEnabled) {
                 delay(250L)
+                continue
+            }
+            if (deferArtworkLoads) {
+                delay(RemoteArtworkCache.DeferredArtworkLoadGraceMs)
                 continue
             }
             val delayMs = if (previewDecodeDimensions.isEmpty() && RemoteArtworkCache.pacingEnabled) {
@@ -242,8 +260,8 @@ private fun cachedStateForDisplay(url: String, maxDecodeDimension: Int, fallback
 
 private fun progressivePreviewDecodeDimensions(maxDecodeDimension: Int): List<Int> {
     val requested = maxDecodeDimension.takeIf { it > 0 } ?: Int.MAX_VALUE
-    if (requested <= ListArtworkMaxDecodeDimension) return emptyList()
-    return listOf(ListArtworkMaxDecodeDimension, ThumbnailArtworkMaxDecodeDimension)
+    if (requested <= ThumbnailArtworkMaxDecodeDimension) return emptyList()
+    return listOf(ThumbnailArtworkMaxDecodeDimension, ListArtworkMaxDecodeDimension)
         .filter { it < requested }
         .distinct()
 }
@@ -261,6 +279,7 @@ object RemoteArtworkCache {
     private const val DefaultLoadPermits = 4
     private const val PacedMinIntervalMs = 72L
     private const val BurstMinIntervalMs = 24L
+    const val DeferredArtworkLoadGraceMs = 350L
     private const val DownloadModeMaxEntries = 32
     private const val DownloadModeMaxEstimatedBytes = 4L * 1024L * 1024L
 

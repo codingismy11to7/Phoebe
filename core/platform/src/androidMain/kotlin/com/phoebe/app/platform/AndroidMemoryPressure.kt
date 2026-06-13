@@ -1,22 +1,30 @@
 package com.phoebe.app.platform
 
-import android.content.ComponentCallbacks2
+private const val TrimMemoryRunningModerate = 5
+private const val TrimMemoryRunningLow = 10
+private const val TrimMemoryRunningCritical = 15
+private const val TrimMemoryUiHidden = 20
+private const val TrimMemoryBackground = 40
+private const val TrimMemoryModerate = 60
+private const val TrimMemoryComplete = 80
 
 /**
- * Maps Android [ComponentCallbacks2.onTrimMemory] levels to app pressure tiers.
+ * Maps Android component trim-memory levels to app pressure tiers.
  *
  * Running and background levels share numeric space but mean different things — never compare
- * against [ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL] with `>=` or UI_HIDDEN (20) is
- * misclassified as critical.
+ * against the running-critical value with `>=` or UI-hidden is misclassified as critical.
+ *
+ * The Android constants for these levels are deprecated on newer SDKs, but the platform still
+ * delivers these stable integer values through the trim-memory callback.
  */
 fun memoryPressureLevelForTrimLevel(level: Int): MemoryPressureLevel? =
     when {
-        level >= ComponentCallbacks2.TRIM_MEMORY_COMPLETE -> MemoryPressureLevel.Critical
-        level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL -> MemoryPressureLevel.Critical
-        level >= ComponentCallbacks2.TRIM_MEMORY_MODERATE -> MemoryPressureLevel.Moderate
-        level >= ComponentCallbacks2.TRIM_MEMORY_BACKGROUND -> MemoryPressureLevel.Moderate
-        level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW -> MemoryPressureLevel.Moderate
-        level >= ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN -> MemoryPressureLevel.UiHidden
-        level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_MODERATE -> MemoryPressureLevel.UiHidden
+        level >= TrimMemoryComplete -> MemoryPressureLevel.Critical
+        level == TrimMemoryRunningCritical -> MemoryPressureLevel.Critical
+        level >= TrimMemoryModerate -> MemoryPressureLevel.Moderate
+        level >= TrimMemoryBackground -> MemoryPressureLevel.Moderate
+        level == TrimMemoryRunningLow -> MemoryPressureLevel.Moderate
+        level >= TrimMemoryUiHidden -> MemoryPressureLevel.UiHidden
+        level == TrimMemoryRunningModerate -> MemoryPressureLevel.UiHidden
         else -> null
     }

@@ -1352,7 +1352,6 @@ private fun OrderMenuItem(
     )
 }
 
-private const val LibraryGridLayoutSettleMs = 200L
 private const val LibraryGridWidthDebounceMs = 200L
 private const val LibraryGridWidthBucketDp = 64f
 
@@ -1403,28 +1402,15 @@ fun LibraryResponsiveGrid(
             itemSizeDp = itemSizeDp,
             horizontalSpacing = horizontalSpacing,
         )
-        var layoutSettling by remember { mutableStateOf(false) }
-        LaunchedEffect(maxWidth) {
-            layoutSettling = true
-            delay(LibraryGridLayoutSettleMs)
-            layoutSettling = false
-        }
-        val artworkEnabled = LocalArtworkLoadingEnabled.current && !layoutSettling
-        val sharedElementsEnabled = LocalSharedElementTransitionsEnabled.current && !layoutSettling
-        CompositionLocalProvider(
-            LocalSharedElementTransitionsEnabled provides sharedElementsEnabled,
-            LocalArtworkLoadingEnabled provides artworkEnabled,
-        ) {
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(columnCount),
-                state = state,
-                verticalArrangement = Arrangement.spacedBy(verticalSpacing),
-                horizontalArrangement = Arrangement.spacedBy(horizontalSpacing),
-                contentPadding = contentPadding,
-                modifier = Modifier.fillMaxSize(),
-                content = content,
-            )
-        }
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(columnCount),
+            state = state,
+            verticalArrangement = Arrangement.spacedBy(verticalSpacing),
+            horizontalArrangement = Arrangement.spacedBy(horizontalSpacing),
+            contentPadding = contentPadding,
+            modifier = Modifier.fillMaxSize(),
+            content = content,
+        )
     }
 }
 
@@ -1685,24 +1671,29 @@ private fun ArtistsContent(
     }
     val scope = rememberCoroutineScope()
     val indexScrollDispatcher = rememberLibrarySectionIndexSelectionDispatcher()
+    var sectionIndexScrubbing by remember { mutableStateOf(false) }
+    val deferArtworkLoads = LocalDeferredArtworkLoading.current || sectionIndexScrubbing
     when (viewMode) {
         LibraryViewMode.Grid -> {
             val gridState = rememberLazyGridState()
             val revealIndex by remember(gridState) { derivedStateOf { gridState.isScrollInProgress } }
             Box(modifier) {
-                LibraryResponsiveGrid(
-                    itemSizeDp = artistGridItemSizeDp,
-                    horizontalSpacing = 18.dp,
-                    verticalSpacing = 20.dp,
-                    state = gridState,
-                    modifier = Modifier.fillMaxSize(),
-                ) {
-                    items(artists, key = { it.id }, contentType = { "artist-card" }) { artist ->
-                        ArtistCard(
-                            artist = artist,
-                            artworkDecodeDimension = libraryGridDecodeDimension(artistGridItemSizeDp),
-                            onArtist = { onArtist(artist) },
-                        )
+                CompositionLocalProvider(LocalDeferredArtworkLoading provides deferArtworkLoads) {
+                    LibraryResponsiveGrid(
+                        itemSizeDp = artistGridItemSizeDp,
+                        horizontalSpacing = 18.dp,
+                        verticalSpacing = 20.dp,
+                        state = gridState,
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        items(artists, key = { it.id }, contentType = { "artist-card" }) { artist ->
+                            val onArtistClick = remember(artist, onArtist) { { onArtist(artist) } }
+                            ArtistCard(
+                                artist = artist,
+                                artworkDecodeDimension = libraryGridDecodeDimension(artistGridItemSizeDp),
+                                onArtist = onArtistClick,
+                            )
+                        }
                     }
                 }
                 LibrarySectionIndex(
@@ -1710,6 +1701,7 @@ private fun ArtistsContent(
                     onEntrySelected = { entry ->
                         indexScrollDispatcher.launch(scope) { gridState.scrollToItem(entry.itemIndex) }
                     },
+                    onScrubbingChanged = { sectionIndexScrubbing = it },
                     mode = LibrarySectionIndexMode.DesktopScrollbar,
                     revealSignal = revealIndex,
                     scrollbarStateProvider = {
@@ -1741,17 +1733,20 @@ private fun ArtistsContent(
             Box(modifier) {
                 Column(Modifier.fillMaxSize()) {
                     ArtistsTableHeader()
-                    LazyColumn(
-                        state = listState,
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                        modifier = Modifier.fillMaxSize(),
-                    ) {
-                        items(artists, key = { it.id }, contentType = { "artist" }) { artist ->
-                            ArtistRow(
-                                artist = artist,
-                                stats = artistStats[artist.title.artistStatsKey()],
-                                onArtist = { onArtist(artist) },
-                            )
+                    CompositionLocalProvider(LocalDeferredArtworkLoading provides deferArtworkLoads) {
+                        LazyColumn(
+                            state = listState,
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.fillMaxSize(),
+                        ) {
+                            items(artists, key = { it.id }, contentType = { "artist" }) { artist ->
+                                val onArtistClick = remember(artist, onArtist) { { onArtist(artist) } }
+                                ArtistRow(
+                                    artist = artist,
+                                    stats = artistStats[artist.title.artistStatsKey()],
+                                    onArtist = onArtistClick,
+                                )
+                            }
                         }
                     }
                 }
@@ -1760,6 +1755,7 @@ private fun ArtistsContent(
                     onEntrySelected = { entry ->
                         indexScrollDispatcher.launch(scope) { listState.scrollToItem(entry.itemIndex) }
                     },
+                    onScrubbingChanged = { sectionIndexScrubbing = it },
                     mode = LibrarySectionIndexMode.DesktopScrollbar,
                     revealSignal = revealIndex,
                     scrollbarState = scrollbarState,
@@ -1995,27 +1991,33 @@ private fun AlbumsGrid(
     }
     val scope = rememberCoroutineScope()
     val indexScrollDispatcher = rememberLibrarySectionIndexSelectionDispatcher()
+    var sectionIndexScrubbing by remember { mutableStateOf(false) }
+    val deferArtworkLoads = LocalDeferredArtworkLoading.current || sectionIndexScrubbing
     when (viewMode) {
         LibraryViewMode.Grid -> {
             val gridState = rememberLazyGridState()
             val revealIndex by remember(gridState) { derivedStateOf { gridState.isScrollInProgress } }
             Box(modifier) {
-                LibraryResponsiveGrid(
-                    itemSizeDp = albumGridItemSizeDp,
-                    horizontalSpacing = 18.dp,
-                    verticalSpacing = 20.dp,
-                    state = gridState,
-                    modifier = Modifier.fillMaxSize(),
-                ) {
-                    items(albums, key = { it.id }, contentType = { "album-card" }) { album ->
-                        AlbumCard(
-                            catalog = catalog,
-                            album = album,
-                            selected = album.id == selectedAlbumId,
-                            artworkDecodeDimension = libraryGridDecodeDimension(albumGridItemSizeDp),
-                            onSelect = { onSelect(album) },
-                            onOpen = { onOpen(album) },
-                        )
+                CompositionLocalProvider(LocalDeferredArtworkLoading provides deferArtworkLoads) {
+                    LibraryResponsiveGrid(
+                        itemSizeDp = albumGridItemSizeDp,
+                        horizontalSpacing = 18.dp,
+                        verticalSpacing = 20.dp,
+                        state = gridState,
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        items(albums, key = { it.id }, contentType = { "album-card" }) { album ->
+                            val onAlbumSelect = remember(album, onSelect) { { onSelect(album) } }
+                            val onAlbumOpen = remember(album, onOpen) { { onOpen(album) } }
+                            AlbumCard(
+                                catalog = catalog,
+                                album = album,
+                                selected = album.id == selectedAlbumId,
+                                artworkDecodeDimension = libraryGridDecodeDimension(albumGridItemSizeDp),
+                                onSelect = onAlbumSelect,
+                                onOpen = onAlbumOpen,
+                            )
+                        }
                     }
                 }
                 LibrarySectionIndex(
@@ -2023,6 +2025,7 @@ private fun AlbumsGrid(
                     onEntrySelected = { entry ->
                         indexScrollDispatcher.launch(scope) { gridState.scrollToItem(entry.itemIndex) }
                     },
+                    onScrubbingChanged = { sectionIndexScrubbing = it },
                     mode = LibrarySectionIndexMode.DesktopScrollbar,
                     revealSignal = revealIndex,
                     scrollbarStateProvider = {
@@ -2049,19 +2052,23 @@ private fun AlbumsGrid(
                 }
             }
             Box(modifier) {
-                LazyColumn(
-                    state = listState,
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                    modifier = Modifier.fillMaxSize(),
-                ) {
-                    items(albums, key = { it.id }, contentType = { "album-list" }) { album ->
-                        AlbumListRow(
-                            catalog = catalog,
-                            album = album,
-                            selected = album.id == selectedAlbumId,
-                            onSelect = { onSelect(album) },
-                            onOpen = { onOpen(album) },
-                        )
+                CompositionLocalProvider(LocalDeferredArtworkLoading provides deferArtworkLoads) {
+                    LazyColumn(
+                        state = listState,
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        items(albums, key = { it.id }, contentType = { "album-list" }) { album ->
+                            val onAlbumSelect = remember(album, onSelect) { { onSelect(album) } }
+                            val onAlbumOpen = remember(album, onOpen) { { onOpen(album) } }
+                            AlbumListRow(
+                                catalog = catalog,
+                                album = album,
+                                selected = album.id == selectedAlbumId,
+                                onSelect = onAlbumSelect,
+                                onOpen = onAlbumOpen,
+                            )
+                        }
                     }
                 }
                 LibrarySectionIndex(
@@ -2069,6 +2076,7 @@ private fun AlbumsGrid(
                     onEntrySelected = { entry ->
                         indexScrollDispatcher.launch(scope) { listState.scrollToItem(entry.itemIndex) }
                     },
+                    onScrubbingChanged = { sectionIndexScrubbing = it },
                     mode = LibrarySectionIndexMode.DesktopScrollbar,
                     revealSignal = revealIndex,
                     scrollbarState = scrollbarState,
@@ -2262,6 +2270,8 @@ private fun SongsTable(
     }
     val scope = rememberCoroutineScope()
     val indexScrollDispatcher = rememberLibrarySectionIndexSelectionDispatcher()
+    var sectionIndexScrubbing by remember { mutableStateOf(false) }
+    val deferArtworkLoads = LocalDeferredArtworkLoading.current || sectionIndexScrubbing
     Box(modifier) {
         Column(Modifier.fillMaxSize()) {
             SongsTableHeader(columns)
@@ -2270,21 +2280,27 @@ private fun SongsTable(
                     Text("No songs yet.", color = PhoebeUi.mutedText, fontSize = 13.sp)
                 }
             } else {
-                LazyColumn(
-                    state = listState,
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                    modifier = Modifier.fillMaxSize(),
-                ) {
-                    itemsIndexed(tracks, key = { _, t -> t.id }, contentType = { _, _ -> "song" }) { index, track ->
-                        SongRow(
-                            track = track,
-                            selected = track.id == selectedTrackId,
-                            columns = columns,
-                            onSelect = { onSelect(track) },
-                            onPlay = { onPlay(index) },
-                            onAddToUpNext = { onAddToUpNext(track) },
-                            onDownload = { onDownload(track) },
-                        )
+                CompositionLocalProvider(LocalDeferredArtworkLoading provides deferArtworkLoads) {
+                    LazyColumn(
+                        state = listState,
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        itemsIndexed(tracks, key = { _, t -> t.id }, contentType = { _, _ -> "song" }) { index, track ->
+                            val onSelectClick = remember(track, onSelect) { { onSelect(track) } }
+                            val onPlayClick = remember(index, onPlay) { { onPlay(index) } }
+                            val onAddClick = remember(track, onAddToUpNext) { { onAddToUpNext(track) } }
+                            val onDownloadClick = remember(track, onDownload) { { onDownload(track) } }
+                            SongRow(
+                                track = track,
+                                selected = track.id == selectedTrackId,
+                                columns = columns,
+                                onSelect = onSelectClick,
+                                onPlay = onPlayClick,
+                                onAddToUpNext = onAddClick,
+                                onDownload = onDownloadClick,
+                            )
+                        }
                     }
                 }
             }
@@ -2294,6 +2310,7 @@ private fun SongsTable(
             onEntrySelected = { entry ->
                 indexScrollDispatcher.launch(scope) { listState.scrollToItem(entry.itemIndex) }
             },
+            onScrubbingChanged = { sectionIndexScrubbing = it },
             mode = LibrarySectionIndexMode.DesktopScrollbar,
             revealSignal = revealIndex,
             scrollbarState = scrollbarState,

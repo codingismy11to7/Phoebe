@@ -251,6 +251,7 @@ fun DesktopHomeScreen(
         if (sharedPlayedTrackKeys[track.id] == 1) "song:${track.id}" else null
     }
     val artistThumbs = state.artistThumbs
+    val albumArtworkFallbacks = state.albumArtworkFallbacks
     val catalogSyncInProgress = LocalCatalogSyncInProgress.current
     LazyColumn(
         state = listState,
@@ -291,7 +292,7 @@ fun DesktopHomeScreen(
                         )
                     }
                     item("favorite-artists") { DesktopFavoriteArtistsPanel(state.favoriteArtists, artistThumbs, onArtist, onFavoriteArtists, totalCount = state.favoriteArtistCount) }
-                    item("favorite-albums") { DesktopFavoriteAlbumsPanel(state.favoriteAlbums, onAlbum, onFavoriteAlbums, totalCount = state.favoriteAlbumCount) }
+                    item("favorite-albums") { DesktopFavoriteAlbumsPanel(state.favoriteAlbums, albumArtworkFallbacks, onAlbum, onFavoriteAlbums, totalCount = state.favoriteAlbumCount) }
                 }
                 HomeSection.FavoritePlaylists -> item("favorite-playlists") {
                     DesktopFavoritePlaylistsPanel(
@@ -302,20 +303,20 @@ fun DesktopHomeScreen(
                     )
                 }
                 HomeSection.FavoriteArtists -> item("favorite-artists") { DesktopFavoriteArtistsPanel(state.favoriteArtists, artistThumbs, onArtist, onFavoriteArtists, totalCount = state.favoriteArtistCount) }
-                HomeSection.FavoriteAlbums -> item("favorite-albums") { DesktopFavoriteAlbumsPanel(state.favoriteAlbums, onAlbum, onFavoriteAlbums, totalCount = state.favoriteAlbumCount) }
+                HomeSection.FavoriteAlbums -> item("favorite-albums") { DesktopFavoriteAlbumsPanel(state.favoriteAlbums, albumArtworkFallbacks, onAlbum, onFavoriteAlbums, totalCount = state.favoriteAlbumCount) }
                 HomeSection.Recents -> {
                     item("recent-songs") { DesktopRecentSongsPanel(state.recentlyAddedTracks, onRecentSongs, onPlayTracks) }
                     item("recent-artists") { DesktopRecentArtistsPanel(state.recentlyAddedArtists, artistThumbs, onRecentArtists, onArtist) }
-                    item("recent-albums") { DesktopRecentAlbumsPanel(state.recentlyAddedAlbums, onRecentAlbums, onAlbum) }
+                    item("recent-albums") { DesktopRecentAlbumsPanel(state.recentlyAddedAlbums, albumArtworkFallbacks, onRecentAlbums, onAlbum) }
                 }
                 HomeSection.RecentSongs -> item("recent-songs") { DesktopRecentSongsPanel(state.recentlyAddedTracks, onRecentSongs, onPlayTracks) }
                 HomeSection.RecentArtists -> item("recent-artists") { DesktopRecentArtistsPanel(state.recentlyAddedArtists, artistThumbs, onRecentArtists, onArtist) }
-                HomeSection.RecentAlbums -> item("recent-albums") { DesktopRecentAlbumsPanel(state.recentlyAddedAlbums, onRecentAlbums, onAlbum) }
+                HomeSection.RecentAlbums -> item("recent-albums") { DesktopRecentAlbumsPanel(state.recentlyAddedAlbums, albumArtworkFallbacks, onRecentAlbums, onAlbum) }
                 HomeSection.Played -> item("played") {
                     DesktopPlayedPanels(state, onPlayTracks, onAddToUpNext, onDownload, onMostPlayed, onRecentlyPlayed, playedPanelMaxRows, sharedKeyForPlayedTrack)
                 }
                 HomeSection.Random -> item("random") {
-                    DesktopRandomPanels(state, catalogRefreshing, onArtist, onAlbum, onRefreshArtists, onRefreshAlbums, onPrefetchArtist, onPrefetchAlbum)
+                    DesktopRandomPanels(state, catalogRefreshing, albumArtworkFallbacks, onArtist, onAlbum, onRefreshArtists, onRefreshAlbums, onPrefetchArtist, onPrefetchAlbum)
                 }
             }
         }
@@ -376,6 +377,7 @@ fun MobileHomeScreen(
     val sectionOrder = remember(homeSections) { normalizedHomeSections(homeSections) }
     val collectionRows = remember(supportedCollectionEntries) { collectionEntryRows(supportedCollectionEntries) }
     val artistThumbs = state.artistThumbs
+    val albumArtworkFallbacks = state.albumArtworkFallbacks
     val catalogSyncInProgress = LocalCatalogSyncInProgress.current
     val chromePadding = LocalMobileChromePadding.current
     val supportedCollections = remember(supportedCollectionEntries) { collectionEntries(supportedCollectionEntries) }
@@ -394,6 +396,7 @@ fun MobileHomeScreen(
                 sectionOrder = sectionOrder,
                 collectionEntries = supportedCollections,
                 artistThumbs = artistThumbs,
+                albumArtworkFallbacks = albumArtworkFallbacks,
                 onArtist = onArtist,
                 onAlbum = onAlbum,
                 onPlaylist = onPlaylist,
@@ -429,6 +432,7 @@ fun MobileHomeScreen(
                 collectionRows = collectionRows,
                 collectionEntries = supportedCollections,
                 artistThumbs = artistThumbs,
+                albumArtworkFallbacks = albumArtworkFallbacks,
                 usePhoneAccordions = usePhoneAccordions,
                 expandedPhoneSection = if (usePhoneAccordions) expandedPhoneSection else null,
                 onExpandedPhoneSection = { expandedPhoneSection = it },
@@ -633,6 +637,7 @@ private fun MobileHomeContent(
     collectionRows: List<List<HomeCollectionEntry>>,
     collectionEntries: List<HomeCollectionEntry>,
     artistThumbs: Map<String, String>,
+    albumArtworkFallbacks: Map<String, String>,
     usePhoneAccordions: Boolean,
     expandedPhoneSection: PhoneHomeAccordionSection?,
     onExpandedPhoneSection: (PhoneHomeAccordionSection?) -> Unit,
@@ -765,7 +770,7 @@ private fun MobileHomeContent(
                         )
                     }
                     item(key = "favorite-artists", contentType = "favorite-artists-section") { MobileFavoriteArtistsSection(state.favoriteArtists, artistThumbs, onArtist, onFavoriteArtists, totalCount = state.favoriteArtistCount) }
-                    item(key = "favorite-albums", contentType = "favorite-albums-section") { MobileFavoriteAlbumsSection(state.favoriteAlbums, onAlbum, onFavoriteAlbums, totalCount = state.favoriteAlbumCount) }
+                    item(key = "favorite-albums", contentType = "favorite-albums-section") { MobileFavoriteAlbumsSection(state.favoriteAlbums, albumArtworkFallbacks, onAlbum, onFavoriteAlbums, totalCount = state.favoriteAlbumCount) }
                 }
                 HomeSection.FavoritePlaylists -> item(key = "favorite-playlists", contentType = "favorite-playlists-section") {
                     MobileFavoritePlaylistsSection(
@@ -776,7 +781,7 @@ private fun MobileHomeContent(
                     )
                 }
                 HomeSection.FavoriteArtists -> item(key = "favorite-artists", contentType = "favorite-artists-section") { MobileFavoriteArtistsSection(state.favoriteArtists, artistThumbs, onArtist, onFavoriteArtists, totalCount = state.favoriteArtistCount) }
-                HomeSection.FavoriteAlbums -> item(key = "favorite-albums", contentType = "favorite-albums-section") { MobileFavoriteAlbumsSection(state.favoriteAlbums, onAlbum, onFavoriteAlbums, totalCount = state.favoriteAlbumCount) }
+                HomeSection.FavoriteAlbums -> item(key = "favorite-albums", contentType = "favorite-albums-section") { MobileFavoriteAlbumsSection(state.favoriteAlbums, albumArtworkFallbacks, onAlbum, onFavoriteAlbums, totalCount = state.favoriteAlbumCount) }
                 HomeSection.Played -> item(key = "played-shortcuts", contentType = "played-shortcuts-section") {
                     if (usePhoneAccordions) {
                         PhonePlayedAccordionSection(
@@ -804,6 +809,7 @@ private fun MobileHomeContent(
                             randomArtists = randomArtists,
                             randomAlbums = randomAlbums,
                             artistThumbs = artistThumbs,
+                            albumArtworkFallbacks = albumArtworkFallbacks,
                             expanded = expandedPhoneSection == PhoneHomeAccordionSection.Random,
                             onToggle = {
                                 onExpandedPhoneSection(
@@ -820,6 +826,7 @@ private fun MobileHomeContent(
                             randomArtists = randomArtists,
                             randomAlbums = randomAlbums,
                             artistThumbs = artistThumbs,
+                            albumArtworkFallbacks = albumArtworkFallbacks,
                             onArtist = onArtist,
                             onAlbum = onAlbum,
                             onRefreshArtists = onRefreshArtists,
@@ -844,6 +851,7 @@ private fun MobileExpandedHomeContent(
     sectionOrder: List<HomeSection>,
     collectionEntries: List<HomeCollectionEntry>,
     artistThumbs: Map<String, String>,
+    albumArtworkFallbacks: Map<String, String>,
     onArtist: (Artist) -> Unit,
     onAlbum: (Album) -> Unit,
     onPlaylist: (Playlist) -> Unit,
@@ -908,6 +916,7 @@ private fun MobileExpandedHomeContent(
                         item(key = "expanded-favorite-albums", contentType = "expanded-favorite-albums") {
                             ExpandedFavoriteAlbumsShelf(
                                 albums = state.favoriteAlbums,
+                                albumArtworkFallbacks = albumArtworkFallbacks,
                                 totalCount = state.favoriteAlbumCount,
                                 onAlbum = onAlbum,
                                 onViewAll = onFavoriteAlbums,
@@ -939,6 +948,7 @@ private fun MobileExpandedHomeContent(
                         item(key = "expanded-recent-albums", contentType = "expanded-recent-albums") {
                             ExpandedRecentAlbumsShelf(
                                 albums = state.recentlyAddedAlbums,
+                                albumArtworkFallbacks = albumArtworkFallbacks,
                                 onAlbum = onAlbum,
                                 onViewAll = onRecentAlbums,
                             )
@@ -981,6 +991,7 @@ private fun MobileExpandedHomeContent(
                         item(key = "expanded-random-albums", contentType = "expanded-random-albums") {
                             ExpandedRandomAlbumsShelf(
                                 randomAlbums = remember(state.randomAlbums) { state.randomAlbums.take(10) },
+                                albumArtworkFallbacks = albumArtworkFallbacks,
                                 onAlbum = onAlbum,
                                 onRefreshAlbums = onRefreshAlbums,
                             )
@@ -1139,6 +1150,7 @@ private fun ExpandedFavoriteArtistsShelf(
 @Composable
 private fun ExpandedFavoriteAlbumsShelf(
     albums: List<Album>,
+    albumArtworkFallbacks: Map<String, String>,
     totalCount: Int,
     onAlbum: (Album) -> Unit,
     onViewAll: () -> Unit,
@@ -1154,7 +1166,7 @@ private fun ExpandedFavoriteAlbumsShelf(
     } else {
         ExpandedHomeShelf("FAVORITE ALBUMS", action = "View all", onAction = onViewAll, horizontalSpacing = 10.dp) {
             items(displayAlbums, key = { "favorite-album:${it.id}" }, contentType = { "expanded-favorite-album" }) { album ->
-                HomeArtworkTile(album.title, album.artist, album.thumbUrl, modifier = Modifier.width(92.dp), maxDecodeDimension = 180, sharedKey = "album:${album.id}") {
+                HomeArtworkTile(album.title, album.artist, album.thumbUrl, fallbackThumbUrl = albumArtworkFallbacks[album.id], modifier = Modifier.width(92.dp), maxDecodeDimension = 180, sharedKey = "album:${album.id}") {
                     onAlbum(album)
                 }
             }
@@ -1214,6 +1226,7 @@ private fun ExpandedRecentArtistsShelf(
 @Composable
 private fun ExpandedRecentAlbumsShelf(
     albums: List<Album>,
+    albumArtworkFallbacks: Map<String, String>,
     onAlbum: (Album) -> Unit,
     onViewAll: () -> Unit,
 ) {
@@ -1223,7 +1236,7 @@ private fun ExpandedRecentAlbumsShelf(
     } else {
         ExpandedHomeShelf("RECENT ALBUMS", action = "View all", onAction = onViewAll, horizontalSpacing = 10.dp) {
             items(displayAlbums, key = { "recent-album:${it.id}" }, contentType = { "expanded-recent-album" }) { album ->
-                HomeArtworkTile(album.title, album.artist, album.thumbUrl, modifier = Modifier.width(92.dp), maxDecodeDimension = 180, sharedKey = "album:${album.id}") {
+                HomeArtworkTile(album.title, album.artist, album.thumbUrl, fallbackThumbUrl = albumArtworkFallbacks[album.id], modifier = Modifier.width(92.dp), maxDecodeDimension = 180, sharedKey = "album:${album.id}") {
                     onAlbum(album)
                 }
             }
@@ -1259,6 +1272,7 @@ private fun ExpandedRandomArtistsShelf(
 @Composable
 private fun ExpandedRandomAlbumsShelf(
     randomAlbums: List<Album>,
+    albumArtworkFallbacks: Map<String, String>,
     onAlbum: (Album) -> Unit,
     onRefreshAlbums: () -> Unit,
 ) {
@@ -1272,7 +1286,7 @@ private fun ExpandedRandomAlbumsShelf(
             horizontalSpacing = 10.dp,
         ) {
             items(randomAlbums, key = { "random-album:${it.id}" }, contentType = { "expanded-random-album" }) { album ->
-                HomeArtworkTile(album.title, album.artist, album.thumbUrl, modifier = Modifier.width(92.dp), maxDecodeDimension = 180, sharedKey = "album:${album.id}") {
+                HomeArtworkTile(album.title, album.artist, album.thumbUrl, fallbackThumbUrl = albumArtworkFallbacks[album.id], modifier = Modifier.width(92.dp), maxDecodeDimension = 180, sharedKey = "album:${album.id}") {
                     onAlbum(album)
                 }
             }
@@ -1632,6 +1646,7 @@ private fun PhoneRandomAccordionSection(
     randomArtists: List<Artist>,
     randomAlbums: List<Album>,
     artistThumbs: Map<String, String>,
+    albumArtworkFallbacks: Map<String, String>,
     expanded: Boolean,
     onToggle: () -> Unit,
     onArtist: (Artist) -> Unit,
@@ -1650,6 +1665,7 @@ private fun PhoneRandomAccordionSection(
             randomArtists = randomArtists,
             randomAlbums = randomAlbums,
             artistThumbs = artistThumbs,
+            albumArtworkFallbacks = albumArtworkFallbacks,
             onArtist = onArtist,
             onAlbum = onAlbum,
             onRefreshArtists = onRefreshArtists,
@@ -1681,6 +1697,7 @@ private fun MobileRandomSection(
     randomArtists: List<Artist>,
     randomAlbums: List<Album>,
     artistThumbs: Map<String, String>,
+    albumArtworkFallbacks: Map<String, String>,
     onArtist: (Artist) -> Unit,
     onAlbum: (Album) -> Unit,
     onRefreshArtists: () -> Unit,
@@ -1692,6 +1709,7 @@ private fun MobileRandomSection(
             randomArtists = randomArtists,
             randomAlbums = randomAlbums,
             artistThumbs = artistThumbs,
+            albumArtworkFallbacks = albumArtworkFallbacks,
             onArtist = onArtist,
             onAlbum = onAlbum,
             onRefreshArtists = onRefreshArtists,
@@ -1705,6 +1723,7 @@ private fun MobileRandomExpandedContent(
     randomArtists: List<Artist>,
     randomAlbums: List<Album>,
     artistThumbs: Map<String, String>,
+    albumArtworkFallbacks: Map<String, String>,
     onArtist: (Artist) -> Unit,
     onAlbum: (Album) -> Unit,
     onRefreshArtists: () -> Unit,
@@ -1712,7 +1731,7 @@ private fun MobileRandomExpandedContent(
 ) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         MobileRandomArtistsList(randomArtists, artistThumbs, onArtist, onRefreshArtists)
-        MobileRandomAlbumsList(randomAlbums, onAlbum, onRefreshAlbums)
+        MobileRandomAlbumsList(randomAlbums, albumArtworkFallbacks, onAlbum, onRefreshAlbums)
     }
 }
 
@@ -1836,6 +1855,7 @@ private fun MobileRandomArtistsList(
 @Composable
 private fun MobileRandomAlbumsList(
     albums: List<Album>,
+    albumArtworkFallbacks: Map<String, String>,
     onAlbum: (Album) -> Unit,
     onRefresh: () -> Unit,
 ) {
@@ -1851,6 +1871,7 @@ private fun MobileRandomAlbumsList(
                             title = album.title,
                             subtitle = album.artist,
                             thumbUrl = album.thumbUrl,
+                            fallbackThumbUrl = albumArtworkFallbacks[album.id],
                             modifier = Modifier.width(92.dp),
                             maxDecodeDimension = 180,
                             sharedKey = "album:${album.id}",
@@ -1951,6 +1972,7 @@ private fun MobileFavoriteArtistsSection(
 @Composable
 private fun MobileFavoriteAlbumsSection(
     albums: List<Album>,
+    albumArtworkFallbacks: Map<String, String>,
     onAlbum: (Album) -> Unit,
     onViewAll: () -> Unit,
     totalCount: Int = albums.size,
@@ -1963,7 +1985,7 @@ private fun MobileFavoriteAlbumsSection(
         SectionHeader("FAVORITE ALBUMS", if (totalCount > 10) "View all" else null, onViewAll)
         HomeHorizontalCarousel(Modifier.fillMaxWidth()) {
             items(visibleAlbums, key = { it.id }, contentType = { "mobile-favorite-album" }) { album ->
-                HomeArtworkTile(album.title, album.artist, album.thumbUrl, modifier = Modifier.width(92.dp), maxDecodeDimension = 180, sharedKey = "album:${album.id}") {
+                HomeArtworkTile(album.title, album.artist, album.thumbUrl, fallbackThumbUrl = albumArtworkFallbacks[album.id], modifier = Modifier.width(92.dp), maxDecodeDimension = 180, sharedKey = "album:${album.id}") {
                     onAlbum(album)
                 }
             }
@@ -2117,6 +2139,7 @@ private fun DesktopRecentArtistsPanel(
 @Composable
 private fun DesktopRecentAlbumsPanel(
     albums: List<Album>,
+    albumArtworkFallbacks: Map<String, String>,
     onRecentAlbums: () -> Unit,
     onAlbum: (Album) -> Unit,
 ) {
@@ -2127,7 +2150,7 @@ private fun DesktopRecentAlbumsPanel(
         } else {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 items(albums.take(10), key = { it.id }, contentType = { "desktop-recent-album" }) { album ->
-                    HomeArtworkTile(album.title, album.artist, album.thumbUrl, modifier = Modifier.width(112.dp), sharedKey = "album:${album.id}") { onAlbum(album) }
+                    HomeArtworkTile(album.title, album.artist, album.thumbUrl, fallbackThumbUrl = albumArtworkFallbacks[album.id], modifier = Modifier.width(112.dp), sharedKey = "album:${album.id}") { onAlbum(album) }
                 }
             }
         }
@@ -2200,6 +2223,7 @@ private fun DesktopFavoriteArtistsPanel(
 @Composable
 private fun DesktopFavoriteAlbumsPanel(
     albums: List<Album>,
+    albumArtworkFallbacks: Map<String, String>,
     onAlbum: (Album) -> Unit,
     onViewAll: () -> Unit,
     totalCount: Int = albums.size,
@@ -2216,7 +2240,7 @@ private fun DesktopFavoriteAlbumsPanel(
                 onViewAll = onViewAll,
             ) {
                 items(displayAlbums, key = { "album:${it.id}" }, contentType = { "favorite-album" }) { album ->
-                        HomeArtworkTile(album.title, album.artist, album.thumbUrl, modifier = Modifier.width(112.dp), sharedKey = "album:${album.id}") { onAlbum(album) }
+                        HomeArtworkTile(album.title, album.artist, album.thumbUrl, fallbackThumbUrl = albumArtworkFallbacks[album.id], modifier = Modifier.width(112.dp), sharedKey = "album:${album.id}") { onAlbum(album) }
                 }
             }
         }
@@ -2343,6 +2367,7 @@ private fun DesktopPlayedPanels(
 private fun DesktopRandomPanels(
     state: HomeUiState,
     catalogRefreshing: Boolean,
+    albumArtworkFallbacks: Map<String, String>,
     onArtist: (Artist) -> Unit,
     onAlbum: (Album) -> Unit,
     onRefreshArtists: () -> Unit,
@@ -2355,12 +2380,12 @@ private fun DesktopRandomPanels(
         if (maxWidth < 820.dp) {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 RandomArtistPanel(state.randomArtists.firstOrNull(), state.randomArtistStats, catalogRefreshing, onArtist, onRefreshArtists, onPrefetchArtist, Modifier.fillMaxWidth().height(randomPanelHeight))
-                RandomAlbumPanel(state.randomAlbums.firstOrNull(), state.randomAlbumStats, catalogRefreshing, onAlbum, onRefreshAlbums, onPrefetchAlbum, Modifier.fillMaxWidth().height(randomPanelHeight))
+                RandomAlbumPanel(state.randomAlbums.firstOrNull(), state.randomAlbumStats, catalogRefreshing, albumArtworkFallbacks, onAlbum, onRefreshAlbums, onPrefetchAlbum, Modifier.fillMaxWidth().height(randomPanelHeight))
             }
         } else {
             Row(Modifier.fillMaxWidth().height(randomPanelHeight), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 RandomArtistPanel(state.randomArtists.firstOrNull(), state.randomArtistStats, catalogRefreshing, onArtist, onRefreshArtists, onPrefetchArtist, Modifier.weight(1f).fillMaxHeight())
-                RandomAlbumPanel(state.randomAlbums.firstOrNull(), state.randomAlbumStats, catalogRefreshing, onAlbum, onRefreshAlbums, onPrefetchAlbum, Modifier.weight(1f).fillMaxHeight())
+                RandomAlbumPanel(state.randomAlbums.firstOrNull(), state.randomAlbumStats, catalogRefreshing, albumArtworkFallbacks, onAlbum, onRefreshAlbums, onPrefetchAlbum, Modifier.weight(1f).fillMaxHeight())
             }
         }
     }
@@ -2787,6 +2812,7 @@ private fun RandomAlbumPanel(
     album: Album?,
     stats: HomeFeaturedAlbumStats?,
     catalogRefreshing: Boolean,
+    albumArtworkFallbacks: Map<String, String>,
     onAlbum: (Album) -> Unit,
     onRefresh: () -> Unit,
     onPrefetch: (Album) -> Unit,
@@ -2807,6 +2833,7 @@ private fun RandomAlbumPanel(
                     album = album,
                     stats = stats?.takeIf { it.albumId == album.id },
                     catalogRefreshing = catalogRefreshing,
+                    fallbackThumbUrl = albumArtworkFallbacks[album.id],
                     modifier = Modifier.fillMaxWidth(0.92f),
                     onClick = { onAlbum(album) },
                 )
@@ -2984,6 +3011,7 @@ private fun FeaturedAlbumCard(
     album: Album,
     stats: HomeFeaturedAlbumStats?,
     catalogRefreshing: Boolean,
+    fallbackThumbUrl: String?,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
@@ -3013,6 +3041,7 @@ private fun FeaturedAlbumCard(
                 Modifier.size(112.dp).sharedArtworkTransition("album:${album.id}"),
                 radius = 10.dp,
                 elevated = false,
+                fallbackThumbUrl = fallbackThumbUrl,
             )
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
