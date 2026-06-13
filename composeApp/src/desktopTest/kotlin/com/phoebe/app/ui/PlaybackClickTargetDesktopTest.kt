@@ -127,8 +127,8 @@ class PlaybackClickTargetDesktopTest {
         onNodeWithTag(PlaybackTestTags.playTrack(tracks[2].id)).performClick()
 
         val captured = assertNotNull(request)
-        assertEquals(2, captured.index)
-        assertEquals(tracks, captured.tracks)
+        assertEquals(0, captured.index)
+        assertEquals(listOf(tracks[2], tracks[0], tracks[1]), captured.tracks)
     }
 
     @OptIn(ExperimentalTestApi::class, ExperimentalComposeUiApi::class)

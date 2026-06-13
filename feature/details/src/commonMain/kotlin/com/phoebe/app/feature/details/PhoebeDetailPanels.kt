@@ -1502,6 +1502,14 @@ fun AlbumDetailPanel(
     val visibleTracks = remember(sortedTracks, searchQuery) {
         filterTracksByQuery(sortedTracks, searchQuery)
     }
+    val playVisibleTrack = { visibleIndex: Int ->
+        val (queueTracks, queueIndex) = playbackQueueForVisibleTrack(
+            sourceTracks = sortedTracks,
+            visibleTracks = visibleTracks,
+            visibleIndex = visibleIndex,
+        )
+        onPlayTracks(queueTracks, queueIndex)
+    }
     val nowPlaying = LocalNowPlaying.current
     val mobileChromeBottom = LocalMobileChromePadding.current.bottom
 
@@ -1611,8 +1619,8 @@ fun AlbumDetailPanel(
                     track = track,
                     selected = false,
                     columns = libraryUi.columns,
-                    onSelect = { onPlayTracks(visibleTracks, index) },
-                    onPlay = { onPlayTracks(visibleTracks, index) },
+                    onSelect = { playVisibleTrack(index) },
+                    onPlay = { playVisibleTrack(index) },
                     onAddToUpNext = { onAddToUpNext(track) },
                     onDownload = { onDownload(track) },
                 )
@@ -1626,7 +1634,7 @@ fun AlbumDetailPanel(
                     isNowPlaying = isNowPlaying,
                     nowPlayingIsPlaying = nowPlaying.isPlaying,
                     nowPlayingIsBuffering = nowPlaying.isBuffering,
-                    onPlay = { onPlayTracks(visibleTracks, index) },
+                    onPlay = { playVisibleTrack(index) },
                     onAddToUpNext = { onAddToUpNext(track) },
                     onDownload = { onDownload(track) },
                 )

@@ -470,15 +470,17 @@ fun MobilePlayer(
             val currentMetadataOverlap = lerp(0.dp, metadataOverlap, clampedExpansionFraction)
             val currentReflectionHeight = (metadataReserve + metadataOverlap) * scale
             val reflectionY = currentArtworkY + currentArtworkSize - currentMetadataOverlap
+            val reflectionDismissAlpha = ((clampedExpansionFraction - 0.88f) / 0.12f).coerceIn(0f, 1f)
+            val reflectionAlpha = fullPlayerAlpha * reflectionDismissAlpha
 
-            if (currentReflectionHeight > 0.dp && fullPlayerElementsAlpha > 0f) {
+            if (currentReflectionHeight > 0.dp && reflectionAlpha > 0f) {
                 val artworkSizePx = with(density) { currentArtworkSize.toPx() }
                 Box(
                     modifier = Modifier
                         .offset(x = currentArtworkX, y = reflectionY)
                         .width(currentArtworkSize)
                         .height(currentReflectionHeight)
-                        .graphicsLayer { alpha = fullPlayerElementsAlpha }
+                        .graphicsLayer { alpha = reflectionAlpha }
                         .clipToBounds()
                 ) {
                     val reflectionsToRender = remember(track, nextTrack, previousTrack, horizontalSwipePreviewDirection) {
@@ -589,7 +591,9 @@ fun MobilePlayer(
                     ) {
                         TransportIcon(PhoebeIcon.Lyrics, "Lyrics", onLyrics)
                         TransportIcon(PhoebeIcon.Equalizer, "Equalizer", { equalizerOpen = true }, active = equalizerProfile.enabled)
-                        if (!isDesktopPlatform() || castState.isAvailable || castState.isConnected) {
+                        if (castState.isConnected) {
+                            Spacer(Modifier.size(40.dp))
+                        } else if (!isDesktopPlatform() || castState.isAvailable) {
                             CastIcon(
                                 active = castState.isConnected,
                                 loading = castState.isBuffering,
@@ -776,11 +780,17 @@ fun MobilePlayer(
 
             val currentTextX = lerp(68.dp, 36.dp, clampedExpansionFraction)
             val currentTextY = lerp(17.dp, 80.dp + statusBarTopPadding + fullArtworkSize + 12.dp, clampedExpansionFraction)
-            val currentTextWidth = lerp(screenWidth - 128.dp, fullArtworkSize - 32.dp, clampedExpansionFraction)
+            val collapsedTextWidth = if (castState.isConnected) {
+                (screenWidth - 176.dp).coerceAtLeast(96.dp)
+            } else {
+                screenWidth - 128.dp
+            }
+            val currentTextWidth = lerp(collapsedTextWidth, fullArtworkSize - 32.dp, clampedExpansionFraction)
 
             val titleFontSize = (14f + (20f - 14f) * clampedExpansionFraction).sp
             val artistFontSize = (12f + (14f - 12f) * clampedExpansionFraction).sp
-            val titleFontWeight = if (clampedExpansionFraction > 0.5f) FontWeight.Black else FontWeight.Bold
+            val metadataTextStable = clampedExpansionFraction < 0.08f || clampedExpansionFraction > 0.96f
+            val titleFontWeight = if (clampedExpansionFraction > 0.96f) FontWeight.Black else FontWeight.Bold
 
             Column(
                 modifier = Modifier
@@ -811,6 +821,7 @@ fun MobilePlayer(
                     color = titleColor,
                     fontSize = titleFontSize,
                     fontWeight = titleFontWeight,
+                    marqueeEnabled = metadataTextStable,
                 )
                 AutoScrollingText(
                     text = track.artist,
@@ -820,7 +831,8 @@ fun MobilePlayer(
                         Modifier.clickable { trackNavigationActions.onOpenArtistForTrack(track) }
                     } else {
                         Modifier
-                    }
+                    },
+                    marqueeEnabled = metadataTextStable,
                 )
                 if (clampedExpansionFraction > 0.5f) {
                     val fadeAlpha = ((clampedExpansionFraction - 0.5f) / 0.5f).coerceIn(0f, 1f)
@@ -835,6 +847,7 @@ fun MobilePlayer(
                                 .clickable {
                                     trackNavigationActions.onOpenAlbumForTrack(track)
                                 },
+                            marqueeEnabled = metadataTextStable,
                         )
                     }
                     if (remotePlaybackTarget != null) {
@@ -859,12 +872,44 @@ fun MobilePlayer(
             val collapsedPlayButtonY = (MobileMiniPlayerChromeHeight - collapsedPlayButtonSize) / 2f
             val expandedPlayButtonX = (screenWidth - expandedPlayButtonSize) / 2f
             val expandedPlayButtonY = screenHeight - collapsedSheetHeight - 12.dp - expandedPlayButtonSize
+            val collapsedCastButtonX = collapsedPlayButtonX - 50.dp
+            val collapsedCastButtonY = collapsedPlayButtonY
+            val expandedCastButtonX = screenWidth - 20.dp - 40.dp
+            val expandedCastButtonY = statusBarTopPadding + 8.dp
             val swipeProgress = (abs(currentSwipeOffset) / swipeThresholdPx).coerceIn(0f, 1f)
             val swipeScale = if (clampedExpansionFraction < 0.1f) 1f - swipeProgress * 0.025f else 1f
             val playButtonAlpha = when {
                 track == null -> fullPlayerElementsAlpha
                 clampedExpansionFraction < 0.1f -> miniPlayerAlpha * (1f - swipeProgress * 0.14f)
                 else -> 1f
+            }
+            val castButtonAlpha = when {
+                track == null -> fullPlayerElementsAlpha
+                clampedExpansionFraction < 0.1f -> miniPlayerAlpha * (1f - swipeProgress * 0.14f)
+                else -> 1f
+            }
+
+            if (castState.isConnected) {
+                CastIcon(
+                    active = true,
+                    loading = castState.isBuffering,
+                    enabled = true,
+                    onClick = onCast,
+                    modifier = Modifier
+                        .offset {
+                            IntOffset(
+                                x = lerp(collapsedCastButtonX, expandedCastButtonX, clampedExpansionFraction).roundToPx(),
+                                y = lerp(collapsedCastButtonY, expandedCastButtonY, clampedExpansionFraction).roundToPx(),
+                            )
+                        }
+                        .graphicsLayer {
+                            alpha = castButtonAlpha
+                            translationX = if (clampedExpansionFraction < 0.1f) currentSwipeOffset else 0f
+                            scaleX = swipeScale
+                            scaleY = swipeScale
+                        }
+                        .then(if (clampedExpansionFraction < 0.1f) horizontalDragModifier else Modifier),
+                )
             }
 
             PlayButton(

@@ -56,9 +56,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
-import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.yield
@@ -228,9 +226,11 @@ private fun rememberRemoteImageState(
                     RemoteImageLoadState.Preview(it)
                 } ?: cachedStateForDisplay(target, maxDecodeDimension, fallback)
             }
-            val requested = RemoteArtworkCache.awaitLoad(target, maxDecodeDimension)
-                ?: fallback?.let { RemoteArtworkCache.awaitLoad(it, maxDecodeDimension) }
-                ?: RemoteArtworkCache.cachedRequested(target, maxDecodeDimension, fallback)
+            val requested = withTimeoutOrNull(RemoteArtworkCache.VisibleArtworkLoadWaitMs) {
+                RemoteArtworkCache.awaitLoad(target, maxDecodeDimension)
+                    ?: fallback?.let { RemoteArtworkCache.awaitLoad(it, maxDecodeDimension) }
+                    ?: RemoteArtworkCache.cachedRequested(target, maxDecodeDimension, fallback)
+            } ?: RemoteArtworkCache.cachedRequested(target, maxDecodeDimension, fallback)
             if (requested != null) {
                 value = RemoteImageLoadState.Ready(requested)
                 return@produceState
@@ -241,7 +241,7 @@ private fun rememberRemoteImageState(
                 value == RemoteImageLoadState.Loading -> RemoteImageLoadState.Missing
                 else -> value
             }
-            delay(if (value == RemoteImageLoadState.Missing) 10_000L else 10L * 60L * 1000L)
+            delay(if (value == RemoteImageLoadState.Missing) RemoteArtworkCache.PendingArtworkPollMs else 10L * 60L * 1000L)
         }
     }.value
 }
@@ -276,6 +276,8 @@ object RemoteArtworkCache {
     private const val DefaultMaxEntries = 300
     private const val FailedLoadRetryMs = 60L * 1000L
     private const val RemoteArtworkLoadTimeoutMs = 12_000L
+    internal const val VisibleArtworkLoadWaitMs = 4_000L
+    internal const val PendingArtworkPollMs = 1_500L
     private const val DefaultLoadPermits = 4
     private const val PacedMinIntervalMs = 72L
     private const val BurstMinIntervalMs = 24L
@@ -302,7 +304,6 @@ object RemoteArtworkCache {
     private val storage: PlatformStorage by lazy { PlatformStorage() }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var gate = Semaphore(permits = DefaultLoadPermits)
-    private val inFlightMutex = Mutex()
     private val inFlight = mutableMapOf<CacheKey, Deferred<ImageBitmap?>>()
     private val estimatedBytesByKey = mutableMapOf<CacheKey, Long>()
     private val accessOrder = LinkedHashMap<CacheKey, Unit>()
@@ -362,9 +363,10 @@ object RemoteArtworkCache {
             } else {
                 max(2L * 1024L * 1024L, maxEstimatedBytes / 2)
             }
-            maxEntries = targetEntries
-            maxEstimatedBytes = minOf(platformMaxEstimatedBytes, targetBytes)
-            trimToLimitsLocked()
+            trimToTargetsLocked(
+                targetEntries = targetEntries,
+                targetBytes = minOf(platformMaxEstimatedBytes, targetBytes),
+            )
         }
     }
 
@@ -376,10 +378,8 @@ object RemoteArtworkCache {
             accessOrder.clear()
             recentFailures.clear()
             estimatedBytes = 0L
-            maxEntries = max(8, DefaultMaxEntries / 4)
-            maxEstimatedBytes = minOf(platformMaxEstimatedBytes, 2L * 1024L * 1024L)
+            inFlight.clear()
         }
-        inFlight.clear()
     }
 
     private suspend fun paceBeforeLoad() {
@@ -395,14 +395,14 @@ object RemoteArtworkCache {
         withCacheLock { cachedLocked(key) }?.let { return it }
         if (!withCacheLock { shouldRetryFailedLoadLocked(key) }) return null
 
-        val job = inFlightMutex.withLock {
-            withCacheLock { cachedLocked(key) }?.let { return it }
-            if (!withCacheLock { shouldRetryFailedLoadLocked(key) }) return null
+        val job = withCacheLock {
+            cachedLocked(key)?.let { return it }
+            if (!shouldRetryFailedLoadLocked(key)) return null
             inFlight[key] ?: scope.async {
                 try {
                     fetchAndDecode(key)
                 } finally {
-                    inFlightMutex.withLock { inFlight.remove(key) }
+                    withCacheLock { inFlight.remove(key) }
                 }
             }.also { inFlight[key] = it }
         }
@@ -506,7 +506,11 @@ object RemoteArtworkCache {
     }
 
     private fun trimToLimitsLocked() {
-        while (images.size > maxEntries || estimatedBytes > maxEstimatedBytes) {
+        trimToTargetsLocked(maxEntries, maxEstimatedBytes)
+    }
+
+    private fun trimToTargetsLocked(targetEntries: Int, targetBytes: Long) {
+        while (images.size > targetEntries || estimatedBytes > targetBytes) {
             val eldest = accessOrder.keys.firstOrNull() ?: return
             accessOrder.remove(eldest)
             images.remove(eldest)
@@ -548,8 +552,8 @@ object RemoteArtworkCache {
             estimatedBytes = 0L
             maxEntries = DefaultMaxEntries
             maxEstimatedBytes = platformMaxEstimatedBytes
+            inFlight.clear()
         }
-        inFlight.clear()
     }
 
     internal fun configureLimitsForTest(maxEntries: Int = DefaultMaxEntries, maxEstimatedBytes: Long = platformMaxEstimatedBytes) {

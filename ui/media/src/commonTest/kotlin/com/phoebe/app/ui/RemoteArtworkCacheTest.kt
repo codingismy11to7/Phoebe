@@ -110,6 +110,21 @@ class RemoteArtworkCacheTest {
     }
 
     @Test
+    fun trimForMemoryPressureDoesNotPermanentlyLowerCacheLimits() {
+        RemoteArtworkCache.configureLimitsForTest(maxEntries = 40, maxEstimatedBytes = Long.MAX_VALUE)
+        repeat(24) { index ->
+            RemoteArtworkCache.putForTest("before-$index", 128, testImageBitmap(32, 32))
+        }
+
+        RemoteArtworkCache.trimForMemoryPressure(aggressive = true)
+        repeat(24) { index ->
+            RemoteArtworkCache.putForTest("after-$index", 128, testImageBitmap(32, 32))
+        }
+
+        assertTrue(RemoteArtworkCache.stats().imageCount > 10)
+    }
+
+    @Test
     fun clearUnderMemoryPressureDropsAllDecodedImages() {
         RemoteArtworkCache.configureLimitsForTest(maxEntries = 20, maxEstimatedBytes = Long.MAX_VALUE)
         RemoteArtworkCache.putForTest("art", 128, testImageBitmap(32, 32))
@@ -119,6 +134,18 @@ class RemoteArtworkCacheTest {
 
         assertEquals(0, RemoteArtworkCache.stats().imageCount)
         assertNull(RemoteArtworkCache.cached("art", 128))
+    }
+
+    @Test
+    fun clearUnderMemoryPressureDoesNotPermanentlyLowerCacheLimits() {
+        RemoteArtworkCache.configureLimitsForTest(maxEntries = 20, maxEstimatedBytes = Long.MAX_VALUE)
+
+        RemoteArtworkCache.clearUnderMemoryPressure()
+        repeat(12) { index ->
+            RemoteArtworkCache.putForTest("after-clear-$index", 128, testImageBitmap(32, 32))
+        }
+
+        assertEquals(12, RemoteArtworkCache.stats().imageCount)
     }
 
     @Test
