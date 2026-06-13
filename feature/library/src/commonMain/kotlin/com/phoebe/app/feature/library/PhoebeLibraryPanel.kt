@@ -26,12 +26,14 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -266,86 +268,93 @@ fun LibraryPanel(
         }
     }
     val libraryItemsStartIndex = 3 + if (catalogRefreshing) 1 else 0
+    var sectionIndexScrubbing by remember { mutableStateOf(false) }
+    val deferArtworkLoads = LocalDeferredArtworkLoading.current || sectionIndexScrubbing
     Box(Modifier.fillMaxSize()) {
-        LazyColumn(
-            state = listState,
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier.fillMaxSize(),
-        ) {
-            item(contentType = "filter") {
-                LibraryFilterToggle(filter, onFilter)
-            }
-            item(contentType = "library-sort") {
-                LibrarySortAndDisplayBar(
-                    prefs = libraryUi,
-                    onSortBy = onLibrarySortBy,
-                    onAscending = onLibraryAscending,
-                    onColumns = onLibraryColumns,
-                    showColumns = filter == LibraryFilterTab.Songs,
-                )
-            }
-            if (catalogRefreshing) {
-                item(contentType = "loading") { CatalogLoadingStrip() }
-            }
-            item(contentType = "pagination") {
+        CompositionLocalProvider(LocalDeferredArtworkLoading provides deferArtworkLoads) {
+            LazyColumn(
+                state = listState,
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                item(contentType = "filter") {
+                    LibraryFilterToggle(filter, onFilter)
+                }
+                item(contentType = "library-sort") {
+                    LibrarySortAndDisplayBar(
+                        prefs = libraryUi,
+                        onSortBy = onLibrarySortBy,
+                        onAscending = onLibraryAscending,
+                        onColumns = onLibraryColumns,
+                        showColumns = filter == LibraryFilterTab.Songs,
+                    )
+                }
+                if (catalogRefreshing) {
+                    item(contentType = "loading") { CatalogLoadingStrip() }
+                }
+                item(contentType = "pagination") {
+                    when (filter) {
+                        LibraryFilterTab.Artists -> LibraryPaginationControls(artistPage, onPage = {
+                            if (jellyfinPagination) onJellyfinPage(filter.toJellyfinPageKind(), it)
+                            pageIndex = it
+                        })
+                        LibraryFilterTab.Albums -> LibraryPaginationControls(albumPage, onPage = {
+                            if (jellyfinPagination) onJellyfinPage(filter.toJellyfinPageKind(), it)
+                            pageIndex = it
+                        })
+                        LibraryFilterTab.Songs -> LibraryPaginationControls(trackPage, onPage = {
+                            if (jellyfinPagination) onJellyfinPage(filter.toJellyfinPageKind(), it)
+                            pageIndex = it
+                        })
+                    }
+                }
                 when (filter) {
-                    LibraryFilterTab.Artists -> LibraryPaginationControls(artistPage, onPage = {
-                        if (jellyfinPagination) onJellyfinPage(filter.toJellyfinPageKind(), it)
-                        pageIndex = it
-                    })
-                    LibraryFilterTab.Albums -> LibraryPaginationControls(albumPage, onPage = {
-                        if (jellyfinPagination) onJellyfinPage(filter.toJellyfinPageKind(), it)
-                        pageIndex = it
-                    })
-                    LibraryFilterTab.Songs -> LibraryPaginationControls(trackPage, onPage = {
-                        if (jellyfinPagination) onJellyfinPage(filter.toJellyfinPageKind(), it)
-                        pageIndex = it
-                    })
-                }
-            }
-            when (filter) {
-                LibraryFilterTab.Artists -> {
-                    items(artistPage.items, key = { it.id }, contentType = { "artist" }) { artist ->
-                        LibraryRow(artist.title, artistAlbumCountSubtitle(artist), artist.title, artist.thumbUrl) {
-                            onArtist(artist)
+                    LibraryFilterTab.Artists -> {
+                        items(artistPage.items, key = { it.id }, contentType = { "artist" }) { artist ->
+                            val onArtistClick = remember(artist, onArtist) { { onArtist(artist) } }
+                            LibraryRow(artist.title, artistAlbumCountSubtitle(artist), artist.title, artist.thumbUrl, onClick = onArtistClick)
+                        }
+                    }
+                    LibraryFilterTab.Albums -> {
+                        items(albumPage.items, key = { it.id }, contentType = { "album" }) { album ->
+                            val onAlbumClick = remember(album, onAlbum) { { onAlbum(album) } }
+                            LibraryRow(album.title, "${album.artist} • ${album.year ?: "Album"}", album.title, album.thumbUrl, onClick = onAlbumClick)
+                        }
+                    }
+                    LibraryFilterTab.Songs -> {
+                        itemsIndexed(trackPage.items, key = { _, track -> track.id }, contentType = { _, _ -> "song" }) { index, track ->
+                            val currentTracks by rememberUpdatedState(trackPage.items)
+                            val onPlayClick = remember(index, onPlayTracks) { { onPlayTracks(currentTracks, index) } }
+                            val onAddClick = remember(track, onAddToUpNext) { { onAddToUpNext(track) } }
+                            val onDownloadClick = remember(track, onDownload) { { onDownload(track) } }
+                            SongRow(
+                                track = track,
+                                selected = false,
+                                columns = libraryUi.columns,
+                                onSelect = onPlayClick,
+                                onPlay = onPlayClick,
+                                onAddToUpNext = onAddClick,
+                                onDownload = onDownloadClick,
+                                showPlaylistDragHandle = true,
+                            )
                         }
                     }
                 }
-                LibraryFilterTab.Albums -> {
-                    items(albumPage.items, key = { it.id }, contentType = { "album" }) { album ->
-                        LibraryRow(album.title, "${album.artist} • ${album.year ?: "Album"}", album.title, album.thumbUrl) {
-                            onAlbum(album)
-                        }
+                if (filter != LibraryFilterTab.Songs && filter != LibraryFilterTab.Artists) {
+                    item(contentType = "playlist-header") {
+                        Spacer(Modifier.height(8.dp))
+                        SectionLabel("Playlists", PhoebeUi.primaryText)
                     }
-                }
-                LibraryFilterTab.Songs -> {
-                    itemsIndexed(trackPage.items, key = { _, track -> track.id }, contentType = { _, _ -> "song" }) { index, track ->
-                        SongRow(
-                            track = track,
-                            selected = false,
-                            columns = libraryUi.columns,
-                            onSelect = { onPlayTracks(trackPage.items, index) },
-                            onPlay = { onPlayTracks(trackPage.items, index) },
-                            onAddToUpNext = { onAddToUpNext(track) },
-                            onDownload = { onDownload(track) },
-                            showPlaylistDragHandle = true,
+                    items(catalog.playlists, key = { it.id }, contentType = { "playlist" }) { playlist ->
+                        val onPlaylistClick = remember(playlist, onPlaylist) { { onPlaylist(playlist) } }
+                        LibraryRow(
+                            title = playlist.title,
+                            subtitle = "${playlist.trackCount} songs",
+                            seed = playlist.title,
+                            thumbUrl = playlist.thumbUrl,
+                            onClick = onPlaylistClick,
                         )
                     }
-                }
-            }
-            if (filter != LibraryFilterTab.Songs && filter != LibraryFilterTab.Artists) {
-                item(contentType = "playlist-header") {
-                    Spacer(Modifier.height(8.dp))
-                    SectionLabel("Playlists", PhoebeUi.primaryText)
-                }
-                items(catalog.playlists, key = { it.id }, contentType = { "playlist" }) { playlist ->
-                    LibraryRow(
-                        title = playlist.title,
-                        subtitle = "${playlist.trackCount} songs",
-                        seed = playlist.title,
-                        thumbUrl = playlist.thumbUrl,
-                        onClick = { onPlaylist(playlist) },
-                    )
                 }
             }
         }
@@ -354,6 +363,7 @@ fun LibraryPanel(
             onEntrySelected = { entry ->
                 indexScrollDispatcher.launch(scope) { listState.scrollToItem(libraryItemsStartIndex + entry.itemIndex) }
             },
+            onScrubbingChanged = { sectionIndexScrubbing = it },
             mode = LibrarySectionIndexMode.DesktopScrollbar,
             revealSignal = revealIndex,
             scrollbarState = scrollbarState,

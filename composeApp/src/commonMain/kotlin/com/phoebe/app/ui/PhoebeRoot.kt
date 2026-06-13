@@ -1042,9 +1042,9 @@ private fun PhoebeRootStateHolder(
                 var bottomBarHeightPx by remember { mutableFloatStateOf(0f) }
                 LaunchedEffect(mobilePlayerAsSheet) {
                     if (mobilePlayerAsSheet) {
-                        playerExpansionFraction.animateTo(1f, spring(stiffness = Spring.StiffnessMedium, dampingRatio = Spring.DampingRatioNoBouncy))
+                        playerExpansionFraction.animateTo(1f, spring(stiffness = Spring.StiffnessLow, dampingRatio = Spring.DampingRatioNoBouncy))
                     } else {
-                        playerExpansionFraction.animateTo(0f, spring(stiffness = Spring.StiffnessMedium, dampingRatio = Spring.DampingRatioNoBouncy))
+                        playerExpansionFraction.animateTo(0f, spring(stiffness = Spring.StiffnessLow, dampingRatio = Spring.DampingRatioNoBouncy))
                     }
                 }
 
@@ -1567,7 +1567,7 @@ private fun PhoebeRootStateHolder(
                                 scope.launch {
                                     playerExpansionFraction.animateTo(
                                         targetValue = 1f,
-                                        animationSpec = spring(stiffness = Spring.StiffnessMedium, dampingRatio = Spring.DampingRatioNoBouncy),
+                                        animationSpec = spring(stiffness = Spring.StiffnessLow, dampingRatio = Spring.DampingRatioNoBouncy),
                                         initialVelocity = initialFractionVelocity,
                                     )
                                 }
@@ -1578,7 +1578,7 @@ private fun PhoebeRootStateHolder(
                                 scope.launch {
                                     playerExpansionFraction.animateTo(
                                         targetValue = 0f,
-                                        animationSpec = spring(stiffness = Spring.StiffnessMedium, dampingRatio = Spring.DampingRatioNoBouncy),
+                                        animationSpec = spring(stiffness = Spring.StiffnessLow, dampingRatio = Spring.DampingRatioNoBouncy),
                                         initialVelocity = initialFractionVelocity,
                                     )
                                 }
@@ -1600,7 +1600,7 @@ private fun PhoebeRootStateHolder(
                             },
                             onBackCancel = {
                                 scope.launch {
-                                    playerExpansionFraction.animateTo(1f, spring(stiffness = Spring.StiffnessMedium, dampingRatio = Spring.DampingRatioNoBouncy))
+                                    playerExpansionFraction.animateTo(1f, spring(stiffness = Spring.StiffnessLow, dampingRatio = Spring.DampingRatioNoBouncy))
                                 }
                             }
                         )

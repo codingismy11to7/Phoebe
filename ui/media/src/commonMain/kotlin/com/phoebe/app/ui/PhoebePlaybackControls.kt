@@ -98,6 +98,7 @@ fun PlayButton(
     isBuffering: Boolean,
     size: Dp,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
     val motionEnabled = LocalContinuousMotionEnabled.current
@@ -121,7 +122,7 @@ fun PlayButton(
         else -> "Play"
     }
     Box(
-        Modifier
+        modifier
             .size(size)
             .graphicsLayer {
                 scaleX = scale

@@ -1,16 +1,23 @@
 package com.phoebe.app.platform
 
-import android.content.ComponentCallbacks2
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+
+private const val TrimMemoryRunningModerate = 5
+private const val TrimMemoryRunningLow = 10
+private const val TrimMemoryRunningCritical = 15
+private const val TrimMemoryUiHidden = 20
+private const val TrimMemoryBackground = 40
+private const val TrimMemoryModerate = 60
+private const val TrimMemoryComplete = 80
 
 class AndroidMemoryPressureTest {
     @Test
     fun uiHiddenMapsToUiHiddenNotCritical() {
         assertEquals(
             MemoryPressureLevel.UiHidden,
-            memoryPressureLevelForTrimLevel(ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN),
+            memoryPressureLevelForTrimLevel(TrimMemoryUiHidden),
         )
     }
 
@@ -18,11 +25,11 @@ class AndroidMemoryPressureTest {
     fun runningCriticalMapsToCriticalWithoutMisclassifyingUiHidden() {
         assertEquals(
             MemoryPressureLevel.Critical,
-            memoryPressureLevelForTrimLevel(ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL),
+            memoryPressureLevelForTrimLevel(TrimMemoryRunningCritical),
         )
         assertEquals(
             MemoryPressureLevel.UiHidden,
-            memoryPressureLevelForTrimLevel(ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN),
+            memoryPressureLevelForTrimLevel(TrimMemoryUiHidden),
         )
     }
 
@@ -30,15 +37,15 @@ class AndroidMemoryPressureTest {
     fun backgroundLadderMapsToModerateThenCritical() {
         assertEquals(
             MemoryPressureLevel.Moderate,
-            memoryPressureLevelForTrimLevel(ComponentCallbacks2.TRIM_MEMORY_BACKGROUND),
+            memoryPressureLevelForTrimLevel(TrimMemoryBackground),
         )
         assertEquals(
             MemoryPressureLevel.Moderate,
-            memoryPressureLevelForTrimLevel(ComponentCallbacks2.TRIM_MEMORY_MODERATE),
+            memoryPressureLevelForTrimLevel(TrimMemoryModerate),
         )
         assertEquals(
             MemoryPressureLevel.Critical,
-            memoryPressureLevelForTrimLevel(ComponentCallbacks2.TRIM_MEMORY_COMPLETE),
+            memoryPressureLevelForTrimLevel(TrimMemoryComplete),
         )
     }
 
@@ -46,11 +53,11 @@ class AndroidMemoryPressureTest {
     fun runningModerateAndLowMapToLightAndModeratePressure() {
         assertEquals(
             MemoryPressureLevel.UiHidden,
-            memoryPressureLevelForTrimLevel(ComponentCallbacks2.TRIM_MEMORY_RUNNING_MODERATE),
+            memoryPressureLevelForTrimLevel(TrimMemoryRunningModerate),
         )
         assertEquals(
             MemoryPressureLevel.Moderate,
-            memoryPressureLevelForTrimLevel(ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW),
+            memoryPressureLevelForTrimLevel(TrimMemoryRunningLow),
         )
     }
 
