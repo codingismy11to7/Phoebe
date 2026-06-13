@@ -1121,6 +1121,40 @@ fun Track.canTogglePlexLike(): Boolean = isRemoteLibraryTrack()
 fun Track.playlistEntryKey(): String =
     playlistItemId?.let { "playlist-item:$it" } ?: id
 
+/**
+ * Identity for play-history display dedupe and personal mix seeding.
+ * Normalizes metadata so the same recording from different providers or with
+ * minor tag differences (for example "The Goo Goo Dolls" vs "Goo Goo Dolls")
+ * collapses to one row.
+ */
+fun Track.playHistoryIdentityKey(): String {
+    val normalizedTitle = title.normalizedTrackIdentityField()
+    val normalizedArtist = artist.normalizedTrackIdentityField()
+    val normalizedAlbum = album.normalizedTrackIdentityField()
+    if (normalizedTitle.isBlank() && normalizedArtist.isBlank() && normalizedAlbum.isBlank()) {
+        return providerEquivalentTrackIdForIdentity()
+    }
+    val durationKey = durationMs.coerceAtLeast(0L).let { ms ->
+        if (ms <= 0L) "0" else ((ms + 2_500L) / 5_000L * 5_000L).toString()
+    }
+    return listOf(normalizedTitle, normalizedArtist, normalizedAlbum, durationKey).joinToString("|")
+}
+
+private fun String.normalizedTrackIdentityField(): String =
+    trim()
+        .lowercase()
+        .replace(Regex("""\s+"""), " ")
+        .removePrefix("the ")
+
+private fun Track.providerEquivalentTrackIdForIdentity(): String {
+    val normalized = id.trim()
+    val prefix = normalized.substringBefore(':', missingDelimiterValue = "")
+    return when (prefix) {
+        "plex", "jellyfin", "emby", "navidrome", "music-assistant" -> normalized.substringAfter(':')
+        else -> normalized
+    }
+}
+
 fun Playlist.remoteProviderPrefix(): String? =
     id.substringBefore(':', missingDelimiterValue = "").takeIf { prefix ->
         MediaProviderType.entries.any { it.catalogPrefix == prefix }

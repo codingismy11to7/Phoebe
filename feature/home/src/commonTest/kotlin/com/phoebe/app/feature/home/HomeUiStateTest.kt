@@ -10,6 +10,7 @@ import com.phoebe.app.domain.PersonalMixPreferences
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.RecentlyPlayedEntry
 import com.phoebe.app.domain.Track
+import com.phoebe.app.domain.playHistoryIdentityKey
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -67,6 +68,62 @@ class HomeUiStateTest {
         assertEquals(listOf("t5", "t1", "t2"), state.mostPlayedTracks.map { it.track.id })
         assertEquals(10, state.randomArtists.size)
         assertEquals(10, state.randomAlbums.size)
+    }
+
+    @Test
+    fun recentlyPlayedCollapsesEquivalentMetadataVariants() {
+        val plexIris = Track(
+            id = "plex:iris",
+            title = "Iris",
+            artist = "The Goo Goo Dolls",
+            album = "Dizzy Up the Girl",
+            durationMs = 289_000L,
+            streamUrl = "plex-stream",
+            downloadUrl = "",
+        )
+        val localIris = Track(
+            id = "local:folder:iris",
+            title = "Iris",
+            artist = "Goo Goo Dolls",
+            album = "Dizzy Up The Girl",
+            durationMs = 289_500L,
+            streamUrl = "",
+            downloadUrl = "",
+            localUri = "file:///iris.mp3",
+        )
+        val other = Track(
+            id = "plex:zombie",
+            title = "Zombie",
+            artist = "The Cranberries",
+            album = "No Need to Argue",
+            durationMs = 305_000L,
+            streamUrl = "plex-stream-2",
+            downloadUrl = "",
+        )
+        val catalog = CatalogSnapshot(
+            tracksByParent = mapOf("all" to listOf(plexIris, localIris, other)),
+        )
+        val state = deriveHomeUiState(
+            catalog = catalog,
+            playHistory = PlayHistorySnapshot(
+                topRecentlyPlayed = listOf(
+                    RecentlyPlayedEntry("plex:iris", 500L, plexIris.artist, plexIris.album),
+                    RecentlyPlayedEntry("local:folder:iris", 400L, localIris.artist, localIris.album),
+                    RecentlyPlayedEntry("plex:zombie", 300L, other.artist, other.album),
+                ),
+            ),
+            randomArtistSeed = 1,
+            randomAlbumSeed = 2,
+            nowMs = 1_000L,
+            limit = 10,
+            includeTrackDerivedSections = false,
+        )
+
+        assertEquals(listOf("plex:iris", "plex:zombie"), state.recentlyPlayedTracks.map { it.track.id })
+        assertEquals(
+            plexIris.playHistoryIdentityKey(),
+            localIris.playHistoryIdentityKey(),
+        )
     }
 
     @Test
@@ -381,7 +438,7 @@ class HomeUiStateTest {
     }
 
     @Test
-    fun playedSectionsOmitUnresolvedTracksInsteadOfBackfillingLowerRanked() {
+    fun playedSectionsSkipUnresolvedTracksAndBackfillResolvableOnes() {
         val tracks = listOf(
             Track("loaded-recent", "Recent", "Artist", "Album", 1_000L, "stream", ""),
             Track("loaded-most", "Most", "Artist", "Album", 1_000L, "stream", ""),
@@ -422,8 +479,8 @@ class HomeUiStateTest {
             includeTrackDerivedSections = false,
         )
 
-        assertTrue(state.recentlyPlayedTracks.isEmpty())
-        assertTrue(state.mostPlayedTracks.isEmpty())
+        assertEquals("loaded-recent", state.recentlyPlayedTracks.single().track.id)
+        assertEquals("loaded-most", state.mostPlayedTracks.single().track.id)
     }
 
     @Test

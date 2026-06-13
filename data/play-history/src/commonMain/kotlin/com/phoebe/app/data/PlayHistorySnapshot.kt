@@ -6,6 +6,7 @@ import com.phoebe.app.domain.MostPlayedEntry
 import com.phoebe.app.domain.PlayHistoryKind
 import com.phoebe.app.domain.RecentlyPlayedEntry
 import com.phoebe.app.domain.Track
+import com.phoebe.app.domain.playHistoryIdentityKey
 import com.phoebe.app.domain.catalogPrefix
 
 data class PlayHistorySnapshot(
@@ -157,6 +158,7 @@ private fun recentlyPlayedTracks(
         resolvedTracksById = resolvedTracksById,
         trackIndex = trackIndex,
         trackId = RecentlyPlayedEntry::trackId,
+        dedupeByIdentity = true,
     ) { entry, track ->
         HomePlayedTrack(
             track = track,
@@ -204,6 +206,7 @@ private fun mostPlayedTracks(
         resolvedTracksById = resolvedTracksById,
         trackIndex = trackIndex,
         trackId = MostPlayedEntry::trackId,
+        dedupeByIdentity = true,
     ) { entry, track ->
         HomePlayedTrack(
             track = track,
@@ -220,16 +223,31 @@ private fun <T> collectResolvedPlayedRows(
     resolvedTracksById: Map<String, Track>,
     trackIndex: Map<String, Track>?,
     trackId: (T) -> String,
+    dedupeByIdentity: Boolean = false,
     buildRow: (T, Track) -> HomePlayedTrack,
 ): List<HomePlayedTrack> {
     if (ranked.isEmpty() || limit <= 0) return emptyList()
-    val candidates = ranked.take(limit)
-    val resolved = lookupTracksByIds(catalog, candidates.map(trackId).toSet(), resolvedTracksById, trackIndex)
-    return candidates.mapNotNull { entry ->
-        val id = trackId(entry)
-        val track = resolved[id] ?: placeholderTrackForPlayHistoryEntry(entry, id) ?: return@mapNotNull null
-        buildRow(entry, track)
+    if (!dedupeByIdentity) {
+        val candidates = ranked.take(limit)
+        val resolved = lookupTracksByIds(catalog, candidates.map(trackId).toSet(), resolvedTracksById, trackIndex)
+        return candidates.mapNotNull { entry ->
+            val id = trackId(entry)
+            val track = resolved[id] ?: placeholderTrackForPlayHistoryEntry(entry, id) ?: return@mapNotNull null
+            buildRow(entry, track)
+        }
     }
+    val seenIdentityKeys = LinkedHashSet<String>()
+    val rows = ArrayList<HomePlayedTrack>(limit.coerceAtMost(ranked.size))
+    val resolved = lookupTracksByIds(catalog, ranked.map(trackId).toSet(), resolvedTracksById, trackIndex)
+    for (entry in ranked) {
+        if (rows.size >= limit) break
+        val id = trackId(entry)
+        val track = resolved[id] ?: placeholderTrackForPlayHistoryEntry(entry, id) ?: continue
+        val identityKey = track.playHistoryIdentityKey()
+        if (!seenIdentityKeys.add(identityKey)) continue
+        rows += buildRow(entry, track)
+    }
+    return rows
 }
 
 fun lookupTracksByIds(

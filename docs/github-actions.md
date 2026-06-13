@@ -59,7 +59,7 @@ phoebe.versionName=1.2.3
 phoebe.versionCode=1002003
 ```
 
-The release workflow requires the pushed tag to match `phoebe.versionName`, so `phoebe.versionName=1.2.3` must be released with tag `release/1.2.3`. It validates that the version is plain semver, then starts the Android, Linux, Windows, macOS, and web deploy jobs in parallel. Native package jobs use `phoebe.versionCode` for Android, rename the generated binaries to include `phoebe.versionName`, then create a draft GitHub release with the generated APK, AAB, DEB, Flatpak bundle, MSI, DMG, and unsigned iOS IPA assets attached.
+The release workflow requires the pushed tag to match `phoebe.versionName`, so `phoebe.versionName=1.2.3` must be released with tag `release/1.2.3`. It validates that the version is plain semver, then starts the Android, Linux, Windows, macOS, iOS, and web deploy jobs in parallel. Native package jobs use `phoebe.versionCode` for Android, rename the generated binaries to include `phoebe.versionName`, then create a draft GitHub release with the generated APK, AAB, DEB, Flatpak bundle, MSI, and DMG assets attached as soon as those jobs finish. The iOS IPA is built on its own macOS runner and is uploaded to the same release afterward, so a slow iOS build no longer blocks publishing the other platform artifacts.
 
 The web deploy job builds the Wasm distribution and deploys it to this repository's GitHub Pages site independently of the draft GitHub release.
 
