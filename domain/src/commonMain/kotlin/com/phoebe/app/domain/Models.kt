@@ -1137,7 +1137,7 @@ fun Track.playHistoryIdentityKey(): String {
     val durationKey = durationMs.coerceAtLeast(0L).let { ms ->
         if (ms <= 0L) "0" else ((ms + 2_500L) / 5_000L * 5_000L).toString()
     }
-    return listOf(normalizedTitle, normalizedArtist, normalizedAlbum, durationKey).joinToString("|")
+    return "$normalizedTitle|$normalizedArtist|$normalizedAlbum|$durationKey"
 }
 
 private fun String.normalizedTrackIdentityField(): String =
