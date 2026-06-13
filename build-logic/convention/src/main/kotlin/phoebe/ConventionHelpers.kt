@@ -56,7 +56,7 @@ internal fun Project.shouldEnableIosTargetsByDefault(): Boolean {
 }
 
 internal fun Project.isPhoebeSharedLibraryModule(): Boolean =
-    path.startsWith(":") && path != ":composeApp" && path != ":androidApp" && path != ":ui:preview"
+    path.startsWith(":") && path != ":" && path != ":composeApp" && path != ":androidApp" && path != ":ui:preview"
 
 internal fun Project.configurePhoebeKmp(
     extension: KotlinMultiplatformExtension,
