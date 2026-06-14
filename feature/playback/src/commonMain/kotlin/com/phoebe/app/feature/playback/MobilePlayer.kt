@@ -251,16 +251,16 @@ fun MobilePlayer(
                 shape = containerShape,
             )
             .drawBehind {
-                drawRect(
-                    brush = Brush.verticalGradient(
-                        colors = listOf(
-                            shellTop,
-                            canvasBackground.copy(alpha = 0.94f),
-                            canvasBackground,
-                        ),
-                    )
-                )
                 if (clampedExpansionFraction > 0f) {
+                    drawRect(
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                shellTop,
+                                canvasBackground.copy(alpha = 0.94f),
+                                canvasBackground,
+                            ),
+                        )
+                    )
                     drawRect(
                         brush = Brush.radialGradient(
                             colors = listOf(shellRadialTint.copy(alpha = clampedExpansionFraction * 0.105f), Color.Transparent),

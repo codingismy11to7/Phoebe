@@ -53,6 +53,7 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeoutOrNull
@@ -61,6 +62,8 @@ import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.sin
+
+private const val RemoteArtworkRetryDelayMs = 15_000L
 
 @Composable
 fun ArtworkImage(
@@ -182,15 +185,19 @@ private fun rememberRemoteImageState(
         maxDecodeDimension,
     ) {
         value = cachedStateForDisplay(target, maxDecodeDimension, fallback)
-        RemoteArtworkCache.cachedRequested(target, maxDecodeDimension, fallback)?.let {
-            value = RemoteImageLoadState.Ready(it)
-            return@produceState
+        while (true) {
+            RemoteArtworkCache.cachedRequested(target, maxDecodeDimension, fallback)?.let {
+                value = RemoteImageLoadState.Ready(it)
+                return@produceState
+            }
+            RemoteArtworkCache.awaitLoadWithFallback(target, fallback, maxDecodeDimension)?.let {
+                value = RemoteImageLoadState.Ready(it)
+                return@produceState
+            }
+            val current = cachedStateForDisplay(target, maxDecodeDimension, fallback)
+            value = if (current is RemoteImageLoadState.Preview) current else RemoteImageLoadState.Unavailable
+            delay(RemoteArtworkRetryDelayMs)
         }
-        RemoteArtworkCache.awaitLoadWithFallback(target, fallback, maxDecodeDimension)?.let {
-            value = RemoteImageLoadState.Ready(it)
-            return@produceState
-        }
-        value = RemoteImageLoadState.Unavailable
     }.value
 }
 
