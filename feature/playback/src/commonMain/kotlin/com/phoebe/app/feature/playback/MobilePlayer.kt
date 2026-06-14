@@ -31,7 +31,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -76,12 +75,12 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-private const val MobilePlayerArtworkLoadDelayMs = 96L
 private const val MobilePlayerContinuousMotionDelayMs = 240L
 private val MobilePlayerMetadataReserveWithAlbum = 104.dp
 private val MobilePlayerMetadataReserveWithoutAlbum = 84.dp
 private val MobilePlayerRemoteTargetReserve = 18.dp
 private val MobilePlayerReflectionOverlap = 112.dp
+private val CollapsedMobilePlayerMetadataHeight = 34.dp
 
 @Composable
 private fun rememberRetainedMobilePlayerUpNextSheetState(
@@ -194,18 +193,9 @@ fun MobilePlayer(
         synchronousSwipeOffsetReset = false
     }
 
-    val inheritedArtworkLoadingEnabled = LocalArtworkLoadingEnabled.current
     val inheritedContinuousMotionEnabled = LocalContinuousMotionEnabled.current
-    var playerArtworkLoadingEnabled by remember(track?.id) { mutableStateOf(false) }
     var playerContinuousMotionEnabled by remember(track?.id) { mutableStateOf(false) }
     val playerMotionEnabled = inheritedContinuousMotionEnabled && playerContinuousMotionEnabled
-    LaunchedEffect(track?.id, inheritedArtworkLoadingEnabled) {
-        playerArtworkLoadingEnabled = false
-        if (track != null && inheritedArtworkLoadingEnabled) {
-            delay(MobilePlayerArtworkLoadDelayMs)
-            playerArtworkLoadingEnabled = true
-        }
-    }
     LaunchedEffect(track?.id, inheritedContinuousMotionEnabled) {
         playerContinuousMotionEnabled = false
         if (track != null && inheritedContinuousMotionEnabled) {
@@ -241,6 +231,7 @@ fun MobilePlayer(
     val shellTop = PhoebeUi.shellTop
     val canvasBackground = PhoebeUi.canvasBackground
     val borderColor = PhoebeUi.border
+    val collapsedChromeAlpha = (1f - clampedExpansionFraction * 3f).coerceIn(0f, 1f)
 
     val cornerRadius = lerp(14.dp, 0.dp, clampedExpansionFraction)
     val containerShape = RoundedCornerShape(topStart = cornerRadius, topEnd = cornerRadius)
@@ -260,23 +251,26 @@ fun MobilePlayer(
                 shape = containerShape,
             )
             .drawBehind {
-                drawRect(color = navBarColor.copy(alpha = 1f - clampedExpansionFraction))
                 if (clampedExpansionFraction > 0f) {
-                    drawRect(
-                        brush = Brush.radialGradient(
-                            colors = listOf(shellRadialTint.copy(alpha = clampedExpansionFraction), Color.Transparent),
-                            center = Offset(210f * this.density, 50f * this.density),
-                            radius = 380f * this.density,
-                        )
-                    )
                     drawRect(
                         brush = Brush.verticalGradient(
                             colors = listOf(
-                                shellTop.copy(alpha = clampedExpansionFraction),
-                                canvasBackground.copy(alpha = clampedExpansionFraction),
+                                shellTop,
+                                canvasBackground.copy(alpha = 0.94f),
+                                canvasBackground,
                             ),
                         )
                     )
+                    drawRect(
+                        brush = Brush.radialGradient(
+                            colors = listOf(shellRadialTint.copy(alpha = clampedExpansionFraction * 0.105f), Color.Transparent),
+                            center = Offset(210f * this.density, 50f * this.density),
+                            radius = 520f * this.density,
+                        )
+                    )
+                }
+                if (collapsedChromeAlpha > 0f) {
+                    drawRect(color = navBarColor.copy(alpha = collapsedChromeAlpha))
                 }
             }
     ) {
@@ -302,7 +296,7 @@ fun MobilePlayer(
         }
         val currentArtworkY = lerp(14.dp, 80.dp + statusBarTopPadding, clampedExpansionFraction)
 
-        val miniPlayerAlpha = (1f - clampedExpansionFraction * 3f).coerceAtLeast(0f)
+        val miniPlayerAlpha = collapsedChromeAlpha
         val fullPlayerAlpha = ((clampedExpansionFraction - 0.2f) * 1.25f).coerceIn(0f, 1f)
         val overlayActionsAlpha = ((clampedExpansionFraction - 0.7f) / 0.2f).coerceIn(0f, 1f)
         val fullPlayerElementsAlpha = ((clampedExpansionFraction - 0.8f) / 0.2f).coerceIn(0f, 1f)
@@ -710,38 +704,33 @@ fun MobilePlayer(
                 ) { t ->
                     var artworkFlipRotation by remember(t.id) { mutableFloatStateOf(0f) }
                     if (visualizerPreset == NowPlayingVisualizerPreset.Artwork) {
-                        val artworkLoadsEnabled = LocalArtworkLoadingEnabled.current
-                        CompositionLocalProvider(
-                            LocalArtworkLoadingEnabled provides artworkLoadsEnabled,
+                        val artworkFadeHeight = if (artworkFlipRotation > 90f) {
+                            0.dp
+                        } else {
+                            lerp(0.dp, metadataOverlap, clampedExpansionFraction)
+                        }
+                        FlippableSongArtwork(
+                            track = t,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .mobileArtworkBottomFade(artworkFadeHeight),
+                            maxDecodeDimension = HeroArtworkMaxDecodeDimension,
+                            shape = artworkContentShape,
+                            onFlipRotationChange = { artworkFlipRotation = it },
                         ) {
-                            val artworkFadeHeight = if (artworkFlipRotation > 90f) {
-                                0.dp
-                            } else {
-                                lerp(0.dp, metadataOverlap, clampedExpansionFraction)
-                            }
-                            FlippableSongArtwork(
+                            val showFeedbackActions = (likeActions.likesEnabled && t.canTogglePlexLike()) || (listenBrainzFeedbackTarget.available && listenBrainzFeedbackTarget.trackId == t.id)
+                            val showLikeControl = likeActions.likesEnabled && t.canTogglePlexLike()
+                            MobileNowPlayingOverlayActions(
                                 track = t,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .mobileArtworkBottomFade(artworkFadeHeight),
-                                maxDecodeDimension = HeroArtworkMaxDecodeDimension,
-                                shape = artworkContentShape,
-                                onFlipRotationChange = { artworkFlipRotation = it },
-                            ) {
-                                val showFeedbackActions = (likeActions.likesEnabled && t.canTogglePlexLike()) || (listenBrainzFeedbackTarget.available && listenBrainzFeedbackTarget.trackId == t.id)
-                                val showLikeControl = likeActions.likesEnabled && t.canTogglePlexLike()
-                                MobileNowPlayingOverlayActions(
-                                    track = t,
-                                    showAudioQualityBadge = true,
-                                    showFeedbackActions = showFeedbackActions,
-                                    showLikeControl = showLikeControl,
-                                    likeActions = likeActions,
-                                    showListenBrainzFeedback = listenBrainzFeedbackTarget.available && listenBrainzFeedbackTarget.trackId == t.id,
-                                    listenBrainzFeedbackTarget = listenBrainzFeedbackTarget,
-                                    onListenBrainzFeedback = onListenBrainzFeedback,
-                                    alpha = overlayActionsAlpha,
-                                )
-                            }
+                                showAudioQualityBadge = true,
+                                showFeedbackActions = showFeedbackActions,
+                                showLikeControl = showLikeControl,
+                                likeActions = likeActions,
+                                showListenBrainzFeedback = listenBrainzFeedbackTarget.available && listenBrainzFeedbackTarget.trackId == t.id,
+                                listenBrainzFeedbackTarget = listenBrainzFeedbackTarget,
+                                onListenBrainzFeedback = onListenBrainzFeedback,
+                                alpha = overlayActionsAlpha,
+                            )
                         }
                     } else {
                         Box(modifier = Modifier.fillMaxSize()) {
@@ -779,7 +768,8 @@ fun MobilePlayer(
             val artistColor = androidx.compose.ui.graphics.lerp(PhoebeUi.secondaryText, metadataArtistColor, clampedExpansionFraction)
 
             val currentTextX = lerp(68.dp, 36.dp, clampedExpansionFraction)
-            val currentTextY = lerp(17.dp, 80.dp + statusBarTopPadding + fullArtworkSize + 12.dp, clampedExpansionFraction)
+            val collapsedTextY = (MobileMiniPlayerChromeHeight - CollapsedMobilePlayerMetadataHeight) / 2f
+            val currentTextY = lerp(collapsedTextY, 80.dp + statusBarTopPadding + fullArtworkSize + 12.dp, clampedExpansionFraction)
             val collapsedTextWidth = if (castState.isConnected) {
                 (screenWidth - 176.dp).coerceAtLeast(96.dp)
             } else {
@@ -789,6 +779,8 @@ fun MobilePlayer(
 
             val titleFontSize = (14f + (20f - 14f) * clampedExpansionFraction).sp
             val artistFontSize = (12f + (14f - 12f) * clampedExpansionFraction).sp
+            val titleLineHeight = (18f + (24f - 18f) * clampedExpansionFraction).sp
+            val artistLineHeight = (16f + (18f - 16f) * clampedExpansionFraction).sp
             val metadataTextStable = clampedExpansionFraction < 0.08f || clampedExpansionFraction > 0.96f
             val titleFontWeight = if (clampedExpansionFraction > 0.96f) FontWeight.Black else FontWeight.Bold
 
@@ -796,15 +788,6 @@ fun MobilePlayer(
                 modifier = Modifier
                     .offset(x = currentTextX, y = currentTextY)
                     .width(currentTextWidth)
-                    .then(
-                        if (clampedExpansionFraction < 0.15f) {
-                            Modifier
-                                .clip(RoundedCornerShape(10.dp))
-                                .clickable { onDragEnd(-1000f) }
-                        } else {
-                            Modifier
-                        }
-                    )
                     .graphicsLayer {
                         if (clampedExpansionFraction < 0.1f) {
                             translationX = currentSwipeOffset
@@ -821,12 +804,14 @@ fun MobilePlayer(
                     color = titleColor,
                     fontSize = titleFontSize,
                     fontWeight = titleFontWeight,
+                    lineHeight = titleLineHeight,
                     marqueeEnabled = metadataTextStable,
                 )
                 AutoScrollingText(
                     text = track.artist,
                     color = artistColor,
                     fontSize = artistFontSize,
+                    lineHeight = artistLineHeight,
                     modifier = if (clampedExpansionFraction >= 0.85f && track.artist.isNotBlank()) {
                         Modifier.clickable { trackNavigationActions.onOpenArtistForTrack(track) }
                     } else {
@@ -862,6 +847,15 @@ fun MobilePlayer(
                     }
                 }
             }
+        }
+
+        if (track != null && clampedExpansionFraction < 0.1f) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(MobileMiniPlayerChromeHeight)
+                    .then(horizontalDragModifier)
+            )
         }
 
         if (track != null || fullPlayerAlpha > 0f) {

@@ -1778,8 +1778,6 @@ fun PlaylistDetailPanel(
         val useTable = maxWidth >= 640.dp
         val editBarHeight = 68.dp
         val listState = RetainedLazyListStates.remember("playlist-detail:${playlist.id}")
-        val scrolling by remember(listState) { derivedStateOf { listState.isScrollInProgress } }
-        val artworkLoadingEnabled = LocalArtworkLoadingEnabled.current && (useTable || !scrolling)
         val reorderModeAvailable = searchQuery.isBlank() && visibleTracks.size > 1
         val editModeAvailable = visibleTracks.isNotEmpty() && playlist.supportsTrackRemoval()
         val reorderEnabled = reorderModeEnabled &&
@@ -1818,7 +1816,7 @@ fun PlaylistDetailPanel(
         }
 
         Box(Modifier.fillMaxSize()) {
-        CompositionLocalProvider(LocalArtworkLoadingEnabled provides artworkLoadingEnabled) {
+
             LazyColumn(
                 state = listState,
                 modifier = Modifier
@@ -2042,7 +2040,7 @@ fun PlaylistDetailPanel(
                     }
                 }
             }
-        }
+
             if (editEnabled && !useTable) {
                 PlaylistEditBottomBar(
                     selectedCount = selectedTrackKeys.size,
