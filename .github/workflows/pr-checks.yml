@@ -75,6 +75,8 @@ jobs:
 
       - name: Run Linux desktop tests
         if: matrix.os == 'linux'
+        env:
+          GALLIUM_DRIVER: softpipe
         run: xvfb-run -a ./gradlew :composeApp:desktopTest -Pphoebe.realAudioTests=true
 
       - name: Run macOS desktop tests

@@ -148,6 +148,7 @@ fun MobilePlayer(
     onListenBrainzFeedback: (ListenBrainzFeedbackScore) -> Unit = {},
     onBack: () -> Unit,
     onSwipeDismiss: () -> Unit,
+    onClick: () -> Unit = {},
     handleSystemBack: Boolean = true,
     initialUpNextExpanded: Boolean = false,
     expansionFraction: Float = 0f,
@@ -854,6 +855,7 @@ fun MobilePlayer(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(MobileMiniPlayerChromeHeight)
+                    .clickable { onClick() }
                     .then(horizontalDragModifier)
             )
         }

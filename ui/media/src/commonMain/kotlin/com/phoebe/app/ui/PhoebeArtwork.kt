@@ -232,7 +232,7 @@ object RemoteArtworkCache {
     private const val FailedLoadRetryMs = 60L * 1000L
     private const val RemoteArtworkLoadTimeoutMs = 12_000L
     private const val FallbackArtworkGraceMs = 350L
-    private const val DefaultLoadPermits = 4
+    private const val DefaultLoadPermits = 8
     private const val DownloadModeMaxEntries = 32
     private const val DownloadModeMaxEstimatedBytes = 4L * 1024L * 1024L
 

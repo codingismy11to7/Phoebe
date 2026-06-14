@@ -38,6 +38,7 @@ class PhoneHomeAccordionTest {
                     MobileHomeScreen(
                         state = HomeUiState(),
                         listState = rememberLazyListState(),
+                        layoutMode = HomeScreenLayoutMode.Compact,
                         radioStations = listOf(
                             PlexRadioStation(
                                 id = "radio-library",
@@ -125,6 +126,7 @@ class PhoneHomeAccordionTest {
                     MobileHomeScreen(
                         state = HomeUiState(),
                         listState = rememberLazyListState(),
+                        layoutMode = HomeScreenLayoutMode.Compact,
                         homeSections = listOf(
                             HomeSection.FavoritePlaylists,
                             HomeSection.FavoriteArtists,
@@ -167,12 +169,12 @@ class PhoneHomeAccordionTest {
 
     @OptIn(ExperimentalTestApi::class, ExperimentalComposeUiApi::class)
     @Test
-    fun expandedPhoneHomeShowsShelvesAndPlayedTables() = runDesktopComposeUiTest(width = 430, height = 932) {
+    fun expandedPhoneHomeShowsShelvesAndPlayedTables() = runDesktopComposeUiTest(width = 430, height = 1500) {
         val track = testTrack("track-1", "A Moment Apart")
         val recentTrack = testTrack("track-2", "Line Of Sight")
         setContent {
             PhoebeTheme {
-                Box(Modifier.size(430.dp, 932.dp)) {
+                Box(Modifier.size(430.dp, 1500.dp)) {
                     MobileHomeScreen(
                         state = HomeUiState(
                             recentlyAddedTracks = listOf(recentTrack),

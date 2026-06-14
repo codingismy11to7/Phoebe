@@ -65,6 +65,7 @@ class MobilePlaybackRouteActions(
     val onDragStart: () -> Unit = {},
     val onDrag: (Float) -> Unit = {},
     val onDragEnd: (Float) -> Unit = {},
+    val onClick: () -> Unit = {},
 )
 
 @Immutable
@@ -140,6 +141,7 @@ fun MobilePlaybackRoute(
         onListenBrainzFeedback = actions.onListenBrainzFeedback,
         onBack = actions.onBack,
         onSwipeDismiss = actions.onSwipeDismiss,
+        onClick = actions.onClick,
         handleSystemBack = state.handleSystemBack,
         initialUpNextExpanded = state.initialUpNextExpanded,
         expansionFraction = state.expansionFraction,
