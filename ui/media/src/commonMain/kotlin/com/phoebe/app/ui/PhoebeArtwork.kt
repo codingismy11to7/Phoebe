@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -54,22 +53,14 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.yield
-import kotlin.concurrent.Volatile
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.sin
-
-val LocalArtworkLoadingEnabled = compositionLocalOf { true }
-
-/** When true, artwork keeps showing cached images but defers new decode/network work. */
-val LocalDeferredArtworkLoading = compositionLocalOf { false }
 
 @Composable
 fun ArtworkImage(
@@ -81,10 +72,9 @@ fun ArtworkImage(
     elevated: Boolean = true,
     maxDecodeDimension: Int = ListArtworkMaxDecodeDimension,
     fallbackThumbUrl: String? = null,
-    artworkStaggerMs: Long = 0L,
     alignment: Alignment = Alignment.Center,
 ) {
-    val imageState = rememberRemoteImageState(thumbUrl, maxDecodeDimension, fallbackThumbUrl, artworkStaggerMs)
+    val imageState = rememberRemoteImageState(thumbUrl, maxDecodeDimension, fallbackThumbUrl)
     val imageModifier = when {
         !elevated || prefersReducedArtworkEffects() -> modifier.clip(shape)
         else -> modifier
@@ -97,7 +87,6 @@ fun ArtworkImage(
             is RemoteImageLoadState.Preview,
             is RemoteImageLoadState.Ready,
                 -> RemoteArtworkVisualState.Image
-            RemoteImageLoadState.Deferred,
             RemoteImageLoadState.Loading -> RemoteArtworkVisualState.Loading
             RemoteImageLoadState.Unavailable -> RemoteArtworkVisualState.Missing
         }
@@ -133,7 +122,6 @@ fun TrackArtworkImage(
     shape: Shape = RoundedCornerShape(radius),
     elevated: Boolean = true,
     maxDecodeDimension: Int = ListArtworkMaxDecodeDimension,
-    artworkStaggerMs: Long = 0L,
     alignment: Alignment = Alignment.Center,
 ) {
     ArtworkImage(
@@ -145,7 +133,6 @@ fun TrackArtworkImage(
         elevated = elevated,
         maxDecodeDimension = maxDecodeDimension,
         fallbackThumbUrl = track.thumbUrl,
-        artworkStaggerMs = artworkStaggerMs,
         alignment = alignment,
     )
 }
@@ -155,15 +142,10 @@ fun rememberRemoteImage(
     url: String?,
     maxDecodeDimension: Int = ListArtworkMaxDecodeDimension,
     fallbackUrl: String? = null,
-    artworkStaggerMs: Long = 0L,
-): ImageBitmap? = rememberRemoteImageState(url, maxDecodeDimension, fallbackUrl, artworkStaggerMs).image
+): ImageBitmap? = rememberRemoteImageState(url, maxDecodeDimension, fallbackUrl).image
 
 internal sealed interface RemoteImageLoadState {
     val image: ImageBitmap?
-
-    data object Deferred : RemoteImageLoadState {
-        override val image: ImageBitmap? = null
-    }
 
     data object Loading : RemoteImageLoadState {
         override val image: ImageBitmap? = null
@@ -188,91 +170,28 @@ private fun rememberRemoteImageState(
     url: String?,
     maxDecodeDimension: Int = ListArtworkMaxDecodeDimension,
     fallbackUrl: String? = null,
-    artworkStaggerMs: Long = 0L,
 ): RemoteImageLoadState {
     val primary = url?.takeIf { it.isNotBlank() }
     val fallbackSource = fallbackUrl?.takeIf { it.isNotBlank() }
     val target = primary ?: fallbackSource ?: return RemoteImageLoadState.Unavailable
     val fallback = fallbackSource?.takeIf { it != target }
-    val artworkLoadsEnabled = LocalArtworkLoadingEnabled.current
-    val deferArtworkLoads = LocalDeferredArtworkLoading.current
-    val previewDecodeDimensions = progressivePreviewDecodeDimensions(maxDecodeDimension)
     return produceState(
         initialValue = cachedStateForDisplay(target, maxDecodeDimension, fallback),
         target,
         fallback,
         maxDecodeDimension,
-        artworkLoadsEnabled,
-        deferArtworkLoads,
-        artworkStaggerMs,
     ) {
         value = cachedStateForDisplay(target, maxDecodeDimension, fallback)
-        while (isActive) {
-            RemoteArtworkCache.cachedRequested(target, maxDecodeDimension, fallback)?.let {
-                value = RemoteImageLoadState.Ready(it)
-                return@produceState
-            }
-            if (!artworkLoadsEnabled) {
-                if (value.image == null) value = RemoteImageLoadState.Deferred
-                delay(250L)
-                continue
-            }
-            if (deferArtworkLoads) {
-                if (value.image == null) value = RemoteImageLoadState.Deferred
-                delay(RemoteArtworkCache.DeferredArtworkLoadGraceMs)
-                continue
-            }
-            if (value == RemoteImageLoadState.Deferred) {
-                value = cachedStateForDisplay(target, maxDecodeDimension, fallback)
-            }
-            val delayMs = if (previewDecodeDimensions.isEmpty() && RemoteArtworkCache.pacingEnabled) {
-                RemoteArtworkCache.staggerDelayMs(target) + artworkStaggerMs
-            } else {
-                artworkStaggerMs
-            }
-            if (delayMs > 0) delay(delayMs)
-            if (value == RemoteImageLoadState.Loading) {
-                value = cachedStateForDisplay(target, maxDecodeDimension, fallback)
-            }
-            val requested = awaitVisibleArtwork(target, fallback, maxDecodeDimension)
-            if (requested != null) {
-                value = RemoteImageLoadState.Ready(requested)
-                return@produceState
-            }
-            val displayState = cachedStateForDisplay(target, maxDecodeDimension, fallback)
-            value = when {
-                displayState !is RemoteImageLoadState.Loading -> displayState
-                RemoteArtworkCache.hasRecentFailure(target, maxDecodeDimension) &&
-                    (fallback == null || RemoteArtworkCache.hasRecentFailure(fallback, maxDecodeDimension)) -> {
-                    RemoteImageLoadState.Unavailable
-                }
-                else -> value
-            }
-            delay(RemoteArtworkCache.PendingArtworkPollMs)
+        RemoteArtworkCache.cachedRequested(target, maxDecodeDimension, fallback)?.let {
+            value = RemoteImageLoadState.Ready(it)
+            return@produceState
         }
+        RemoteArtworkCache.awaitLoadWithFallback(target, fallback, maxDecodeDimension)?.let {
+            value = RemoteImageLoadState.Ready(it)
+            return@produceState
+        }
+        value = RemoteImageLoadState.Unavailable
     }.value
-}
-
-private suspend fun awaitVisibleArtwork(
-    target: String,
-    fallback: String?,
-    maxDecodeDimension: Int,
-): ImageBitmap? {
-    val startTime = currentTimeMs()
-    val limit = RemoteArtworkCache.VisibleArtworkLoadWaitMs
-    withTimeoutOrNull(limit) {
-        RemoteArtworkCache.awaitLoad(target, maxDecodeDimension)
-    }?.let { return it }
-    RemoteArtworkCache.cachedRequested(target, maxDecodeDimension, fallback)?.let { return it }
-    if (fallback != null) {
-        val remaining = limit - (currentTimeMs() - startTime)
-        if (remaining > 0) {
-            withTimeoutOrNull(remaining) {
-                RemoteArtworkCache.awaitLoad(fallback, maxDecodeDimension)
-            }?.let { return it }
-        }
-    }
-    return RemoteArtworkCache.cachedRequested(target, maxDecodeDimension, fallback)
 }
 
 internal fun cachedStateForDisplay(url: String, maxDecodeDimension: Int, fallbackUrl: String? = null): RemoteImageLoadState {
@@ -305,21 +224,10 @@ object RemoteArtworkCache {
     private const val DefaultMaxEntries = 300
     private const val FailedLoadRetryMs = 60L * 1000L
     private const val RemoteArtworkLoadTimeoutMs = 12_000L
-    internal const val VisibleArtworkLoadWaitMs = 4_000L
-    internal const val PendingArtworkPollMs = 1_500L
+    private const val FallbackArtworkGraceMs = 350L
     private const val DefaultLoadPermits = 4
-    private const val PacedMinIntervalMs = 72L
-    private const val BurstMinIntervalMs = 24L
-    const val DeferredArtworkLoadGraceMs = 350L
     private const val DownloadModeMaxEntries = 32
     private const val DownloadModeMaxEstimatedBytes = 4L * 1024L * 1024L
-
-    @Volatile
-    var pacingEnabled: Boolean = false
-        private set
-
-    @Volatile
-    private var lastLoadStartMs = 0L
 
     private data class CacheKey(
         val url: String,
@@ -358,13 +266,6 @@ object RemoteArtworkCache {
                     cachedRequestedLocked(url, previewDimension, fallbackUrl)
                 }
         }
-
-    fun staggerDelayMs(url: String): Long = (url.hashCode() and 0x3F).toLong() * 12L
-
-    /** Spreads decode/network work across frames — use after a large catalog snapshot lands in the UI. */
-    fun configurePacingEnabled(enabled: Boolean) {
-        pacingEnabled = enabled
-    }
 
     fun configureDownloadMemoryMode(enabled: Boolean) {
         withCacheLock {
@@ -411,14 +312,6 @@ object RemoteArtworkCache {
         }
     }
 
-    private suspend fun paceBeforeLoad() {
-        val minInterval = if (pacingEnabled) PacedMinIntervalMs else BurstMinIntervalMs
-        val now = currentTimeMs()
-        val wait = minInterval - (now - lastLoadStartMs)
-        if (wait > 0) delay(wait)
-        lastLoadStartMs = currentTimeMs()
-    }
-
     suspend fun awaitLoad(url: String, maxDecodeDimension: Int = ListArtworkMaxDecodeDimension): ImageBitmap? {
         val key = CacheKey(url, maxDecodeDimension.normalizedDecodeDimension())
         withCacheLock { cachedLocked(key) }?.let { return it }
@@ -438,27 +331,34 @@ object RemoteArtworkCache {
         return job.await()
     }
 
+    suspend fun awaitLoadWithFallback(
+        url: String,
+        fallbackUrl: String?,
+        maxDecodeDimension: Int = ListArtworkMaxDecodeDimension,
+    ): ImageBitmap? {
+        cachedRequested(url, maxDecodeDimension, fallbackUrl)?.let { return it }
+        if (fallbackUrl == null || fallbackUrl == url) {
+            return awaitLoad(url, maxDecodeDimension)
+        }
+
+        withTimeoutOrNull(FallbackArtworkGraceMs) {
+            awaitLoad(url, maxDecodeDimension)
+        }?.let { return it }
+
+        awaitLoad(fallbackUrl, maxDecodeDimension)?.let { return it }
+        cachedRequested(url, maxDecodeDimension, fallbackUrl)?.let { return it }
+        return awaitLoad(url, maxDecodeDimension)
+    }
+
     internal fun hasRecentFailure(url: String, maxDecodeDimension: Int = ListArtworkMaxDecodeDimension): Boolean {
         val key = CacheKey(url, maxDecodeDimension.normalizedDecodeDimension())
         return withCacheLock { !shouldRetryFailedLoadLocked(key) }
-    }
-
-    suspend fun awaitPreview(url: String, fallbackUrl: String?, previewDecodeDimensions: List<Int>): ImageBitmap? {
-        previewDecodeDimensions.forEach { previewDimension ->
-            cachedRequested(url, previewDimension, fallbackUrl)?.let { return it }
-        }
-        previewDecodeDimensions.forEach { previewDimension ->
-            awaitLoad(url, previewDimension)?.let { return it }
-            fallbackUrl?.let { awaitLoad(it, previewDimension) }?.let { return it }
-        }
-        return null
     }
 
     private suspend fun fetchAndDecode(key: CacheKey): ImageBitmap? {
         withCacheLock { cachedLocked(key) }?.let { return it }
         return gate.withPermit {
             withCacheLock { cachedLocked(key) }?.let { return@withPermit it }
-            paceBeforeLoad()
             val url = key.url
             val remote = url.startsWith("http://") || url.startsWith("https://")
             val decoded = runCatching {

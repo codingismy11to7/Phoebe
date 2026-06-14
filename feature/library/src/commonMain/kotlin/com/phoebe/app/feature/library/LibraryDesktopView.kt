@@ -43,7 +43,6 @@ import androidx.compose.material3.Text
 import androidx.compose.foundation.lazy.grid.LazyGridScope
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -1672,28 +1671,25 @@ private fun ArtistsContent(
     val scope = rememberCoroutineScope()
     val indexScrollDispatcher = rememberLibrarySectionIndexSelectionDispatcher()
     var sectionIndexScrubbing by remember { mutableStateOf(false) }
-    val deferArtworkLoads = LocalDeferredArtworkLoading.current || sectionIndexScrubbing
     when (viewMode) {
         LibraryViewMode.Grid -> {
             val gridState = rememberLazyGridState()
             val revealIndex by remember(gridState) { derivedStateOf { gridState.isScrollInProgress } }
             Box(modifier) {
-                CompositionLocalProvider(LocalDeferredArtworkLoading provides deferArtworkLoads) {
-                    LibraryResponsiveGrid(
-                        itemSizeDp = artistGridItemSizeDp,
-                        horizontalSpacing = 18.dp,
-                        verticalSpacing = 20.dp,
-                        state = gridState,
-                        modifier = Modifier.fillMaxSize(),
-                    ) {
-                        items(artists, key = { it.id }, contentType = { "artist-card" }) { artist ->
-                            val onArtistClick = remember(artist, onArtist) { { onArtist(artist) } }
-                            ArtistCard(
-                                artist = artist,
-                                artworkDecodeDimension = libraryGridDecodeDimension(artistGridItemSizeDp),
-                                onArtist = onArtistClick,
-                            )
-                        }
+                LibraryResponsiveGrid(
+                    itemSizeDp = artistGridItemSizeDp,
+                    horizontalSpacing = 18.dp,
+                    verticalSpacing = 20.dp,
+                    state = gridState,
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    items(artists, key = { it.id }, contentType = { "artist-card" }) { artist ->
+                        val onArtistClick = remember(artist, onArtist) { { onArtist(artist) } }
+                        ArtistCard(
+                            artist = artist,
+                            artworkDecodeDimension = libraryGridDecodeDimension(artistGridItemSizeDp),
+                            onArtist = onArtistClick,
+                        )
                     }
                 }
                 LibrarySectionIndex(
@@ -1733,20 +1729,18 @@ private fun ArtistsContent(
             Box(modifier) {
                 Column(Modifier.fillMaxSize()) {
                     ArtistsTableHeader()
-                    CompositionLocalProvider(LocalDeferredArtworkLoading provides deferArtworkLoads) {
-                        LazyColumn(
-                            state = listState,
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                            modifier = Modifier.fillMaxSize(),
-                        ) {
-                            items(artists, key = { it.id }, contentType = { "artist" }) { artist ->
-                                val onArtistClick = remember(artist, onArtist) { { onArtist(artist) } }
-                                ArtistRow(
-                                    artist = artist,
-                                    stats = artistStats[artist.title.artistStatsKey()],
-                                    onArtist = onArtistClick,
-                                )
-                            }
+                    LazyColumn(
+                        state = listState,
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        items(artists, key = { it.id }, contentType = { "artist" }) { artist ->
+                            val onArtistClick = remember(artist, onArtist) { { onArtist(artist) } }
+                            ArtistRow(
+                                artist = artist,
+                                stats = artistStats[artist.title.artistStatsKey()],
+                                onArtist = onArtistClick,
+                            )
                         }
                     }
                 }
@@ -1992,32 +1986,29 @@ private fun AlbumsGrid(
     val scope = rememberCoroutineScope()
     val indexScrollDispatcher = rememberLibrarySectionIndexSelectionDispatcher()
     var sectionIndexScrubbing by remember { mutableStateOf(false) }
-    val deferArtworkLoads = LocalDeferredArtworkLoading.current || sectionIndexScrubbing
     when (viewMode) {
         LibraryViewMode.Grid -> {
             val gridState = rememberLazyGridState()
             val revealIndex by remember(gridState) { derivedStateOf { gridState.isScrollInProgress } }
             Box(modifier) {
-                CompositionLocalProvider(LocalDeferredArtworkLoading provides deferArtworkLoads) {
-                    LibraryResponsiveGrid(
-                        itemSizeDp = albumGridItemSizeDp,
-                        horizontalSpacing = 18.dp,
-                        verticalSpacing = 20.dp,
-                        state = gridState,
-                        modifier = Modifier.fillMaxSize(),
-                    ) {
-                        items(albums, key = { it.id }, contentType = { "album-card" }) { album ->
-                            val onAlbumSelect = remember(album, onSelect) { { onSelect(album) } }
-                            val onAlbumOpen = remember(album, onOpen) { { onOpen(album) } }
-                            AlbumCard(
-                                catalog = catalog,
-                                album = album,
-                                selected = album.id == selectedAlbumId,
-                                artworkDecodeDimension = libraryGridDecodeDimension(albumGridItemSizeDp),
-                                onSelect = onAlbumSelect,
-                                onOpen = onAlbumOpen,
-                            )
-                        }
+                LibraryResponsiveGrid(
+                    itemSizeDp = albumGridItemSizeDp,
+                    horizontalSpacing = 18.dp,
+                    verticalSpacing = 20.dp,
+                    state = gridState,
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    items(albums, key = { it.id }, contentType = { "album-card" }) { album ->
+                        val onAlbumSelect = remember(album, onSelect) { { onSelect(album) } }
+                        val onAlbumOpen = remember(album, onOpen) { { onOpen(album) } }
+                        AlbumCard(
+                            catalog = catalog,
+                            album = album,
+                            selected = album.id == selectedAlbumId,
+                            artworkDecodeDimension = libraryGridDecodeDimension(albumGridItemSizeDp),
+                            onSelect = onAlbumSelect,
+                            onOpen = onAlbumOpen,
+                        )
                     }
                 }
                 LibrarySectionIndex(
@@ -2052,23 +2043,21 @@ private fun AlbumsGrid(
                 }
             }
             Box(modifier) {
-                CompositionLocalProvider(LocalDeferredArtworkLoading provides deferArtworkLoads) {
-                    LazyColumn(
-                        state = listState,
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                        modifier = Modifier.fillMaxSize(),
-                    ) {
-                        items(albums, key = { it.id }, contentType = { "album-list" }) { album ->
-                            val onAlbumSelect = remember(album, onSelect) { { onSelect(album) } }
-                            val onAlbumOpen = remember(album, onOpen) { { onOpen(album) } }
-                            AlbumListRow(
-                                catalog = catalog,
-                                album = album,
-                                selected = album.id == selectedAlbumId,
-                                onSelect = onAlbumSelect,
-                                onOpen = onAlbumOpen,
-                            )
-                        }
+                LazyColumn(
+                    state = listState,
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    items(albums, key = { it.id }, contentType = { "album-list" }) { album ->
+                        val onAlbumSelect = remember(album, onSelect) { { onSelect(album) } }
+                        val onAlbumOpen = remember(album, onOpen) { { onOpen(album) } }
+                        AlbumListRow(
+                            catalog = catalog,
+                            album = album,
+                            selected = album.id == selectedAlbumId,
+                            onSelect = onAlbumSelect,
+                            onOpen = onAlbumOpen,
+                        )
                     }
                 }
                 LibrarySectionIndex(
@@ -2271,7 +2260,6 @@ private fun SongsTable(
     val scope = rememberCoroutineScope()
     val indexScrollDispatcher = rememberLibrarySectionIndexSelectionDispatcher()
     var sectionIndexScrubbing by remember { mutableStateOf(false) }
-    val deferArtworkLoads = LocalDeferredArtworkLoading.current || sectionIndexScrubbing
     Box(modifier) {
         Column(Modifier.fillMaxSize()) {
             SongsTableHeader(columns)
@@ -2280,27 +2268,25 @@ private fun SongsTable(
                     Text("No songs yet.", color = PhoebeUi.mutedText, fontSize = 13.sp)
                 }
             } else {
-                CompositionLocalProvider(LocalDeferredArtworkLoading provides deferArtworkLoads) {
-                    LazyColumn(
-                        state = listState,
-                        verticalArrangement = Arrangement.spacedBy(2.dp),
-                        modifier = Modifier.fillMaxSize(),
-                    ) {
-                        itemsIndexed(tracks, key = { _, t -> t.id }, contentType = { _, _ -> "song" }) { index, track ->
-                            val onSelectClick = remember(track, onSelect) { { onSelect(track) } }
-                            val onPlayClick = remember(index, onPlay) { { onPlay(index) } }
-                            val onAddClick = remember(track, onAddToUpNext) { { onAddToUpNext(track) } }
-                            val onDownloadClick = remember(track, onDownload) { { onDownload(track) } }
-                            SongRow(
-                                track = track,
-                                selected = track.id == selectedTrackId,
-                                columns = columns,
-                                onSelect = onSelectClick,
-                                onPlay = onPlayClick,
-                                onAddToUpNext = onAddClick,
-                                onDownload = onDownloadClick,
-                            )
-                        }
+                LazyColumn(
+                    state = listState,
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    itemsIndexed(tracks, key = { _, t -> t.id }, contentType = { _, _ -> "song" }) { index, track ->
+                        val onSelectClick = remember(track, onSelect) { { onSelect(track) } }
+                        val onPlayClick = remember(index, onPlay) { { onPlay(index) } }
+                        val onAddClick = remember(track, onAddToUpNext) { { onAddToUpNext(track) } }
+                        val onDownloadClick = remember(track, onDownload) { { onDownload(track) } }
+                        SongRow(
+                            track = track,
+                            selected = track.id == selectedTrackId,
+                            columns = columns,
+                            onSelect = onSelectClick,
+                            onPlay = onPlayClick,
+                            onAddToUpNext = onAddClick,
+                            onDownload = onDownloadClick,
+                        )
                     }
                 }
             }

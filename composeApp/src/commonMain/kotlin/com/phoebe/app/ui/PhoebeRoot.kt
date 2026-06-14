@@ -557,16 +557,6 @@ private fun PhoebeRootStateHolder(
             value = true
         }
     }
-    val artworkLoadingEnabled = true
-    LaunchedEffect(catalogSyncInProgress) {
-        if (catalogSyncInProgress) {
-            RemoteArtworkCache.configurePacingEnabled(true)
-        } else {
-            delay(2_000L)
-            RemoteArtworkCache.configurePacingEnabled(false)
-        }
-    }
-
     val nowPlaying = remember(currentTrack?.id, shellPlayback.isPlaying, shellPlayback.isBuffering) {
         NowPlayingIndicatorState(
             trackId = currentTrack?.id,
@@ -943,7 +933,6 @@ private fun PhoebeRootStateHolder(
         LocalCatalogHasContent provides catalogHasContent,
         LocalCatalogSyncState provides catalogSyncState,
         LocalCatalogSyncInProgress provides catalogSyncInProgress,
-        LocalArtworkLoadingEnabled provides artworkLoadingEnabled,
         LocalHomeTrackSectionsReady provides trackHeavySectionsEnabled,
         LocalMostPlayedResolving provides mostPlayedResolving,
         LocalSharedElementTransitionsEnabled provides true,
