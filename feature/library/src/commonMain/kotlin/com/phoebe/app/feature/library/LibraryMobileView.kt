@@ -504,7 +504,7 @@ private fun MobileArtistsContent(
                 LibrarySectionIndex(
                     entries = indexEntries,
                     onEntrySelected = { entry ->
-                        indexScrollDispatcher.launch(scope) { gridState.scrollToItem(entry.itemIndex) }
+                        indexScrollDispatcher.launch(scope, key = entry.itemIndex) { gridState.scrollToItem(entry.itemIndex) }
                     },
                     onScrubbingChanged = { sectionIndexScrubbing = it },
                     mode = LibrarySectionIndexMode.MobileScrollbar,
@@ -539,7 +539,7 @@ private fun MobileArtistsContent(
                 LibrarySectionIndex(
                     entries = indexEntries,
                     onEntrySelected = { entry ->
-                        indexScrollDispatcher.launch(scope) { listState.scrollToItem(entry.itemIndex) }
+                        indexScrollDispatcher.launch(scope, key = entry.itemIndex) { listState.scrollToItem(entry.itemIndex) }
                     },
                     onScrubbingChanged = { sectionIndexScrubbing = it },
                     mode = LibrarySectionIndexMode.MobileScrollbar,
@@ -725,7 +725,7 @@ private fun MobileAlbumsContent(
                 LibrarySectionIndex(
                     entries = indexEntries,
                     onEntrySelected = { entry ->
-                        indexScrollDispatcher.launch(scope) { gridState.scrollToItem(entry.itemIndex) }
+                        indexScrollDispatcher.launch(scope, key = entry.itemIndex) { gridState.scrollToItem(entry.itemIndex) }
                     },
                     onScrubbingChanged = { sectionIndexScrubbing = it },
                     mode = LibrarySectionIndexMode.MobileScrollbar,
@@ -760,7 +760,7 @@ private fun MobileAlbumsContent(
                 LibrarySectionIndex(
                     entries = indexEntries,
                     onEntrySelected = { entry ->
-                        indexScrollDispatcher.launch(scope) { listState.scrollToItem(entry.itemIndex) }
+                        indexScrollDispatcher.launch(scope, key = entry.itemIndex) { listState.scrollToItem(entry.itemIndex) }
                     },
                     onScrubbingChanged = { sectionIndexScrubbing = it },
                     mode = LibrarySectionIndexMode.MobileScrollbar,
@@ -936,11 +936,9 @@ private fun MobileSongsList(
     val indexScrollDispatcher = rememberLibrarySectionIndexSelectionDispatcher()
     val nowPlaying = LocalNowPlaying.current
     val scrolling by remember(listState) { derivedStateOf { listState.isScrollInProgress } }
-    val artworkLoadingEnabled = LocalArtworkLoadingEnabled.current && !scrolling
     var sectionIndexScrubbing by remember { mutableStateOf(false) }
     val deferArtworkLoads = LocalDeferredArtworkLoading.current || sectionIndexScrubbing
     CompositionLocalProvider(
-        LocalArtworkLoadingEnabled provides artworkLoadingEnabled,
         LocalDeferredArtworkLoading provides deferArtworkLoads,
     ) {
         Box(Modifier.fillMaxSize()) {
@@ -970,7 +968,7 @@ private fun MobileSongsList(
             LibrarySectionIndex(
                 entries = indexEntries,
                 onEntrySelected = { entry ->
-                    indexScrollDispatcher.launch(scope) { listState.scrollToItem(entry.itemIndex) }
+                    indexScrollDispatcher.launch(scope, key = entry.itemIndex) { listState.scrollToItem(entry.itemIndex) }
                 },
                 onScrubbingChanged = { sectionIndexScrubbing = it },
                 mode = LibrarySectionIndexMode.MobileScrollbar,
@@ -1277,59 +1275,55 @@ fun FavoritePlaylistsMobileView(
             placeholder = "Search favorite playlists",
         )
         val listState = RetainedLazyListStates.remember("mobile-favorite-playlists")
-        val scrolling by remember(listState) { derivedStateOf { listState.isScrollInProgress } }
-        val artworkLoadingEnabled = LocalArtworkLoadingEnabled.current && !scrolling
-        CompositionLocalProvider(LocalArtworkLoadingEnabled provides artworkLoadingEnabled) {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-                contentPadding = PaddingValues(bottom = MobileChromeScrollGap),
-            ) {
-                when {
-                    preparingPlaylists -> item(contentType = "loading") {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            LibraryLoadingStrip()
-                            Text(
-                                "Loading playlists...",
-                                color = PhoebeUi.mutedText,
-                                fontSize = 13.sp,
-                                lineHeight = 18.sp,
-                                modifier = Modifier.padding(top = 12.dp, bottom = 8.dp),
-                            )
-                        }
-                    }
-                    preparedFavoritePlaylists.isEmpty() -> item(contentType = "empty") {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+            contentPadding = PaddingValues(bottom = MobileChromeScrollGap),
+        ) {
+            when {
+                preparingPlaylists -> item(contentType = "loading") {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        LibraryLoadingStrip()
                         Text(
-                            "Favorite playlists will appear here.",
+                            "Loading playlists...",
                             color = PhoebeUi.mutedText,
                             fontSize = 13.sp,
                             lineHeight = 18.sp,
-                            modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
+                            modifier = Modifier.padding(top = 12.dp, bottom = 8.dp),
                         )
                     }
-                    preparedVisiblePlaylists.isEmpty() -> item(contentType = "empty-filter") {
-                        Text(
-                            "No favorite playlists match \"$searchQuery\".",
-                            color = PhoebeUi.mutedText,
-                            fontSize = 13.sp,
-                            lineHeight = 18.sp,
-                            modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
-                        )
-                    }
-                    else -> items(preparedVisiblePlaylists, key = { it.id }, contentType = { "favorite-playlist" }) { playlist ->
-                        MobilePlaylistRow(
-                            icon = PhoebeIcon.Heart,
-                            title = playlist.title,
-                            subtitle = "${playlist.trackCount} songs",
-                            thumbUrl = playlist.thumbUrl,
-                            accent = true,
-                            onClick = { onPlaylist(playlist) },
-                            onLongClick = { playlistActions.onShufflePlaylist(playlist) },
-                        )
-                    }
+                }
+                preparedFavoritePlaylists.isEmpty() -> item(contentType = "empty") {
+                    Text(
+                        "Favorite playlists will appear here.",
+                        color = PhoebeUi.mutedText,
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp,
+                        modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
+                    )
+                }
+                preparedVisiblePlaylists.isEmpty() -> item(contentType = "empty-filter") {
+                    Text(
+                        "No favorite playlists match \"$searchQuery\".",
+                        color = PhoebeUi.mutedText,
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp,
+                        modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
+                    )
+                }
+                else -> items(preparedVisiblePlaylists, key = { it.id }, contentType = { "favorite-playlist" }) { playlist ->
+                    MobilePlaylistRow(
+                        icon = PhoebeIcon.Heart,
+                        title = playlist.title,
+                        subtitle = "${playlist.trackCount} songs",
+                        thumbUrl = playlist.thumbUrl,
+                        accent = true,
+                        onClick = { onPlaylist(playlist) },
+                        onLongClick = { playlistActions.onShufflePlaylist(playlist) },
+                    )
                 }
             }
         }
@@ -1394,72 +1388,68 @@ fun PlaylistsMobileView(
             }
         } else {
             val listState = RetainedLazyListStates.remember("mobile-playlists")
-            val scrolling by remember(listState) { derivedStateOf { listState.isScrollInProgress } }
-            val artworkLoadingEnabled = LocalArtworkLoadingEnabled.current && !scrolling
-            CompositionLocalProvider(LocalArtworkLoadingEnabled provides artworkLoadingEnabled) {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                    contentPadding = PaddingValues(bottom = MobileChromeScrollGap),
-                ) {
-                    item(contentType = "create") {
-                        MobilePlaylistRow(
-                            icon = PhoebeIcon.Plus,
-                            title = "Create Playlist",
-                            subtitle = null,
-                            accent = false,
-                            onClick = { playlistActions.onRequestCreatePlaylist(emptyList()) },
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+                contentPadding = PaddingValues(bottom = MobileChromeScrollGap),
+            ) {
+                item(contentType = "create") {
+                    MobilePlaylistRow(
+                        icon = PhoebeIcon.Plus,
+                        title = "Create Playlist",
+                        subtitle = null,
+                        accent = false,
+                        onClick = { playlistActions.onRequestCreatePlaylist(emptyList()) },
+                    )
+                }
+                if (preparingPlaylists) {
+                    item(contentType = "loading") {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            LibraryLoadingStrip()
+                            Text(
+                                "Loading playlists...",
+                                color = PhoebeUi.mutedText,
+                                fontSize = 13.sp,
+                                lineHeight = 18.sp,
+                                modifier = Modifier.padding(top = 12.dp, bottom = 8.dp),
+                            )
+                        }
+                    }
+                } else if (playlists.isEmpty()) {
+                    item(contentType = "empty") {
+                        Text(
+                            "No playlists yet. Create one or add songs from your library.",
+                            color = PhoebeUi.mutedText,
+                            fontSize = 13.sp,
+                            lineHeight = 18.sp,
+                            modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
                         )
                     }
-                    if (preparingPlaylists) {
-                        item(contentType = "loading") {
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                LibraryLoadingStrip()
-                                Text(
-                                    "Loading playlists...",
-                                    color = PhoebeUi.mutedText,
-                                    fontSize = 13.sp,
-                                    lineHeight = 18.sp,
-                                    modifier = Modifier.padding(top = 12.dp, bottom = 8.dp),
-                                )
-                            }
-                        }
-                    } else if (playlists.isEmpty()) {
-                        item(contentType = "empty") {
-                            Text(
-                                "No playlists yet. Create one or add songs from your library.",
-                                color = PhoebeUi.mutedText,
-                                fontSize = 13.sp,
-                                lineHeight = 18.sp,
-                                modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
-                            )
-                        }
-                    } else if (preparedVisiblePlaylists.isEmpty()) {
-                        item(contentType = "empty-filter") {
-                            Text(
-                                "No playlists match \"$searchQuery\".",
-                                color = PhoebeUi.mutedText,
-                                fontSize = 13.sp,
-                                lineHeight = 18.sp,
-                                modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
-                            )
-                        }
-                    } else {
-                        items(preparedVisiblePlaylists, key = { it.id }, contentType = { "playlist" }) { playlist ->
-                            val liked = playlist.isLikedSongsPlaylist()
-                            MobilePlaylistRow(
-                                icon = if (liked) PhoebeIcon.Heart else null,
-                                title = playlist.title,
-                                subtitle = "${playlist.trackCount} songs",
-                                thumbUrl = playlist.thumbUrl,
-                                accent = liked,
-                                onClick = { onPlaylist(playlist) },
-                                onLongClick = { playlistActions.onShufflePlaylist(playlist) },
-                            )
-                        }
+                } else if (preparedVisiblePlaylists.isEmpty()) {
+                    item(contentType = "empty-filter") {
+                        Text(
+                            "No playlists match \"$searchQuery\".",
+                            color = PhoebeUi.mutedText,
+                            fontSize = 13.sp,
+                            lineHeight = 18.sp,
+                            modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
+                        )
+                    }
+                } else {
+                    items(preparedVisiblePlaylists, key = { it.id }, contentType = { "playlist" }) { playlist ->
+                        val liked = playlist.isLikedSongsPlaylist()
+                        MobilePlaylistRow(
+                            icon = if (liked) PhoebeIcon.Heart else null,
+                            title = playlist.title,
+                            subtitle = "${playlist.trackCount} songs",
+                            thumbUrl = playlist.thumbUrl,
+                            accent = liked,
+                            onClick = { onPlaylist(playlist) },
+                            onLongClick = { playlistActions.onShufflePlaylist(playlist) },
+                        )
                     }
                 }
             }

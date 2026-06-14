@@ -124,17 +124,28 @@ data class LibraryScrollbarState(
 
 class LibrarySectionIndexSelectionDispatcher {
     private var job: Job? = null
+    private var pendingKey: Int? = null
     private var pendingBlock: (suspend CoroutineScope.() -> Unit)? = null
+    private var lastDispatchedKey: Int? = null
 
-    fun launch(scope: CoroutineScope, block: suspend CoroutineScope.() -> Unit) {
+    fun launch(scope: CoroutineScope, key: Int? = null, block: suspend CoroutineScope.() -> Unit) {
+        if (key != null && (key == pendingKey || key == lastDispatchedKey)) return
+        pendingKey = key
         pendingBlock = block
         if (job?.isActive == true) return
         job = scope.launch {
-            while (true) {
-                val next = pendingBlock ?: break
-                pendingBlock = null
-                next.invoke(this)
-                delay(SectionIndexSelectionCoalesceMs)
+            try {
+                while (true) {
+                    val next = pendingBlock ?: break
+                    val nextKey = pendingKey
+                    pendingBlock = null
+                    pendingKey = null
+                    lastDispatchedKey = nextKey
+                    next.invoke(this)
+                    delay(SectionIndexSelectionCoalesceMs)
+                }
+            } finally {
+                lastDispatchedKey = null
             }
         }
     }
