@@ -4,11 +4,11 @@ import com.phoebe.app.data.filterTracksByQuery
 import com.phoebe.app.data.sortTracksForLibrary
 import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.Track
-import com.phoebe.app.ui.libraryTrackScrollIndex
-import com.phoebe.app.ui.monthYearLabelFromEpochMs
+import com.phoebe.app.feature.library.libraryTrackScrollIndex
+import com.phoebe.app.feature.library.monthYearLabelFromEpochMs
+import com.phoebe.app.feature.library.railIndexLabel
+import com.phoebe.app.feature.library.sampleForRailLabels
 import com.phoebe.app.ui.playbackQueueForVisibleTrack
-import com.phoebe.app.ui.railIndexLabel
-import com.phoebe.app.ui.sampleForRailLabels
 import kotlin.test.Test
 import kotlin.test.assertEquals
 

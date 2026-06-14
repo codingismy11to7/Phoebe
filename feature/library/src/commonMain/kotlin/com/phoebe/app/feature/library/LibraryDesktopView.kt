@@ -1699,7 +1699,7 @@ private fun ArtistsContent(
                 LibrarySectionIndex(
                     entries = indexEntries,
                     onEntrySelected = { entry ->
-                        indexScrollDispatcher.launch(scope) { gridState.scrollToItem(entry.itemIndex) }
+                        indexScrollDispatcher.launch(scope, key = entry.itemIndex) { gridState.scrollToItem(entry.itemIndex) }
                     },
                     onScrubbingChanged = { sectionIndexScrubbing = it },
                     mode = LibrarySectionIndexMode.DesktopScrollbar,
@@ -1753,7 +1753,7 @@ private fun ArtistsContent(
                 LibrarySectionIndex(
                     entries = indexEntries,
                     onEntrySelected = { entry ->
-                        indexScrollDispatcher.launch(scope) { listState.scrollToItem(entry.itemIndex) }
+                        indexScrollDispatcher.launch(scope, key = entry.itemIndex) { listState.scrollToItem(entry.itemIndex) }
                     },
                     onScrubbingChanged = { sectionIndexScrubbing = it },
                     mode = LibrarySectionIndexMode.DesktopScrollbar,
@@ -2023,7 +2023,7 @@ private fun AlbumsGrid(
                 LibrarySectionIndex(
                     entries = indexEntries,
                     onEntrySelected = { entry ->
-                        indexScrollDispatcher.launch(scope) { gridState.scrollToItem(entry.itemIndex) }
+                        indexScrollDispatcher.launch(scope, key = entry.itemIndex) { gridState.scrollToItem(entry.itemIndex) }
                     },
                     onScrubbingChanged = { sectionIndexScrubbing = it },
                     mode = LibrarySectionIndexMode.DesktopScrollbar,
@@ -2074,7 +2074,7 @@ private fun AlbumsGrid(
                 LibrarySectionIndex(
                     entries = indexEntries,
                     onEntrySelected = { entry ->
-                        indexScrollDispatcher.launch(scope) { listState.scrollToItem(entry.itemIndex) }
+                        indexScrollDispatcher.launch(scope, key = entry.itemIndex) { listState.scrollToItem(entry.itemIndex) }
                     },
                     onScrubbingChanged = { sectionIndexScrubbing = it },
                     mode = LibrarySectionIndexMode.DesktopScrollbar,
@@ -2308,7 +2308,7 @@ private fun SongsTable(
         LibrarySectionIndex(
             entries = indexEntries,
             onEntrySelected = { entry ->
-                indexScrollDispatcher.launch(scope) { listState.scrollToItem(entry.itemIndex) }
+                indexScrollDispatcher.launch(scope, key = entry.itemIndex) { listState.scrollToItem(entry.itemIndex) }
             },
             onScrubbingChanged = { sectionIndexScrubbing = it },
             mode = LibrarySectionIndexMode.DesktopScrollbar,

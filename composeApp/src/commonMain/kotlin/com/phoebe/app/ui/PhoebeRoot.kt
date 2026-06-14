@@ -557,16 +557,7 @@ private fun PhoebeRootStateHolder(
             value = true
         }
     }
-    val artworkLoadingEnabled by produceState(!catalogSyncInProgress, catalogSyncInProgress) {
-        if (catalogSyncInProgress) {
-            value = false
-            delay(1_000L)
-            value = true
-        } else {
-            delay(250L)
-            value = true
-        }
-    }
+    val artworkLoadingEnabled = true
     LaunchedEffect(catalogSyncInProgress) {
         if (catalogSyncInProgress) {
             RemoteArtworkCache.configurePacingEnabled(true)

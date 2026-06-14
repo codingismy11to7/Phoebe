@@ -33,6 +33,11 @@ import androidx.compose.ui.unit.dp
 import com.phoebe.app.data.ListenBrainzFeedbackScore
 import com.phoebe.app.data.ListenBrainzFeedbackTarget
 import com.phoebe.app.domain.Track
+import com.phoebe.app.platform.prefersReducedArtworkEffects
+import dev.chrisbanes.haze.HazeInputScale
+import dev.chrisbanes.haze.blur.HazeProgressive
+import dev.chrisbanes.haze.blur.blurEffect
+import dev.chrisbanes.haze.hazeEffect
 
 fun lerp(start: Float, stop: Float, fraction: Float): Float {
     return start + fraction * (stop - start)
@@ -211,7 +216,25 @@ private fun BoxScope.MobileArtworkReflectionLayer(
             if (rotationY <= 90f) {
                 TrackArtworkImage(
                     track = track,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .then(
+                            if (prefersReducedArtworkEffects()) {
+                                Modifier
+                            } else {
+                                Modifier.hazeEffect {
+                                    inputScale = HazeInputScale.Auto
+                                    blurEffect {
+                                        blurRadius = 20.dp
+                                        progressive = HazeProgressive.verticalGradient(
+                                            startIntensity = 1f,
+                                            endIntensity = 0.12f,
+                                        )
+                                        noiseFactor = 0f
+                                    }
+                                }
+                            }
+                        ),
                     shape = RectangleShape,
                     elevated = false,
                     maxDecodeDimension = HeroArtworkMaxDecodeDimension,

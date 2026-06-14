@@ -361,7 +361,7 @@ fun LibraryPanel(
         LibrarySectionIndex(
             entries = sectionIndexEntries,
             onEntrySelected = { entry ->
-                indexScrollDispatcher.launch(scope) { listState.scrollToItem(libraryItemsStartIndex + entry.itemIndex) }
+                indexScrollDispatcher.launch(scope, key = entry.itemIndex) { listState.scrollToItem(libraryItemsStartIndex + entry.itemIndex) }
             },
             onScrubbingChanged = { sectionIndexScrubbing = it },
             mode = LibrarySectionIndexMode.DesktopScrollbar,

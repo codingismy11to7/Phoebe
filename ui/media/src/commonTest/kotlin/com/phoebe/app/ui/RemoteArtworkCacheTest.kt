@@ -12,6 +12,8 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -94,6 +96,43 @@ class RemoteArtworkCacheTest {
             1024,
             RemoteArtworkCache.cachedForDisplay("art", HeroArtworkMaxDecodeDimension)?.width,
         )
+    }
+
+    @Test
+    fun displayStateUsesPreviewWhileHeroArtworkIsPending() {
+        RemoteArtworkCache.configureLimitsForTest(maxEntries = 10, maxEstimatedBytes = Long.MAX_VALUE)
+        RemoteArtworkCache.putForTest("art", ThumbnailArtworkMaxDecodeDimension, testImageBitmap(160, 160))
+
+        val state = cachedStateForDisplay("art", HeroArtworkMaxDecodeDimension)
+
+        assertIs<RemoteImageLoadState.Preview>(state)
+        assertEquals(160, state.image.width)
+    }
+
+    @Test
+    fun recentFailureDoesNotBlockCachedFallbackArtwork() {
+        RemoteArtworkCache.configureLimitsForTest(maxEntries = 10, maxEstimatedBytes = Long.MAX_VALUE)
+        RemoteArtworkCache.markFailedForTest("primary", ListArtworkMaxDecodeDimension)
+        RemoteArtworkCache.putForTest("fallback", ListArtworkMaxDecodeDimension, testImageBitmap(256, 256))
+
+        val state = cachedStateForDisplay("primary", ListArtworkMaxDecodeDimension, fallbackUrl = "fallback")
+
+        assertTrue(RemoteArtworkCache.hasRecentFailure("primary", ListArtworkMaxDecodeDimension))
+        assertFalse(RemoteArtworkCache.hasRecentFailure("fallback", ListArtworkMaxDecodeDimension))
+        assertIs<RemoteImageLoadState.Ready>(state)
+        assertEquals(256, state.image.width)
+    }
+
+    @Test
+    fun unresolvedArtworkRemainsLoadingUntilARealFailureIsRecorded() {
+        val pending = cachedStateForDisplay("pending", ListArtworkMaxDecodeDimension)
+
+        assertIs<RemoteImageLoadState.Loading>(pending)
+        assertFalse(RemoteArtworkCache.hasRecentFailure("pending", ListArtworkMaxDecodeDimension))
+
+        RemoteArtworkCache.markFailedForTest("pending", ListArtworkMaxDecodeDimension)
+
+        assertTrue(RemoteArtworkCache.hasRecentFailure("pending", ListArtworkMaxDecodeDimension))
     }
 
     @Test
