@@ -78,12 +78,12 @@ fun PlayHistoryScreen(
     onDownload: (Track) -> Unit,
 ) {
     var sortBy by remember(kind) { mutableStateOf(LibrarySortBy.PlaylistOrder) }
-    var ascending by remember(kind) { mutableStateOf(true) }
+    var ascending by remember(kind) { mutableStateOf(false) }
 
     val sortedRows = remember(state.rows, sortBy, ascending) {
         val rows = state.rows ?: return@remember null
         if (sortBy == LibrarySortBy.PlaylistOrder) {
-            if (ascending) rows else rows.reversed()
+            if (ascending) rows.reversed() else rows
         } else {
             val tracks = rows.map { it.track }
             val sortedTracks = sortTracksForLibrary(tracks, sortBy, ascending)
