@@ -8,7 +8,7 @@ enum class HomeScreenLayoutMode(
     Expanded("Expanded", "expanded");
 
     companion object {
-        val Default = Compact
+        val Default = Expanded
 
         fun fromStorage(value: String?): HomeScreenLayoutMode =
             entries.firstOrNull { mode ->

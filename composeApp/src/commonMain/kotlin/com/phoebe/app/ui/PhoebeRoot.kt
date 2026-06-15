@@ -1615,6 +1615,7 @@ private fun PhoebeRootStateHolder(
                             },
                             onBack = collapseMobilePlayer,
                             onSwipeDismiss = collapseMobilePlayer,
+                            onClick = { openMobilePlayer() },
                             handleSystemBack = false,
                             expansionFraction = playerExpansionFraction.value,
                             onDragStart = onDragStart,
@@ -2161,6 +2162,7 @@ private fun MobilePlayerHost(
     onLyrics: () -> Unit,
     onBack: () -> Unit,
     onSwipeDismiss: () -> Unit,
+    onClick: () -> Unit = {},
     handleSystemBack: Boolean = true,
     expansionFraction: Float = 0f,
     onDragStart: () -> Unit = {},
@@ -2225,6 +2227,7 @@ private fun MobilePlayerHost(
             onDragStart = onDragStart,
             onDrag = onDrag,
             onDragEnd = onDragEnd,
+            onClick = onClick,
         ),
         modifier = modifier,
     )

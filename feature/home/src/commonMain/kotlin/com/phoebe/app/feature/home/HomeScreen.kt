@@ -3149,7 +3149,7 @@ private fun SectionHeader(title: String, action: String?, onAction: () -> Unit) 
                 action,
                 color = PhoebeUi.secondaryText,
                 fontSize = 11.sp,
-                modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClick = onAction).padding(horizontal = 6.dp, vertical = 4.dp),
+                modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClick = onAction).padding(horizontal = 16.dp, vertical = 10.dp),
             )
         }
     }
