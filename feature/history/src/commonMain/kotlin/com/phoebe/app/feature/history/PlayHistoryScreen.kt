@@ -6,7 +6,9 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,30 +21,37 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.role
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.phoebe.app.data.HomePlayedTrack
+import com.phoebe.app.data.sortTracksForLibrary
+import com.phoebe.app.domain.LibraryColumnVisibility
+import com.phoebe.app.domain.LibrarySortBy
+import com.phoebe.app.domain.LibraryUiPreferences
 import com.phoebe.app.domain.PlayHistoryKind
 import com.phoebe.app.domain.Track
+import com.phoebe.app.feature.library.DetailSectionHeader
+import com.phoebe.app.feature.library.MobileSongRow
+import com.phoebe.app.feature.library.SongRow
+import com.phoebe.app.feature.library.SongsTableHeader
 import com.phoebe.app.ui.PhoebeIcon
 import com.phoebe.app.ui.PhoebeIconView
 import com.phoebe.app.ui.PhoebeUi
@@ -58,6 +67,8 @@ data class HistoryNowPlayingState(
 fun PlayHistoryScreen(
     kind: PlayHistoryKind,
     state: PlayHistoryUiState,
+    libraryUi: LibraryUiPreferences,
+    onLibraryColumns: (LibraryColumnVisibility) -> Unit,
     modifier: Modifier = Modifier,
     nowPlaying: HistoryNowPlayingState = HistoryNowPlayingState(),
     bottomContentPadding: Dp = 0.dp,
@@ -66,10 +77,30 @@ fun PlayHistoryScreen(
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
 ) {
+    var sortBy by remember(kind) { mutableStateOf(LibrarySortBy.PlaylistOrder) }
+    var ascending by remember(kind) { mutableStateOf(true) }
+
+    val sortedRows = remember(state.rows, sortBy, ascending) {
+        val rows = state.rows ?: return@remember null
+        if (sortBy == LibrarySortBy.PlaylistOrder) {
+            if (ascending) rows else rows.reversed()
+        } else {
+            val tracks = rows.map { it.track }
+            val sortedTracks = sortTracksForLibrary(tracks, sortBy, ascending)
+            val rowsByTrackId = rows.associateBy { it.track.id }
+            sortedTracks.mapNotNull { rowsByTrackId[it.id] }
+        }
+    }
+
     Column(
         modifier
             .fillMaxSize()
-            .padding(start = 16.dp, end = 16.dp, top = 12.dp + WindowInsets.statusBars.asPaddingValues().calculateTopPadding(), bottom = 12.dp + bottomContentPadding),
+            .padding(
+                start = 16.dp,
+                end = 16.dp,
+                top = 12.dp + WindowInsets.statusBars.asPaddingValues().calculateTopPadding(),
+                bottom = 12.dp + bottomContentPadding
+            ),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         PlayHistoryHeader(
@@ -78,12 +109,45 @@ fun PlayHistoryScreen(
             rankedTotal = state.rankedTotal.takeIf { state.showResolving },
             onBack = onBack,
         )
+
+        DetailSectionHeader(
+            title = "Tracks",
+            sortBy = sortBy,
+            sortKeys = listOf(
+                LibrarySortBy.PlaylistOrder,
+                LibrarySortBy.Name,
+                LibrarySortBy.Artist,
+                LibrarySortBy.Album,
+                LibrarySortBy.Year,
+                LibrarySortBy.DateAdded
+            ),
+            sortLabel = { key ->
+                when (key) {
+                    LibrarySortBy.PlaylistOrder -> when (kind) {
+                        PlayHistoryKind.RecentlyPlayed -> "Last played"
+                        PlayHistoryKind.MostPlayed -> "Play count"
+                    }
+                    LibrarySortBy.Artist -> "Artist"
+                    LibrarySortBy.Album -> "Album name"
+                    LibrarySortBy.Year -> "Release date"
+                    LibrarySortBy.DateAdded -> "Date added"
+                    else -> "Song name"
+                }
+            },
+            onSortBy = { sortBy = it },
+            ascending = ascending,
+            onAscending = { ascending = it },
+            columns = libraryUi.columns,
+            onColumns = onLibraryColumns,
+        )
+
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            when (val loaded = state.rows) {
+            when (sortedRows) {
                 null -> PlayHistoryLoading(Modifier.fillMaxSize())
                 else -> PlayHistoryTracks(
-                    rows = loaded,
+                    rows = sortedRows,
                     showPlayCount = kind == PlayHistoryKind.MostPlayed,
+                    libraryUi = libraryUi,
                     nowPlaying = nowPlaying,
                     onPlayTracks = onPlayTracks,
                     onAddToUpNext = onAddToUpNext,
@@ -158,6 +222,7 @@ private fun PlayHistoryHeader(
 private fun PlayHistoryTracks(
     rows: List<HomePlayedTrack>,
     showPlayCount: Boolean,
+    libraryUi: LibraryUiPreferences,
     nowPlaying: HistoryNowPlayingState,
     onPlayTracks: (List<Track>, Int) -> Unit,
     onAddToUpNext: (Track) -> Unit,
@@ -169,127 +234,55 @@ private fun PlayHistoryTracks(
         return
     }
     val tracks = rows.map { it.track }
-    LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        itemsIndexed(rows, key = { _, row -> row.track.id }) { index, row ->
-            HistoryTrackRow(
-                row = row,
-                isNowPlaying = row.track.id == nowPlaying.trackId,
-                nowPlayingIsPlaying = nowPlaying.isPlaying,
-                nowPlayingIsBuffering = nowPlaying.isBuffering,
-                showPlayCount = showPlayCount,
-                onPlay = { onPlayTracks(tracks, index) },
-                onAddToUpNext = { onAddToUpNext(row.track) },
-                onDownload = { onDownload(row.track) },
-            )
-        }
-    }
-}
+    val listState = rememberLazyListState()
 
-@Composable
-private fun HistoryTrackRow(
-    row: HomePlayedTrack,
-    isNowPlaying: Boolean,
-    nowPlayingIsPlaying: Boolean,
-    nowPlayingIsBuffering: Boolean,
-    showPlayCount: Boolean,
-    onPlay: () -> Unit,
-    onAddToUpNext: () -> Unit,
-    onDownload: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val track = row.track
-    val rowShape = RoundedCornerShape(10.dp)
-    Row(
-        modifier
-            .fillMaxWidth()
-            .clip(rowShape)
-            .clickable(onClick = onPlay)
-            .background(if (isNowPlaying) PhoebeUi.accent.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.045f))
-            .border(BorderStroke(1.dp, if (isNowPlaying) PhoebeUi.accent.copy(alpha = 0.45f) else PhoebeUi.border), rowShape)
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        HistoryArtworkPlaceholder(
-            seed = track.id,
-            isNowPlaying = isNowPlaying,
-            nowPlayingIsPlaying = nowPlayingIsPlaying,
-            nowPlayingIsBuffering = nowPlayingIsBuffering,
-        )
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(
-                track.title.ifBlank { "Unknown Title" },
-                color = PhoebeUi.primaryText,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                listOf(track.artist, track.album).filter { it.isNotBlank() }.joinToString(" - ").ifBlank { "Unknown Artist" },
-                color = PhoebeUi.secondaryText,
-                fontSize = 12.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (showPlayCount) {
-                Text(playCountLabel(row.playCount), color = PhoebeUi.mutedText, fontSize = 11.sp)
+    BoxWithConstraints(modifier) {
+        val useTable = maxWidth >= 640.dp
+        LazyColumn(
+            state = listState,
+            verticalArrangement = Arrangement.spacedBy(if (useTable) 2.dp else 10.dp),
+            contentPadding = PaddingValues(bottom = 12.dp)
+        ) {
+            if (useTable) {
+                item(contentType = "history-header") {
+                    SongsTableHeader(
+                        columns = libraryUi.columns,
+                        showLeadingHandle = false,
+                        showSelectionColumn = false,
+                        showPlayCount = showPlayCount,
+                        showLastPlayed = !showPlayCount,
+                    )
+                }
+                itemsIndexed(rows, key = { _, row -> row.track.id }, contentType = { _, _ -> "track" }) { index, row ->
+                    SongRow(
+                        track = row.track,
+                        selected = false,
+                        columns = libraryUi.columns,
+                        onSelect = { onPlayTracks(tracks, index) },
+                        onPlay = { onPlayTracks(tracks, index) },
+                        onAddToUpNext = { onAddToUpNext(row.track) },
+                        onDownload = { onDownload(row.track) },
+                        playCount = row.playCount.takeIf { showPlayCount },
+                        lastPlayedMs = row.lastPlayedMs.takeIf { !showPlayCount },
+                    )
+                }
+            } else {
+                itemsIndexed(rows, key = { _, row -> row.track.id }, contentType = { _, _ -> "track" }) { index, row ->
+                    MobileSongRow(
+                        track = row.track,
+                        columns = libraryUi.columns,
+                        isNowPlaying = row.track.id == nowPlaying.trackId,
+                        nowPlayingIsPlaying = nowPlaying.isPlaying,
+                        nowPlayingIsBuffering = nowPlaying.isBuffering,
+                        onPlay = { onPlayTracks(tracks, index) },
+                        onAddToUpNext = { onAddToUpNext(row.track) },
+                        onDownload = { onDownload(row.track) },
+                        playCount = row.playCount.takeIf { showPlayCount },
+                        lastPlayedMs = row.lastPlayedMs.takeIf { !showPlayCount },
+                    )
+                }
             }
         }
-        HistoryIconButton(PhoebeIcon.Queue, "Add to Up Next", onAddToUpNext)
-        HistoryIconButton(PhoebeIcon.Download, "Download", onDownload)
-    }
-}
-
-@Composable
-private fun HistoryArtworkPlaceholder(
-    seed: String,
-    isNowPlaying: Boolean,
-    nowPlayingIsPlaying: Boolean,
-    nowPlayingIsBuffering: Boolean,
-) {
-    val colors = historyArtworkColors(seed)
-    Box(
-        Modifier
-            .size(50.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(Brush.linearGradient(colors)),
-        contentAlignment = Alignment.Center,
-    ) {
-        val icon = when {
-            !isNowPlaying -> PhoebeIcon.Music
-            nowPlayingIsBuffering -> PhoebeIcon.ActiveDot
-            nowPlayingIsPlaying -> PhoebeIcon.Pause
-            else -> PhoebeIcon.Play
-        }
-        PhoebeIconView(
-            icon,
-            tint = Color.White.copy(alpha = if (isNowPlaying) 0.92f else 0.76f),
-            modifier = Modifier.size(if (isNowPlaying) 19.dp else 17.dp),
-        )
-    }
-}
-
-@Composable
-private fun HistoryIconButton(
-    icon: PhoebeIcon,
-    description: String,
-    onClick: () -> Unit,
-) {
-    Box(
-        Modifier
-            .size(34.dp)
-            .clip(CircleShape)
-            .clickable(onClick = onClick)
-            .background(PhoebeUi.subtleFill)
-            .border(BorderStroke(1.dp, PhoebeUi.border), CircleShape)
-            .semantics {
-                contentDescription = description
-                role = Role.Button
-            },
-        contentAlignment = Alignment.Center,
-    ) {
-        PhoebeIconView(icon, tint = PhoebeUi.secondaryText, modifier = Modifier.size(16.dp))
     }
 }
 
@@ -305,27 +298,4 @@ private fun PlayHistoryEmpty(message: String, modifier: Modifier = Modifier) {
     ) {
         Text(message, color = PhoebeUi.secondaryText, fontSize = 14.sp)
     }
-}
-
-private fun playCountLabel(count: Long): String =
-    if (count == 1L) "1 play" else "$count plays"
-
-private fun historyArtworkColors(seed: String): List<Color> {
-    val hash = seed.hashCode()
-    val hueA = (hash and 0xFF) / 255f
-    val hueB = ((hash shr 8) and 0xFF) / 255f
-    return listOf(
-        Color(
-            red = 0.18f + hueA * 0.24f,
-            green = 0.22f + hueB * 0.22f,
-            blue = 0.36f + (1f - hueA) * 0.28f,
-            alpha = 1f,
-        ),
-        Color(
-            red = 0.42f + hueB * 0.26f,
-            green = 0.24f + (1f - hueA) * 0.22f,
-            blue = 0.36f + hueA * 0.26f,
-            alpha = 1f,
-        ),
-    )
 }

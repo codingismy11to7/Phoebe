@@ -986,6 +986,8 @@ fun MobileSongRow(
     selectionMode: Boolean = false,
     selected: Boolean = false,
     onToggleSelection: (() -> Unit)? = null,
+    playCount: Long? = null,
+    lastPlayedMs: Long? = null,
 ) {
     var menuExpanded by remember(track.id) { mutableStateOf(false) }
     val likeActions = LocalLikeActions.current
@@ -996,8 +998,16 @@ fun MobileSongRow(
     val canLike = likeActions.likesEnabled && track.canTogglePlexLike()
     val liked = likeActions.isLiked(track)
     val downloaded = downloads.isComplete(track)
-    val metadataParts = remember(track, columns, nowMs) {
-        mobileSongMetadataParts(track, columns, nowMs)
+    val metadataParts = remember(track, columns, nowMs, playCount, lastPlayedMs) {
+        buildList {
+            addAll(mobileSongMetadataParts(track, columns, nowMs))
+            if (playCount != null && playCount > 0L) {
+                add(if (playCount == 1L) "1 play" else "$playCount plays")
+            }
+            if (lastPlayedMs != null && lastPlayedMs > 0L) {
+                add("Played ${formatLastPlayed(lastPlayedMs, nowMs)}")
+            }
+        }
     }
     val filepath = remember(track.filepath, columns.filepath) {
         if (columns.filepath) track.filepath?.takeIf { it.isNotBlank() }?.let(::shortenFilepath) ?: "—" else null

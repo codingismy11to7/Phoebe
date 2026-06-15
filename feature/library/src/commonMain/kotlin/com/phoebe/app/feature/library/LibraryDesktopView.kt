@@ -2310,6 +2310,8 @@ fun SongsTableHeader(
     columns: LibraryColumnVisibility,
     showLeadingHandle: Boolean = LocalPlaylistDragEnabled.current,
     showSelectionColumn: Boolean = false,
+    showPlayCount: Boolean = false,
+    showLastPlayed: Boolean = false,
 ) {
     Row(
         Modifier
@@ -2339,6 +2341,8 @@ fun SongsTableHeader(
         if (columns.filepath) TableHeaderCell("File Path", modifier = Modifier.weight(1.4f))
         if (columns.rating) TableHeaderCell("Rating", modifier = Modifier.width(86.dp))
         if (columns.favorite) TableHeaderCell("Fav", modifier = Modifier.width(44.dp))
+        if (showPlayCount) TableHeaderCell("Plays", modifier = Modifier.width(80.dp))
+        if (showLastPlayed) TableHeaderCell("Last Played", modifier = Modifier.width(100.dp))
         Spacer(Modifier.width(102.dp))
     }
 }
@@ -2357,6 +2361,8 @@ fun SongRow(
     showPlaylistDragHandle: Boolean = true,
     selectionMode: Boolean = false,
     sharedKey: String? = "song:${track.id}",
+    playCount: Long? = null,
+    lastPlayedMs: Long? = null,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     val hasMenu = true
@@ -2486,6 +2492,12 @@ fun SongRow(
                 onClick = { likeActions.onToggleLiked(track) },
                 modifier = Modifier.width(44.dp),
             )
+        }
+        if (playCount != null) {
+            TableCellText(if (playCount == 1L) "1 play" else "$playCount plays", modifier = Modifier.width(80.dp), color = PhoebeUi.secondaryText)
+        }
+        if (lastPlayedMs != null) {
+            TableCellText(formatLastPlayed(lastPlayedMs, LocalNowMs.current), modifier = Modifier.width(100.dp), color = PhoebeUi.mutedText)
         }
         Box(Modifier.width(30.dp), contentAlignment = Alignment.Center) {
             TrackStateBadges(
