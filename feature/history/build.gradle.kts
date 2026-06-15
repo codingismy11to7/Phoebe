@@ -6,7 +6,9 @@ kotlin {
     sourceSets {
         commonMain {
             dependencies {
+                implementation(project(":data:catalog"))
                 implementation(project(":data:play-history"))
+                implementation(project(":feature:library"))
             }
         }
     }

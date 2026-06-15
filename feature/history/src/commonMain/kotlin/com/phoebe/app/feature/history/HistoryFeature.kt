@@ -15,6 +15,8 @@ import com.phoebe.app.data.derivationKey
 import com.phoebe.app.data.playHistoryRows
 import com.phoebe.app.data.trackIndexKey
 import com.phoebe.app.domain.CatalogSnapshot
+import com.phoebe.app.domain.LibraryColumnVisibility
+import com.phoebe.app.domain.LibraryUiPreferences
 import com.phoebe.app.domain.PlayHistoryKind
 import com.phoebe.app.domain.Track
 import kotlinx.coroutines.Dispatchers
@@ -33,6 +35,8 @@ data class PlayHistoryUiState(
 fun PlayHistoryRoute(
     viewModel: PlayHistoryViewModel,
     state: PlayHistoryRouteState,
+    libraryUi: LibraryUiPreferences,
+    onLibraryColumns: (LibraryColumnVisibility) -> Unit,
     modifier: Modifier = Modifier,
     bottomContentPadding: Dp = 0.dp,
     onBack: () -> Unit,
@@ -47,6 +51,8 @@ fun PlayHistoryRoute(
     PlayHistoryScreen(
         kind = state.kind,
         state = uiState,
+        libraryUi = libraryUi,
+        onLibraryColumns = onLibraryColumns,
         modifier = modifier,
         nowPlaying = state.nowPlaying,
         bottomContentPadding = bottomContentPadding,
@@ -64,6 +70,8 @@ fun PlayHistoryRoute(
     playHistory: PlayHistorySnapshot,
     resolvedTracksById: Map<String, Track>,
     nowPlaying: HistoryNowPlayingState,
+    libraryUi: LibraryUiPreferences,
+    onLibraryColumns: (LibraryColumnVisibility) -> Unit,
     modifier: Modifier = Modifier,
     bottomContentPadding: Dp = 0.dp,
     onBack: () -> Unit,
@@ -94,6 +102,8 @@ fun PlayHistoryRoute(
             rows = rows,
             rankedTotal = rankedTotal,
         ),
+        libraryUi = libraryUi,
+        onLibraryColumns = onLibraryColumns,
         modifier = modifier,
         nowPlaying = nowPlaying,
         bottomContentPadding = bottomContentPadding,

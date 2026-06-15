@@ -558,6 +558,8 @@ internal fun DesktopPlayer(
                                             ),
                                             loadRankedEntries = browseState.loadPlayHistoryEntries,
                                         ),
+                                        libraryUi = libraryUi,
+                                        onLibraryColumns = onLibraryColumns,
                                         modifier = Modifier.weight(1f).fillMaxWidth(),
                                         onBack = onPopDetail,
                                         onPlayTracks = onPlayTracks,

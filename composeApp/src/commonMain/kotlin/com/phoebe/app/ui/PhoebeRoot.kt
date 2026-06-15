@@ -1252,6 +1252,8 @@ private fun PhoebeRootStateHolder(
                                 ),
                                 loadRankedEntries = loadPlayHistoryEntries,
                             ),
+                            libraryUi = libraryUi,
+                            onLibraryColumns = state::setLibraryColumns,
                             modifier = Modifier.fillMaxSize(),
                             bottomContentPadding = LocalMobileChromePadding.current.bottom,
                             onBack = { navigator.pop() },
