@@ -7,13 +7,12 @@ internal fun loadMacMediaDylib(): Boolean {
     val appResourcesDir = System.getProperty("compose.application.resources.dir")
         ?.trim()
         ?.takeIf { it.isNotEmpty() }
-    val candidates = buildList {
-        if (prop != null) add(File(prop))
-        if (appResourcesDir != null) add(File(appResourcesDir, "libPhoebeMediaKeys.dylib"))
-        val ud = System.getProperty("user.dir") ?: return@buildList
-        add(File(ud, "composeApp/build/native/macos/libPhoebeMediaKeys.dylib"))
-        add(File(ud, "build/native/macos/libPhoebeMediaKeys.dylib"))
-    }.distinctBy { it.absolutePath }
+    val candidates = macMediaDylibCandidates(
+        prop = prop,
+        appResourcesDir = appResourcesDir,
+        userDir = System.getProperty("user.dir"),
+        osArch = System.getProperty("os.arch"),
+    )
     for (f in candidates) {
         if (f.isFile) {
             val loaded = try {
@@ -27,3 +26,27 @@ internal fun loadMacMediaDylib(): Boolean {
     }
     return false
 }
+
+internal fun macMediaDylibCandidates(
+    prop: String?,
+    appResourcesDir: String?,
+    userDir: String?,
+    osArch: String?,
+): List<File> = buildList {
+    if (prop != null) add(File(prop))
+    if (appResourcesDir != null) {
+        add(File(appResourcesDir, "${macMediaKeysResourceDirName(osArch)}/libPhoebeMediaKeys.dylib"))
+        add(File(appResourcesDir, "libPhoebeMediaKeys.dylib"))
+    }
+    if (userDir != null) {
+        add(File(userDir, "composeApp/build/native/macos/libPhoebeMediaKeys.dylib"))
+        add(File(userDir, "build/native/macos/libPhoebeMediaKeys.dylib"))
+    }
+}.distinctBy { it.absolutePath }
+
+private fun macMediaKeysResourceDirName(osArch: String?): String =
+    when (osArch) {
+        "aarch64" -> "macos-arm64"
+        "x86_64", "amd64" -> "macos-x64"
+        else -> "macos"
+    }
