@@ -561,6 +561,7 @@ internal fun DesktopPlayer(
                                         libraryUi = libraryUi,
                                         onLibraryColumns = onLibraryColumns,
                                         modifier = Modifier.weight(1f).fillMaxWidth(),
+                                        preferTableLayout = true,
                                         onBack = onPopDetail,
                                         onPlayTracks = onPlayTracks,
                                         onAddToUpNext = onAddToUpNext,

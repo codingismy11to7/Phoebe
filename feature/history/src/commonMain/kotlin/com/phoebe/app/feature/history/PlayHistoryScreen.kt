@@ -70,6 +70,7 @@ fun PlayHistoryScreen(
     libraryUi: LibraryUiPreferences,
     onLibraryColumns: (LibraryColumnVisibility) -> Unit,
     modifier: Modifier = Modifier,
+    preferTableLayout: Boolean = false,
     nowPlaying: HistoryNowPlayingState = HistoryNowPlayingState(),
     bottomContentPadding: Dp = 0.dp,
     onBack: () -> Unit,
@@ -148,6 +149,7 @@ fun PlayHistoryScreen(
                     rows = sortedRows,
                     showPlayCount = kind == PlayHistoryKind.MostPlayed,
                     libraryUi = libraryUi,
+                    preferTableLayout = preferTableLayout,
                     nowPlaying = nowPlaying,
                     onPlayTracks = onPlayTracks,
                     onAddToUpNext = onAddToUpNext,
@@ -223,6 +225,7 @@ private fun PlayHistoryTracks(
     rows: List<HomePlayedTrack>,
     showPlayCount: Boolean,
     libraryUi: LibraryUiPreferences,
+    preferTableLayout: Boolean,
     nowPlaying: HistoryNowPlayingState,
     onPlayTracks: (List<Track>, Int) -> Unit,
     onAddToUpNext: (Track) -> Unit,
@@ -237,7 +240,7 @@ private fun PlayHistoryTracks(
     val listState = rememberLazyListState()
 
     BoxWithConstraints(modifier) {
-        val useTable = maxWidth >= 640.dp
+        val useTable = preferTableLayout || maxWidth >= 640.dp
         LazyColumn(
             state = listState,
             verticalArrangement = Arrangement.spacedBy(if (useTable) 2.dp else 10.dp),

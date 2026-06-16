@@ -1,5 +1,6 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import org.gradle.api.tasks.JavaExec
+import org.gradle.api.tasks.Sync
 import org.gradle.api.tasks.testing.Test
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.io.File
@@ -376,6 +377,15 @@ private val macosLocalNetworkInfoPlistKeys = """
     <string>Phoebe connects to Jellyfin, Plex, Emby, and other media servers on your home network.</string>
 """.trimIndent()
 
+val macMediaKeysAppResources = layout.buildDirectory.dir("generated/appResources")
+val macMediaKeysResourceDirName = providers.provider {
+    when (System.getProperty("os.arch")) {
+        "aarch64" -> "macos-arm64"
+        "x86_64", "amd64" -> "macos-x64"
+        else -> "macos"
+    }
+}
+
 compose.desktop {
     application {
         mainClass = "com.phoebe.app.MainKt"
@@ -397,6 +407,7 @@ compose.desktop {
             configurationFiles.from(project.file("desktop-release.pro"))
         }
         nativeDistributions {
+            appResourcesRootDir.set(macMediaKeysAppResources)
             targetFormats(TargetFormat.Dmg, TargetFormat.Pkg, TargetFormat.Msi, TargetFormat.Deb)
             modules("java.instrument", "java.management", "java.net.http", "java.sql", "jdk.jfr", "jdk.unsupported")
             packageName = if (phoebeDebugDistribution.get()) "Phoebe Debug" else "Phoebe"
@@ -469,7 +480,18 @@ val compileMacMediaKeysNative = tasks.register<Exec>("compileMacMediaKeysNative"
     )
 }
 
+val syncMacMediaKeyResources = tasks.register<Sync>("syncMacMediaKeyResources") {
+    onlyIf { System.getProperty("os.name").lowercase().contains("mac") }
+    dependsOn(compileMacMediaKeysNative)
+    from(layout.buildDirectory.file("native/macos/libPhoebeMediaKeys.dylib"))
+    into(macMediaKeysAppResources.map { it.dir(macMediaKeysResourceDirName.get()) })
+}
+
 tasks.named("compileKotlinDesktop") { dependsOn(compileMacMediaKeysNative) }
+tasks.matching { it.name in setOf("prepareAppResources", "createDistributable", "runDistributable", "packageDmg", "packagePkg") }
+    .configureEach {
+        dependsOn(syncMacMediaKeyResources)
+    }
 
 val desktopDevRunTaskNames = setOf("run", "hotRunDesktop", "hotDevDesktop", "desktopRunHot")
 
