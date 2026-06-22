@@ -1316,6 +1316,7 @@ fun FavoritePlaylistsMobileView(
                         subtitle = "${playlist.trackCount} songs",
                         thumbUrl = playlist.thumbUrl,
                         accent = true,
+                        sharedKey = "playlist:${playlist.id}",
                         onClick = { onPlaylist(playlist) },
                         onLongClick = { playlistActions.onShufflePlaylist(playlist) },
                     )
@@ -1442,6 +1443,7 @@ fun PlaylistsMobileView(
                             subtitle = "${playlist.trackCount} songs",
                             thumbUrl = playlist.thumbUrl,
                             accent = liked,
+                            sharedKey = "playlist:${playlist.id}",
                             onClick = { onPlaylist(playlist) },
                             onLongClick = { playlistActions.onShufflePlaylist(playlist) },
                         )
@@ -1459,6 +1461,7 @@ fun MobilePlaylistRow(
     subtitle: String?,
     thumbUrl: String? = null,
     accent: Boolean = false,
+    sharedKey: String? = null,
     onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null,
 ) {
@@ -1512,6 +1515,7 @@ fun MobilePlaylistRow(
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.sharedBoundsTransition(sharedKey?.let { "$it:title" }),
             )
             if (subtitle != null) {
                 Text(subtitle, color = PhoebeUi.mutedText, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)

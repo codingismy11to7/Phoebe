@@ -16,15 +16,29 @@ data class PhoebeTintOption(
         val Purple = PhoebeTintOption("purple", "Purple", Color(0xFF9B4DFF), Color(0xFF8B3DFF))
         val Options = listOf(
             PhoebeTintOption("red", "Red", Color(0xFFEF4444), Color(0xFFDC2626)),
+            PhoebeTintOption("scarlet", "Scarlet", Color(0xFFF43F5E), Color(0xFFE11D48)),
             PhoebeTintOption("coral", "Coral", Color(0xFFFF6B5F), Color(0xFFE64B3C)),
+            PhoebeTintOption("orange", "Orange", Color(0xFFF97316), Color(0xFFEA580C)),
             PhoebeTintOption("amber", "Amber", Color(0xFFF59E0B), Color(0xFFD97706)),
+            PhoebeTintOption("gold", "Gold", Color(0xFFFACC15), Color(0xFFEAB308)),
             PhoebeTintOption("yellow", "Yellow", Color(0xFFEAB308), Color(0xFFCA8A04)),
+            PhoebeTintOption("lime", "Lime", Color(0xFF84CC16), Color(0xFF65A30D)),
+            PhoebeTintOption("chartreuse", "Chartreuse", Color(0xFFA3E635), Color(0xFF84CC16)),
             PhoebeTintOption("green", "Green", Color(0xFF22C55E), Color(0xFF16A34A)),
+            PhoebeTintOption("emerald", "Emerald", Color(0xFF10B981), Color(0xFF059669)),
+            PhoebeTintOption("mint", "Mint", Color(0xFF34D399), Color(0xFF10B981)),
             PhoebeTintOption("teal", "Teal", Color(0xFF14B8A6), Color(0xFF0D9488)),
+            PhoebeTintOption("aqua", "Aqua", Color(0xFF22D3EE), Color(0xFF06B6D4)),
+            PhoebeTintOption("cyan", "Cyan", Color(0xFF06B6D4), Color(0xFF0891B2)),
+            PhoebeTintOption("sky", "Sky", Color(0xFF0EA5E9), Color(0xFF0284C7)),
             PhoebeTintOption("blue", "Blue", Color(0xFF3B82F6), Color(0xFF2563EB)),
             PhoebeTintOption("indigo", "Indigo", Color(0xFF6366F1), Color(0xFF4F46E5)),
+            PhoebeTintOption("violet", "Violet", Color(0xFF8B5CF6), Color(0xFF7C3AED)),
             Purple,
+            PhoebeTintOption("fuchsia", "Fuchsia", Color(0xFFD946EF), Color(0xFFC026D3)),
+            PhoebeTintOption("magenta", "Magenta", Color(0xFFC026D3), Color(0xFFA21CAF)),
             PhoebeTintOption("pink", "Pink", Color(0xFFEC4899), Color(0xFFDB2777)),
+            PhoebeTintOption("plum", "Plum", Color(0xFFA855F7), Color(0xFF9333EA)),
         )
 
         fun fromId(id: String?): PhoebeTintOption =

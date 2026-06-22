@@ -1836,7 +1836,15 @@ fun PlaylistDetailPanel(
                             label = "Playlist",
                             alignBackIconToContentStart = !useTable,
                         )
-                        Text(playlist.title, color = PhoebeUi.primaryText, fontSize = 24.sp, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            playlist.title,
+                            color = PhoebeUi.primaryText,
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.Black,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.sharedBoundsTransition("playlist:${playlist.id}:title"),
+                        )
                         PlaylistTrackSummaryLine(
                             totalCount = if (preparingTracks) tracks.size else sortedTracks.size,
                             visibleCount = if (preparingTracks) tracks.size else visibleTracks.size,

@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -378,6 +380,7 @@ private fun SettingsCategoryRow(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun AppearanceSettingsCard(
     isLightMode: Boolean,
@@ -455,17 +458,17 @@ private fun AppearanceSettingsCard(
         Text("Tint", color = PhoebeUi.primaryText, fontSize = 14.sp, fontWeight = FontWeight.Medium)
         Text("Choose the accent color for controls and active states", color = PhoebeUi.secondaryText, fontSize = 12.sp)
         Spacer(Modifier.height(10.dp))
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            PhoebeTintOption.Options.chunked(5).forEach { row ->
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    row.forEach { option ->
-                        TintSwatch(
-                            option = option,
-                            selected = option.id == tintId,
-                            onClick = { onTintChange(option.id) },
-                        )
-                    }
-                }
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            PhoebeTintOption.Options.forEach { option ->
+                TintSwatch(
+                    option = option,
+                    selected = option.id == tintId,
+                    onClick = { onTintChange(option.id) },
+                )
             }
         }
     }
