@@ -89,6 +89,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.mutableStateMapOf
@@ -177,6 +178,11 @@ import kotlinx.coroutines.yield
 import kotlin.math.max
 
 private const val ArtistSimilarArtistDisplayLimit = 20
+
+private data class PlaylistTrackListState(
+    val sortedTracks: List<Track>,
+    val visibleTracks: List<Track>,
+)
 
 @Composable
 fun DetailSectionIntro(
@@ -1711,11 +1717,6 @@ private fun AlbumDetailHeaderText(
     }
 }
 
-private data class PlaylistTrackListState(
-    val sortedTracks: List<Track>,
-    val visibleTracks: List<Track>,
-)
-
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun PlaylistDetailPanel(
@@ -1746,9 +1747,22 @@ fun PlaylistDetailPanel(
     var editModeEnabled by remember(playlist.id) { mutableStateOf(false) }
     var selectedTrackKeys by remember(playlist.id) { mutableStateOf(setOf<String>()) }
     var confirmRemove by remember(playlist.id) { mutableStateOf(false) }
-    var trackListState by remember(playlist.id) { mutableStateOf<PlaylistTrackListState?>(null) }
-    LaunchedEffect(playlist.id, tracks, sortBy, ascending, searchQuery) {
-        trackListState = withContext(Dispatchers.Default) {
+    val initialTrackListState = remember(tracks, searchQuery) {
+        PlaylistTrackListState(
+            sortedTracks = tracks,
+            visibleTracks = if (searchQuery.isBlank()) tracks else emptyList(),
+        )
+    }
+    val trackListState by produceState(
+        initialTrackListState,
+        playlist.id,
+        tracks,
+        sortBy,
+        ascending,
+        searchQuery,
+    ) {
+        value = initialTrackListState
+        value = withContext(Dispatchers.Default) {
             val sorted = sortTracksForLibrary(tracks, sortBy, ascending)
             PlaylistTrackListState(
                 sortedTracks = sorted,
@@ -1756,11 +1770,8 @@ fun PlaylistDetailPanel(
             )
         }
     }
-    val sortedTracks = trackListState?.sortedTracks ?: tracks
-    val visibleTracks = trackListState?.visibleTracks
-        ?: if (searchQuery.isBlank()) tracks else emptyList()
-    val preparingTracks = trackListState == null && visibleTracks.isEmpty() &&
-        (tracks.isNotEmpty() || searchQuery.isNotBlank())
+    val sortedTracks = trackListState.sortedTracks
+    val visibleTracks = trackListState.visibleTracks
     val actionTracks = sortedTracks
     val ratingActions = LocalRatingActions.current
     val favoriteActions = LocalFavoriteActions.current
@@ -1846,8 +1857,8 @@ fun PlaylistDetailPanel(
                             modifier = Modifier.sharedBoundsTransition("playlist:${playlist.id}:title"),
                         )
                         PlaylistTrackSummaryLine(
-                            totalCount = if (preparingTracks) tracks.size else sortedTracks.size,
-                            visibleCount = if (preparingTracks) tracks.size else visibleTracks.size,
+                            totalCount = sortedTracks.size,
+                            visibleCount = visibleTracks.size,
                             searchQuery = searchQuery,
                         )
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1964,18 +1975,7 @@ fun PlaylistDetailPanel(
                         }
                     }
                 }
-                if (preparingTracks) {
-                    item(contentType = "playlist-preparing") {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            CatalogLoadingStrip()
-                            Text(
-                                "Preparing songs...",
-                                color = PhoebeUi.mutedText,
-                                fontSize = 15.sp,
-                            )
-                        }
-                    }
-                } else if (visibleTracks.isEmpty()) {
+                if (visibleTracks.isEmpty()) {
                     item(contentType = "playlist-empty") {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             if (playlist.id in LocalTracksLoading.current && searchQuery.isBlank()) CatalogLoadingStrip()

@@ -217,6 +217,7 @@ import com.phoebe.app.data.trackIndexKey
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.AppScreen
 import com.phoebe.app.domain.Artist
+import com.phoebe.app.domain.AudioAnalysisFrame
 import com.phoebe.app.domain.CollectionEntry
 import com.phoebe.app.domain.CollectionTarget
 import com.phoebe.app.domain.LibraryColumnVisibility
@@ -227,6 +228,7 @@ import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.LocalFolderMediaSourceConfig
 import com.phoebe.app.domain.MediaSourcesState
 import com.phoebe.app.domain.MusicLibrary
+import com.phoebe.app.domain.NowPlayingVisualizerPreset
 import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.Playlist
@@ -373,7 +375,6 @@ private fun PhoebeRootStateHolder(
     val libraries by state.libraries.collectAsState()
     val libraryUi by state.libraryUi.collectAsState()
     val appSettings by state.appSettings.collectAsState()
-    val audioAnalysis by state.audioAnalysis.collectAsState()
     val listenBrainzFeedbackTarget by state.listenBrainzFeedbackTarget.collectAsState()
     val equalizerProfile by state.equalizerProfile.collectAsState()
     val equalizerRemoteUnavailable by state.equalizerRemoteUnavailable.collectAsState()
@@ -1635,6 +1636,7 @@ private fun PhoebeRootStateHolder(
                 }
                 }
             } else {
+                val audioAnalysis by state.audioAnalysis.collectAsState()
                 DesktopPlayer(
                     playerFlow = state.player,
                     shellState = DesktopShellState(
@@ -2174,7 +2176,15 @@ private fun MobilePlayerHost(
 ) {
     val player by appState.player.collectAsState()
     val appSettings by appState.appSettings.collectAsState()
-    val audioAnalysis by appState.audioAnalysis.collectAsState()
+    val collectAudioAnalysis = expansionFraction > 0.6f &&
+        appSettings.nowPlayingVisualizerPreset != NowPlayingVisualizerPreset.Artwork
+    val audioAnalysis by produceState(AudioAnalysisFrame.Empty, collectAudioAnalysis) {
+        if (collectAudioAnalysis) {
+            appState.audioAnalysis.collect { value = it }
+        } else {
+            value = AudioAnalysisFrame.Empty
+        }
+    }
     val equalizerProfile by appState.equalizerProfile.collectAsState()
     val equalizerRemoteUnavailable by appState.equalizerRemoteUnavailable.collectAsState()
     val listenBrainzFeedbackTarget by appState.listenBrainzFeedbackTarget.collectAsState()

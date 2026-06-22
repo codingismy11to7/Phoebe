@@ -1336,15 +1336,9 @@ fun PlaylistsMobileView(
 ) {
     val playlistActions = LocalPlaylistActions.current
     val playlists = playlistActions.playlists
-    var visiblePlaylists by remember { mutableStateOf<List<Playlist>?>(null) }
-    LaunchedEffect(playlists, searchQuery) {
-        visiblePlaylists = withContext(Dispatchers.Default) {
-            filterPlaylistsByQuery(playlists, searchQuery)
-        }
+    val preparedVisiblePlaylists = remember(playlists, searchQuery) {
+        filterPlaylistsByQuery(playlists, searchQuery)
     }
-    val preparedVisiblePlaylists = visiblePlaylists
-        ?: if (searchQuery.isBlank()) playlists else emptyList()
-    val preparingPlaylists = visiblePlaylists == null && preparedVisiblePlaylists.isEmpty() && playlists.isNotEmpty()
 
     Column(
         modifier
@@ -1401,20 +1395,7 @@ fun PlaylistsMobileView(
                         onClick = { playlistActions.onRequestCreatePlaylist(emptyList()) },
                     )
                 }
-                if (preparingPlaylists) {
-                    item(contentType = "loading") {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            LibraryLoadingStrip()
-                            Text(
-                                "Loading playlists...",
-                                color = PhoebeUi.mutedText,
-                                fontSize = 13.sp,
-                                lineHeight = 18.sp,
-                                modifier = Modifier.padding(top = 12.dp, bottom = 8.dp),
-                            )
-                        }
-                    }
-                } else if (playlists.isEmpty()) {
+                if (playlists.isEmpty()) {
                     item(contentType = "empty") {
                         Text(
                             "No playlists yet. Create one or add songs from your library.",
