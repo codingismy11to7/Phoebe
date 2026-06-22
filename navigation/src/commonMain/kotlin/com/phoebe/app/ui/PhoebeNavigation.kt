@@ -32,7 +32,6 @@ import androidx.navigation3.scene.Scene
 import androidx.navigation3.ui.LocalNavAnimatedContentScope
 import androidx.navigation3.ui.NavDisplay
 import androidx.navigation3.ui.defaultPopTransitionSpec
-import androidx.navigation3.ui.defaultPredictivePopTransitionSpec
 import androidx.navigation3.ui.defaultTransitionSpec
 import androidx.compose.animation.core.animate
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -121,19 +120,69 @@ fun PhoebeNavDisplay(
             if (animateTransitions) defaultTransitionSpec() else noPhoebeRouteTransition()
         val popTransitionSpec: AnimatedContentTransitionScope<Scene<PhoebeRoute>>.() -> ContentTransform =
             if (animateTransitions) defaultPopTransitionSpec() else noPhoebeRouteTransition()
-        val predictivePopTransitionSpec: AnimatedContentTransitionScope<Scene<PhoebeRoute>>.(Int) -> ContentTransform =
-            if (animateTransitions) {
-                { edge -> defaultPredictivePopTransitionSpec<PhoebeRoute>().invoke(this, edge) }
-            } else {
-                { _ -> noPhoebeRouteContentTransform() }
-            }
-
-        NavDisplay(
+        PredictiveBackNavDisplay(
             backStack = backStack.ifEmpty { listOf(PhoebeRoute.SignIn) },
             modifier = modifier,
             transitionSpec = transitionSpec,
             popTransitionSpec = popTransitionSpec,
-            predictivePopTransitionSpec = predictivePopTransitionSpec,
+            opaqueSceneBackgrounds = opaqueSceneBackgrounds,
+            onBack = onBack,
+            content = content,
+        )
+    }
+}
+
+@Composable
+private fun PredictiveBackNavDisplay(
+    backStack: List<PhoebeRoute>,
+    modifier: Modifier = Modifier,
+    transitionSpec: AnimatedContentTransitionScope<Scene<PhoebeRoute>>.() -> ContentTransform,
+    popTransitionSpec: AnimatedContentTransitionScope<Scene<PhoebeRoute>>.() -> ContentTransform,
+    opaqueSceneBackgrounds: Boolean,
+    onBack: () -> Unit,
+    content: @Composable (PhoebeRoute) -> Unit,
+) {
+    var predictiveBackActive by remember { mutableStateOf(false) }
+    var predictiveBackProgress by remember { mutableFloatStateOf(0f) }
+
+    LaunchedEffect(backStack) {
+        predictiveBackActive = false
+        predictiveBackProgress = 0f
+    }
+
+    Box(modifier.fillMaxSize()) {
+        if (predictiveBackActive && backStack.size > 1) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        val progress = predictiveBackProgress.coerceIn(0f, 1f)
+                        alpha = (0.78f + progress * 0.22f).coerceIn(0f, 1f)
+                        scaleX = 0.98f + progress * 0.02f
+                        scaleY = 0.98f + progress * 0.02f
+                    },
+            ) {
+                SwipeBackNavEntryContent(backStack[backStack.lastIndex - 1], opaqueSceneBackgrounds, content)
+            }
+        }
+
+        NavDisplay(
+            backStack = backStack,
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    if (predictiveBackActive) {
+                        val progress = predictiveBackProgress.coerceIn(0f, 1f)
+                        val scale = 1f - progress * 0.08f
+                        translationX = size.width * 0.08f * progress
+                        scaleX = scale
+                        scaleY = scale
+                        alpha = 1f - progress * 0.05f
+                    }
+                },
+            transitionSpec = transitionSpec,
+            popTransitionSpec = popTransitionSpec,
+            predictivePopTransitionSpec = { _ -> noPhoebeRouteContentTransform() },
             onBack = onBack,
             entryProvider = entryProvider {
                 entry<PhoebeRoute.SignIn> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
@@ -156,6 +205,23 @@ fun PhoebeNavDisplay(
                 entry<PhoebeRoute.PlaylistDetail> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
                 entry<PhoebeRoute.PlaylistSlugDetail> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
                 entry<PhoebeRoute.Player> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
+            },
+        )
+
+        PlatformBackHandler(
+            enabled = backStack.size > 1,
+            onBack = {
+                predictiveBackActive = false
+                predictiveBackProgress = 0f
+                onBack()
+            },
+            onBackProgress = { progress ->
+                predictiveBackActive = true
+                predictiveBackProgress = progress
+            },
+            onBackCancel = {
+                predictiveBackActive = false
+                predictiveBackProgress = 0f
             },
         )
     }
@@ -352,11 +418,7 @@ private fun SwipeBackNavDisplay(
                 val popTransitionSpec: AnimatedContentTransitionScope<Scene<PhoebeRoute>>.() -> ContentTransform =
                     if (animate) defaultPopTransitionSpec() else noPhoebeRouteTransition()
                 val predictivePopTransitionSpec: AnimatedContentTransitionScope<Scene<PhoebeRoute>>.(Int) -> ContentTransform =
-                    if (animate) {
-                        { edge -> defaultPredictivePopTransitionSpec<PhoebeRoute>().invoke(this, edge) }
-                    } else {
-                        { _ -> noPhoebeRouteContentTransform() }
-                    }
+                    { _ -> noPhoebeRouteContentTransform() }
 
                 NavDisplay(
                     backStack = backStack.ifEmpty { listOf(PhoebeRoute.SignIn) },
