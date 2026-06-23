@@ -46,6 +46,25 @@ class BrowseMediaItemsTest {
     }
 
     @Test
+    fun browseTrackItemHandlesMissingPlayableUri() {
+        val item = browseTrackItem(
+            Track(
+                id = "missing-uri",
+                title = "Missing URI",
+                artist = "Fixture",
+                album = "Tests",
+                durationMs = 0,
+                streamUrl = "",
+                downloadUrl = "",
+                localUri = null,
+            ),
+        )
+
+        assertEquals("missing-uri", item.mediaId)
+        assertEquals("", item.localConfiguration?.uri.toString())
+    }
+
+    @Test
     fun pagedPlaylistSelectionExpandsToFullParentQueue() = runTest {
         val parentId = BrowseMediaIds.playlist("playlist-1")
         val tracks = (0 until 150).map { index ->

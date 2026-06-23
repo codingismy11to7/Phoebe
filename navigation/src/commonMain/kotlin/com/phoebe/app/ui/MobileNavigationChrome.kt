@@ -28,19 +28,43 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import com.phoebe.app.domain.MobileBottomTab
+
+fun MobileBottomTab.browseSection(): BrowseSection = when (this) {
+    MobileBottomTab.Home -> BrowseSection.Home
+    MobileBottomTab.Search -> BrowseSection.Search
+    MobileBottomTab.Library -> BrowseSection.Library
+    MobileBottomTab.Playlists -> BrowseSection.Playlists
+    MobileBottomTab.Radio -> BrowseSection.Radio
+}
+
+fun BrowseSection.mobileBottomTab(): MobileBottomTab? = when (this) {
+    BrowseSection.Home -> MobileBottomTab.Home
+    BrowseSection.Search -> MobileBottomTab.Search
+    BrowseSection.Library -> MobileBottomTab.Library
+    BrowseSection.Playlists -> MobileBottomTab.Playlists
+    BrowseSection.Radio -> MobileBottomTab.Radio
+    BrowseSection.Lyrics,
+    BrowseSection.Settings,
+    -> null
+}
+
+fun MobileBottomTab.iconLabel(): Pair<PhoebeIcon, String> = when (this) {
+    MobileBottomTab.Home -> PhoebeIcon.Home to "Home"
+    MobileBottomTab.Search -> PhoebeIcon.Search to "Search"
+    MobileBottomTab.Library -> PhoebeIcon.Library to "Library"
+    MobileBottomTab.Playlists -> PhoebeIcon.PlaylistPlay to "Playlists"
+    MobileBottomTab.Radio -> PhoebeIcon.Radio to "Radio"
+}
 
 @Composable
 fun MobileBottomNavigation(
     section: BrowseSection,
     onSection: (BrowseSection) -> Unit,
     attachedToMiniPlayer: Boolean = false,
+    tabs: List<MobileBottomTab> = MobileBottomTab.defaultOrder,
 ) {
-    val tabs = listOf(
-        BrowseSection.Home to (PhoebeIcon.Home to "Home"),
-        BrowseSection.Search to (PhoebeIcon.Search to "Search"),
-        BrowseSection.Library to (PhoebeIcon.Library to "Library"),
-        BrowseSection.Playlists to (PhoebeIcon.PlaylistPlay to "Playlists"),
-    )
+    val visibleTabs = tabs.ifEmpty { MobileBottomTab.defaultOrder }
     val topShape = if (attachedToMiniPlayer) {
         RoundedCornerShape(0.dp)
     } else {
@@ -61,8 +85,9 @@ fun MobileBottomNavigation(
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            tabs.forEach { (target, iconLabel) ->
-                val (icon, label) = iconLabel
+            visibleTabs.forEach { tab ->
+                val target = tab.browseSection()
+                val (icon, label) = tab.iconLabel()
                 val active = section == target
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -94,6 +119,7 @@ fun mobileSectionTitle(section: BrowseSection): String = when (section) {
     BrowseSection.Home -> "Home"
     BrowseSection.Search -> "Search"
     BrowseSection.Library -> "Library"
+    BrowseSection.Radio -> "Radio"
     BrowseSection.Lyrics -> "Lyrics"
     BrowseSection.Playlists -> "Playlists"
     BrowseSection.Settings -> "Settings"

@@ -4,6 +4,7 @@ enum class PhoebeIcon {
     Home,
     Search,
     Library,
+    Radio,
     Person,
     Calendar,
     Book,

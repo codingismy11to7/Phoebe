@@ -3,6 +3,7 @@ package com.phoebe.app.feature.settings
 import androidx.lifecycle.ViewModel
 import com.phoebe.app.domain.HomeSection
 import com.phoebe.app.domain.LibraryColumnVisibility
+import com.phoebe.app.domain.MobileBottomTab
 import com.phoebe.app.domain.NowPlayingVisualizerPreset
 import com.phoebe.app.domain.PersonalMixPreferences
 import com.phoebe.app.ui.HomeScreenLayoutMode
@@ -63,6 +64,10 @@ class SettingsViewModel : ViewModel() {
 
     fun onHomeSections(sections: List<HomeSection>) {
         mutableState.update { it?.copy(libraryUi = it.libraryUi.copy(homeSections = sections)) }
+    }
+
+    fun onMobileBottomTabs(tabs: List<MobileBottomTab>) {
+        mutableState.update { it?.copy(libraryUi = it.libraryUi.copy(mobileBottomTabs = tabs)) }
     }
 
     fun onPersonalMix(preferences: PersonalMixPreferences) {

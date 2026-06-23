@@ -286,9 +286,15 @@ data class LikeActions(
     val likedTrackIds: Set<String> = emptySet(),
     val likesEnabled: Boolean = false,
     val onToggleLiked: (Track) -> Unit = {},
+    val likedRadioStreamUrls: Set<String> = emptySet(),
 ) {
-    fun isLiked(track: Track): Boolean =
-        equivalentTrackIds(track.id).any { it in likedTrackIds }
+    fun isLiked(track: Track): Boolean {
+        if (track.id.startsWith("radio:")) {
+            val streamUrl = track.streamUrl.trim().removeSuffix("/")
+            return likedRadioStreamUrls.any { it.trim().removeSuffix("/") == streamUrl }
+        }
+        return equivalentTrackIds(track.id).any { it in likedTrackIds }
+    }
 }
 
 val LocalLikeActions = compositionLocalOf { LikeActions() }

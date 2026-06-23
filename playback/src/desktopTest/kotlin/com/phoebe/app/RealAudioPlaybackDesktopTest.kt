@@ -436,6 +436,54 @@ class RealAudioPlaybackDesktopTest {
     }
 
     @Test
+    fun remoteNoExtensionMp3StreamUsesSampledStreamFromContentType() {
+        assumeRealAudioTestsEnabled()
+
+        val fixture = fixtureBytes("wikimedia-example.mp3")
+        val requestEvents = Collections.synchronizedList(mutableListOf<String>())
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/live") { exchange ->
+            requestEvents += "${exchange.requestMethod}:${exchange.requestURI.path}"
+            serveRemoteMp3(exchange, fixture)
+        }
+        server.start()
+        val diagnostics = RecordingPlaybackDiagnostics()
+        val player = DesktopAudioPlayer(diagnostics)
+        try {
+            val uri = "http://127.0.0.1:${server.address.port}/live"
+            val track = Track(
+                id = "no-extension-live-mp3",
+                title = "No Extension Live MP3",
+                artist = "Fixture",
+                album = "Real Audio Tests",
+                durationMs = 10_000,
+                streamUrl = uri,
+                downloadUrl = "",
+            )
+
+            player.play(listOf(track), 0)
+
+            assertTrue(
+                waitUntil(timeoutMs = 25_000L) {
+                    diagnostics.hasEngine(PlaybackEnginePath.SampledStream) &&
+                        player.state.value.isPlaying &&
+                        diagnostics.hasEnergy(PlaybackEnginePath.SampledStream)
+                },
+                "No-extension remote MP3 should use sampled stream after probing Content-Type; " +
+                    "engines=${diagnostics.engineEvents()} requests=${requestEvents.toList()} " +
+                    "errors=${diagnostics.errorEvents()}",
+            )
+            assertFalse(
+                diagnostics.hasEngine(PlaybackEnginePath.JavaFxMediaPlayer),
+                "No-extension remote MP3 should not fall through to JavaFX once sampled streaming starts.",
+            )
+        } finally {
+            player.releaseForTests()
+            server.stop(0)
+        }
+    }
+
+    @Test
     fun remoteMp3UsesJavaFxDownloadFallbackWhenStreamEndpointIsNotPlayable() {
         assumeRealAudioTestsEnabled()
 

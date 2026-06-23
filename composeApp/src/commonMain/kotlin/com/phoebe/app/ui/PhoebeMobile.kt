@@ -36,6 +36,10 @@ import com.phoebe.app.feature.library.LibraryRouteState
 import com.phoebe.app.feature.library.PlaylistsMobileRoute
 import com.phoebe.app.feature.library.PlaylistsRouteActions
 import com.phoebe.app.feature.library.PlaylistsRouteState
+import com.phoebe.app.feature.library.LibrarySectionIndexMode
+import com.phoebe.app.feature.radio.RadioRoute
+import com.phoebe.app.feature.radio.RadioRouteActions
+import com.phoebe.app.feature.radio.RadioRouteState
 import com.phoebe.app.feature.search.SearchDesktopRouteActions
 import com.phoebe.app.feature.search.SearchMobileRoute
 import com.phoebe.app.feature.settings.SettingsMobileRoute
@@ -195,6 +199,7 @@ import com.phoebe.app.domain.CollectionEntry
 import com.phoebe.app.domain.EqualizerProfile
 import com.phoebe.app.domain.LocalFolderMediaSourceConfig
 import com.phoebe.app.domain.MediaSourcesState
+import com.phoebe.app.domain.MobileBottomTab
 import com.phoebe.app.domain.MusicLibrary
 import com.phoebe.app.domain.NowPlayingVisualizerPreset
 import com.phoebe.app.domain.PersonalMixPreferences
@@ -202,6 +207,9 @@ import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.PlexRadioStation
+import com.phoebe.app.domain.RadioDirectoryState
+import com.phoebe.app.domain.RadioStation
+import com.phoebe.app.domain.RadioStationSearchQuery
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.defaultCollectionEntries
@@ -274,6 +282,15 @@ internal fun MobileBrowseShell(
     radioStations: List<PlexRadioStation> = emptyList(),
     radioStartingIds: Set<String> = emptySet(),
     onPlayRadioStation: (PlexRadioStation) -> Unit = {},
+    internetRadioDirectory: RadioDirectoryState = RadioDirectoryState(),
+    internetRadioStartingIds: Set<String> = emptySet(),
+    onInternetRadioSearch: (RadioStationSearchQuery) -> Unit = {},
+    onInternetRadioLoadMore: () -> Unit = {},
+    onInternetRadioRefreshPopular: () -> Unit = {},
+    onPlayInternetRadioStation: (RadioStation) -> Unit = {},
+    onAddManualRadioStation: (String, String) -> Unit = { _, _ -> },
+    onUpdateManualRadioStation: (RadioStation, String, String) -> Unit = { _, _, _ -> },
+    onDeleteManualRadioStation: (RadioStation) -> Unit = {},
     onPlayPersonalMix: () -> Unit = {},
     onPlayTracks: (List<Track>, Int) -> Unit,
     onAddToUpNext: (Track) -> Unit,
@@ -293,11 +310,14 @@ internal fun MobileBrowseShell(
     onLibraryAscending: (Boolean) -> Unit,
     onLibraryColumns: (LibraryColumnVisibility) -> Unit,
     onHomeSections: (List<HomeSection>) -> Unit,
+    onMobileBottomTabs: (List<MobileBottomTab>) -> Unit = {},
     onPersonalMix: (PersonalMixPreferences) -> Unit,
     onAlbumGridItemSize: (Int) -> Unit,
     onArtistGridItemSize: (Int) -> Unit,
     onExportFavoritePlaylists: () -> Unit,
     onImportFavoritePlaylists: () -> Unit,
+    onExportRadioStations: () -> Unit,
+    onImportRadioStations: () -> Unit,
     appSettings: AppSettings,
     homeScreenLayoutMode: HomeScreenLayoutMode = HomeScreenLayoutMode.Default,
     onCrossfadeSeconds: (Int) -> Unit,
@@ -396,11 +416,14 @@ internal fun MobileBrowseShell(
                         onVisualizerPreset = onVisualizerPreset,
                         onBlurredArtworkAppearance = onBlurredArtworkAppearance,
                         onHomeSections = onHomeSections,
+                        onMobileBottomTabs = onMobileBottomTabs,
                         onPersonalMix = onPersonalMix,
                         onAlbumGridItemSize = onAlbumGridItemSize,
                         onArtistGridItemSize = onArtistGridItemSize,
                         onExportFavoritePlaylists = onExportFavoritePlaylists,
                         onImportFavoritePlaylists = onImportFavoritePlaylists,
+                        onExportRadioStations = onExportRadioStations,
+                        onImportRadioStations = onImportRadioStations,
                         onHomeScreenLayoutModeChange = onHomeScreenLayoutModeChange,
                         onConnectListenBrainz = onConnectListenBrainz,
                         onDisconnectListenBrainz = onDisconnectListenBrainz,
@@ -546,6 +569,26 @@ internal fun MobileBrowseShell(
                     ),
                     modifier = Modifier.fillMaxSize().padding(top = chromePadding.top, bottom = chromePadding.bottom),
                 )
+                section == BrowseSection.Radio && selectedPlaylistId == null -> RadioRoute(
+                    state = RadioRouteState(internetRadioDirectory, internetRadioStartingIds),
+                    actions = RadioRouteActions(
+                        onSearch = onInternetRadioSearch,
+                        onLoadMore = onInternetRadioLoadMore,
+                        onRefreshPopular = onInternetRadioRefreshPopular,
+                        onPlay = onPlayInternetRadioStation,
+                        onAddManualStation = onAddManualRadioStation,
+                        onUpdateManualStation = onUpdateManualRadioStation,
+                        onDeleteManualStation = onDeleteManualRadioStation,
+                    ),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(
+                        start = 20.dp,
+                        top = chromePadding.top,
+                        end = 20.dp,
+                        bottom = chromePadding.bottom,
+                    ),
+                    sectionIndexMode = LibrarySectionIndexMode.MobileScrollbar,
+                )
                 else -> DesktopContent(
                     catalog = catalog,
                     catalogRefreshing = catalogRefreshing,
@@ -568,6 +611,15 @@ internal fun MobileBrowseShell(
                     onLibrarySortBy = onLibrarySortBy,
                     onLibraryAscending = onLibraryAscending,
                     onLibraryColumns = onLibraryColumns,
+                    radioDirectory = internetRadioDirectory,
+                    internetRadioStartingIds = internetRadioStartingIds,
+                    onRadioSearch = onInternetRadioSearch,
+                    onRadioLoadMore = onInternetRadioLoadMore,
+                    onRadioRefreshPopular = onInternetRadioRefreshPopular,
+                    onRadioPlay = onPlayInternetRadioStation,
+                    onRadioAddManualStation = onAddManualRadioStation,
+                    onRadioUpdateManualStation = onUpdateManualRadioStation,
+                    onRadioDeleteManualStation = onDeleteManualRadioStation,
                     edgePadding = 20.dp,
                     headlineFontSize = 22.sp,
                     headlineLineHeight = 26.sp,

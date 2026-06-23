@@ -157,8 +157,10 @@ internal fun DesktopPlayer(
     val supportedCollectionEntries = browseState.supportedCollectionEntries
     val decadeMixNotice = browseState.decadeMixNotice
     val radioStations = browseState.radioStations
+    val radioDirectory = browseState.radioDirectory
     val artistRadioAvailability = browseState.artistRadioAvailability
     val radioStartingIds = browseState.radioStartingIds
+    val internetRadioStartingIds = browseState.internetRadioStartingIds
     val appMessage = authSetupState.appMessage
     val pinCode = authSetupState.pinCode
     val authInProgress = authSetupState.authInProgress
@@ -204,6 +206,13 @@ internal fun DesktopPlayer(
     val onPlayDecadeMix = browseActions.onPlayDecadeMix
     val onClearDecadeMixNotice = browseActions.onClearDecadeMixNotice
     val onPlayRadioStation = browseActions.onPlayRadioStation
+    val onRadioSearch = browseActions.onRadioSearch
+    val onRadioLoadMore = browseActions.onRadioLoadMore
+    val onRadioRefreshPopular = browseActions.onRadioRefreshPopular
+    val onRadioPlay = browseActions.onRadioPlay
+    val onRadioAddManualStation = browseActions.onRadioAddManualStation
+    val onRadioUpdateManualStation = browseActions.onRadioUpdateManualStation
+    val onRadioDeleteManualStation = browseActions.onRadioDeleteManualStation
     val onPlayPersonalMix = browseActions.onPlayPersonalMix
     val onPopDetail = browseActions.onPopDetail
     val onPlayTracks = browseActions.onPlayTracks
@@ -259,11 +268,14 @@ internal fun DesktopPlayer(
     val onBackToServerPicker = authSetupActions.onBackToServerPicker
     val onRetryServers = authSetupActions.onRetryServers
     val onHomeSections = settingsActions.onHomeSections
+    val onMobileBottomTabs = settingsActions.onMobileBottomTabs
     val onPersonalMix = settingsActions.onPersonalMix
     val onAlbumGridItemSize = settingsActions.onAlbumGridItemSize
     val onArtistGridItemSize = settingsActions.onArtistGridItemSize
     val onExportFavoritePlaylists = settingsActions.onExportFavoritePlaylists
     val onImportFavoritePlaylists = settingsActions.onImportFavoritePlaylists
+    val onExportRadioStations = settingsActions.onExportRadioStations
+    val onImportRadioStations = settingsActions.onImportRadioStations
     val onCrossfadeSeconds = settingsActions.onCrossfadeSeconds
     val onScanLibraryOnLaunch = settingsActions.onScanLibraryOnLaunch
     val onNotifyWhenDownloadFinishes = settingsActions.onNotifyWhenDownloadFinishes
@@ -758,11 +770,14 @@ internal fun DesktopPlayer(
                                             onVisualizerPreset = onVisualizerPresetFromSettings,
                                             onBlurredArtworkAppearance = onBlurredArtworkAppearance,
                                             onHomeSections = onHomeSections,
+                                            onMobileBottomTabs = onMobileBottomTabs,
                                             onPersonalMix = onPersonalMix,
                                             onAlbumGridItemSize = onAlbumGridItemSize,
                                             onArtistGridItemSize = onArtistGridItemSize,
                                             onExportFavoritePlaylists = onExportFavoritePlaylists,
                                             onImportFavoritePlaylists = onImportFavoritePlaylists,
+                                            onExportRadioStations = onExportRadioStations,
+                                            onImportRadioStations = onImportRadioStations,
                                             onHomeScreenLayoutModeChange = settingsActions.onHomeScreenLayoutModeChange,
                                             onConnectListenBrainz = onConnectListenBrainz,
                                             onDisconnectListenBrainz = onDisconnectListenBrainz,
@@ -794,6 +809,15 @@ internal fun DesktopPlayer(
                                         onLibrarySortBy = onLibrarySortBy,
                                         onLibraryAscending = onLibraryAscending,
                                         onLibraryColumns = onLibraryColumns,
+                                        radioDirectory = radioDirectory,
+                                        internetRadioStartingIds = internetRadioStartingIds,
+                                        onRadioSearch = onRadioSearch,
+                                        onRadioLoadMore = onRadioLoadMore,
+                                        onRadioRefreshPopular = onRadioRefreshPopular,
+                                        onRadioPlay = onRadioPlay,
+                                        onRadioAddManualStation = onRadioAddManualStation,
+                                        onRadioUpdateManualStation = onRadioUpdateManualStation,
+                                        onRadioDeleteManualStation = onRadioDeleteManualStation,
                                         onDownloadPlaylist = onDownloadPlaylist,
                                     )
                                 }

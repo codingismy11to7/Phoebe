@@ -364,7 +364,9 @@ private fun PhoebeRootStateHolder(
     val pendingUpdateInstallConfirmation by state.pendingUpdateInstallConfirmation.collectAsState()
     val decadeMixNotice by state.decadeMixNotice.collectAsState()
     val radioStations by state.radioStations.collectAsState()
+    val radioDirectory by state.radioDirectory.collectAsState()
     val radioStartingIds by state.radioStartingIds.collectAsState()
+    val internetRadioStartingIds by state.internetRadioStartingIds.collectAsState()
     val artistRadioAvailability by state.artistRadioAvailability.collectAsState()
     val downloadDirectory by state.downloadDirectory.collectAsState()
     val pin by state.pin.collectAsState()
@@ -387,6 +389,17 @@ private fun PhoebeRootStateHolder(
     val topRecentlyPlayed by state.topRecentlyPlayed.collectAsState()
     val upNext = playerQueue.upNext
     val currentTrack = shellPlayback.currentTrack
+    val effectiveInternetRadioStartingIds = remember(internetRadioStartingIds, shellPlayback.currentTrack?.id, shellPlayback.isBuffering) {
+        val bufferingRadioId = shellPlayback.currentTrack
+            ?.id
+            ?.takeIf { shellPlayback.isBuffering && it.startsWith("radio:") }
+            ?.removePrefix("radio:")
+        if (bufferingRadioId == null) {
+            internetRadioStartingIds
+        } else {
+            internetRadioStartingIds + bufferingRadioId
+        }
+    }
     val currentIndex = playerQueue.currentIndex.takeIf { it >= 0 } ?: 0
     var suppressInitialNavigationRequest by remember(state) {
         mutableStateOf(navigationPath != null)
@@ -768,6 +781,13 @@ private fun PhoebeRootStateHolder(
     LaunchedEffect(session?.selectedServer?.id, session?.selectedLibrary?.key) {
         state.refreshRadioStations()
     }
+    LaunchedEffect(browseSection, libraryUi.mobileBottomTabs) {
+        val currentTab = browseSection.mobileBottomTab()
+        if (currentTab != null && currentTab !in libraryUi.mobileBottomTabs) {
+            navigator.openBrowse(libraryUi.mobileBottomTabs.first().browseSection())
+            selectedPlaylistId = null
+        }
+    }
     val openRecentSongs: () -> Unit = {
         selectedPlaylistId = null
         navigator.openBrowse(BrowseSection.Home)
@@ -868,14 +888,21 @@ private fun PhoebeRootStateHolder(
         )
     }
     val likedTracksKey = if (trackHeavySectionsEnabled) catalog.trackIndexKey() else -1L
-    val likeActions = remember(catalogActionsKey, likedTracksKey, sessionKey) {
+    val likeActions = remember(catalogActionsKey, likedTracksKey, sessionKey, radioDirectory.manualStations) {
         val likedPlaylist = catalog.playlists.firstOrNull { it.isLikedSongsPlaylist() }
         LikeActions(
             likedTrackIds = likedPlaylist?.let { playlist ->
                 catalog.tracksByParent[playlist.id].orEmpty().map { it.id }.toSet()
             }.orEmpty(),
             likesEnabled = session.supportsRemotePlaylists(),
-            onToggleLiked = { track -> state.toggleLikedTrack(track) },
+            onToggleLiked = { track ->
+                if (track.id.startsWith("radio:")) {
+                    state.toggleFavoriteRadioStation(track)
+                } else {
+                    state.toggleLikedTrack(track)
+                }
+            },
+            likedRadioStreamUrls = radioDirectory.manualStations.map { it.streamUrl }.toSet(),
         )
     }
     val trackRatingIndex = remember(catalogTrackIndexKey) {
@@ -1393,6 +1420,7 @@ private fun PhoebeRootStateHolder(
                                 scopedScreen is AppScreen.PlaylistDetail ||
                                 selectedPlaylistId != null ||
                                 browseSection == BrowseSection.Library ||
+                                browseSection == BrowseSection.Radio ||
                                 browseSection == BrowseSection.Playlists ||
                                 browseSection == BrowseSection.Settings
                             if (!scoped && newQuery.isNotBlank()) {
@@ -1426,6 +1454,15 @@ private fun PhoebeRootStateHolder(
                         radioStations = radioStations,
                         radioStartingIds = radioStartingIds,
                         onPlayRadioStation = state::playRadioStation,
+                        internetRadioDirectory = radioDirectory,
+                        internetRadioStartingIds = effectiveInternetRadioStartingIds,
+                        onInternetRadioSearch = state::searchInternetRadio,
+                        onInternetRadioLoadMore = state::loadMoreInternetRadio,
+                        onInternetRadioRefreshPopular = state::refreshInternetRadio,
+                        onPlayInternetRadioStation = state::playInternetRadioStation,
+                        onAddManualRadioStation = state::addManualRadioStation,
+                        onUpdateManualRadioStation = state::updateManualRadioStation,
+                        onDeleteManualRadioStation = state::deleteManualRadioStation,
                         onPlayPersonalMix = playPersonalMix,
                         onPlayTracks = playTracksFromMobile,
                         onAddToUpNext = state::addToUpNext,
@@ -1442,11 +1479,14 @@ private fun PhoebeRootStateHolder(
                         onLibraryAscending = state::setLibrarySortAscending,
                         onLibraryColumns = state::setLibraryColumns,
                         onHomeSections = state::setHomeSections,
+                        onMobileBottomTabs = state::setMobileBottomTabs,
                         onPersonalMix = state::setPersonalMixPreferences,
                         onAlbumGridItemSize = state::setAlbumGridItemSize,
                         onArtistGridItemSize = state::setArtistGridItemSize,
                         onExportFavoritePlaylists = state::exportFavoritePlaylists,
                         onImportFavoritePlaylists = state::importFavoritePlaylists,
+                        onExportRadioStations = state::exportRadioStations,
+                        onImportRadioStations = state::importRadioStations,
                         appSettings = appSettings,
                         homeScreenLayoutMode = homeScreenLayoutMode,
                         onCrossfadeSeconds = state::setCrossfadeSeconds,
@@ -1522,6 +1562,7 @@ private fun PhoebeRootStateHolder(
                                     selectedPlaylistId = null
                                 },
                                 attachedToMiniPlayer = currentTrack != null,
+                                tabs = libraryUi.mobileBottomTabs,
                             )
                         }
                     }
@@ -1721,8 +1762,10 @@ private fun PhoebeRootStateHolder(
                         supportedCollectionEntries = supportedCollectionEntries,
                         decadeMixNotice = decadeMixNotice,
                         radioStations = radioStations,
+                        radioDirectory = radioDirectory,
                         artistRadioAvailability = artistRadioAvailability,
                         radioStartingIds = radioStartingIds,
+                        internetRadioStartingIds = effectiveInternetRadioStartingIds,
                     ),
                     browseActions = BrowseActions(
                         onNavigate = { section ->
@@ -1748,6 +1791,7 @@ private fun PhoebeRootStateHolder(
                                 screen is AppScreen.PlaylistDetail ||
                                 selectedPlaylistId != null ||
                                 browseSection == BrowseSection.Library ||
+                                browseSection == BrowseSection.Radio ||
                                 browseSection == BrowseSection.Playlists ||
                                 browseSection == BrowseSection.Settings
                             if (
@@ -1786,6 +1830,13 @@ private fun PhoebeRootStateHolder(
                         onPlayDecadeMix = state::playDecadeMix,
                         onClearDecadeMixNotice = state::clearDecadeMixNotice,
                         onPlayRadioStation = state::playRadioStation,
+                        onRadioSearch = state::searchInternetRadio,
+                        onRadioLoadMore = state::loadMoreInternetRadio,
+                        onRadioRefreshPopular = state::refreshInternetRadio,
+                        onRadioPlay = state::playInternetRadioStation,
+                        onRadioAddManualStation = state::addManualRadioStation,
+                        onRadioUpdateManualStation = state::updateManualRadioStation,
+                        onRadioDeleteManualStation = state::deleteManualRadioStation,
                         onPlayPersonalMix = playPersonalMix,
                         onPopDetail = { navigator.pop() },
                         onPlayTracks = playTracks,
@@ -1847,11 +1898,14 @@ private fun PhoebeRootStateHolder(
                     ),
                     settingsActions = SettingsActions(
                         onHomeSections = state::setHomeSections,
+                        onMobileBottomTabs = state::setMobileBottomTabs,
                         onPersonalMix = state::setPersonalMixPreferences,
                         onAlbumGridItemSize = state::setAlbumGridItemSize,
                         onArtistGridItemSize = state::setArtistGridItemSize,
                         onExportFavoritePlaylists = state::exportFavoritePlaylists,
                         onImportFavoritePlaylists = state::importFavoritePlaylists,
+                        onExportRadioStations = state::exportRadioStations,
+                        onImportRadioStations = state::importRadioStations,
                         onCrossfadeSeconds = state::setCrossfadeSeconds,
                         onScanLibraryOnLaunch = state::setScanLibraryOnLaunch,
                         onNotifyWhenDownloadFinishes = state::setNotifyWhenDownloadFinishes,
@@ -2104,6 +2158,7 @@ private fun catalogHasContentForSurface(
                 LibraryFilterTab.Albums -> catalog.albums.isNotEmpty()
                 LibraryFilterTab.Songs -> catalog.tracksByParent.values.any { it.isNotEmpty() }
             }
+            BrowseSection.Radio -> true
             BrowseSection.Lyrics -> true
             BrowseSection.Playlists -> catalog.playlists.isNotEmpty()
             BrowseSection.Settings -> true

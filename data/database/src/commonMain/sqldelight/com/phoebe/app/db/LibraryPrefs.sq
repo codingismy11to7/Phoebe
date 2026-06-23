@@ -16,6 +16,7 @@ CREATE TABLE LibraryPrefsRow (
     colRating INTEGER NOT NULL DEFAULT 1,
     colFavorite INTEGER NOT NULL DEFAULT 1,
     homeSections TEXT NOT NULL DEFAULT 'Mixes,Collections,FavoritePlaylists,FavoriteArtists,FavoriteAlbums,RecentSongs,RecentArtists,RecentAlbums,Played,Random',
+    mobileBottomTabs TEXT NOT NULL DEFAULT 'Home,Search,Library,Playlists,Radio',
     personalMix TEXT NOT NULL DEFAULT '{"limit":50,"heavyRotationWeight":25,"recentWeight":30,"mostPlayedWeight":25,"similarWeight":15,"discoveryWeight":5}',
     gridColumns INTEGER NOT NULL DEFAULT 3,
     albumGridItemSizeDp INTEGER NOT NULL DEFAULT 160,
@@ -29,8 +30,8 @@ upsert:
 INSERT OR REPLACE INTO LibraryPrefsRow(
     id, sortBy, ascending,
     colYear, colGenre, colFilepath, colAudioCodec, colBitrate,
-    colDuration, colSampleRate, colFileType, colDateAdded, colRating, colFavorite, homeSections, personalMix, gridColumns, albumGridItemSizeDp, artistGridItemSizeDp
-) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    colDuration, colSampleRate, colFileType, colDateAdded, colRating, colFavorite, homeSections, mobileBottomTabs, personalMix, gridColumns, albumGridItemSizeDp, artistGridItemSizeDp
+) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 clear:
 DELETE FROM LibraryPrefsRow;

@@ -17,6 +17,7 @@ import com.phoebe.app.domain.LibraryTab
 import com.phoebe.app.domain.LyricsLoadState
 import com.phoebe.app.domain.MediaProviderType
 import com.phoebe.app.domain.MusicLibrary
+import com.phoebe.app.domain.MobileBottomTab
 import com.phoebe.app.domain.NowPlayingVisualizerPreset
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.PlayHistoryKind
@@ -30,6 +31,9 @@ import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.PersonalMixPreferences
 import com.phoebe.app.domain.RepeatMode
+import com.phoebe.app.domain.RadioDirectoryState
+import com.phoebe.app.domain.RadioStation
+import com.phoebe.app.domain.RadioStationSearchQuery
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.TrackMetadataUpdate
 import com.phoebe.app.domain.canTogglePlexLike
@@ -178,6 +182,7 @@ class AppState(
             ),
         )
     val libraryUi = dependencies.libraryUiRepository.preferences
+    val radioDirectory: StateFlow<RadioDirectoryState> = dependencies.radioRepository.state
     val appSettings = dependencies.appSettingsRepository.settings
     val listenBrainzFeedbackTarget = dependencies.listenBrainzPlaybackReporter.feedbackTarget
     val listenBrainzCredentialAvailability = dependencies.listenBrainzAccountRepository.storageAvailability
@@ -253,6 +258,9 @@ class AppState(
 
     private val mutableRadioStartingIds = MutableStateFlow<Set<String>>(emptySet())
     val radioStartingIds: StateFlow<Set<String>> = mutableRadioStartingIds
+
+    private val mutableInternetRadioStartingIds = MutableStateFlow<Set<String>>(emptySet())
+    val internetRadioStartingIds: StateFlow<Set<String>> = mutableInternetRadioStartingIds
 
     private val mutableArtistRadioAvailability = MutableStateFlow<Map<String, ArtistRadioAvailability>>(emptyMap())
     val artistRadioAvailability: StateFlow<Map<String, ArtistRadioAvailability>> = mutableArtistRadioAvailability
@@ -337,6 +345,7 @@ class AppState(
                 setVolume(restoredSettings.savedVolume)
             }
             dependencies.libraryUiRepository.restore()
+            dependencies.radioRepository.restore()
             dependencies.searchHistoryRepository.restore()
             dependencies.audioPlayer.setCrossfadeDurationMs(appSettings.value.crossfadeSeconds * 1_000L)
             dependencies.playHistoryRepository.restore()
@@ -347,6 +356,7 @@ class AppState(
                 refreshServers()
             }
             dependencies.catalogRepository.restoreCachedCatalog()
+            refreshInternetRadio()
             syncLightweightRemoteStateInBackground()
             val hasRemoteLibrary = session.value?.selectedLibrary != null
             val hasLocalFolders = mediaSources.value.localFolders.any { it.enabled }
@@ -1330,8 +1340,40 @@ class AppState(
         }
     }
 
-    suspend fun resolveTracksByIds(trackIds: Collection<String>): Map<String, Track> =
-        dependencies.catalogRepository.resolveTracksByIds(trackIds)
+    suspend fun resolveTracksByIds(trackIds: Collection<String>): Map<String, Track> {
+        val (radioIds, catalogIds) = trackIds.partition { it.startsWith("radio:") }
+        val catalogTracks = if (catalogIds.isNotEmpty()) {
+            dependencies.catalogRepository.resolveTracksByIds(catalogIds)
+        } else {
+            emptyMap()
+        }
+        val radioTracks = radioIds.mapNotNull { radioId ->
+            val stationId = radioId.removePrefix("radio:")
+            val station = dependencies.radioRepository.findStationById(stationId)
+            if (station != null) {
+                val track = runCatching { dependencies.radioRepository.stationTrack(station) }.getOrNull()
+                if (track != null) {
+                    radioId to track
+                } else {
+                    null
+                }
+            } else {
+                null
+            }
+        }.toMap()
+        return catalogTracks + radioTracks
+    }
+
+    fun toggleFavoriteRadioStation(track: Track) = scope.launch {
+        val streamUrl = track.streamUrl ?: return@launch
+        val existing = radioDirectory.value.manualStations.find { it.streamUrl == streamUrl }
+        if (existing != null) {
+            dependencies.radioRepository.deleteManualStation(existing.id)
+        } else {
+            dependencies.radioRepository.addManualStation(track.title, streamUrl)
+                .onFailure { mutableMessage.value = it.message ?: "Couldn't add radio station." }
+        }
+    }
 
     suspend fun queryPlayHistoryEntries(kind: PlayHistoryKind, limit: Int): PlayHistoryRankedEntries =
         dependencies.playHistoryRepository.queryRankedEntries(kind, limit)
@@ -1768,6 +1810,10 @@ class AppState(
         dependencies.libraryPreferencesService.setHomeSections(sections)
     }
 
+    fun setMobileBottomTabs(tabs: List<MobileBottomTab>) = scope.launch {
+        dependencies.libraryPreferencesService.setMobileBottomTabs(tabs)
+    }
+
     fun setPersonalMixPreferences(preferences: PersonalMixPreferences) = scope.launch {
         dependencies.libraryPreferencesService.setPersonalMix(preferences)
     }
@@ -1778,6 +1824,62 @@ class AppState(
 
     fun setArtistGridItemSize(sizeDp: Int) = scope.launch {
         dependencies.libraryPreferencesService.setArtistGridItemSize(sizeDp)
+    }
+
+    fun refreshInternetRadio() = scope.launch {
+        dependencies.radioRepository.refreshPopular()
+    }
+
+    fun searchInternetRadio(query: RadioStationSearchQuery) = scope.launch {
+        dependencies.radioRepository.search(query)
+    }
+
+    fun loadMoreInternetRadio() = scope.launch {
+        dependencies.radioRepository.loadMore()
+    }
+
+    fun addManualRadioStation(name: String, streamUrl: String) = scope.launch {
+        dependencies.radioRepository.addManualStation(name, streamUrl)
+            .onFailure { mutableMessage.value = it.message ?: "Couldn't add radio station." }
+    }
+
+    fun updateManualRadioStation(station: RadioStation, name: String, streamUrl: String) = scope.launch {
+        dependencies.radioRepository.updateManualStation(station.id, name, streamUrl)
+            .onFailure { mutableMessage.value = it.message ?: "Couldn't update radio station." }
+    }
+
+    fun deleteManualRadioStation(station: RadioStation) = scope.launch {
+        dependencies.radioRepository.deleteManualStation(station.id)
+    }
+
+    fun playInternetRadioStation(station: RadioStation) = scope.launch {
+        mutableInternetRadioStartingIds.value = mutableInternetRadioStartingIds.value + station.id
+        val track = runCatching { dependencies.radioRepository.stationTrack(station) }
+            .getOrElse { error ->
+                mutableInternetRadioStartingIds.value = mutableInternetRadioStartingIds.value - station.id
+                val message = error.message ?: "Couldn't start ${station.name}."
+                mutableMessage.value = message
+                mutablePlaybackSnackbar.value = message
+                return@launch
+        }
+        try {
+            if (playTracks(listOf(track), 0, clearShuffle = true)) {
+                mutableMessage.value = "Playing ${station.name}."
+                surfaceInternetRadioStartupTimeout(track, station)
+            }
+        } finally {
+            mutableInternetRadioStartingIds.value = mutableInternetRadioStartingIds.value - station.id
+        }
+    }
+
+    private fun surfaceInternetRadioStartupTimeout(track: Track, station: RadioStation) = scope.launch {
+        delay(InternetRadioStartupTimeoutMs)
+        val playback = dependencies.audioPlayer.state.value
+        if (playback.currentTrack?.id != track.id || !playback.isBuffering) return@launch
+        dependencies.audioPlayer.stopPlayback()
+        val message = "Couldn't start ${station.name}."
+        mutableMessage.value = message
+        mutablePlaybackSnackbar.value = message
     }
 
     fun prependRecentSearch(item: RecentSearchItem) = scope.launch {
@@ -2150,6 +2252,14 @@ class AppState(
         mutableMessage.value = dependencies.catalogItemMutationService.importFavoritePlaylists()
     }
 
+    fun exportRadioStations() = scope.launch {
+        mutableMessage.value = dependencies.catalogItemMutationService.exportRadioStations()
+    }
+
+    fun importRadioStations() = scope.launch {
+        mutableMessage.value = dependencies.catalogItemMutationService.importRadioStations()
+    }
+
     fun addLocalFolderFromUri(rootUri: String?) = scope.launch {
         if (rootUri.isNullOrBlank()) return@launch
         val label = rootUri.trimEnd('/').substringAfterLast('/').substringBefore('?', "Local").ifBlank { "Local" }
@@ -2344,6 +2454,8 @@ private data class PlaybackHistoryRecord(
 private const val PlaybackHistoryDedupeWindowMs = 30_000L
 
 private const val ProviderPlayHistoryDebounceMs = 8_000L
+
+private const val InternetRadioStartupTimeoutMs = 30_000L
 
 private const val PLEX_SIGN_IN_TIMEOUT_MS = 20_000L
 

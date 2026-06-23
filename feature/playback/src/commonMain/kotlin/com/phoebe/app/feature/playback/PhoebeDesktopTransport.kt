@@ -103,9 +103,10 @@ fun DesktopTransport(
     )
     val likeActions = LocalLikeActions.current
     val trackNavigationActions = LocalTrackNavigationActions.current
-    val canLike = track != null && likeActions.likesEnabled && track.canTogglePlexLike()
+    val canLike = track != null && (track.id.startsWith("radio:") || (likeActions.likesEnabled && track.canTogglePlexLike()))
     val liked = track != null && likeActions.isLiked(track)
     val showListenBrainzFeedback = track != null &&
+        !track.id.startsWith("radio:") &&
         listenBrainzFeedbackTarget.enabled &&
         listenBrainzFeedbackTarget.trackId == track.id
     val showCastControls = !isDesktopPlatform() || castState.isAvailable || castState.isConnected

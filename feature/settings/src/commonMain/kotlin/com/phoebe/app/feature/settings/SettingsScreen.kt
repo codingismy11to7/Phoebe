@@ -66,6 +66,7 @@ import com.phoebe.app.domain.AppSettings
 import com.phoebe.app.domain.HomeSection
 import com.phoebe.app.domain.ListenBrainzCredentialStorageStatus
 import com.phoebe.app.domain.LibraryUiPreferences
+import com.phoebe.app.domain.MobileBottomTab
 import com.phoebe.app.domain.NowPlayingVisualizerPreset
 import com.phoebe.app.domain.PersonalMixPreferences
 import com.phoebe.app.domain.PlexSession
@@ -123,11 +124,14 @@ fun SettingsDesktopView(
     onVisualizerPreset: (NowPlayingVisualizerPreset) -> Unit = {},
     onBlurredArtworkAppearance: (Boolean) -> Unit = {},
     onHomeSections: (List<HomeSection>) -> Unit,
+    onMobileBottomTabs: (List<MobileBottomTab>) -> Unit = {},
     onPersonalMix: (PersonalMixPreferences) -> Unit,
     onAlbumGridItemSize: (Int) -> Unit,
     onArtistGridItemSize: (Int) -> Unit,
     onExportFavoritePlaylists: () -> Unit,
     onImportFavoritePlaylists: () -> Unit,
+    onExportRadioStations: () -> Unit,
+    onImportRadioStations: () -> Unit,
     homeScreenLayoutMode: HomeScreenLayoutMode = HomeScreenLayoutMode.Default,
     onHomeScreenLayoutModeChange: (HomeScreenLayoutMode) -> Unit = {},
     session: PlexSession? = null,
@@ -214,7 +218,9 @@ fun SettingsDesktopView(
                             onArtistGridItemSize = onArtistGridItemSize,
                         )
                         HomeSettingsCard(libraryUi.homeSections, onHomeSections)
+                        BottomTabSettingsCard(libraryUi.mobileBottomTabs, onMobileBottomTabs)
                         FavoritePlaylistSettingsCard(onExportFavoritePlaylists, onImportFavoritePlaylists)
+                        RadioStationsSettingsCard(onExportRadioStations, onImportRadioStations)
                     }
                     SettingsCategory.Downloads -> DownloadsSettingsCard(
                         downloadDirectory = downloadDirectory,
@@ -257,11 +263,14 @@ fun SettingsMobileView(
     onVisualizerPreset: (NowPlayingVisualizerPreset) -> Unit = {},
     onBlurredArtworkAppearance: (Boolean) -> Unit = {},
     onHomeSections: (List<HomeSection>) -> Unit,
+    onMobileBottomTabs: (List<MobileBottomTab>) -> Unit = {},
     onPersonalMix: (PersonalMixPreferences) -> Unit,
     onAlbumGridItemSize: (Int) -> Unit,
     onArtistGridItemSize: (Int) -> Unit,
     onExportFavoritePlaylists: () -> Unit,
     onImportFavoritePlaylists: () -> Unit,
+    onExportRadioStations: () -> Unit,
+    onImportRadioStations: () -> Unit,
     homeScreenLayoutMode: HomeScreenLayoutMode = HomeScreenLayoutMode.Default,
     onHomeScreenLayoutModeChange: (HomeScreenLayoutMode) -> Unit = {},
     session: PlexSession? = null,
@@ -315,7 +324,9 @@ fun SettingsMobileView(
             compact = true,
         )
         HomeSettingsCard(libraryUi.homeSections, onHomeSections, compact = true)
+        BottomTabSettingsCard(libraryUi.mobileBottomTabs, onMobileBottomTabs, compact = true)
         FavoritePlaylistSettingsCard(onExportFavoritePlaylists, onImportFavoritePlaylists, compact = true)
+        RadioStationsSettingsCard(onExportRadioStations, onImportRadioStations, compact = true)
         SectionLabel("AUDIO PLAYBACK", PhoebeUi.accentLight)
         AudioPlaybackSettingsCard(
             settings = appSettings,
@@ -1022,6 +1033,132 @@ private fun HomeSettingsCard(
 }
 
 @Composable
+private fun BottomTabSettingsCard(
+    tabs: List<MobileBottomTab>,
+    onTabs: (List<MobileBottomTab>) -> Unit,
+    compact: Boolean = false,
+) {
+    var order by remember { mutableStateOf(normalizedBottomTabs(tabs)) }
+    var draggingTab by remember { mutableStateOf<MobileBottomTab?>(null) }
+    var dragStartIndex by remember { mutableStateOf<Int?>(null) }
+    var dragTargetIndex by remember { mutableStateOf<Int?>(null) }
+    var dragOffsetPx by remember { mutableFloatStateOf(0f) }
+    val onTabsUpdated = rememberUpdatedState(onTabs)
+    val density = LocalDensity.current
+    val rowHeight = if (compact) 46.dp else 50.dp
+    val rowSpacing = 8.dp
+    val rowStepPx = with(density) { rowHeight.toPx() + rowSpacing.toPx() }
+    LaunchedEffect(tabs) {
+        order = normalizedBottomTabs(tabs)
+    }
+    SettingsCard {
+        Text("Bottom tabs", color = PhoebeUi.primaryText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Text("Choose which mobile tabs show and drag them into order", color = PhoebeUi.mutedText, fontSize = 12.sp, modifier = Modifier.padding(bottom = 14.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(rowSpacing)) {
+            order.forEachIndexed { index, tab ->
+                val isDragging = draggingTab == tab
+                val startIndex = dragStartIndex
+                val targetIndex = dragTargetIndex
+                val checked = tab in tabs
+                val rowOffsetPx = when {
+                    draggingTab == null || startIndex == null || targetIndex == null -> 0f
+                    isDragging -> dragOffsetPx
+                    targetIndex > startIndex && index in (startIndex + 1)..targetIndex -> -rowStepPx
+                    targetIndex < startIndex && index in targetIndex until startIndex -> rowStepPx
+                    else -> 0f
+                }
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(rowHeight)
+                        .offset { IntOffset(0, rowOffsetPx.roundToInt()) }
+                        .zIndex(if (isDragging) 1f else 0f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(if (isDragging) PhoebeUi.accent.copy(alpha = 0.14f) else PhoebeUi.subtleFill)
+                        .border(
+                            BorderStroke(1.dp, if (isDragging) PhoebeUi.accent.copy(alpha = 0.35f) else PhoebeUi.border),
+                            RoundedCornerShape(10.dp),
+                        )
+                        .padding(horizontal = 12.dp, vertical = if (compact) 8.dp else 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Box(
+                        Modifier
+                            .size(30.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .pointerInput(tab, rowStepPx) {
+                                detectDragGestures(
+                                    onDragStart = {
+                                        draggingTab = tab
+                                        dragStartIndex = index
+                                        dragTargetIndex = index
+                                        dragOffsetPx = 0f
+                                    },
+                                    onDragCancel = {
+                                        draggingTab = null
+                                        dragStartIndex = null
+                                        dragTargetIndex = null
+                                        dragOffsetPx = 0f
+                                    },
+                                    onDragEnd = {
+                                        val from = dragStartIndex
+                                        val to = dragTargetIndex
+                                        draggingTab = null
+                                        dragStartIndex = null
+                                        dragTargetIndex = null
+                                        dragOffsetPx = 0f
+                                        if (from != null && to != null && from != to) {
+                                            val nextOrder = order.moved(from, to)
+                                            order = nextOrder
+                                            onTabsUpdated.value(nextOrder.filter { it in tabs })
+                                        }
+                                    },
+                                    onDrag = { change, drag ->
+                                        change.consume()
+                                        val start = dragStartIndex ?: return@detectDragGestures
+                                        val minOffset = -start * rowStepPx
+                                        val maxOffset = (order.lastIndex - start) * rowStepPx
+                                        dragOffsetPx = (dragOffsetPx + drag.y).coerceIn(minOffset, maxOffset)
+                                        dragTargetIndex = (start + (dragOffsetPx / rowStepPx).roundToInt())
+                                            .coerceIn(0, order.lastIndex)
+                                    },
+                                )
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        PhoebeIconView(PhoebeIcon.Drag, tint = PhoebeUi.mutedText, modifier = Modifier.size(16.dp))
+                    }
+                    PhoebeIconView(tab.icon, tint = PhoebeUi.accentLight, modifier = Modifier.size(15.dp))
+                    Text(tab.label, color = PhoebeUi.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    Switch(
+                        checked = checked,
+                        onCheckedChange = { enabled ->
+                            val next = when {
+                                enabled -> order.filter { it in tabs || it == tab }
+                                tabs.size <= MobileBottomTab.MinVisibleTabs -> tabs
+                                else -> tabs.filterNot { it == tab }
+                            }
+                            onTabsUpdated.value(next)
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = PhoebeUi.accentLight,
+                            uncheckedThumbColor = Color.White,
+                            uncheckedTrackColor = PhoebeUi.progressTrack,
+                        ),
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        TextButton(onClick = { onTabs(MobileBottomTab.defaultOrder) }) {
+            Text("Reset tabs", color = PhoebeUi.accentLight)
+        }
+    }
+}
+
+@Composable
 private fun FavoritePlaylistSettingsCard(
     onExport: () -> Unit,
     onImport: () -> Unit,
@@ -1031,6 +1168,31 @@ private fun FavoritePlaylistSettingsCard(
         Text("Favorite playlists", color = PhoebeUi.primaryText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
         Text(
             "Export or import locally saved favorite playlist flags",
+            color = PhoebeUi.mutedText,
+            fontSize = 12.sp,
+            modifier = Modifier.padding(bottom = if (compact) 8.dp else 12.dp),
+        )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            TextButton(onClick = onExport) {
+                Text("Export", color = PhoebeUi.accentLight)
+            }
+            TextButton(onClick = onImport) {
+                Text("Import", color = PhoebeUi.accentLight)
+            }
+        }
+    }
+}
+
+@Composable
+private fun RadioStationsSettingsCard(
+    onExport: () -> Unit,
+    onImport: () -> Unit,
+    compact: Boolean = false,
+) {
+    SettingsCard {
+        Text("Radio stations", color = PhoebeUi.primaryText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Text(
+            "Export or import locally saved manual radio stations",
             color = PhoebeUi.mutedText,
             fontSize = 12.sp,
             modifier = Modifier.padding(bottom = if (compact) 8.dp else 12.dp),
@@ -1062,6 +1224,24 @@ private val HomeSection.icon: PhoebeIcon
         HomeSection.Random -> PhoebeIcon.Grid
     }
 
+private val MobileBottomTab.label: String
+    get() = when (this) {
+        MobileBottomTab.Home -> "Home"
+        MobileBottomTab.Search -> "Search"
+        MobileBottomTab.Library -> "Library"
+        MobileBottomTab.Playlists -> "Playlists"
+        MobileBottomTab.Radio -> "Radio"
+    }
+
+private val MobileBottomTab.icon: PhoebeIcon
+    get() = when (this) {
+        MobileBottomTab.Home -> PhoebeIcon.Home
+        MobileBottomTab.Search -> PhoebeIcon.Search
+        MobileBottomTab.Library -> PhoebeIcon.Library
+        MobileBottomTab.Playlists -> PhoebeIcon.PlaylistPlay
+        MobileBottomTab.Radio -> PhoebeIcon.Radio
+    }
+
 private fun <T> List<T>.moved(from: Int, to: Int): List<T> {
     if (from !in indices || to !in indices) return this
     val copy = toMutableList()
@@ -1081,6 +1261,9 @@ private fun normalizedHomeSections(sections: List<HomeSection>): List<HomeSectio
         }
         .filterNot { it == HomeSection.Favorites || it == HomeSection.Recents }
         .let { (it + HomeSection.defaultOrder).distinct() }
+
+private fun normalizedBottomTabs(tabs: List<MobileBottomTab>): List<MobileBottomTab> =
+    (tabs + MobileBottomTab.defaultOrder).distinct()
 
 @Composable
 private fun SettingsSwitchRow(

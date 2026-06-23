@@ -62,12 +62,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
-val LibrarySectionIndexWidth = 44.dp
+val LibrarySectionIndexWidth = 80.dp
 val LocalLibrarySectionIndexForceScrub = compositionLocalOf { false }
 
-private val LibrarySectionIndexHitWidth = 22.dp
-private val LibrarySectionIndexDesktopHitWidth = 44.dp
-private const val MaxVisibleSectionIndexLabels = 28
+private val LibrarySectionIndexHitWidth = 40.dp
+private val LibrarySectionIndexDesktopHitWidth = 80.dp
+private const val MaxVisibleSectionIndexLabels = 60
 private const val SectionIndexInteractionLingerMs = 3_000L
 private const val ActiveSectionIndexLabelMs = 1_100L
 private const val ScrollHintVisibleMs = 650L
@@ -162,6 +162,7 @@ fun LibrarySectionIndex(
     modifier: Modifier = Modifier,
     mode: LibrarySectionIndexMode = LibrarySectionIndexMode.DesktopHover,
     revealSignal: Boolean = false,
+    keepLabelsVisible: Boolean = false,
     scrollbarState: LibraryScrollbarState? = null,
     scrollbarStateProvider: (() -> LibraryScrollbarState?)? = null,
     onScrubbingChanged: (Boolean) -> Unit = {},
@@ -249,13 +250,14 @@ fun LibrarySectionIndex(
         entryAt(y, height)?.let(::selectEntry)
     }
 
+    val containerWidth = LibrarySectionIndexWidth
     BoxWithConstraints(
         modifier
-            .width(LibrarySectionIndexWidth)
+            .width(containerWidth)
             .fillMaxHeight()
     ) {
         val compactDateLabels = entries.any { it.label.length > 4 }
-        val minLabelStep = if (compactDateLabels) 22.dp else 13.dp
+        val minLabelStep = if (compactDateLabels) 26.dp else 16.dp
         val maxVisibleLabels = remember(maxHeight, minLabelStep, entries.size) {
             val estimated = if (maxHeight.value.isFinite()) {
                 (maxHeight / minLabelStep).toInt()
@@ -279,8 +281,8 @@ fun LibrarySectionIndex(
         val activeLabel = displayedActiveEntry?.label
         val activeEntryIndex = displayedActiveEntry?.let { entryIndexes[it] } ?: -1
         val labelsVisible = when (mode) {
-            LibrarySectionIndexMode.DesktopHover -> hovering || scrubbing || interactionLingerVisible || forceScrub
-            LibrarySectionIndexMode.DesktopScrollbar -> hovering || scrubbing || interactionLingerVisible || forceScrub
+            LibrarySectionIndexMode.DesktopHover -> hovering || scrubbing || interactionLingerVisible || forceScrub || keepLabelsVisible
+            LibrarySectionIndexMode.DesktopScrollbar -> hovering || scrubbing || interactionLingerVisible || forceScrub || keepLabelsVisible
             LibrarySectionIndexMode.MobileScrollbar -> scrubbing || forceScrub
         }
         val previewBubbleVisible = displayedActiveEntry != null && (scrubbing || forceScrub)
@@ -570,7 +572,7 @@ private fun SectionIndexLabels(
                     }
                     .clip(RoundedCornerShape(999.dp))
                     .clickable { onEntryClick(entry) }
-                    .padding(horizontal = 2.dp, vertical = 1.dp),
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
             )
         }
     }

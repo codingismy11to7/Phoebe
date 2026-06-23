@@ -719,15 +719,16 @@ fun MobilePlayer(
                             shape = artworkContentShape,
                             onFlipRotationChange = { artworkFlipRotation = it },
                         ) {
-                            val showFeedbackActions = (likeActions.likesEnabled && t.canTogglePlexLike()) || (listenBrainzFeedbackTarget.available && listenBrainzFeedbackTarget.trackId == t.id)
-                            val showLikeControl = likeActions.likesEnabled && t.canTogglePlexLike()
+                            val isRadio = t.id.startsWith("radio:")
+                            val showFeedbackActions = isRadio || (likeActions.likesEnabled && t.canTogglePlexLike()) || (listenBrainzFeedbackTarget.available && listenBrainzFeedbackTarget.trackId == t.id)
+                            val showLikeControl = isRadio || (likeActions.likesEnabled && t.canTogglePlexLike())
                             MobileNowPlayingOverlayActions(
                                 track = t,
                                 showAudioQualityBadge = true,
                                 showFeedbackActions = showFeedbackActions,
                                 showLikeControl = showLikeControl,
                                 likeActions = likeActions,
-                                showListenBrainzFeedback = listenBrainzFeedbackTarget.available && listenBrainzFeedbackTarget.trackId == t.id,
+                                showListenBrainzFeedback = !isRadio && listenBrainzFeedbackTarget.available && listenBrainzFeedbackTarget.trackId == t.id,
                                 listenBrainzFeedbackTarget = listenBrainzFeedbackTarget,
                                 onListenBrainzFeedback = onListenBrainzFeedback,
                                 alpha = overlayActionsAlpha,
@@ -743,15 +744,16 @@ fun MobilePlayer(
                                 positionMs = positionMs,
                                 modifier = Modifier.fillMaxSize(),
                             )
-                            val showFeedbackActions = (likeActions.likesEnabled && t.canTogglePlexLike()) || (listenBrainzFeedbackTarget.available && listenBrainzFeedbackTarget.trackId == t.id)
-                            val showLikeControl = likeActions.likesEnabled && t.canTogglePlexLike()
+                            val isRadio = t.id.startsWith("radio:")
+                            val showFeedbackActions = isRadio || (likeActions.likesEnabled && t.canTogglePlexLike()) || (listenBrainzFeedbackTarget.available && listenBrainzFeedbackTarget.trackId == t.id)
+                            val showLikeControl = isRadio || (likeActions.likesEnabled && t.canTogglePlexLike())
                             MobileNowPlayingOverlayActions(
                                 track = t,
                                 showAudioQualityBadge = false,
                                 showFeedbackActions = showFeedbackActions,
                                 showLikeControl = showLikeControl,
                                 likeActions = likeActions,
-                                showListenBrainzFeedback = listenBrainzFeedbackTarget.available && listenBrainzFeedbackTarget.trackId == t.id,
+                                showListenBrainzFeedback = !isRadio && listenBrainzFeedbackTarget.available && listenBrainzFeedbackTarget.trackId == t.id,
                                 listenBrainzFeedbackTarget = listenBrainzFeedbackTarget,
                                 onListenBrainzFeedback = onListenBrainzFeedback,
                                 alpha = overlayActionsAlpha,

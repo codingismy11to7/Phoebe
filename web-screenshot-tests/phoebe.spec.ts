@@ -14,6 +14,7 @@ const coreScenarios = [
   'CollectionValues',
   'CollectionItems',
   'Search',
+  'Radio',
   'Player',
   'Settings',
   'SignIn',
@@ -31,6 +32,7 @@ const phoneLightScenarios = [
 ] as const;
 const phoneDarkScenarios = [
   ['LibraryFiveColumnGrid', 'library-five-column-grid'],
+  ['Radio', 'radio'],
 ] as const;
 const scrollbarScenarios = [
   ['LibraryScrollbar', 'library-scrollbar'],

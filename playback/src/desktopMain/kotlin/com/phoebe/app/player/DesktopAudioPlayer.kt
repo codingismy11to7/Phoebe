@@ -84,6 +84,7 @@ class DesktopAudioPlayer(
     private var crossfadePrefetchFuture: CompletableFuture<PrefetchedCrossfade?>? = null
     private var fullyBufferedPlayback = false
     private val httpClient = HttpClient.newBuilder()
+        .version(HttpClient.Version.HTTP_1_1)
         .connectTimeout(Duration.ofSeconds(15))
         .followRedirects(HttpClient.Redirect.NORMAL)
         .build()
@@ -112,6 +113,8 @@ class DesktopAudioPlayer(
         var paused = false
         @Volatile
         var reportedEnergy = false
+        @Volatile
+        var reportedOutput = false
         private val startedAtNs = System.nanoTime()
         @Volatile
         private var pausedAtNs: Long? = null
@@ -335,6 +338,14 @@ class DesktopAudioPlayer(
                     }
                     disposeSampled()
                 }
+                if (file == null &&
+                    isRemoteUri(activeUri) &&
+                    streamingSampledExtensionFromUri(activeUri) == null &&
+                    DesktopSandboxPlayback.shouldStreamRemoteSampledPlayback(activeUri) &&
+                    tryStartSampledStream(activeUri, extension = null, generation)
+                ) {
+                    return@execute
+                }
                 if (!isPlayRequestCurrent(generation)) return@execute
                 val playbackUri = file?.toURI()?.toString() ?: activeUri
                 fullyBufferedPlayback = file != null
@@ -345,6 +356,12 @@ class DesktopAudioPlayer(
                 }
                 if (!javaFxStarted) {
                     if (file != null && trySampledFallbackAfterJavaFxFailure(file, generation)) {
+                        return@execute
+                    }
+                    if (file == null &&
+                        DesktopSandboxPlayback.shouldStreamRemoteSampledPlayback(activeUri) &&
+                        tryStartSampledStream(activeUri, preferredStreamingExtension ?: streamingSampledExtensionFromUri(activeUri), generation)
+                    ) {
                         return@execute
                     }
                     if (file == null && tryBufferedRemotePlaybackFallback(activeUri, downloadUri, preferredSampledExtension, generation)) {
@@ -852,17 +869,22 @@ class DesktopAudioPlayer(
         return false
     }
 
-    private fun tryStartSampledStream(uri: String, extension: String, generation: Int): Boolean {
+    private fun tryStartSampledStream(uri: String, extension: String?, generation: Int): Boolean {
         if (!isRemoteUri(uri) || !isPlayRequestCurrent(generation)) return false
-        val responseStream = runCatching { openRemoteAudioStream(uri) }
+        val response = runCatching { openRemoteAudioStream(uri) }
             .getOrElse { error ->
                 logPlaybackFailure(error)
                 diagnostics.playbackError(PlaybackEnginePath.SampledStream, error.message)
                 return false
             }
+        val resolvedExtension = extension ?: sampledStreamingExtensionFromContentType(response.contentType)
+        if (resolvedExtension == null) {
+            runCatching { response.inputStream.close() }
+            return false
+        }
         return tryStartSampledStreamFromInput(
-            inputStream = responseStream,
-            extension = extension,
+            inputStream = response.inputStream,
+            extension = resolvedExtension,
             generation = generation,
             fullyBufferedDurationMs = null,
         )
@@ -919,7 +941,7 @@ class DesktopAudioPlayer(
                 diagnostics.playbackError(PlaybackEnginePath.SampledStream, error.message)
                 return false
             }
-        if (firstRead <= 0) {
+        if (firstRead < 0) {
             runCatching { line.close() }
             runCatching { pcmStream.close() }
             return false
@@ -940,19 +962,20 @@ class DesktopAudioPlayer(
         diagnostics.engineSelected(PlaybackEnginePath.SampledStream)
         applyVolumeToLine(line, effectiveOutputVolume())
         line.start()
-        writeSampledStreamBuffer(
-            playback = playback,
-            buffer = firstBuffer,
-            length = firstRead,
-            generation = generation,
-        )
-        markPlaybackReady(generation = generation)
+        if (firstRead > 0) {
+            writeSampledStreamBuffer(
+                playback = playback,
+                buffer = firstBuffer,
+                length = firstRead,
+                generation = generation,
+            )
+        }
         syncSampledStreamPlayback(playback, generation)
         startSampledStreamPump(playback, bufferSize, generation)
         return true
     }
 
-    private fun openRemoteAudioStream(uri: String): InputStream {
+    private fun openRemoteAudioStream(uri: String): RemoteAudioStream {
         val request = HttpRequest.newBuilder(URI(uri))
             .GET()
             .timeout(Duration.ofSeconds(45))
@@ -973,7 +996,24 @@ class DesktopAudioPlayer(
             response.body().close()
             error("Plex stream returned $contentType instead of audio")
         }
-        return response.body()
+        return RemoteAudioStream(response.body(), contentType)
+    }
+
+    private data class RemoteAudioStream(
+        val inputStream: InputStream,
+        val contentType: String,
+    )
+
+    private fun sampledStreamingExtensionFromContentType(contentType: String): String? {
+        val normalized = contentType.substringBefore(';').trim().lowercase()
+        return when {
+            normalized == "audio/mpeg" || normalized == "audio/mp3" || normalized == "audio/x-mpeg" -> "mp3"
+            normalized == "audio/flac" || normalized == "audio/x-flac" -> "flac"
+            normalized == "audio/ogg" || normalized == "application/ogg" -> "ogg"
+            normalized == "audio/wav" || normalized == "audio/x-wav" -> "wav"
+            normalized == "audio/aiff" || normalized == "audio/x-aiff" -> "aiff"
+            else -> null
+        }
     }
 
     private fun openStreamingRawAudioInputStream(input: InputStream, extension: String): AudioInputStream {
@@ -1031,7 +1071,8 @@ class DesktopAudioPlayer(
                 while (isPlayRequestCurrent(generation) && sampledStream === playback && !playback.stopped.get()) {
                     waitIfSampledStreamPaused(playback)
                     val read = playback.stream.read(buffer, 0, buffer.size)
-                    if (read <= 0) break
+                    if (read < 0) break
+                    if (read == 0) continue
                     writeSampledStreamBuffer(playback, buffer, read, generation)
                     syncSampledStreamPlayback(playback, generation)
                 }
@@ -1150,13 +1191,18 @@ class DesktopAudioPlayer(
         if (linePlaying) {
             diagnostics.platformPlaying(PlaybackEnginePath.SampledStream, positionMs, durationMs)
         }
+        if (!playback.reportedOutput && linePlaying && positionMs > 0L) {
+            playback.reportedOutput = true
+        }
+        val isStarting = !playback.paused && !playback.reportedOutput
         applyPlatformPlayback(
             positionMs = positionMs,
             durationMs = durationMs,
-            isPlaying = !playback.paused && linePlaying,
-            isBuffering = false,
+            isPlaying = !playback.paused && linePlaying && !isStarting,
+            isBuffering = isStarting,
             bufferedPositionMs = bufferedPositionMs,
             generation = generation,
+            forceBuffering = isStarting,
         )
     }
 
@@ -1546,7 +1592,7 @@ class DesktopAudioPlayer(
                 mediaPlayer.volume = effectiveOutputVolume().toDouble().coerceIn(0.0, 1.0)
                 applyJavaFxEqualizer(mediaPlayer, equalizerProfile)
                 mediaPlayer.audioSpectrumInterval = 0.05
-                mediaPlayer.audioSpectrumNumBands = 64
+                mediaPlayer.audioSpectrumNumBands = 128
                 mediaPlayer.audioSpectrumThreshold = -80
                 mediaPlayer.audioSpectrumListener = AudioSpectrumListener { _, _, magnitudes, _ ->
                     publishAudioAnalysisMagnitudesDb(magnitudes, AudioAnalysisSource.Spectrum)
@@ -1722,13 +1768,15 @@ class DesktopAudioPlayer(
         if (mediaPlayer.status == MediaPlayer.Status.PLAYING) {
             diagnostics.platformPlaying(PlaybackEnginePath.JavaFxMediaPlayer, positionMs, durationMs)
         }
+        val waitingForPlayback = playWhenReady && !playing
         applyPlatformPlayback(
             positionMs = positionMs,
             durationMs = durationMs,
             isPlaying = playing,
-            isBuffering = isBuffering,
+            isBuffering = isBuffering || waitingForPlayback,
             bufferedPositionMs = bufferedMs,
             generation = generation,
+            forceBuffering = waitingForPlayback || isBuffering,
         )
     }
 

@@ -155,7 +155,11 @@ private class IosAudioPlayer(
         equalizerInstallSuppressedForCurrentItem = false
         val asset = AVURLAsset.URLAssetWithURL(url, options = null)
         currentAsset = asset
-        val item = AVPlayerItem(asset = asset, automaticallyLoadedAssetKeys = listOf(IosAssetTracksKey))
+        val item = if (isLiveStream(uri)) {
+            AVPlayerItem(asset = asset)
+        } else {
+            AVPlayerItem(asset = asset, automaticallyLoadedAssetKeys = listOf(IosAssetTracksKey))
+        }
         item.preferredForwardBufferDuration = PreferredForwardBufferSeconds
         installEqualizerTap(item, asset, allowTrackLoad = true)
         val avPlayer = player ?: AVPlayer().also { player = it }
@@ -223,10 +227,15 @@ private class IosAudioPlayer(
             var incomingEqualizerTap: IosEqualizerTap? = null
             var adopted = false
             try {
+                val isLive = isLiveStream(uri) || track.id.startsWith("radio:")
                 val asset = AVURLAsset.URLAssetWithURL(url, options = null)
-                val item = AVPlayerItem(asset = asset, automaticallyLoadedAssetKeys = listOf(IosAssetTracksKey))
+                val item = if (isLive) {
+                    AVPlayerItem(asset = asset)
+                } else {
+                    AVPlayerItem(asset = asset, automaticallyLoadedAssetKeys = listOf(IosAssetTracksKey))
+                }
                 item.preferredForwardBufferDuration = PreferredForwardBufferSeconds
-                incomingEqualizerTap = attachEqualizerTapIfReady(item, asset, equalizerProfile)
+                incomingEqualizerTap = if (isLive) null else attachEqualizerTapIfReady(item, asset, equalizerProfile)
                 crossfadeEqualizerTap = incomingEqualizerTap
                 incoming = AVPlayer().also { avPlayer ->
                     avPlayer.automaticallyWaitsToMinimizeStalling = true
@@ -436,6 +445,8 @@ private class IosAudioPlayer(
             equalizerTap = tap
             return
         }
+        val uri = currentUri ?: ""
+        if (isLiveStream(uri)) return
         if (allowTrackLoad && !equalizerTapTrackLoadRequested) {
             equalizerTapTrackLoadRequested = true
             asset.loadValuesAsynchronouslyForKeys(listOf(IosAssetTracksKey)) {
@@ -610,7 +621,11 @@ private class IosAudioPlayer(
             equalizerInstallSuppressedForCurrentItem = false
             val asset = AVURLAsset.URLAssetWithURL(url, options = null)
             currentAsset = asset
-            val item = AVPlayerItem(asset = asset, automaticallyLoadedAssetKeys = listOf(IosAssetTracksKey))
+            val item = if (isLiveStream(uri)) {
+                AVPlayerItem(asset = asset)
+            } else {
+                AVPlayerItem(asset = asset, automaticallyLoadedAssetKeys = listOf(IosAssetTracksKey))
+            }
             item.preferredForwardBufferDuration = PreferredForwardBufferSeconds
             installEqualizerTap(item, asset, allowTrackLoad = true)
             avPlayer.replaceCurrentItemWithPlayerItem(item)
@@ -632,6 +647,17 @@ private class IosAudioPlayer(
     }
 
     private fun cmTimeToMs(time: CValue<CMTime>): Long = cmTimeToMs(CMTimeGetSeconds(time))
+
+    private fun isLiveStream(uri: String): Boolean {
+        val lower = uri.lowercase()
+        return lower.contains(".m3u8") ||
+            lower.contains(".m3u") ||
+            lower.contains("/live") ||
+            lower.contains("://radio.") ||
+            lower.contains(".radio.") ||
+            lower.contains("/radio/") ||
+            lower.endsWith("/radio")
+    }
 
     private companion object {
         // Avoid asking AVPlayer to retain very large forward buffers on device.
