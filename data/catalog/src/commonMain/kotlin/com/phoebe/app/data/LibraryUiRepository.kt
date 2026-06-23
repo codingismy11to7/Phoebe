@@ -6,7 +6,9 @@ import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.HomeSection
 import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryUiPreferences
+import com.phoebe.app.domain.MobileBottomTab
 import com.phoebe.app.domain.PersonalMixPreferences
+import com.phoebe.app.domain.normalizedMobileBottomTabs
 import com.phoebe.app.platform.PhoebeLog
 import com.phoebe.app.platform.PlatformStorage
 import dev.zacsweers.metro.AppScope
@@ -72,6 +74,11 @@ class LibraryUiRepository(
         save(mutableState.value.copy(homeSections = normalized))
     }
 
+    suspend fun setMobileBottomTabs(tabs: List<MobileBottomTab>) {
+        val normalized = tabs.normalizedMobileBottomTabs()
+        save(mutableState.value.copy(mobileBottomTabs = normalized))
+    }
+
     suspend fun setPersonalMix(personalMix: PersonalMixPreferences) {
         save(mutableState.value.copy(personalMix = personalMix.normalized()))
     }
@@ -119,6 +126,7 @@ class LibraryUiRepository(
             colRating = c.rating.toDb(),
             colFavorite = c.favorite.toDb(),
             homeSections = prefs.homeSections.joinToString(",") { it.name },
+            mobileBottomTabs = prefs.mobileBottomTabs.normalizedMobileBottomTabs().joinToString(",") { it.name },
             personalMix = json.encodeToString(PersonalMixPreferences.serializer(), prefs.personalMix.normalized()),
             gridColumns = 3,
             albumGridItemSizeDp = prefs.normalized().albumGridItemSizeDp.toLong(),
@@ -144,6 +152,7 @@ class LibraryUiRepository(
                 favorite = colFavorite.toBool(),
             ),
             homeSections = homeSections.toHomeSections(),
+            mobileBottomTabs = mobileBottomTabs.toMobileBottomTabs(),
             personalMix = personalMix.toPersonalMixPreferences(),
             albumGridItemSizeDp = albumGridItemSizeDp.toInt(),
             artistGridItemSizeDp = artistGridItemSizeDp.toInt(),
@@ -178,3 +187,10 @@ private fun List<HomeSection>.normalizedHomeSections(): List<HomeSection> =
     }
         .filterNot { it == HomeSection.Favorites || it == HomeSection.Recents }
         .let { (it + HomeSection.defaultOrder).distinct() }
+
+private fun String.toMobileBottomTabs(): List<MobileBottomTab> {
+    val parsed = split(',')
+        .mapNotNull { raw -> runCatching { MobileBottomTab.valueOf(raw.trim()) }.getOrNull() }
+        .distinct()
+    return parsed.normalizedMobileBottomTabs()
+}

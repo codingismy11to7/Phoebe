@@ -38,6 +38,9 @@ import com.phoebe.app.domain.PlayerState
 import com.phoebe.app.domain.PlayerTransportState
 import com.phoebe.app.domain.PlayHistoryKind
 import com.phoebe.app.domain.Playlist
+import com.phoebe.app.domain.RadioDirectoryState
+import com.phoebe.app.domain.RadioStation
+import com.phoebe.app.domain.RadioStationSearchQuery
 import com.phoebe.app.domain.ShellPlaybackState
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.defaultCollectionEntries
@@ -117,8 +120,10 @@ internal data class BrowseUiState(
     val supportedCollectionEntries: Set<CollectionEntry> = defaultCollectionEntries.toSet(),
     val decadeMixNotice: String? = null,
     val radioStations: List<PlexRadioStation> = emptyList(),
+    val radioDirectory: RadioDirectoryState = RadioDirectoryState(),
     val artistRadioAvailability: Map<String, ArtistRadioAvailability> = emptyMap(),
     val radioStartingIds: Set<String> = emptySet(),
+    val internetRadioStartingIds: Set<String> = emptySet(),
 )
 
 internal data class BrowseActions(
@@ -149,6 +154,13 @@ internal data class BrowseActions(
     val onPlayDecadeMix: (Int) -> Unit = {},
     val onClearDecadeMixNotice: () -> Unit = {},
     val onPlayRadioStation: (PlexRadioStation) -> Unit = {},
+    val onRadioSearch: (RadioStationSearchQuery) -> Unit = {},
+    val onRadioLoadMore: () -> Unit = {},
+    val onRadioRefreshPopular: () -> Unit = {},
+    val onRadioPlay: (RadioStation) -> Unit = {},
+    val onRadioAddManualStation: (String, String) -> Unit = { _, _ -> },
+    val onRadioUpdateManualStation: (RadioStation, String, String) -> Unit = { _, _, _ -> },
+    val onRadioDeleteManualStation: (RadioStation) -> Unit = {},
     val onPlayPersonalMix: () -> Unit = {},
     val onPopDetail: () -> Unit,
     val onPlayTracks: (List<Track>, Int) -> Unit,
@@ -215,11 +227,14 @@ internal data class SettingsUiState(
 
 internal data class SettingsActions(
     val onHomeSections: (List<HomeSection>) -> Unit,
+    val onMobileBottomTabs: (List<com.phoebe.app.domain.MobileBottomTab>) -> Unit = {},
     val onPersonalMix: (PersonalMixPreferences) -> Unit,
     val onAlbumGridItemSize: (Int) -> Unit,
     val onArtistGridItemSize: (Int) -> Unit,
     val onExportFavoritePlaylists: () -> Unit,
     val onImportFavoritePlaylists: () -> Unit,
+    val onExportRadioStations: () -> Unit,
+    val onImportRadioStations: () -> Unit,
     val onCrossfadeSeconds: (Int) -> Unit,
     val onScanLibraryOnLaunch: (Boolean) -> Unit,
     val onNotifyWhenDownloadFinishes: (Boolean) -> Unit,

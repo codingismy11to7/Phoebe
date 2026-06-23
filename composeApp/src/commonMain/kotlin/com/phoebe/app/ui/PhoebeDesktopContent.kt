@@ -1,6 +1,9 @@
 package com.phoebe.app.ui
 
 import com.phoebe.app.feature.library.*
+import com.phoebe.app.feature.radio.RadioRoute
+import com.phoebe.app.feature.radio.RadioRouteActions
+import com.phoebe.app.feature.radio.RadioRouteState
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
@@ -152,6 +155,9 @@ import com.phoebe.app.domain.MusicLibrary
 import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.Playlist
+import com.phoebe.app.domain.RadioDirectoryState
+import com.phoebe.app.domain.RadioStation
+import com.phoebe.app.domain.RadioStationSearchQuery
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.isLocalMediaPlayback
@@ -198,6 +204,15 @@ internal fun DesktopContent(
     onLibrarySortBy: (LibrarySortBy) -> Unit,
     onLibraryAscending: (Boolean) -> Unit,
     onLibraryColumns: (LibraryColumnVisibility) -> Unit,
+    radioDirectory: RadioDirectoryState = RadioDirectoryState(),
+    internetRadioStartingIds: Set<String> = emptySet(),
+    onRadioSearch: (RadioStationSearchQuery) -> Unit = {},
+    onRadioLoadMore: () -> Unit = {},
+    onRadioRefreshPopular: () -> Unit = {},
+    onRadioPlay: (RadioStation) -> Unit = {},
+    onRadioAddManualStation: (String, String) -> Unit = { _, _ -> },
+    onRadioUpdateManualStation: (RadioStation, String, String) -> Unit = { _, _, _ -> },
+    onRadioDeleteManualStation: (RadioStation) -> Unit = {},
     edgePadding: Dp = 36.dp,
     headlineFontSize: TextUnit = 30.sp,
     headlineLineHeight: TextUnit = 35.sp,
@@ -248,6 +263,24 @@ internal fun DesktopContent(
             headlineFontSize = headlineFontSize,
             headlineLineHeight = headlineLineHeight,
             searchPillModifier = searchPillModifier,
+        )
+        return
+    }
+
+    if (section == BrowseSection.Radio) {
+        RadioRoute(
+            state = RadioRouteState(radioDirectory, internetRadioStartingIds),
+            actions = RadioRouteActions(
+                onSearch = onRadioSearch,
+                onLoadMore = onRadioLoadMore,
+                onRefreshPopular = onRadioRefreshPopular,
+                onPlay = onRadioPlay,
+                onAddManualStation = onRadioAddManualStation,
+                onUpdateManualStation = onRadioUpdateManualStation,
+                onDeleteManualStation = onRadioDeleteManualStation,
+            ),
+            modifier = modifier,
+            contentPadding = PaddingValues(horizontal = edgePadding, vertical = edgePadding),
         )
         return
     }

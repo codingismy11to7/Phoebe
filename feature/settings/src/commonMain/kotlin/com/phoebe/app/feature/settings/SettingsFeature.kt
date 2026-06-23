@@ -6,6 +6,7 @@ import androidx.compose.ui.Modifier
 import com.phoebe.app.domain.AppSettings
 import com.phoebe.app.domain.HomeSection
 import com.phoebe.app.domain.LibraryUiPreferences
+import com.phoebe.app.domain.MobileBottomTab
 import com.phoebe.app.domain.NowPlayingVisualizerPreset
 import com.phoebe.app.domain.PersonalMixPreferences
 import com.phoebe.app.domain.PlexSession
@@ -41,11 +42,14 @@ class SettingsRouteActions(
     val onVisualizerPreset: (NowPlayingVisualizerPreset) -> Unit = {},
     val onBlurredArtworkAppearance: (Boolean) -> Unit = {},
     val onHomeSections: (List<HomeSection>) -> Unit,
+    val onMobileBottomTabs: (List<MobileBottomTab>) -> Unit = {},
     val onPersonalMix: (PersonalMixPreferences) -> Unit,
     val onAlbumGridItemSize: (Int) -> Unit,
     val onArtistGridItemSize: (Int) -> Unit,
     val onExportFavoritePlaylists: () -> Unit,
     val onImportFavoritePlaylists: () -> Unit,
+    val onExportRadioStations: () -> Unit,
+    val onImportRadioStations: () -> Unit,
     val onHomeScreenLayoutModeChange: (HomeScreenLayoutMode) -> Unit = {},
     val onConnectListenBrainz: (String) -> Unit = {},
     val onDisconnectListenBrainz: () -> Unit = {},
@@ -80,11 +84,14 @@ fun SettingsDesktopRoute(
         onVisualizerPreset = actions.onVisualizerPreset,
         onBlurredArtworkAppearance = actions.onBlurredArtworkAppearance,
         onHomeSections = actions.onHomeSections,
+        onMobileBottomTabs = actions.onMobileBottomTabs,
         onPersonalMix = actions.onPersonalMix,
         onAlbumGridItemSize = actions.onAlbumGridItemSize,
         onArtistGridItemSize = actions.onArtistGridItemSize,
         onExportFavoritePlaylists = actions.onExportFavoritePlaylists,
         onImportFavoritePlaylists = actions.onImportFavoritePlaylists,
+        onExportRadioStations = actions.onExportRadioStations,
+        onImportRadioStations = actions.onImportRadioStations,
         homeScreenLayoutMode = state.homeScreenLayoutMode,
         onHomeScreenLayoutModeChange = actions.onHomeScreenLayoutModeChange,
         session = state.session,
@@ -125,11 +132,14 @@ fun SettingsMobileRoute(
         onVisualizerPreset = actions.onVisualizerPreset,
         onBlurredArtworkAppearance = actions.onBlurredArtworkAppearance,
         onHomeSections = actions.onHomeSections,
+        onMobileBottomTabs = actions.onMobileBottomTabs,
         onPersonalMix = actions.onPersonalMix,
         onAlbumGridItemSize = actions.onAlbumGridItemSize,
         onArtistGridItemSize = actions.onArtistGridItemSize,
         onExportFavoritePlaylists = actions.onExportFavoritePlaylists,
         onImportFavoritePlaylists = actions.onImportFavoritePlaylists,
+        onExportRadioStations = actions.onExportRadioStations,
+        onImportRadioStations = actions.onImportRadioStations,
         homeScreenLayoutMode = state.homeScreenLayoutMode,
         onHomeScreenLayoutModeChange = actions.onHomeScreenLayoutModeChange,
         session = state.session,

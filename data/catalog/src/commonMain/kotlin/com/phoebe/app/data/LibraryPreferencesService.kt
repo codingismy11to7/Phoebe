@@ -3,6 +3,7 @@ package com.phoebe.app.data
 import com.phoebe.app.domain.HomeSection
 import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.LibrarySortBy
+import com.phoebe.app.domain.MobileBottomTab
 import com.phoebe.app.domain.PersonalMixPreferences
 import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.Inject
@@ -31,6 +32,10 @@ class LibraryPreferencesService(
 
     suspend fun setHomeSections(sections: List<HomeSection>) {
         libraryUiRepository.setHomeSections(sections)
+    }
+
+    suspend fun setMobileBottomTabs(tabs: List<MobileBottomTab>) {
+        libraryUiRepository.setMobileBottomTabs(tabs)
     }
 
     suspend fun setPersonalMix(preferences: PersonalMixPreferences) {

@@ -19,9 +19,11 @@ class PhoebeWebRoutesTest {
         assertEquals(listOf(PhoebeRoute.Browse(BrowseSection.Home)), phoebeWebRoutesForPath("/"))
         assertEquals(listOf(PhoebeRoute.Browse(BrowseSection.Search)), phoebeWebRoutesForPath("/search"))
         assertEquals(listOf(PhoebeRoute.Browse(BrowseSection.Library)), phoebeWebRoutesForPath("/library"))
+        assertEquals(listOf(PhoebeRoute.Browse(BrowseSection.Radio)), phoebeWebRoutesForPath("/radio"))
         assertEquals(listOf(PhoebeRoute.Browse(BrowseSection.Lyrics)), phoebeWebRoutesForPath("/lyrics"))
         assertEquals(listOf(PhoebeRoute.Browse(BrowseSection.Playlists)), phoebeWebRoutesForPath("/playlists"))
         assertEquals(listOf(PhoebeRoute.Browse(BrowseSection.Settings)), phoebeWebRoutesForPath("/settings"))
+        assertEquals("/radio", PhoebeRoute.Browse(BrowseSection.Radio).toPhoebeWebPath())
     }
 
     @Test

@@ -44,6 +44,7 @@ import phoebe.ui.core.generated.resources.phoebe_icon_person
 import phoebe.ui.core.generated.resources.phoebe_icon_plus
 import phoebe.ui.core.generated.resources.phoebe_icon_previous
 import phoebe.ui.core.generated.resources.phoebe_icon_queue
+import phoebe.ui.core.generated.resources.phoebe_icon_radio
 import phoebe.ui.core.generated.resources.phoebe_icon_repeat
 import phoebe.ui.core.generated.resources.phoebe_icon_search
 import phoebe.ui.core.generated.resources.phoebe_icon_settings
@@ -213,6 +214,7 @@ private fun PhoebeIcon.drawableResource(filled: Boolean): DrawableResource? =
         PhoebeIcon.Download -> Res.drawable.phoebe_icon_download
         PhoebeIcon.Repeat -> Res.drawable.phoebe_icon_repeat
         PhoebeIcon.Drag -> Res.drawable.phoebe_icon_drag
+        PhoebeIcon.Radio -> Res.drawable.phoebe_icon_radio
         PhoebeIcon.PlaylistPlay,
         PhoebeIcon.Play,
         PhoebeIcon.Pause,

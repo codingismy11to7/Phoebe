@@ -126,7 +126,7 @@ class AudioAnalysisAccumulator(
     }
 
     companion object {
-        const val DefaultBandCount = 32
+        const val DefaultBandCount = 128
         const val DefaultPublishIntervalMs = 45L
         private const val AnalysisSampleLimit = 2048
         private const val MinFrequencyHz = 60f

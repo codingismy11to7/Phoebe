@@ -32,6 +32,7 @@ Phoebe can sign in to one remote music source at a time (plus optional local fol
 | Playback sync to server | Timeline API | Session progress | Session progress | Scrobble on stop | Queue control | — |
 | Home library radio stations | Yes | No | No | No | Via MA² | — |
 | Artist radio / mix | Plex stations | Instant mix | Instant mix³ | Not wired⁴ | Via MA² | — |
+| Internet radio streams | Yes | Yes | Yes | Yes | Yes | Yes |
 | Collections (genre / mood / style) | All three | Genre | Genre | Genre | Genre | From tags |
 | Import server play history | Yes | Yes | Yes | Yes | No | — |
 | Chromecast | Yes | Yes | Yes | Yes | When stream URL is receiver-loadable | Remote HTTP(S) streams |
@@ -75,6 +76,7 @@ For UI architecture and navigation rules, see [Compose Architecture Guidelines](
 - **Local music folders** — Add one or more local folder roots (desktop, Android, iOS, and web), enable or disable them individually, and merge them with a remote catalog in one library. You can add a folder from the sign-in screen to use Phoebe without signing in to a server.
 - **Unified catalog** — Remote provider prefixes and local tracks appear together in search, library views, and playback.
 - **Home** — Configurable sections (mixes, collections, favorite playlists/artists/albums, recents, listening history, random picks) with order controlled in Settings. Recently added songs, artists, and albums (7-day window), **heavy rotation** (frequently replayed tracks in a 14-day window), recently played and most-played panels, random artist/album picks, a **personal mix** seeded from listening history (weights tunable in Settings), and a **decade mix** for a chosen era. Plex library radio stations appear in mixes when signed in to Plex. Mobile home can use **Compact** or **Expanded** layout modes.
+- **Internet radio** — Browse recommended stations, search the Radio Browser directory, jump through country/category groups with the same section index used by Library, and save custom stream URLs as manual stations.
 - **Collections** — Browse artists and albums grouped by **genre**, **mood**, or **style** where the active source exposes them (Plex and local tags: all three; other providers: genre only).
 - **Play history** — Dedicated screens for recently played and most played tracks; per-play events power smarter home mixes. Last-played timestamps and play counts surface in the library and home UI. Plex, Jellyfin/Emby, and Navidrome playback history can be imported from the server to warm play counts and missing track metadata.
 - **Rich library table** — Configurable columns (title, artist, album, year, genre, path, codec, bitrate, duration, rating, favorite, and related fields where available).
@@ -229,6 +231,10 @@ Screenshots below come from CI screenshot baselines: [Roborazzi](composeApp/src/
     <tr>
       <td>Library — artists grid, sidebar, and Up Next queue</td>
       <td align="center" height="280" valign="middle"><a href="composeApp/src/screenshotTest/roborazzi/desktop-library-dark.png" target="_blank" rel="noopener noreferrer"><img src="composeApp/src/screenshotTest/roborazzi/desktop-library-dark.png" height="280" alt="Desktop library" /></a></td>
+    </tr>
+    <tr>
+      <td>Radio — recommended streams, saved stations, and country browsing</td>
+      <td align="center" height="280" valign="middle"><a href="composeApp/src/screenshotTest/roborazzi/desktop-radio-dark.png" target="_blank" rel="noopener noreferrer"><img src="composeApp/src/screenshotTest/roborazzi/desktop-radio-dark.png" height="280" alt="Desktop radio" /></a></td>
     </tr>
     <tr>
       <td>Now playing — Plenoptic visualizer, waveform progress, and queue</td>

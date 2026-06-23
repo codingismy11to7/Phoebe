@@ -135,6 +135,9 @@ fun NowPlayingVisualizerSurface(
             NowPlayingVisualizerPreset.BarsAndWaves -> drawBarsAndWaves(frame, phase)
             NowPlayingVisualizerPreset.BlazingColors -> drawBlazingColors(frame, phase)
             NowPlayingVisualizerPreset.Plenoptic -> drawPlenoptic(frame, phase)
+            NowPlayingVisualizerPreset.VortexSpectrum -> drawVortexSpectrum(frame, phase)
+            NowPlayingVisualizerPreset.ClassicEQ -> drawClassicEQ(frame, phase)
+            NowPlayingVisualizerPreset.HaloSpectrum -> drawHaloSpectrum(frame, phase)
             NowPlayingVisualizerPreset.Artwork -> Unit
         }
     }
@@ -441,8 +444,8 @@ private fun DrawScope.drawBattery(frame: AudioAnalysisFrame, phase: Float) {
 // Bold vertical bars from the bottom with a centred waveform overlay
 private fun DrawScope.drawBarsAndWaves(frame: AudioAnalysisFrame, phase: Float) {
     val colors = NowPlayingVisualizerPreset.BarsAndWaves.visualColors()
-    val bands = frame.bands.ifEmpty { List(64) { 0.12f } }
-    val slots = min(80, bands.size.coerceAtLeast(32))
+    val bands = frame.bands.ifEmpty { List(128) { 0.12f } }
+    val slots = min(128, bands.size.coerceAtLeast(32))
     val slotWidth = size.width / slots
     val barW = slotWidth * 0.62f
     val baseline = size.height * 0.78f
@@ -527,8 +530,8 @@ private fun DrawScope.drawBarsAndWaves(frame: AudioAnalysisFrame, phase: Float) 
 private fun DrawScope.drawBlazingColors(frame: AudioAnalysisFrame, phase: Float) {
     val colors = NowPlayingVisualizerPreset.BlazingColors.visualColors()
     val amp = frame.amplitude.coerceIn(0f, 1f)
-    val bands = frame.bands.ifEmpty { List(32) { 0.2f } }
-    val columns = min(48, bands.size.coerceAtLeast(24))
+    val bands = frame.bands.ifEmpty { List(128) { 0.2f } }
+    val columns = min(128, bands.size.coerceAtLeast(24))
     val colW = size.width / columns
 
     // Flame columns — tall tapered vertical brushes
@@ -648,6 +651,148 @@ private fun DrawScope.drawPlenoptic(frame: AudioAnalysisFrame, phase: Float) {
     }
 }
 
+// ─── Vortex Spectrum ─────────────────────────────────────────────────────────
+// 3D-angled circular spectrum analyzer with rainbow colors
+private fun DrawScope.drawVortexSpectrum(frame: AudioAnalysisFrame, phase: Float) {
+    val center = Offset(size.width / 2f, size.height / 2f)
+    val baseRadiusX = size.minDimension * 0.25f
+    val baseRadiusY = baseRadiusX * 0.35f // Flatten to create 3D perspective
+    
+    val bands = frame.bands.ifEmpty { List(128) { 0.1f } }
+    val count = bands.size
+    
+    // Draw central black hole/disc
+    drawOval(
+        color = Color.Black,
+        topLeft = Offset(center.x - baseRadiusX, center.y - baseRadiusY),
+        size = Size(baseRadiusX * 2, baseRadiusY * 2)
+    )
+
+    for (i in 0 until count) {
+        val band = bands[i].coerceIn(0f, 1f)
+        val angle = (i.toFloat() / count) * FullTurn
+        
+        val hue = (i.toFloat() / count) * 360f
+        val color = Color.hsv(hue, 1f, 1f)
+        
+        val startX = center.x + cosF(angle) * baseRadiusX
+        val startY = center.y + sinF(angle) * baseRadiusY
+        
+        // Project length outwards
+        val length = size.minDimension * 0.3f * band
+        val endX = startX + cosF(angle) * length
+        val endY = startY + sinF(angle) * length * 0.35f // Apply same perspective scale
+        
+        drawLine(
+            color = color,
+            start = Offset(startX, startY),
+            end = Offset(endX, endY),
+            strokeWidth = 2.dp.toPx(),
+            cap = StrokeCap.Round
+        )
+    }
+}
+
+// ─── Classic EQ ──────────────────────────────────────────────────────────────
+// Segmented LED graphic equalizer with peak holds
+private fun DrawScope.drawClassicEQ(frame: AudioAnalysisFrame, phase: Float) {
+    val bands = frame.bands.ifEmpty { List(128) { 0.1f } }
+    val count = min(128, bands.size.coerceAtLeast(16))
+    val spacing = 2.dp.toPx()
+    val barWidth = (size.width - spacing * (count + 1)) / count
+    val segmentHeight = 4.dp.toPx()
+    val segmentSpacing = 1.dp.toPx()
+    
+    val maxSegments = (size.height / (segmentHeight + segmentSpacing)).toInt().coerceAtLeast(1)
+    
+    for (i in 0 until count) {
+        val band = frame.band(i)
+        val activeSegments = (band * maxSegments).toInt().coerceIn(0, maxSegments)
+        
+        val x = spacing + i * (barWidth + spacing)
+        
+        for (s in 0 until maxSegments) {
+            val y = size.height - (s + 1) * (segmentHeight + segmentSpacing)
+            
+            val color = when {
+                s > maxSegments * 0.8f -> Color.Red
+                s > maxSegments * 0.5f -> Color.Yellow
+                else -> Color.Green
+            }
+            
+            if (s < activeSegments) {
+                drawRect(
+                    color = color,
+                    topLeft = Offset(x, y),
+                    size = Size(barWidth, segmentHeight)
+                )
+            } else if (s == activeSegments && activeSegments > 0) {
+                // Peak hold simulation (simplified flicker)
+                val peakHoldDecay = (phase * 5f).toInt() % 3
+                if (peakHoldDecay > 0 && s + 1 < maxSegments) {
+                     drawRect(
+                        color = Color.Red,
+                        topLeft = Offset(x, y - (segmentHeight + segmentSpacing)),
+                        size = Size(barWidth, segmentHeight)
+                    )
+                }
+            } else {
+                drawRect(
+                    color = color.copy(alpha = 0.1f),
+                    topLeft = Offset(x, y),
+                    size = Size(barWidth, segmentHeight)
+                )
+            }
+        }
+    }
+}
+
+// ─── Halo Spectrum ───────────────────────────────────────────────────────────
+// 2D circular spectrum analyzer with rainbow gradients
+private fun DrawScope.drawHaloSpectrum(frame: AudioAnalysisFrame, phase: Float) {
+    val center = Offset(size.width / 2f, size.height / 2f)
+    val baseRadius = size.minDimension * 0.25f
+    val amp = frame.amplitude.coerceIn(0f, 1f)
+    val dynamicRadius = baseRadius + amp * size.minDimension * 0.05f
+    
+    val bands = frame.bands.ifEmpty { List(128) { 0.1f } }
+    val count = bands.size
+    
+    // Draw pulsating center circle
+    drawCircle(
+        brush = Brush.radialGradient(
+            colors = listOf(Color.Transparent, Color(0x33FFFFFF)),
+            center = center,
+            radius = dynamicRadius.coerceAtLeast(1f)
+        ),
+        radius = dynamicRadius,
+        center = center
+    )
+    
+    for (i in 0 until count) {
+        val band = bands[i].coerceIn(0f, 1f)
+        val angle = (i.toFloat() / count) * FullTurn + phase * 0.5f
+        
+        val hue = ((i.toFloat() / count) * 360f + phase * 30f) % 360f
+        val color = Color.hsv(hue, 0.9f, 0.9f)
+        
+        val startX = center.x + cosF(angle) * dynamicRadius
+        val startY = center.y + sinF(angle) * dynamicRadius
+        
+        val length = size.minDimension * 0.2f * band
+        val endX = startX + cosF(angle) * length
+        val endY = startY + sinF(angle) * length
+        
+        drawLine(
+            color = color,
+            start = Offset(startX, startY),
+            end = Offset(endX, endY),
+            strokeWidth = 3.dp.toPx(),
+            cap = StrokeCap.Round
+        )
+    }
+}
+
 // ─── Color palettes ──────────────────────────────────────────────────────────
 private fun NowPlayingVisualizerPreset.backgroundColors(): List<Color> =
     when (this) {
@@ -656,6 +801,9 @@ private fun NowPlayingVisualizerPreset.backgroundColors(): List<Color> =
         NowPlayingVisualizerPreset.BarsAndWaves -> listOf(Color(0xFF0D1A2E), Color(0xFF111827), Color(0xFF05070D))
         NowPlayingVisualizerPreset.BlazingColors -> listOf(Color(0xFF280A00), Color(0xFF1A0500), Color(0xFF05070D))
         NowPlayingVisualizerPreset.Plenoptic -> listOf(Color(0xFF1A1233), Color(0xFF092B34), Color(0xFF05070D))
+        NowPlayingVisualizerPreset.VortexSpectrum -> listOf(Color(0xFF0A0A0A), Color(0xFF000000), Color(0xFF000000))
+        NowPlayingVisualizerPreset.ClassicEQ -> listOf(Color(0xFF0F0F0F), Color(0xFF050505), Color(0xFF000000))
+        NowPlayingVisualizerPreset.HaloSpectrum -> listOf(Color(0xFF1A1A24), Color(0xFF08080C), Color(0xFF05050A))
         NowPlayingVisualizerPreset.Artwork -> listOf(Color.Transparent, Color.Transparent)
     }
 
@@ -682,6 +830,9 @@ private fun NowPlayingVisualizerPreset.visualColors(): List<Color> =
         NowPlayingVisualizerPreset.Plenoptic -> listOf(
             Color(0xFFE599F7), Color(0xFF66D9E8), Color(0xFFFFD43B), Color(0xFFFF8787),
         )
+        NowPlayingVisualizerPreset.VortexSpectrum -> listOf(Color.White)
+        NowPlayingVisualizerPreset.ClassicEQ -> listOf(Color(0xFF00FF00), Color(0xFFFFFF00), Color(0xFFFF0000))
+        NowPlayingVisualizerPreset.HaloSpectrum -> listOf(Color.White)
         NowPlayingVisualizerPreset.Artwork -> listOf(Color(0xFF74C0FC))
     }
 

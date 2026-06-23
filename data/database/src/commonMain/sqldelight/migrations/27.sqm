@@ -1,0 +1,11 @@
+ALTER TABLE LibraryPrefsRow ADD COLUMN mobileBottomTabs TEXT NOT NULL DEFAULT 'Home,Search,Library,Playlists,Radio';
+
+CREATE TABLE ManualRadioStationRow (
+    id TEXT NOT NULL PRIMARY KEY,
+    name TEXT NOT NULL,
+    streamUrl TEXT NOT NULL,
+    homepageUrl TEXT,
+    faviconUrl TEXT,
+    createdAtMs INTEGER NOT NULL,
+    updatedAtMs INTEGER NOT NULL
+);

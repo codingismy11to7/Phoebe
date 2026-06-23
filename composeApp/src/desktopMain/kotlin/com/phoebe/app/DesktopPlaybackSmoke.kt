@@ -9,20 +9,51 @@ import java.net.URI
 import kotlin.system.exitProcess
 
 private const val PlaybackSmokeArgPrefix = "--phoebe-playback-smoke="
+private const val PlaybackSmokeUrlArgPrefix = "--phoebe-playback-smoke-url="
 private const val PlaybackSmokeTimeoutArgPrefix = "--phoebe-playback-smoke-timeout-ms="
 private const val DefaultPlaybackSmokeTimeoutMs = 15_000L
 
 internal fun runDesktopPlaybackSmokeIfRequested(args: Array<String>): Boolean {
+    val urlRaw = args.firstOrNull { it.startsWith(PlaybackSmokeUrlArgPrefix) }
+        ?.removePrefix(PlaybackSmokeUrlArgPrefix)
     val fixtureRaw = args.firstOrNull { it.startsWith(PlaybackSmokeArgPrefix) }
         ?.removePrefix(PlaybackSmokeArgPrefix)
-        ?: return false
+    if (urlRaw == null && fixtureRaw == null) return false
     val timeoutMs = args.firstOrNull { it.startsWith(PlaybackSmokeTimeoutArgPrefix) }
         ?.removePrefix(PlaybackSmokeTimeoutArgPrefix)
         ?.toLongOrNull()
         ?.takeIf { it > 0L }
         ?: DefaultPlaybackSmokeTimeoutMs
-    val status = runDesktopPlaybackSmoke(fixtureRaw, timeoutMs)
+    val status = if (urlRaw != null) {
+        runDesktopPlaybackSmokeUrl(urlRaw, timeoutMs)
+    } else {
+        runDesktopPlaybackSmoke(fixtureRaw.orEmpty(), timeoutMs)
+    }
     exitProcess(status)
+}
+
+private fun runDesktopPlaybackSmokeUrl(
+    url: String,
+    timeoutMs: Long,
+): Int {
+    if (!url.startsWith("http://", ignoreCase = true) && !url.startsWith("https://", ignoreCase = true)) {
+        println("PHOEBE_PLAYBACK_SMOKE_FAILED reason=invalid-url url=${singleLine(url)} timeoutMs=$timeoutMs")
+        return 2
+    }
+    return runDesktopPlaybackSmokeTrack(
+        track = Track(
+            id = "desktop-playback-smoke-url",
+            title = url.substringAfterLast('/').ifBlank { "Remote stream" },
+            artist = "Phoebe Smoke",
+            album = "Desktop Playback Smoke",
+            durationMs = 0L,
+            streamUrl = url,
+            downloadUrl = url,
+            audioCodec = "",
+        ),
+        label = "url=${singleLine(url)}",
+        timeoutMs = timeoutMs,
+    )
 }
 
 private fun runDesktopPlaybackSmoke(
@@ -38,6 +69,22 @@ private fun runDesktopPlaybackSmoke(
     val diagnostics = PlaybackSmokeDiagnostics()
     val player = DesktopAudioPlayer(diagnostics)
     val track = fixture.toSmokeTrack()
+    return runDesktopPlaybackSmokeTrack(
+        track = track,
+        label = "file=${singleLine(fixture.absolutePath)}",
+        timeoutMs = timeoutMs,
+        diagnostics = diagnostics,
+        player = player,
+    )
+}
+
+private fun runDesktopPlaybackSmokeTrack(
+    track: Track,
+    label: String,
+    timeoutMs: Long,
+    diagnostics: PlaybackSmokeDiagnostics = PlaybackSmokeDiagnostics(),
+    player: DesktopAudioPlayer = DesktopAudioPlayer(diagnostics),
+): Int {
     try {
         diagnostics.markPlayRequested()
         player.play(listOf(track), 0)
@@ -49,7 +96,7 @@ private fun runDesktopPlaybackSmoke(
                 println(
                     "PHOEBE_PLAYBACK_SMOKE_OK firstAudioMs=$firstAudioMs " +
                         "engines=${snapshot.engines.asSmokeValue()} errors=${snapshot.errors.asSmokeValue()} " +
-                        "file=${singleLine(fixture.absolutePath)}",
+                        label,
                 )
                 return 0
             }
@@ -62,7 +109,7 @@ private fun runDesktopPlaybackSmoke(
             "PHOEBE_PLAYBACK_SMOKE_FAILED reason=timeout timeoutMs=$timeoutMs " +
                 "engines=${snapshot.engines.asSmokeValue()} errors=${snapshot.errors.asSmokeValue()} " +
                 "buffering=${state.isBuffering} playing=${state.isPlaying} errorSerial=${state.playbackErrorSerial} " +
-                "file=${singleLine(fixture.absolutePath)}",
+                label,
         )
         return 3
     } finally {

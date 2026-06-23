@@ -12,7 +12,10 @@ enum class NowPlayingVisualizerPreset(
     Battery("Battery"),
     BarsAndWaves("Bars & Waves"),
     BlazingColors("Blazing Colors"),
-    Plenoptic("Plenoptic");
+    Plenoptic("Plenoptic"),
+    VortexSpectrum("Vortex Spectrum"),
+    ClassicEQ("Classic EQ"),
+    HaloSpectrum("Halo Spectrum");
 
     val isVisualizer: Boolean
         get() = this != Artwork
@@ -50,7 +53,7 @@ data class AudioAnalysisFrame(
     }
 
     companion object {
-        const val MaxBands = 64
+        const val MaxBands = 128
         val Empty = AudioAnalysisFrame()
     }
 }

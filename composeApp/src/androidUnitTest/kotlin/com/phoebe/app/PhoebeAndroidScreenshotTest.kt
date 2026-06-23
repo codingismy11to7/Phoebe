@@ -29,6 +29,7 @@ class PhoebeAndroidPhoneScreenshotTest {
     @Test fun phoneLibraryDark() = capturePhone("library", PhoebeScreenshotScenario.Library)
     @Test fun phoneLibraryScrollbarDark() = capturePhone("library-scrollbar", PhoebeScreenshotScenario.LibraryScrollbar)
     @Test fun phoneLibraryFiveColumnGridDark() = capturePhone("library-five-column-grid", PhoebeScreenshotScenario.LibraryFiveColumnGrid)
+    @Test fun phoneRadioDark() = capturePhone("radio", PhoebeScreenshotScenario.Radio)
     @Test fun phonePlaylistDark() = capturePhone("playlist", PhoebeScreenshotScenario.Playlist)
     @Test fun phoneArtistDark() = capturePhone("artist", PhoebeScreenshotScenario.Artist)
     @Test fun phoneAlbumDark() = capturePhone("album", PhoebeScreenshotScenario.Album)
@@ -59,6 +60,9 @@ class PhoebeAndroidPhoneScreenshotTest {
     @Test fun phonePlayerVisualizerBarsAndWavesLight() = capturePhone("player-visualizer-bars-and-waves", PhoebeScreenshotScenario.PlayerVisualizerBarsAndWaves, useLightAppearance = true)
     @Test fun phonePlayerVisualizerBlazingColorsLight() = capturePhone("player-visualizer-blazing-colors", PhoebeScreenshotScenario.PlayerVisualizerBlazingColors, useLightAppearance = true)
     @Test fun phonePlayerVisualizerPlenopticLight() = capturePhone("player-visualizer-plenoptic", PhoebeScreenshotScenario.PlayerVisualizerPlenoptic, useLightAppearance = true)
+    @Test fun phonePlayerVisualizerVortexSpectrumLight() = capturePhone("player-visualizer-vortex-spectrum", PhoebeScreenshotScenario.PlayerVisualizerVortexSpectrum, useLightAppearance = true)
+    @Test fun phonePlayerVisualizerClassicEQLight() = capturePhone("player-visualizer-classic-eq", PhoebeScreenshotScenario.PlayerVisualizerClassicEQ, useLightAppearance = true)
+    @Test fun phonePlayerVisualizerHaloSpectrumLight() = capturePhone("player-visualizer-halo-spectrum", PhoebeScreenshotScenario.PlayerVisualizerHaloSpectrum, useLightAppearance = true)
     @Test fun phonePlayerUpNextExpandedLight() = capturePhone("player-upnext-expanded", PhoebeScreenshotScenario.PlayerUpNextExpanded, useLightAppearance = true)
 }
 
@@ -72,6 +76,7 @@ class PhoebeAndroidTabletScreenshotTest {
     @Test fun tabletArtistRadioDark() = captureTablet("artist-radio", PhoebeScreenshotScenario.ArtistRadio)
     @Test fun tabletLibraryDark() = captureTablet("library", PhoebeScreenshotScenario.Library)
     @Test fun tabletLibraryUpNextExpandedDark() = captureTabletUpNextExpanded("library", PhoebeScreenshotScenario.Library)
+    @Test fun tabletRadioDark() = captureTablet("radio", PhoebeScreenshotScenario.Radio)
     @Test fun tabletPlaylistDark() = captureTablet("playlist", PhoebeScreenshotScenario.Playlist)
     @Test fun tabletArtistDark() = captureTablet("artist", PhoebeScreenshotScenario.Artist)
     @Test fun tabletSearchDark() = captureTablet("search", PhoebeScreenshotScenario.Search)

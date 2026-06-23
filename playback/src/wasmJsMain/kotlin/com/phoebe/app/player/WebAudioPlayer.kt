@@ -1195,7 +1195,7 @@ private external fun setWebAudioOutputGain(audio: HTMLAudioElement, gain: Double
             const context = eq.context;
             const input = eq.gain || eq.source;
             const analyser = context.createAnalyser();
-            analyser.fftSize = 128;
+            analyser.fftSize = 256;
             analyser.smoothingTimeConstant = 0.72;
             input.connect(analyser);
             const data = new Uint8Array(analyser.frequencyBinCount);

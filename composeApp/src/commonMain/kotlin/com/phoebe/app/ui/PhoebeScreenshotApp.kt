@@ -180,6 +180,7 @@ import com.phoebe.app.data.catalogAlbumsForArtist
 import com.phoebe.app.data.catalogTracksForArtist
 import com.phoebe.app.data.defaultPlexRadioStations
 import com.phoebe.app.data.PlayHistorySnapshot
+import com.phoebe.app.data.RecommendedRadioStations
 import com.phoebe.app.domain.AudioAnalysisFrame
 import com.phoebe.app.domain.AudioAnalysisSource
 import com.phoebe.app.domain.Album
@@ -208,6 +209,10 @@ import com.phoebe.app.domain.PlayerState
 import com.phoebe.app.domain.PlayerTransportState
 import com.phoebe.app.domain.RecentSearchItem
 import com.phoebe.app.domain.Playlist
+import com.phoebe.app.domain.RadioCountry
+import com.phoebe.app.domain.RadioDirectoryState
+import com.phoebe.app.domain.RadioStation
+import com.phoebe.app.domain.RadioStationSource
 import com.phoebe.app.domain.ShellPlaybackState
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
@@ -241,6 +246,7 @@ internal enum class PhoebeScreenshotScenario {
     Library,
     LibraryScrollbar,
     LibraryFiveColumnGrid,
+    Radio,
     Playlist,
     Artist,
     ArtistRadio,
@@ -258,6 +264,9 @@ internal enum class PhoebeScreenshotScenario {
     PlayerVisualizerBarsAndWaves,
     PlayerVisualizerBlazingColors,
     PlayerVisualizerPlenoptic,
+    PlayerVisualizerVortexSpectrum,
+    PlayerVisualizerClassicEQ,
+    PlayerVisualizerHaloSpectrum,
     PlayerUpNextExpanded,
     Settings,
     SignIn,
@@ -266,7 +275,7 @@ internal enum class PhoebeScreenshotScenario {
 
 private val ScreenshotAudioAnalysisFrame = AudioAnalysisFrame(
     amplitude = 0.68f,
-    bands = List(32) { index -> (0.14f + ((index * 37) % 100) / 125f).coerceIn(0f, 1f) },
+    bands = List(128) { index -> (0.14f + ((index * 37) % 100) / 125f).coerceIn(0f, 1f) },
     timestampMs = 1_800_000_000_000L,
     source = AudioAnalysisSource.Pcm,
 )
@@ -280,6 +289,9 @@ private fun PhoebeScreenshotScenario.visualizerPreset(): NowPlayingVisualizerPre
         PhoebeScreenshotScenario.PlayerVisualizerBattery -> NowPlayingVisualizerPreset.Battery
         PhoebeScreenshotScenario.PlayerVisualizerBlazingColors -> NowPlayingVisualizerPreset.BlazingColors
         PhoebeScreenshotScenario.PlayerVisualizerPlenoptic -> NowPlayingVisualizerPreset.Plenoptic
+        PhoebeScreenshotScenario.PlayerVisualizerVortexSpectrum -> NowPlayingVisualizerPreset.VortexSpectrum
+        PhoebeScreenshotScenario.PlayerVisualizerClassicEQ -> NowPlayingVisualizerPreset.ClassicEQ
+        PhoebeScreenshotScenario.PlayerVisualizerHaloSpectrum -> NowPlayingVisualizerPreset.HaloSpectrum
         else -> NowPlayingVisualizerPreset.Default
     }
 
@@ -388,6 +400,9 @@ internal fun PhoebeDesktopScreenshotScenario(
         PhoebeScreenshotScenario.PlayerVisualizerBarsAndWaves,
         PhoebeScreenshotScenario.PlayerVisualizerBlazingColors,
         PhoebeScreenshotScenario.PlayerVisualizerPlenoptic,
+        PhoebeScreenshotScenario.PlayerVisualizerVortexSpectrum,
+        PhoebeScreenshotScenario.PlayerVisualizerClassicEQ,
+        PhoebeScreenshotScenario.PlayerVisualizerHaloSpectrum,
         -> AppScreen.Player
         else -> AppScreen.Home
     }
@@ -396,6 +411,7 @@ internal fun PhoebeDesktopScreenshotScenario(
         PhoebeScreenshotScenario.LibraryScrollbar,
         PhoebeScreenshotScenario.LibraryFiveColumnGrid,
         -> BrowseSection.Library
+        PhoebeScreenshotScenario.Radio -> BrowseSection.Radio
         PhoebeScreenshotScenario.Playlist -> BrowseSection.Library
         PhoebeScreenshotScenario.Search -> BrowseSection.Search
         PhoebeScreenshotScenario.Settings -> BrowseSection.Settings
@@ -484,6 +500,7 @@ internal fun PhoebeDesktopScreenshotScenario(
             libraryFilter = LibraryFilterTab.Artists,
             libraryUi = libraryUi,
             radioStations = fixture.radioStations,
+            radioDirectory = fixture.radioDirectory,
             artistRadioAvailability = if (scenario == PhoebeScreenshotScenario.ArtistRadio) {
                 mapOf(fixture.artist.id to ArtistRadioAvailability.Available)
             } else {
@@ -560,6 +577,8 @@ internal fun PhoebeDesktopScreenshotScenario(
             onArtistGridItemSize = {},
             onExportFavoritePlaylists = {},
             onImportFavoritePlaylists = {},
+            onExportRadioStations = {},
+            onImportRadioStations = {},
             onCrossfadeSeconds = {},
             onScanLibraryOnLaunch = {},
             onNotifyWhenDownloadFinishes = {},
@@ -773,6 +792,9 @@ internal fun PhoebeMobileScreenshotScenario(
             PhoebeScreenshotScenario.PlayerVisualizerBarsAndWaves,
             PhoebeScreenshotScenario.PlayerVisualizerBlazingColors,
             PhoebeScreenshotScenario.PlayerVisualizerPlenoptic,
+            PhoebeScreenshotScenario.PlayerVisualizerVortexSpectrum,
+            PhoebeScreenshotScenario.PlayerVisualizerClassicEQ,
+            PhoebeScreenshotScenario.PlayerVisualizerHaloSpectrum,
             PhoebeScreenshotScenario.PlayerUpNextExpanded,
             -> MobilePlaybackRoute(
                 state = MobilePlaybackRouteState(
@@ -832,6 +854,7 @@ internal fun PhoebeMobileScreenshotScenario(
                     PhoebeScreenshotScenario.LibraryScrollbar,
                     PhoebeScreenshotScenario.LibraryFiveColumnGrid,
                     -> BrowseSection.Library
+                    PhoebeScreenshotScenario.Radio -> BrowseSection.Radio
                     PhoebeScreenshotScenario.Search -> BrowseSection.Search
                     PhoebeScreenshotScenario.Settings -> BrowseSection.Settings
                     else -> BrowseSection.Home
@@ -883,9 +906,11 @@ internal fun PhoebeMobileScreenshotScenario(
                 onHomeSections = {},
                 onPersonalMix = {},
                 onAlbumGridItemSize = {},
-            onArtistGridItemSize = {},
+                onArtistGridItemSize = {},
                 onExportFavoritePlaylists = {},
                 onImportFavoritePlaylists = {},
+                onExportRadioStations = {},
+                onImportRadioStations = {},
                 appSettings = AppSettings.Default,
                 onCrossfadeSeconds = {},
                 onScanLibraryOnLaunch = {},
@@ -900,6 +925,7 @@ internal fun PhoebeMobileScreenshotScenario(
                 appearanceTintId = PhoebeTintOption.Purple.id,
                 onAppearanceTintChange = {},
                 radioStations = fixture.radioStations,
+                internetRadioDirectory = fixture.radioDirectory,
             )
         }
     }
@@ -941,6 +967,7 @@ internal fun PhoebeMobileScreenshotScenario(
                     PhoebeScreenshotScenario.LibraryScrollbar,
                     PhoebeScreenshotScenario.LibraryFiveColumnGrid,
                     -> BrowseSection.Library
+                    PhoebeScreenshotScenario.Radio -> BrowseSection.Radio
                     PhoebeScreenshotScenario.Search -> BrowseSection.Search
                     PhoebeScreenshotScenario.Settings -> BrowseSection.Settings
                     else -> BrowseSection.Home
@@ -1085,6 +1112,8 @@ private fun MobileHomeAccordionScreenshot(
                 onArtistGridItemSize = {},
         onExportFavoritePlaylists = {},
         onImportFavoritePlaylists = {},
+        onExportRadioStations = {},
+        onImportRadioStations = {},
         appSettings = AppSettings.Default,
         onCrossfadeSeconds = {},
         onScanLibraryOnLaunch = {},
@@ -1108,6 +1137,7 @@ private fun MobileHomeAccordionScreenshot(
 internal data class PhoebeScreenshotFixtureData(
     val catalog: CatalogSnapshot,
     val radioStations: List<PlexRadioStation>,
+    val radioDirectory: RadioDirectoryState,
     val session: PlexSession,
     val mediaSources: MediaSourcesState,
     val libraryUi: LibraryUiPreferences,
@@ -1152,8 +1182,39 @@ internal val PhoebeScreenshotFixture = run {
     )
     val library = MusicLibrary(key = "42", title = "Music")
     val radioStations = defaultPlexRadioStations(library)
+    val internetRadioDirectory = RadioDirectoryState(
+        manualStations = listOf(
+            RadioStation(
+                id = "manual:morning-static",
+                name = "Morning Static",
+                streamUrl = "https://radio.example/morning-static.mp3",
+                description = "Saved manual stream",
+                source = RadioStationSource.Manual,
+            ),
+        ),
+        recommendedStations = RecommendedRadioStations.take(12),
+        countries = listOf(
+            RadioCountry(name = "The United States Of America", code = "US", stationCount = 7349),
+            RadioCountry(name = "Germany", code = "DE", stationCount = 5951),
+            RadioCountry(name = "The Russian Federation", code = "RU", stationCount = 3087),
+            RadioCountry(name = "France", code = "FR", stationCount = 2640),
+            RadioCountry(name = "Brazil", code = "BR", stationCount = 2351),
+            RadioCountry(name = "The United Kingdom", code = "GB", stationCount = 2173),
+            RadioCountry(name = "Canada", code = "CA", stationCount = 1742),
+            RadioCountry(name = "The Netherlands", code = "NL", stationCount = 1456),
+            RadioCountry(name = "Japan", code = "JP", stationCount = 1238),
+            RadioCountry(name = "Argentina", code = "AR", stationCount = 1124),
+            RadioCountry(name = "Italy", code = "IT", stationCount = 1048),
+            RadioCountry(name = "Spain", code = "ES", stationCount = 997),
+            RadioCountry(name = "Australia", code = "AU", stationCount = 812),
+            RadioCountry(name = "Sweden", code = "SE", stationCount = 654),
+            RadioCountry(name = "Mexico", code = "MX", stationCount = 602),
+            RadioCountry(name = "Norway", code = "NO", stationCount = 431),
+        ),
+    )
     PhoebeScreenshotFixtureData(
         radioStations = radioStations,
+        radioDirectory = internetRadioDirectory,
         catalog = CatalogSnapshot(
             artists = listOf(artist, secondArtist, thirdArtist),
             albums = listOf(album, secondAlbum, thirdAlbum, fourthAlbum),

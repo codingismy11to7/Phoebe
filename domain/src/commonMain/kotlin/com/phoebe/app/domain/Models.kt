@@ -268,6 +268,121 @@ enum class ArtistRadioAvailability {
 }
 
 @Serializable
+enum class RadioStationSource {
+    RadioBrowser,
+    Manual,
+    Recommended,
+}
+
+@Serializable
+data class RadioStation(
+    val id: String,
+    val name: String,
+    val streamUrl: String,
+    val homepageUrl: String? = null,
+    val faviconUrl: String? = null,
+    val description: String? = null,
+    val category: String? = null,
+    val tags: String? = null,
+    val countryCode: String? = null,
+    val language: String? = null,
+    val codec: String? = null,
+    val bitrateKbps: Int? = null,
+    val clickCount: Int = 0,
+    val source: RadioStationSource = RadioStationSource.RadioBrowser,
+) {
+    val displaySubtitle: String
+        get() = listOfNotNull(
+            category?.takeIf { it.isNotBlank() },
+            description?.takeIf { it.isNotBlank() },
+            countryCode?.takeIf { it.isNotBlank() },
+            language?.takeIf { it.isNotBlank() }?.replaceFirstChar { char -> char.uppercase() },
+            codec?.takeIf { it.isNotBlank() },
+            bitrateKbps?.takeIf { it > 0 }?.let { "${it}kbps" },
+        ).joinToString(" • ").ifBlank {
+            when (source) {
+                RadioStationSource.RadioBrowser -> "Radio Browser"
+                RadioStationSource.Manual -> "Manual station"
+                RadioStationSource.Recommended -> "Recommended stream"
+            }
+        }
+
+    val faviconUrlOrFallback: String?
+        get() = faviconUrl ?: homepageUrl?.let { url ->
+            val schemeEnd = url.indexOf("://").takeIf { it > 0 } ?: return@let null
+            val scheme = url.take(schemeEnd)
+            if (scheme != "http" && scheme != "https") return@let null
+            val hostStart = schemeEnd + 3
+            val hostEnd = url.indexOf('/', startIndex = hostStart).takeIf { it > hostStart } ?: url.length
+            "${url.take(hostEnd).trimEnd('/')}/favicon.ico"
+        }
+}
+
+@Serializable
+data class RadioCountry(
+    val name: String,
+    val code: String,
+    val stationCount: Int = 0,
+)
+
+@Serializable
+data class RadioFilterOption(
+    val name: String,
+    val value: String = name,
+    val stationCount: Int = 0,
+)
+
+@Serializable
+data class RadioStationSearchQuery(
+    val text: String = "",
+    val countryCode: String = "",
+    val language: String = "",
+    val tag: String = "",
+) {
+    fun normalized(): RadioStationSearchQuery =
+        copy(
+            text = text.trim(),
+            countryCode = countryCode.trim().uppercase(),
+            language = language.trim().lowercase(),
+            tag = tag.trim().lowercase(),
+        )
+
+    val isBlank: Boolean
+        get() = text.isBlank() && countryCode.isBlank() && language.isBlank() && tag.isBlank()
+}
+
+@Serializable
+data class RadioDirectoryState(
+    val manualStations: List<RadioStation> = emptyList(),
+    val recommendedStations: List<RadioStation> = emptyList(),
+    val countries: List<RadioCountry> = emptyList(),
+    val languages: List<RadioFilterOption> = emptyList(),
+    val tags: List<RadioFilterOption> = emptyList(),
+    val directoryStations: List<RadioStation> = emptyList(),
+    val searchQuery: RadioStationSearchQuery = RadioStationSearchQuery(),
+    val loading: Boolean = false,
+    val loadingMore: Boolean = false,
+    val canLoadMore: Boolean = false,
+    val errorMessage: String? = null,
+)
+
+@Serializable
+enum class MobileBottomTab {
+    Home,
+    Search,
+    Library,
+    Playlists,
+    Radio,
+    ;
+
+    companion object {
+        val defaultOrder: List<MobileBottomTab> =
+            listOf(Home, Search, Library, Playlists, Radio)
+        const val MinVisibleTabs = 2
+    }
+}
+
+@Serializable
 data class Track(
     val id: String,
     val title: String,
@@ -362,6 +477,7 @@ data class LibraryUiPreferences(
     val ascending: Boolean = true,
     val columns: LibraryColumnVisibility = LibraryColumnVisibility(),
     val homeSections: List<HomeSection> = HomeSection.defaultOrder,
+    val mobileBottomTabs: List<MobileBottomTab> = MobileBottomTab.defaultOrder,
     val personalMix: PersonalMixPreferences = PersonalMixPreferences(),
     /** Target artwork size (dp) for album cards in library grid view. */
     val albumGridItemSizeDp: Int = DefaultAlbumGridItemSizeDp,
@@ -370,6 +486,7 @@ data class LibraryUiPreferences(
 ) {
     fun normalized(): LibraryUiPreferences =
         copy(
+            mobileBottomTabs = mobileBottomTabs.normalizedMobileBottomTabs(),
             albumGridItemSizeDp = albumGridItemSizeDp.coerceIn(MinAlbumGridItemSizeDp, MaxAlbumGridItemSizeDp),
             artistGridItemSizeDp = artistGridItemSizeDp.coerceIn(MinArtistGridItemSizeDp, MaxArtistGridItemSizeDp),
         )
@@ -382,6 +499,12 @@ data class LibraryUiPreferences(
         const val DefaultArtistGridItemSizeDp = 112
         const val MaxArtistGridItemSizeDp = 200
     }
+}
+
+fun List<MobileBottomTab>.normalizedMobileBottomTabs(): List<MobileBottomTab> {
+    val unique = distinct()
+        .filter { it in MobileBottomTab.defaultOrder }
+    return if (unique.size >= MobileBottomTab.MinVisibleTabs) unique else MobileBottomTab.defaultOrder
 }
 
 @Serializable

@@ -1,0 +1,32 @@
+CREATE TABLE ManualRadioStationRow (
+    id TEXT NOT NULL PRIMARY KEY,
+    name TEXT NOT NULL,
+    streamUrl TEXT NOT NULL,
+    homepageUrl TEXT,
+    faviconUrl TEXT,
+    createdAtMs INTEGER NOT NULL,
+    updatedAtMs INTEGER NOT NULL
+);
+
+selectManualStations:
+SELECT * FROM ManualRadioStationRow ORDER BY name COLLATE NOCASE ASC;
+
+selectManualStation:
+SELECT * FROM ManualRadioStationRow WHERE id = ?;
+
+upsertManualStation:
+INSERT OR REPLACE INTO ManualRadioStationRow(
+    id,
+    name,
+    streamUrl,
+    homepageUrl,
+    faviconUrl,
+    createdAtMs,
+    updatedAtMs
+) VALUES (?, ?, ?, ?, ?, ?, ?);
+
+deleteManualStation:
+DELETE FROM ManualRadioStationRow WHERE id = ?;
+
+clearManualStations:
+DELETE FROM ManualRadioStationRow;

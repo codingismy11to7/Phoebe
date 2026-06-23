@@ -50,6 +50,20 @@ class PhoebeDesktopScreenshotTest {
 
     @OptIn(ExperimentalTestApi::class, ExperimentalComposeUiApi::class)
     @Test
+    fun desktopRadioDark() = runDesktopComposeUiTest(width = 1365, height = 900) {
+        setContent {
+            Box(Modifier.size(1365.dp, 900.dp)) {
+                PhoebeScreenshotApp(scenario = PhoebeScreenshotScenario.Radio)
+            }
+        }
+        waitForIdle()
+        onRoot().captureRoboImage(
+            filePath = "src/screenshotTest/roborazzi/desktop-radio-dark.png",
+        )
+    }
+
+    @OptIn(ExperimentalTestApi::class, ExperimentalComposeUiApi::class)
+    @Test
     fun desktopLibraryScrollbarDark() = runDesktopComposeUiTest(width = 1365, height = 900) {
         setContent {
             Box(Modifier.size(1365.dp, 900.dp)) {
@@ -95,6 +109,9 @@ class PhoebeDesktopScreenshotTest {
             PhoebeScreenshotScenario.PlayerVisualizerBarsAndWaves to "bars-and-waves",
             PhoebeScreenshotScenario.PlayerVisualizerBlazingColors to "blazing-colors",
             PhoebeScreenshotScenario.PlayerVisualizerPlenoptic to "plenoptic",
+            PhoebeScreenshotScenario.PlayerVisualizerVortexSpectrum to "vortex-spectrum",
+            PhoebeScreenshotScenario.PlayerVisualizerClassicEQ to "classic-eq",
+            PhoebeScreenshotScenario.PlayerVisualizerHaloSpectrum to "halo-spectrum",
         ).forEach { (scenario, slug) ->
             setContent {
                 Box(Modifier.size(1365.dp, 900.dp)) {

@@ -23,6 +23,7 @@ enum class BrowseSection {
     Home,
     Search,
     Library,
+    Radio,
     Lyrics,
     Playlists,
     Settings,
@@ -34,6 +35,7 @@ fun BrowseSection.isMainBrowseSection(): Boolean = when (this) {
     BrowseSection.Library,
     -> true
 
+    BrowseSection.Radio,
     BrowseSection.Lyrics,
     BrowseSection.Playlists,
     BrowseSection.Settings,
@@ -234,7 +236,15 @@ val PhoebeRoute.telemetryName: String
         PhoebeRoute.SignIn -> "sign_in"
         PhoebeRoute.ServerPicker -> "server_picker"
         PhoebeRoute.LibraryPicker -> "library_picker"
-        is PhoebeRoute.Browse -> "home"
+        is PhoebeRoute.Browse -> when (section) {
+            BrowseSection.Home -> "home"
+            BrowseSection.Search -> "search"
+            BrowseSection.Library -> "library"
+            BrowseSection.Radio -> "radio"
+            BrowseSection.Lyrics -> "lyrics"
+            BrowseSection.Playlists -> "playlists"
+            BrowseSection.Settings -> "settings"
+        }
         is PhoebeRoute.Collections -> "collections"
         is PhoebeRoute.CollectionItems -> "collection_items"
         is PhoebeRoute.AlbumDetail -> "album_detail"

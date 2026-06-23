@@ -254,6 +254,8 @@ class PhoneHomeAccordionTest {
                     onArtistGridItemSize = {},
                     onExportFavoritePlaylists = {},
                     onImportFavoritePlaylists = {},
+                    onExportRadioStations = {},
+                    onImportRadioStations = {},
                     homeScreenLayoutMode = selected,
                     onHomeScreenLayoutModeChange = { selected = it },
                     modifier = Modifier.size(430.dp, 932.dp),

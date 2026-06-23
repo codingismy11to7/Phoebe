@@ -19,6 +19,7 @@ import com.phoebe.app.data.PlayHistoryRepository
 import com.phoebe.app.data.PlaylistService
 import com.phoebe.app.data.PlexPlayHistorySyncer
 import com.phoebe.app.data.PlexPlaybackReporter
+import com.phoebe.app.data.RadioRepository
 import com.phoebe.app.data.SearchHistoryRepository
 import com.phoebe.app.data.SettingsService
 import com.phoebe.app.data.SessionRepository
@@ -56,6 +57,7 @@ class AppDependencies(
     val lyricsRepository: LyricsRepository,
     val playHistoryRepository: PlayHistoryRepository,
     val playlistService: PlaylistService,
+    val radioRepository: RadioRepository,
     val appSettingsRepository: AppSettingsRepository,
     val searchHistoryRepository: SearchHistoryRepository,
     val settingsService: SettingsService,
@@ -91,6 +93,7 @@ class AppDependencies(
         catalogRepository.clearInMemoryCatalog()
         mediaSourcesRepository.clearInMemoryState()
         libraryUiRepository.resetInMemoryState()
+        radioRepository.resetInMemoryState()
         appSettingsRepository.resetInMemoryState()
         searchHistoryRepository.clear()
         lyricsRepository.clearMemoryCache()
@@ -114,10 +117,12 @@ class AppDependencies(
             val sessionRepository = services.sessionRepository
             val mediaSourcesRepository = services.mediaSourcesRepository
             val searchHistoryRepository = services.searchHistoryRepository
+            val radioRepository = services.radioRepository
 
             sessionRepository.restore(refreshConnections = false)
             mediaSourcesRepository.restore()
             searchHistoryRepository.restore()
+            radioRepository.restore()
             return AppDependencies(
                 appGraph = appGraph,
                 database = services.database,
@@ -133,6 +138,7 @@ class AppDependencies(
                 lyricsRepository = services.lyricsRepository,
                 playHistoryRepository = services.playHistoryRepository,
                 playlistService = services.playlistService,
+                radioRepository = radioRepository,
                 appSettingsRepository = services.appSettingsRepository,
                 searchHistoryRepository = searchHistoryRepository,
                 settingsService = services.settingsService,

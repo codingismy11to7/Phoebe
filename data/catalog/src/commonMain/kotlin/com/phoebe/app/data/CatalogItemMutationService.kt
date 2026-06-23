@@ -14,11 +14,13 @@ import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 
 private const val FavoritePlaylistsExportPath = "exports/favorite-playlists.json"
+private const val RadioStationsExportPath = "exports/radio-stations.json"
 
 @SingleIn(AppScope::class)
 @Inject
 class CatalogItemMutationService(
     private val catalogRepository: CatalogRepository,
+    private val radioRepository: RadioRepository,
     private val platformStorage: PlatformStorage,
 ) {
     suspend fun updateTrackMetadata(session: PlexSession?, update: TrackMetadataUpdate): String {
@@ -82,6 +84,38 @@ class CatalogItemMutationService(
                 }
             },
             onFailure = { it.message ?: "Couldn't import favorite playlists." },
+        )
+    }
+
+    suspend fun exportRadioStations(): String {
+        val export = radioRepository.exportRadioStations()
+        if (export.stations.isEmpty()) return "No manual radio stations to export."
+        return runCatching {
+            platformStorage.writeText(
+                RadioStationsExportPath,
+                PlexClient.PlexJson.encodeToString(RadioStationsExport.serializer(), export),
+            )
+        }.fold(
+            onSuccess = { "Exported ${export.stations.size} radio stations." },
+            onFailure = { it.message ?: "Couldn't export radio stations." },
+        )
+    }
+
+    suspend fun importRadioStations(): String {
+        val content = platformStorage.readText(RadioStationsExportPath)
+        if (content.isNullOrBlank()) return "No radio stations export found."
+        return runCatching {
+            val export = PlexClient.PlexJson.decodeFromString(RadioStationsExport.serializer(), content)
+            radioRepository.importRadioStations(export)
+        }.fold(
+            onSuccess = { imported ->
+                if (imported > 0) {
+                    "Imported $imported radio stations."
+                } else {
+                    "No new radio stations to import."
+                }
+            },
+            onFailure = { it.message ?: "Couldn't import radio stations." },
         )
     }
 

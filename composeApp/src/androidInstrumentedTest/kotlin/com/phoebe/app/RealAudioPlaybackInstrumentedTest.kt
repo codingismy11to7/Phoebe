@@ -148,9 +148,9 @@ class RealAudioPlaybackInstrumentedTest {
         val diagnostics = RecordingPlaybackDiagnostics()
         val player = AndroidAudioPlayer(diagnostics)
         try {
-            val firstFile = copyAssetFixture("mdn-t-rex-roar-cc0.mp3")
+            val firstFile = copyAssetFixture("wikimedia-example.mp3")
             val secondFile = copyAssetFixture("wikimedia-example.mp3")
-            val first = fixtureTrack(firstFile, durationMs = 2_500, id = "first-mp3")
+            val first = fixtureTrack(firstFile, durationMs = 10_000, id = "first-mp3")
             val second = fixtureTrack(secondFile, durationMs = 10_000, id = "second-mp3")
 
             player.setCrossfadeDurationMs(4_000)

@@ -27,10 +27,17 @@ internal fun browseFolderItem(
         )
         .build()
 
-internal fun browseTrackItem(track: Track): MediaItem =
-    MediaItem.Builder()
+internal fun browseTrackItem(track: Track): MediaItem {
+    val uriString = track.localUri ?: track.streamUrl.takeIf { it.isNotBlank() }.orEmpty()
+    val isHls = uriString.contains(".m3u8", ignoreCase = true)
+    return MediaItem.Builder()
         .setMediaId(track.id)
-        .setUri((track.localUri ?: track.streamUrl).toAndroidUri())
+        .setUri(uriString.toAndroidUri())
+        .apply {
+            if (isHls) {
+                setMimeType("application/x-mpegURL")
+            }
+        }
         .setMediaMetadata(
             MediaMetadata.Builder()
                 .setTitle(track.title)
@@ -48,6 +55,7 @@ internal fun browseTrackItem(track: Track): MediaItem =
                 .build(),
         )
         .build()
+}
 
 internal fun browseTrackItem(track: Track, mediaId: String): MediaItem =
     browseTrackItem(track).buildUpon()

@@ -270,6 +270,13 @@ internal fun Sidebar(
                 enabled = mainNavEnabled,
                 onClick = { onNavigate(BrowseSection.Library) },
             )
+            NavRow(
+                PhoebeIcon.Radio,
+                "Radio",
+                active = activeSection == BrowseSection.Radio && selectedPlaylistId == null,
+                enabled = true,
+                onClick = { onNavigate(BrowseSection.Radio) },
+            )
         }
 
         LazyColumn(

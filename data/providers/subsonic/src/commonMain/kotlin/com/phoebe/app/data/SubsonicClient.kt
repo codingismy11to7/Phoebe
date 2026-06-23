@@ -11,6 +11,8 @@ import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.Track
+import com.phoebe.app.domain.RadioStation
+import com.phoebe.app.domain.RadioStationSource
 import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
@@ -403,6 +405,63 @@ class SubsonicClient(
         }
     }
 
+    suspend fun getInternetRadioStations(server: PlexServer, username: String, password: String): List<RadioStation> {
+        val response = request<SubsonicInternetRadioStationsRoot>(server.uri, username, password, "getInternetRadioStations")
+        return response.response.internetRadioStations?.internetRadioStation.orEmpty().map {
+            RadioStation(
+                id = "subsonic:${server.id}:${it.id}",
+                name = it.name,
+                streamUrl = it.streamUrl,
+                homepageUrl = it.homePageUrl,
+                faviconUrl = it.coverArt?.let { cover -> coverArtUrl(server.uri, username, password, cover) },
+                source = RadioStationSource.Recommended,
+            )
+        }
+    }
+    
+    suspend fun createInternetRadioStation(
+        server: PlexServer,
+        username: String,
+        password: String,
+        name: String,
+        streamUrl: String,
+        homepageUrl: String? = null,
+    ) {
+        request<SubsonicRoot>(server.uri, username, password, "createInternetRadioStation") {
+            parameter("name", name)
+            parameter("streamUrl", streamUrl)
+            homepageUrl?.let { parameter("homepageUrl", it) }
+        }
+    }
+
+    suspend fun updateInternetRadioStation(
+        server: PlexServer,
+        username: String,
+        password: String,
+        id: String,
+        name: String,
+        streamUrl: String,
+        homepageUrl: String? = null,
+    ) {
+        request<SubsonicRoot>(server.uri, username, password, "updateInternetRadioStation") {
+            parameter("id", id)
+            parameter("name", name)
+            parameter("streamUrl", streamUrl)
+            homepageUrl?.let { parameter("homepageUrl", it) }
+        }
+    }
+
+    suspend fun deleteInternetRadioStation(
+        server: PlexServer,
+        username: String,
+        password: String,
+        id: String,
+    ) {
+        request<SubsonicRoot>(server.uri, username, password, "deleteInternetRadioStation") {
+            parameter("id", id)
+        }
+    }
+
     suspend fun scrobble(server: PlexServer, username: String, password: String, itemId: String, submission: Boolean, timeMs: Long? = null) {
         request<SubsonicRoot>(server.uri, username, password, "scrobble") {
             parameter("id", itemId.removePrefix("navidrome:"))
@@ -515,6 +574,9 @@ private data class SubsonicSimilarSongsRoot(@SerialName("subsonic-response") val
 private data class SubsonicStarred2Root(@SerialName("subsonic-response") val response: SubsonicResponse = SubsonicResponse())
 
 @Serializable
+private data class SubsonicInternetRadioStationsRoot(@SerialName("subsonic-response") val response: SubsonicResponse = SubsonicResponse())
+
+@Serializable
 private data class SubsonicResponse(
     val status: String? = null,
     val musicFolders: SubsonicMusicFolders? = null,
@@ -526,6 +588,19 @@ private data class SubsonicResponse(
     val playlist: SubsonicPlaylistDto? = null,
     val similarSongs2: SubsonicSongs? = null,
     val starred2: SubsonicStarred2? = null,
+    val internetRadioStations: SubsonicInternetRadioStations? = null,
+)
+
+@Serializable
+private data class SubsonicInternetRadioStations(val internetRadioStation: List<SubsonicInternetRadioStationDto> = emptyList())
+
+@Serializable
+private data class SubsonicInternetRadioStationDto(
+    val id: String,
+    val name: String,
+    val streamUrl: String,
+    val homePageUrl: String? = null,
+    val coverArt: String? = null,
 )
 
 @Serializable

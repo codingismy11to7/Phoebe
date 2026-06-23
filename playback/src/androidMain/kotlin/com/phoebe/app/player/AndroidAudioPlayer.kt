@@ -518,7 +518,15 @@ class AndroidAudioPlayer(
         if (uri.isBlank()) return
         val generation = activePlayGeneration
         runPlatformLoad(generation) { player ->
-            player.setMediaItem(MediaItem.fromUri(uri))
+            val mediaItem = MediaItem.Builder()
+                .setUri(uri)
+                .apply {
+                    if (uri.contains(".m3u8", ignoreCase = true)) {
+                        setMimeType("application/x-mpegURL")
+                    }
+                }
+                .build()
+            player.setMediaItem(mediaItem)
             player.prepare()
             if (playWhenReady) {
                 markPendingAutoplay(generation)
