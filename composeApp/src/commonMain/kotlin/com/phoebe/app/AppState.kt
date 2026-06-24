@@ -1371,9 +1371,21 @@ class AppState(
     }
 
     suspend fun resolveTracksByIds(trackIds: Collection<String>): Map<String, Track> {
-        val (radioIds, catalogIds) = trackIds.partition { it.startsWith("radio:") }
+        val requestedIds = trackIds.filter { it.isNotBlank() }.distinct()
+        if (requestedIds.isEmpty()) return emptyMap()
+        val playbackTracks = resolveActivePlaybackTracksByIds(requestedIds)
+        val unresolvedIds = requestedIds.filter { it !in playbackTracks }
+        val (radioIds, catalogIds) = unresolvedIds.partition { it.startsWith("radio:") }
         val catalogTracks = if (catalogIds.isNotEmpty()) {
-            dependencies.catalogRepository.resolveTracksByIds(catalogIds)
+            runCatching {
+                withTimeout(PlayHistoryCatalogResolveTimeoutMs) {
+                    dependencies.catalogRepository.resolveTracksByIds(catalogIds)
+                }
+            }.getOrElse { error ->
+                if (error is CancellationException && error !is TimeoutCancellationException) throw error
+                PhoebeLog.d("AppState") { "catalog play-history lookup timed out for ${catalogIds.size} tracks" }
+                emptyMap()
+            }
         } else {
             emptyMap()
         }
@@ -1391,7 +1403,24 @@ class AppState(
                 null
             }
         }.toMap()
-        return catalogTracks + radioTracks
+        return catalogTracks + playbackTracks + radioTracks
+    }
+
+    private fun resolveActivePlaybackTracksByIds(trackIds: Collection<String>): Map<String, Track> {
+        val playbackState = dependencies.audioPlayer.state.value
+        val candidates = buildList {
+            playbackState.currentTrack?.let(::add)
+            addAll(playbackState.queue)
+            mutableMusicAssistantRemotePlayback.value?.tracks?.let(::addAll)
+        }
+        if (candidates.isEmpty()) return emptyMap()
+        return buildMap {
+            trackIds.forEach { requestedId ->
+                candidates.firstOrNull { it.matchesTrackId(requestedId) }?.let { track ->
+                    put(requestedId, track)
+                }
+            }
+        }
     }
 
     fun toggleFavoriteRadioStation(track: Track) = scope.launch {
@@ -2754,6 +2783,8 @@ private data class PlaybackHistoryRecord(
 )
 
 private const val PlaybackHistoryDedupeWindowMs = 30_000L
+
+private const val PlayHistoryCatalogResolveTimeoutMs = 1_500L
 
 private const val ProviderPlayHistoryDebounceMs = 8_000L
 

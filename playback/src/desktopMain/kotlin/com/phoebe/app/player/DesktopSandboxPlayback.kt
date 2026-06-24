@@ -36,12 +36,16 @@ internal object DesktopSandboxPlayback {
     }
 
     /**
-     * Flatpak release 1.1.x buffered remote Plex streams before decoding. Progressive HTTP
-     * streaming was added in 1.2.x but is unreliable against real Plex transcode/direct URLs,
-     * so keep the buffer-first path inside the sandbox.
+     * Prefer progressive Java Sound decoding for sampled-friendly remote streams. The desktop
+     * player still falls back to fully buffered playback when streaming setup fails.
      */
-    @Suppress("UNUSED_PARAMETER")
-    fun shouldStreamRemoteSampledPlayback(uri: String): Boolean = false
+    fun shouldStreamRemoteSampledPlayback(uri: String): Boolean {
+        if (!DesktopPlaybackStartupPolicy.isRemoteUri(uri)) return false
+        val extension = DesktopPlaybackStartupPolicy.streamingSampledExtensionFromUri(uri)
+            ?: sampledPlaybackExtensionFromUri(uri)
+            ?: return false
+        return streamingSampledExtensionFromSuffix(extension) != null
+    }
 
     fun bufferedRemotePlaybackUri(activeUri: String, downloadUri: String?): String {
         val download = downloadUri?.takeIf { it.isNotBlank() && DesktopPlaybackStartupPolicy.isRemoteUri(it) }

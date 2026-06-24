@@ -494,7 +494,7 @@ fun MobilePlayer(
                         key(t.id) {
                             Box(
                                 modifier = Modifier
-                                    .fillMaxWidth()
+                                    .width(currentArtworkSize)
                                     .offset {
                                         val baseOffset = when (position) {
                                             -1 -> -artworkSizePx

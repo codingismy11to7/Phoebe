@@ -240,6 +240,7 @@ import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.PlayHistoryKind
+import com.phoebe.app.domain.RadioStationSearchQuery
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.RecentlyAddedKind
 import com.phoebe.app.domain.supportedCollectionEntries
@@ -479,10 +480,20 @@ private fun PhoebeRootStateHolder(
         selectedPlaylistId = null
         navigator.pop()
     }
+    val radioCountryResultsVisible = screen == AppScreen.Home &&
+        browseSection == BrowseSection.Radio &&
+        selectedPlaylistId == null &&
+        radioDirectory.searchQuery.countryCode.isNotBlank()
+    PlatformBackHandler(
+        enabled = radioCountryResultsVisible,
+        onBack = {
+            state.searchInternetRadio(RadioStationSearchQuery())
+        },
+    )
     val canHandleBrowseBack = screen == AppScreen.Home &&
         (selectedPlaylistId != null || browseSection != BrowseSection.Home)
     PlatformBackHandler(
-        enabled = canHandleBrowseBack,
+        enabled = canHandleBrowseBack && !radioCountryResultsVisible,
         onBack = {
             when {
                 screen == AppScreen.Home && selectedPlaylistId != null -> {

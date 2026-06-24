@@ -93,10 +93,10 @@ class DesktopPlaybackStartupPolicyTest {
     }
 
     @Test
-    fun flatpakSandboxBuffersRemoteHttpInsteadOfProgressiveStreaming() {
+    fun flatpakSandboxStreamsRemoteHttpBeforeBufferedFallback() {
         DesktopSandboxPlayback.flatpakSandboxOverride = { true }
         try {
-            assertFalse(
+            assertTrue(
                 DesktopSandboxPlayback.shouldStreamRemoteSampledPlayback(
                     "https://plex.example:32400/library/parts/2.mp3?X-Plex-Token=token",
                 ),
@@ -158,9 +158,9 @@ class DesktopPlaybackStartupPolicyTest {
     }
 
     @Test
-    fun remoteNonJavaFxFormatsBufferSoTimelineSeekCanRepositionPlayback() {
+    fun remoteNonJavaFxFormatsStreamBeforeBufferedFallback() {
         assertEquals("flac", DesktopPlaybackStartupPolicy.streamingSampledExtensionFromSuffix("flac"))
-        assertFalse(
+        assertTrue(
             DesktopSandboxPlayback.shouldStreamRemoteSampledPlayback(
                 "https://music.example.test/library/track.flac?token=abc",
             ),

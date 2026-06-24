@@ -49,6 +49,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.phoebe.app.domain.Album
@@ -67,6 +68,8 @@ val LocalLibrarySectionIndexForceScrub = compositionLocalOf { false }
 
 private val LibrarySectionIndexHitWidth = 40.dp
 private val LibrarySectionIndexDesktopHitWidth = 80.dp
+private val DesktopSectionIndexPreviewBubbleWidth = 104.dp
+private val MobileSectionIndexPreviewBubbleWidth = 176.dp
 private const val MaxVisibleSectionIndexLabels = 60
 private const val SectionIndexInteractionLingerMs = 3_000L
 private const val ActiveSectionIndexLabelMs = 1_100L
@@ -280,6 +283,8 @@ fun LibrarySectionIndex(
         val displayedActiveEntry = activeEntry ?: forcedActiveEntry
         val activeLabel = displayedActiveEntry?.label
         val activeEntryIndex = displayedActiveEntry?.let { entryIndexes[it] } ?: -1
+        val previewBubbleWidth = if (mobileMode) MobileSectionIndexPreviewBubbleWidth else DesktopSectionIndexPreviewBubbleWidth
+        val previewBubbleOffset = -(previewBubbleWidth + 8.dp)
         val labelsVisible = when (mode) {
             LibrarySectionIndexMode.DesktopHover -> hovering || scrubbing || interactionLingerVisible || forceScrub || keepLabelsVisible
             LibrarySectionIndexMode.DesktopScrollbar -> hovering || scrubbing || interactionLingerVisible || forceScrub || keepLabelsVisible
@@ -387,13 +392,15 @@ fun LibrarySectionIndex(
             displayedActiveEntry.let { entry ->
                 SectionIndexPreviewBubble(
                     entry = entry,
-                    modifier = Modifier.align(Alignment.CenterStart).offset(x = (-112).dp),
+                    width = previewBubbleWidth,
+                    maxLines = if (mobileMode) 2 else 1,
+                    modifier = Modifier.align(Alignment.CenterStart).offset(x = previewBubbleOffset),
                 )
             }
         } else {
             AnimatedVisibility(
                 visible = previewBubbleVisible,
-                modifier = Modifier.align(Alignment.CenterStart).offset(x = (-112).dp),
+                modifier = Modifier.align(Alignment.CenterStart).offset(x = previewBubbleOffset),
                 enter = fadeIn(animationSpec = tween(110)) +
                     scaleIn(initialScale = 0.86f, animationSpec = tween(160)) +
                     slideInHorizontally(initialOffsetX = { it / 3 }, animationSpec = tween(160)),
@@ -402,7 +409,11 @@ fun LibrarySectionIndex(
                     slideOutHorizontally(targetOffsetX = { it / 4 }, animationSpec = tween(160)),
             ) {
                 displayedActiveEntry?.let { entry ->
-                    SectionIndexPreviewBubble(entry = entry)
+                    SectionIndexPreviewBubble(
+                        entry = entry,
+                        width = previewBubbleWidth,
+                        maxLines = if (mobileMode) 2 else 1,
+                    )
                 }
             }
         }
@@ -581,11 +592,13 @@ private fun SectionIndexLabels(
 @Composable
 private fun SectionIndexPreviewBubble(
     entry: LibraryScrollIndexEntry,
+    width: Dp,
+    maxLines: Int,
     modifier: Modifier = Modifier,
 ) {
     Box(
         modifier
-            .width(104.dp)
+            .width(width)
             .clip(RoundedCornerShape(18.dp))
             .background(PhoebeUi.accent.copy(alpha = 0.94f))
             .padding(horizontal = 12.dp, vertical = 10.dp),
@@ -595,9 +608,10 @@ private fun SectionIndexPreviewBubble(
             text = entry.label,
             color = Color.White,
             fontSize = 16.sp,
+            lineHeight = 18.sp,
             fontWeight = FontWeight.Black,
             textAlign = TextAlign.Center,
-            maxLines = 1,
+            maxLines = maxLines,
             overflow = TextOverflow.Ellipsis,
         )
     }

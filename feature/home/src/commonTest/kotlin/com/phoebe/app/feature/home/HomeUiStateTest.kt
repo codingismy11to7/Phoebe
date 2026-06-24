@@ -127,6 +127,43 @@ class HomeUiStateTest {
     }
 
     @Test
+    fun recentlyPlayedCollapsesSameRecordingFromDifferentAlbums() {
+        val albumTrack = Track(
+            id = "plex:album-beautiful-day",
+            title = "Beautiful Day",
+            artist = "U2",
+            album = "All That You Can't Leave Behind",
+            durationMs = 246_000L,
+            streamUrl = "plex-stream",
+            downloadUrl = "",
+        )
+        val compilationTrack = albumTrack.copy(
+            id = "plex:compilation-beautiful-day",
+            album = "The Anthems 09",
+        )
+        val catalog = CatalogSnapshot(
+            tracksByParent = mapOf("all" to listOf(albumTrack, compilationTrack)),
+        )
+        val state = deriveHomeUiState(
+            catalog = catalog,
+            playHistory = PlayHistorySnapshot(
+                topRecentlyPlayed = listOf(
+                    RecentlyPlayedEntry(albumTrack.id, 500L, albumTrack.artist, albumTrack.album),
+                    RecentlyPlayedEntry(compilationTrack.id, 400L, compilationTrack.artist, compilationTrack.album),
+                ),
+            ),
+            randomArtistSeed = 1,
+            randomAlbumSeed = 2,
+            nowMs = 1_000L,
+            limit = 10,
+            includeTrackDerivedSections = false,
+        )
+
+        assertEquals(listOf(albumTrack.id), state.recentlyPlayedTracks.map { it.track.id })
+        assertEquals(albumTrack.playHistoryIdentityKey(), compilationTrack.playHistoryIdentityKey())
+    }
+
+    @Test
     fun mostPlayedRendersFromRankedMetadataBeforeTrackIsResolved() {
         val state = deriveHomeUiState(
             catalog = CatalogSnapshot(),
