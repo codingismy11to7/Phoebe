@@ -581,12 +581,18 @@ class AppState(
 
     private fun Track.matchesTrackId(trackId: String): Boolean {
         if (id == trackId) return true
+        val idPrefix = providerPrefixForTrackId(id)
+        if (idPrefix != null && id.removePrefix(idPrefix) == trackId) return true
+        val trackIdPrefix = providerPrefixForTrackId(trackId)
+        return trackIdPrefix != null && trackId.removePrefix(trackIdPrefix) == id
+    }
+
+    private fun providerPrefixForTrackId(trackId: String): String? {
         for (provider in MediaProviderType.entries) {
             val prefix = "${provider.catalogPrefix}:"
-            if (id.startsWith(prefix) && id.removePrefix(prefix) == trackId) return true
-            if (trackId.startsWith(prefix) && trackId.removePrefix(prefix) == id) return true
+            if (trackId.startsWith(prefix)) return prefix
         }
-        return false
+        return null
     }
 
     /**
@@ -1414,9 +1420,29 @@ class AppState(
             mutableMusicAssistantRemotePlayback.value?.tracks?.let(::addAll)
         }
         if (candidates.isEmpty()) return emptyMap()
+
+        val prefixedCandidates = mutableMapOf<String, Track>()
+        val unprefixedCandidates = mutableMapOf<String, Track>()
+        val prefixedByUnprefixedId = mutableMapOf<String, Track>()
+        candidates.forEach { track ->
+            val prefix = providerPrefixForTrackId(track.id)
+            if (prefix == null) {
+                unprefixedCandidates.putIfAbsent(track.id, track)
+            } else {
+                prefixedCandidates.putIfAbsent(track.id, track)
+                prefixedByUnprefixedId.putIfAbsent(track.id.removePrefix(prefix), track)
+            }
+        }
+
         return buildMap {
             trackIds.forEach { requestedId ->
-                candidates.firstOrNull { it.matchesTrackId(requestedId) }?.let { track ->
+                val prefix = providerPrefixForTrackId(requestedId)
+                val track = if (prefix == null) {
+                    unprefixedCandidates[requestedId] ?: prefixedByUnprefixedId[requestedId]
+                } else {
+                    prefixedCandidates[requestedId] ?: unprefixedCandidates[requestedId.removePrefix(prefix)]
+                }
+                if (track != null) {
                     put(requestedId, track)
                 }
             }
