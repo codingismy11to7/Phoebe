@@ -35,6 +35,7 @@ import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.PersonalMixPreferences
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.RadioDirectoryState
+import com.phoebe.app.domain.RadioNowPlayingMetadata
 import com.phoebe.app.domain.RadioStation
 import com.phoebe.app.domain.RadioStationSearchQuery
 import com.phoebe.app.domain.SavedSearch
@@ -97,12 +98,15 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.stateIn
@@ -195,6 +199,8 @@ class AppState(
         )
     val libraryUi = dependencies.libraryUiRepository.preferences
     val radioDirectory: StateFlow<RadioDirectoryState> = dependencies.radioRepository.state
+    private val mutableRadioNowPlaying = MutableStateFlow<RadioNowPlayingMetadata?>(null)
+    val radioNowPlaying: StateFlow<RadioNowPlayingMetadata?> = mutableRadioNowPlaying.asStateFlow()
     val appSettings = dependencies.appSettingsRepository.settings
     val listenBrainzFeedbackTarget = dependencies.listenBrainzPlaybackReporter.feedbackTarget
     val listenBrainzCredentialAvailability = dependencies.listenBrainzAccountRepository.storageAvailability
@@ -350,6 +356,27 @@ class AppState(
     }
 
     init {
+        scope.launch {
+            player
+                .map { it.currentTrack }
+                .distinctUntilChangedBy { it?.id }
+                .collectLatest { track ->
+                    if (track?.id?.startsWith("radio:") != true) {
+                        mutableRadioNowPlaying.value = null
+                        return@collectLatest
+                    }
+                    mutableRadioNowPlaying.value = null
+                    while (currentCoroutineContext().isActive) {
+                        val metadata = runCatching {
+                            dependencies.radioNowPlayingRepository.resolve(track)
+                        }.getOrNull()
+                        mutableRadioNowPlaying.value = metadata
+                            ?.takeIf { it.hasTrack }
+                            ?.copy(trackId = track.id)
+                        delay(RadioNowPlayingRefreshMs)
+                    }
+                }
+        }
         scope.launch {
             PhoebeLog.d("AppState") { "startup restore begin" }
             // Session and local folders are restored in [AppDependencies.create] so the first frame
@@ -2011,6 +2038,27 @@ class AppState(
         dependencies.radioRepository.search(query)
     }
 
+    fun browseInternetRadioCountry(countryCode: String) = scope.launch {
+        dependencies.radioRepository.browseCountry(countryCode)
+    }
+
+    fun showInternetRadioStation(stationId: String) = scope.launch {
+        dependencies.radioRepository.showStation(stationId)
+    }
+
+    fun playInternetRadioStation(stationId: String) = scope.launch {
+        val station = runCatching { dependencies.radioRepository.findStationById(stationId) }
+            .onFailure { if (it is CancellationException) throw it }
+            .getOrNull()
+        if (station == null) {
+            val message = "Radio station not found."
+            mutableMessage.value = message
+            mutablePlaybackSnackbar.value = message
+            return@launch
+        }
+        playInternetRadioStation(station)
+    }
+
     fun loadMoreInternetRadio() = scope.launch {
         dependencies.radioRepository.loadMore()
     }
@@ -2821,6 +2869,7 @@ private const val PlayHistoryCatalogResolveTimeoutMs = 1_500L
 private const val ProviderPlayHistoryDebounceMs = 8_000L
 
 private const val InternetRadioStartupTimeoutMs = 30_000L
+private const val RadioNowPlayingRefreshMs = 30_000L
 
 private const val PLEX_SIGN_IN_TIMEOUT_MS = 20_000L
 

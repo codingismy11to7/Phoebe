@@ -39,6 +39,7 @@ import com.phoebe.app.feature.library.PlaylistsRouteState
 import com.phoebe.app.feature.library.LibrarySectionIndexMode
 import com.phoebe.app.feature.radio.RadioRoute
 import com.phoebe.app.feature.radio.RadioRouteActions
+import com.phoebe.app.feature.radio.RadioRouteMode
 import com.phoebe.app.feature.radio.RadioRouteState
 import com.phoebe.app.feature.search.SearchDesktopRouteActions
 import com.phoebe.app.feature.search.SearchMobileRoute
@@ -289,11 +290,16 @@ internal fun MobileBrowseShell(
     radioStartingIds: Set<String> = emptySet(),
     onPlayRadioStation: (PlexRadioStation) -> Unit = {},
     internetRadioDirectory: RadioDirectoryState = RadioDirectoryState(),
+    internetRadioRouteMode: RadioRouteMode = RadioRouteMode.Home,
     internetRadioStartingIds: Set<String> = emptySet(),
     onInternetRadioSearch: (RadioStationSearchQuery) -> Unit = {},
     onInternetRadioLoadMore: () -> Unit = {},
     onInternetRadioRefreshPopular: () -> Unit = {},
     onPlayInternetRadioStation: (RadioStation) -> Unit = {},
+    onInternetRadioCountries: () -> Unit = {},
+    onInternetRadioCountry: (String) -> Unit = {},
+    onOpenInternetRadioStation: (RadioStation) -> Unit = onPlayInternetRadioStation,
+    onInternetRadioRoot: () -> Unit = {},
     onAddManualRadioStation: (String, String) -> Unit = { _, _ -> },
     onUpdateManualRadioStation: (RadioStation, String, String) -> Unit = { _, _, _ -> },
     onDeleteManualRadioStation: (RadioStation) -> Unit = {},
@@ -631,6 +637,10 @@ internal fun MobileBrowseShell(
                         onAddManualStation = onAddManualRadioStation,
                         onUpdateManualStation = onUpdateManualRadioStation,
                         onDeleteManualStation = onDeleteManualRadioStation,
+                        onBrowseCountries = onInternetRadioCountries,
+                        onCountry = { country -> onInternetRadioCountry(country.code) },
+                        onStation = onOpenInternetRadioStation,
+                        onClearCountry = onInternetRadioRoot,
                     ),
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(
@@ -640,6 +650,7 @@ internal fun MobileBrowseShell(
                         bottom = chromePadding.bottom,
                     ),
                     sectionIndexMode = LibrarySectionIndexMode.MobileScrollbar,
+                    mode = internetRadioRouteMode,
                 )
                 else -> DesktopContent(
                     catalog = catalog,
@@ -669,6 +680,9 @@ internal fun MobileBrowseShell(
                     onRadioLoadMore = onInternetRadioLoadMore,
                     onRadioRefreshPopular = onInternetRadioRefreshPopular,
                     onRadioPlay = onPlayInternetRadioStation,
+                    onRadioCountry = onInternetRadioCountry,
+                    onRadioStation = onOpenInternetRadioStation,
+                    onRadioRoot = onInternetRadioRoot,
                     onRadioAddManualStation = onAddManualRadioStation,
                     onRadioUpdateManualStation = onUpdateManualRadioStation,
                     onRadioDeleteManualStation = onDeleteManualRadioStation,

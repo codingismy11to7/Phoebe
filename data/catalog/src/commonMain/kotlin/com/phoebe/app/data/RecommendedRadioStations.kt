@@ -1,6 +1,8 @@
 package com.phoebe.app.data
 
 import com.phoebe.app.domain.RadioStation
+import com.phoebe.app.domain.RadioNowPlayingSource
+import com.phoebe.app.domain.RadioNowPlayingSourceType
 import com.phoebe.app.domain.RadioStationSource
 
 val RecommendedRadioStations: List<RadioStation> = listOf(
@@ -13,6 +15,10 @@ val RecommendedRadioStations: List<RadioStation> = listOf(
         category = "The Starter Pack",
         tags = "The Starter Pack, recommended",
         source = RadioStationSource.Recommended,
+        nowPlayingSource = RadioNowPlayingSource(
+            type = RadioNowPlayingSourceType.BbcRmsSegments,
+            url = "https://rms.api.bbc.co.uk/v2/services/bbc_6music/segments/latest?experience=domestic&limit=1",
+        ),
     ),
     RadioStation(
         id = "recommended:dublab",
@@ -37,12 +43,17 @@ val RecommendedRadioStations: List<RadioStation> = listOf(
     RadioStation(
         id = "recommended:kexp-90-3",
         name = "KEXP 90.3",
-        streamUrl = "https://kexp.streamguys1.com/kexp160.aac",
+        streamUrl = "https://kexp.streamguys1.com/kexp128.mp3",
         homepageUrl = "https://www.kexp.org/listen/",
         description = "Indie rock from Seattle, famous for live in-studio sessions",
         category = "The Starter Pack",
         tags = "The Starter Pack, recommended",
+        codec = "mp3",
         source = RadioStationSource.Recommended,
+        nowPlayingSource = RadioNowPlayingSource(
+            type = RadioNowPlayingSourceType.KexpPlays,
+            url = "https://api.kexp.org/v2/plays/?limit=1&ordering=-airdate",
+        ),
     ),
     RadioStation(
         id = "recommended:la-patate-douce",
@@ -207,7 +218,7 @@ val RecommendedRadioStations: List<RadioStation> = listOf(
     RadioStation(
         id = "recommended:chilltraxx",
         name = "ChillTraxx",
-        streamUrl = "http://streams.electronicmusicradiogroup.org:9050/",
+        streamUrl = "https://streamssleu.chilltrax.com/stream?sid=1",
         homepageUrl = "https://www.chilltrax.com/",
         description = "Listener-supported downtempo and chillout, broadcast from Oakland, California",
         category = "Ambient, Lo-Fi & Chill",

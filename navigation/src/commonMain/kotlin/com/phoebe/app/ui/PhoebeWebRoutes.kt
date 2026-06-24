@@ -23,7 +23,7 @@ fun phoebeWebRoutesForPath(path: String?): List<PhoebeRoute> {
     return when (segments.first()) {
         "search" -> listOf(PhoebeRoute.Browse(BrowseSection.Search))
         "library" -> listOf(PhoebeRoute.Browse(BrowseSection.Library))
-        "radio" -> listOf(PhoebeRoute.Browse(BrowseSection.Radio))
+        "radio" -> parseRadioPath(segments)
         "lyrics" -> parseLyricsPath(segments)
         "playlists" -> parsePlaylistsPath(segments)
         "downloads" -> listOf(PhoebeRoute.Browse(BrowseSection.Downloads))
@@ -76,6 +76,9 @@ private fun PhoebeRoute?.requiresBrowseSource(): Boolean = when (this) {
     PhoebeRoute.LibraryPicker,
     is PhoebeRoute.Lyrics,
     PhoebeRoute.Player,
+    is PhoebeRoute.RadioCountry,
+    PhoebeRoute.RadioCountries,
+    is PhoebeRoute.RadioStation,
     PhoebeRoute.ServerPicker,
     PhoebeRoute.SignIn,
     null,
@@ -98,6 +101,9 @@ fun PhoebeRoute.toPhoebeWebPath(
         BrowseSection.Downloads -> "/downloads"
         BrowseSection.Settings -> "/settings"
     }
+    PhoebeRoute.RadioCountries -> "/radio/countries"
+    is PhoebeRoute.RadioCountry -> "/radio/${countryCode.trim().uppercase()}"
+    is PhoebeRoute.RadioStation -> "/radio/${encodePhoebePathSegment(stationId)}"
     is PhoebeRoute.Collections -> "/collections/${entry.target.pathSegment()}/${entry.facet.pathSegment()}"
     is PhoebeRoute.CollectionItems -> "/collections/${entry.target.pathSegment()}/${entry.facet.pathSegment()}/${encodePhoebePathSegment(value)}"
     is PhoebeRoute.ArtistDetail -> routeResolution.resolvedScreen<AppScreen.ArtistDetail>()
@@ -148,6 +154,19 @@ fun PhoebeRoute.toPhoebeWebPath(
 
 private inline fun <reified T : AppScreen> PhoebeRouteResolution?.resolvedScreen(): T? =
     ((this as? PhoebeRouteResolution.Resolved)?.screen as? T)
+
+private fun parseRadioPath(segments: List<String>): List<PhoebeRoute> {
+    val value = segments.getOrNull(1)?.let(::decodePhoebePathSegment)
+        ?: return listOf(PhoebeRoute.Browse(BrowseSection.Radio))
+    val route = if (value.isCountryCodeSegment()) {
+        PhoebeRoute.RadioCountry(value.uppercase())
+    } else if (value == "countries") {
+        PhoebeRoute.RadioCountries
+    } else {
+        PhoebeRoute.RadioStation(value)
+    }
+    return listOf(PhoebeRoute.Browse(BrowseSection.Radio), route)
+}
 
 private fun parseLyricsPath(segments: List<String>): List<PhoebeRoute> = when {
     segments.size == 1 -> listOf(PhoebeRoute.Browse(BrowseSection.Lyrics))
@@ -267,6 +286,9 @@ private fun normalizedSlugSegment(value: String): String =
 
 private fun String.looksLikeProviderId(): Boolean =
     ':' in this || '/' in this
+
+private fun String.isCountryCodeSegment(): Boolean =
+    length == 2 && all { it in 'a'..'z' || it in 'A'..'Z' }
 
 fun phoebePathSlug(value: String): String {
     val slug = buildString {

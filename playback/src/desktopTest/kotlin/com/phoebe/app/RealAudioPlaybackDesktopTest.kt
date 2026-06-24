@@ -484,6 +484,33 @@ class RealAudioPlaybackDesktopTest {
     }
 
     @Test
+    fun testRealLiveStreamCiut() {
+        assumeRealAudioTestsEnabled()
+        val diagnostics = RecordingPlaybackDiagnostics()
+        val player = DesktopAudioPlayer(diagnostics)
+        try {
+            val track = Track(
+                id = "ciut-live",
+                title = "CIUT",
+                artist = "Radio",
+                album = "Radio",
+                durationMs = 0L,
+                streamUrl = "https://ice23.securenetsystems.net/CIUT",
+                downloadUrl = "https://ice23.securenetsystems.net/CIUT",
+            )
+            player.play(listOf(track), 0)
+            assertTrue(
+                waitUntil(timeoutMs = 15_000L) {
+                    player.state.value.isPlaying
+                },
+                "CIUT stream should play; state=${player.state.value} errors=${diagnostics.errorEvents()}",
+            )
+        } finally {
+            player.releaseForTests()
+        }
+    }
+
+    @Test
     fun remoteMp3UsesJavaFxDownloadFallbackWhenStreamEndpointIsNotPlayable() {
         assumeRealAudioTestsEnabled()
 

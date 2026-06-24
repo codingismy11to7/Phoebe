@@ -739,6 +739,9 @@ private class WebAudioPlayer(
 
     private fun startWebAudioPrefetchIfNeeded(uri: String?, generation: Int) {
         if (uri.isNullOrBlank() || prefetchStartedGeneration == generation) return
+        val track = state.value.queue.find { it.streamUrl == uri || it.localUri == uri }
+            ?: state.value.currentTrack?.takeIf { it.streamUrl == uri || it.localUri == uri }
+        if (track?.id?.startsWith("radio:") == true || track?.durationMs == 0L) return
         prefetchStartedGeneration = generation
         startWebAudioPrefetch(uri, generation)
     }

@@ -14,6 +14,7 @@ import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import io.ktor.http.Url
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -81,6 +82,38 @@ class RadioRepository(
         } else {
             loadDirectory(normalized)
         }
+    }
+
+    suspend fun browseCountry(countryCode: String) {
+        search(RadioStationSearchQuery(countryCode = countryCode))
+    }
+
+    suspend fun showStation(stationId: String) {
+        val normalizedId = stationId.trim()
+        if (normalizedId.isBlank()) {
+            search(RadioStationSearchQuery())
+            return
+        }
+        mutableState.value = mutableState.value.copy(
+            loading = true,
+            loadingMore = false,
+            canLoadMore = false,
+            errorMessage = null,
+            searchQuery = RadioStationSearchQuery(text = normalizedId),
+            directoryStations = emptyList(),
+        )
+        val result = runCatching { findStationById(normalizedId) }
+            .onFailure { if (it is CancellationException) throw it }
+        val station = result.getOrNull()
+        mutableState.value = mutableState.value.copy(
+            loading = false,
+            loadingMore = false,
+            canLoadMore = false,
+            errorMessage = result.exceptionOrNull()?.message
+                ?: if (station == null) "Radio station not found." else null,
+            searchQuery = RadioStationSearchQuery(text = station?.name ?: normalizedId),
+            directoryStations = station?.let(::listOf).orEmpty(),
+        )
     }
 
     suspend fun loadMore() {
@@ -180,7 +213,8 @@ class RadioRepository(
 
     suspend fun findStationById(id: String): RadioStation? {
         RecommendedRadioStations.find { it.id == id }?.let { return it }
-        return existingManualStation(id)?.toRadioStation()
+        existingManualStation(id)?.toRadioStation()?.let { return it }
+        return radioBrowserClient.stationByUuid(id)
     }
 
     suspend fun stationTrack(station: RadioStation): Track {
@@ -394,6 +428,7 @@ private fun RadioStation.toTrack(streamUrl: String): Track =
         genre = tags?.substringBefore(',')?.takeIf { it.isNotBlank() },
         audioCodec = codec ?: streamUrl.radioStreamCodecHint(),
         bitrateKbps = bitrateKbps,
+        radioNowPlayingSource = nowPlayingSource,
     )
 
 private fun String.radioStreamCodecHint(): String? {

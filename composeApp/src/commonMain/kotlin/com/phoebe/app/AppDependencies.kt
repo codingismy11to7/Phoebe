@@ -23,6 +23,7 @@ import com.phoebe.app.data.PlayHistoryRepository
 import com.phoebe.app.data.PlaylistService
 import com.phoebe.app.data.PlexPlayHistorySyncer
 import com.phoebe.app.data.PlexPlaybackReporter
+import com.phoebe.app.data.RadioNowPlayingRepository
 import com.phoebe.app.data.RadioRepository
 import com.phoebe.app.data.SearchHistoryRepository
 import com.phoebe.app.data.SettingsService
@@ -63,6 +64,7 @@ class AppDependencies(
     val playHistoryRepository: PlayHistoryRepository,
     val playlistService: PlaylistService,
     val radioRepository: RadioRepository,
+    val radioNowPlayingRepository: RadioNowPlayingRepository,
     val appSettingsRepository: AppSettingsRepository,
     val searchHistoryRepository: SearchHistoryRepository,
     val userArtifactsRepository: UserArtifactsRepository,
@@ -154,6 +156,7 @@ class AppDependencies(
                 playHistoryRepository = services.playHistoryRepository,
                 playlistService = services.playlistService,
                 radioRepository = radioRepository,
+                radioNowPlayingRepository = services.radioNowPlayingRepository,
                 appSettingsRepository = services.appSettingsRepository,
                 searchHistoryRepository = searchHistoryRepository,
                 userArtifactsRepository = userArtifactsRepository,

@@ -108,10 +108,13 @@ class DesktopAudioPlayer(
         val stream: AudioInputStream,
         val equalizerProcessor: GraphicEqualizerProcessor?,
         val fullyBufferedDurationMs: Long?,
+        val onStop: (() -> Unit)? = null,
     ) {
         val stopped = AtomicBoolean(false)
         @Volatile
         var writtenPcmBytes: Long = 0L
+        @Volatile
+        var lastWriteAtNs: Long = System.nanoTime()
         @Volatile
         var paused = false
         @Volatile
@@ -137,6 +140,7 @@ class DesktopAudioPlayer(
             runCatching { line.flush() }
             runCatching { line.close() }
             runCatching { stream.close() }
+            runCatching { onStop?.invoke() }
         }
 
         fun pause() {
@@ -255,6 +259,22 @@ class DesktopAudioPlayer(
                     file = uriToLocalFile(activeUri)
                 }
                 if (file == null) {
+                    resolveDesktopPlaylistStreamUri(activeUri)?.let { resolved ->
+                        PhoebeLog.d("DesktopAudioPlayer") { "resolved playlist stream $activeUri -> $resolved" }
+                        activeUri = resolved
+                    }
+                }
+                val isLiveStream = file == null && state.value.durationMs <= 0L && isRemoteUri(activeUri)
+                if (isLiveStream) {
+                    if (!isPlayRequestCurrent(generation)) return@execute
+                    if (tryStartFfmpegPcmStream(activeUri, generation)) {
+                        return@execute
+                    }
+                    diagnostics.playbackError(PlaybackEnginePath.SampledStream, "FFmpeg live streaming failed to start")
+                    markPlaybackFailed(generation = generation)
+                    return@execute
+                }
+                if (file == null) {
                     val streamingExtension = preferredStreamingExtension ?: streamingSampledExtensionFromUri(activeUri)
                     if (streamingExtension != null &&
                         DesktopSandboxPlayback.shouldStreamRemoteSampledPlayback(activeUri) &&
@@ -368,6 +388,9 @@ class DesktopAudioPlayer(
                         return@execute
                     }
                     if (file == null && tryBufferedRemotePlaybackFallback(activeUri, downloadUri, preferredSampledExtension, generation)) {
+                        return@execute
+                    }
+                    if (file == null && tryStartFfmpegPcmStream(activeUri, generation)) {
                         return@execute
                     }
                     diagnostics.playbackError(PlaybackEnginePath.JavaFxMediaPlayer, "JavaFX playback failed to start")
@@ -825,6 +848,7 @@ class DesktopAudioPlayer(
         generation: Int,
     ): Boolean {
         if (!isRemoteUri(uri) || !isPlayRequestCurrent(generation)) return false
+        if (state.value.durationMs <= 0L) return false
         disposeJavaFxBlocking()
         val extension = preferredSampledExtension
             ?: sampledPlaybackExtensionFromUri(uri)
@@ -912,6 +936,99 @@ class DesktopAudioPlayer(
         )
     }
 
+    private fun tryStartFfmpegPcmStream(uri: String, generation: Int): Boolean {
+        if (!isRemoteUri(uri) || !isPlayRequestCurrent(generation)) return false
+        val ffmpeg = findFfmpegExecutable() ?: return false
+        val process = runCatching {
+            ProcessBuilder(
+                ffmpeg,
+                "-nostdin",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-reconnect",
+                "1",
+                "-reconnect_streamed",
+                "1",
+                "-reconnect_delay_max",
+                "5",
+                "-user_agent",
+                "Phoebe/0.1.0 (https://github.com/phoebe)",
+                "-i",
+                uri,
+                "-vn",
+                "-f",
+                "s16le",
+                "-acodec",
+                "pcm_s16le",
+                "-ar",
+                FfmpegPcmSampleRateHz.toString(),
+                "-ac",
+                FfmpegPcmChannels.toString(),
+                "-flush_packets",
+                "1",
+                "pipe:1",
+            )
+                .redirectError(ProcessBuilder.Redirect.DISCARD)
+                .start()
+        }.getOrElse { error ->
+            PhoebeLog.d("DesktopAudioPlayer") { "ffmpeg fallback unavailable: ${error.message}" }
+            return false
+        }
+        val format = AudioFormat(
+            AudioFormat.Encoding.PCM_SIGNED,
+            FfmpegPcmSampleRateHz.toFloat(),
+            16,
+            FfmpegPcmChannels,
+            FfmpegPcmChannels * 2,
+            FfmpegPcmSampleRateHz.toFloat(),
+            false,
+        )
+        val stream = AudioInputStream(
+            BufferedInputStream(process.inputStream, RemoteAudioProbeBufferBytes),
+            format,
+            AudioSystem.NOT_SPECIFIED.toLong(),
+        )
+        val started = tryStartPcmSampledStream(
+            pcmStream = stream,
+            generation = generation,
+            fullyBufferedDurationMs = null,
+            onStop = { process.destroyForcibly() },
+            diagnosticLabel = "ffmpeg-pcm",
+        )
+        if (!started) {
+            runCatching { stream.close() }
+            runCatching { process.destroyForcibly() }
+        } else {
+            PhoebeLog.d("DesktopAudioPlayer") { "ffmpeg pcm fallback started for $uri" }
+        }
+        return started
+    }
+
+    private fun findFfmpegExecutable(): String? {
+        val pathCandidates = System.getenv("PATH")
+            .orEmpty()
+            .split(File.pathSeparator)
+            .filter { it.isNotBlank() }
+            .map { File(it, "ffmpeg") }
+        return (pathCandidates + FfmpegFallbackPaths.map(::File))
+            .firstOrNull { it.isFile && it.canExecute() }
+            ?.absolutePath
+    }
+
+    private fun resolveDesktopPlaylistStreamUri(uri: String): String? {
+        if (!isRemoteUri(uri) || !isLikelyDesktopPlaylistUri(uri)) return null
+        val request = HttpRequest.newBuilder(URI(uri))
+            .GET()
+            .timeout(Duration.ofSeconds(15))
+            .header("User-Agent", "Phoebe/0.1.0 (https://github.com/phoebe)")
+            .build()
+        val response = runCatching { httpClient.send(request, HttpResponse.BodyHandlers.ofString()) }.getOrNull()
+            ?: return null
+        if (response.statusCode() !in 200..299) return null
+        return parseDesktopPlaylistStreamUri(response.body(), uri)
+    }
+
     private fun tryStartSampledStreamFromInput(
         inputStream: InputStream,
         extension: String,
@@ -927,6 +1044,20 @@ class DesktopAudioPlayer(
             diagnostics.playbackError(PlaybackEnginePath.SampledStream, error.message)
             return false
         }
+        return tryStartPcmSampledStream(
+            pcmStream = pcmStream,
+            generation = generation,
+            fullyBufferedDurationMs = fullyBufferedDurationMs,
+        )
+    }
+
+    private fun tryStartPcmSampledStream(
+        pcmStream: AudioInputStream,
+        generation: Int,
+        fullyBufferedDurationMs: Long?,
+        onStop: (() -> Unit)? = null,
+        diagnosticLabel: String = "pcm",
+    ): Boolean {
         val format = pcmStream.format
         val bufferSize = sourceLineBufferSize(format)
         val line = runCatching {
@@ -934,15 +1065,17 @@ class DesktopAudioPlayer(
             (AudioSystem.getLine(info) as SourceDataLine).also { it.open(format, bufferSize) }
         }.getOrElse { error ->
             runCatching { pcmStream.close() }
+            runCatching { onStop?.invoke() }
             logPlaybackFailure(error)
             diagnostics.playbackError(PlaybackEnginePath.SampledStream, error.message)
             return false
         }
-        val firstBuffer = ByteArray(bufferSize)
+        val firstBuffer = ByteArray(StreamingPcmBufferBytes)
         val firstRead = runCatching { pcmStream.read(firstBuffer, 0, firstBuffer.size) }
             .getOrElse { error ->
                 runCatching { line.close() }
                 runCatching { pcmStream.close() }
+                runCatching { onStop?.invoke() }
                 logPlaybackFailure(error)
                 diagnostics.playbackError(PlaybackEnginePath.SampledStream, error.message)
                 return false
@@ -950,11 +1083,13 @@ class DesktopAudioPlayer(
         if (firstRead < 0) {
             runCatching { line.close() }
             runCatching { pcmStream.close() }
+            runCatching { onStop?.invoke() }
             return false
         }
         if (!isPlayRequestCurrent(generation)) {
             runCatching { line.close() }
             runCatching { pcmStream.close() }
+            runCatching { onStop?.invoke() }
             return true
         }
         val playback = StreamingSampledPlayback(
@@ -962,9 +1097,10 @@ class DesktopAudioPlayer(
             stream = pcmStream,
             equalizerProcessor = streamingEqualizerProcessor(format),
             fullyBufferedDurationMs = fullyBufferedDurationMs,
+            onStop = onStop,
         )
         sampledStream = playback
-        PhoebeLog.d("DesktopAudioPlayer") { "sampled stream playback extension=$extension format=$format" }
+        PhoebeLog.d("DesktopAudioPlayer") { "sampled stream playback source=$diagnosticLabel format=$format" }
         diagnostics.engineSelected(PlaybackEnginePath.SampledStream)
         applyVolumeToLine(line, effectiveOutputVolume())
         line.start()
@@ -1060,7 +1196,7 @@ class DesktopAudioPlayer(
     private fun sourceLineBufferSize(format: AudioFormat): Int {
         val frameSize = format.frameSize.takeIf { it > 0 } ?: return StreamingPcmBufferBytes
         val sampleRate = format.sampleRate.takeIf { it > 0f && !it.isNaN() } ?: return StreamingPcmBufferBytes
-        val frames = (sampleRate / 8f).toInt().coerceAtLeast(1)
+        val frames = (sampleRate * 1.5f).toInt().coerceAtLeast(1)
         return (frames * frameSize)
             .coerceAtLeast(StreamingPcmBufferBytes)
             .coerceAtMost(MaxStreamingLineBufferBytes)
@@ -1072,7 +1208,7 @@ class DesktopAudioPlayer(
         generation: Int,
     ) {
         Thread({
-            val buffer = ByteArray(bufferSize)
+            val buffer = ByteArray(StreamingPcmBufferBytes)
             try {
                 while (isPlayRequestCurrent(generation) && sampledStream === playback && !playback.stopped.get()) {
                     waitIfSampledStreamPaused(playback)
@@ -1127,6 +1263,7 @@ class DesktopAudioPlayer(
             publishAudioAnalysisPcm(samples, playback.stream.format.sampleRate, AudioAnalysisSource.Pcm)
         }
         val written = playback.line.write(buffer, 0, length).coerceAtLeast(0)
+        playback.lastWriteAtNs = System.nanoTime()
         playback.writtenPcmBytes += written.toLong()
         if (!playback.reportedEnergy) {
             val rms = pcmRms(buffer.copyOf(length), playback.stream.format)
@@ -1180,7 +1317,8 @@ class DesktopAudioPlayer(
         if (!isPlayRequestCurrent(generation) || sampledStream !== playback) return
         val decodedPositionMs = playback.stream.format.durationMsForPcmBytes(playback.writtenPcmBytes)
         val durationMs = state.value.durationMs
-        val linePlaying = playback.line.isActive || playback.line.isRunning
+        val lastWriteElapsedMs = (System.nanoTime() - playback.lastWriteAtNs) / 1_000_000L
+        val linePlaying = playback.line.isActive || playback.line.isRunning || (lastWriteElapsedMs < 1200L)
         val audiblePositionMs = if (!playback.paused && linePlaying) {
             playback.playbackPositionMs()
         } else {
@@ -1201,14 +1339,16 @@ class DesktopAudioPlayer(
             playback.reportedOutput = true
         }
         val isStarting = !playback.paused && !playback.reportedOutput
+        val isStarved = !playback.paused && !linePlaying && playback.reportedOutput
+        val isBuffering = isStarting || isStarved
         applyPlatformPlayback(
             positionMs = positionMs,
             durationMs = durationMs,
             isPlaying = !playback.paused && linePlaying && !isStarting,
-            isBuffering = isStarting,
+            isBuffering = isBuffering,
             bufferedPositionMs = bufferedPositionMs,
             generation = generation,
-            forceBuffering = isStarting,
+            forceBuffering = isBuffering,
         )
     }
 
@@ -1245,8 +1385,10 @@ class DesktopAudioPlayer(
      * JavaFX cannot decode every format Phoebe supports. For sampled-only formats,
      * buffer the remote file first so startup reaches the Clip path directly.
      */
-    private fun shouldEagerlyBufferRemotePlayback(uri: String, preferredSampledExtension: String?): Boolean =
-        DesktopSandboxPlayback.shouldEagerlyBufferRemotePlayback(uri, preferredSampledExtension)
+    private fun shouldEagerlyBufferRemotePlayback(uri: String, preferredSampledExtension: String?): Boolean {
+        if (state.value.durationMs <= 0L) return false
+        return DesktopSandboxPlayback.shouldEagerlyBufferRemotePlayback(uri, preferredSampledExtension)
+    }
 
     private fun shouldPrefetchRemoteForCrossfade(uri: String): Boolean =
         DesktopPlaybackStartupPolicy.shouldPrefetchRemoteForCrossfade(uri)
@@ -1917,8 +2059,52 @@ class DesktopAudioPlayer(
         const val SampledClipEndToleranceMs = 20L
         const val RemoteAudioProbeBufferBytes = 128 * 1024
         const val StreamingPcmBufferBytes = 16 * 1024
-        const val MaxStreamingLineBufferBytes = 96 * 1024
+        const val MaxStreamingLineBufferBytes = 1024 * 1024
+        const val FfmpegPcmSampleRateHz = 44_100
+        const val FfmpegPcmChannels = 2
+        val FfmpegFallbackPaths = listOf(
+            "/opt/homebrew/bin/ffmpeg",
+            "/usr/local/bin/ffmpeg",
+            "/usr/bin/ffmpeg",
+        )
         val JavaFxPreferredLocalCrossfadeExtensions = setOf("mp3", "mpeg", "mpga")
+    }
+}
+
+internal fun isLikelyDesktopPlaylistUri(uri: String): Boolean {
+    val path = runCatching { URI(uri).path }.getOrNull()
+        ?: uri.substringBefore('?').substringBefore('#')
+    val lower = path.lowercase()
+    return lower.endsWith(".pls") || (lower.endsWith(".m3u") && !lower.endsWith(".m3u8"))
+}
+
+internal fun parseDesktopPlaylistStreamUri(body: String, playlistUri: String): String? {
+    val base = runCatching { URI(playlistUri) }.getOrNull()
+    val candidates = body
+        .lineSequence()
+        .map { it.trim() }
+        .filter { it.isNotBlank() && !it.startsWith("#") }
+        .map { line ->
+            if (line.startsWith("File", ignoreCase = true) && line.contains('=')) {
+                line.substringAfter('=').trim()
+            } else {
+                line
+            }
+        }
+        .filterNot { line ->
+            line.startsWith("[") ||
+                line.startsWith("Title", ignoreCase = true) ||
+                line.startsWith("Length", ignoreCase = true) ||
+                line.startsWith("NumberOfEntries", ignoreCase = true) ||
+                line.startsWith("Version", ignoreCase = true)
+        }
+    return candidates.firstNotNullOfOrNull { candidate ->
+        when {
+            candidate.startsWith("http://", ignoreCase = true) ||
+                candidate.startsWith("https://", ignoreCase = true) -> candidate
+            base != null -> runCatching { base.resolve(candidate).toString() }.getOrNull()
+            else -> null
+        }
     }
 }
 

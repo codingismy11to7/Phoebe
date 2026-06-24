@@ -1,6 +1,7 @@
 package com.phoebe.app.ui
 
 import com.phoebe.app.feature.library.*
+import com.phoebe.app.feature.radio.RadioRouteMode
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExperimentalSharedTransitionApi
@@ -240,6 +241,8 @@ import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.PlayHistoryKind
+import com.phoebe.app.domain.RadioNowPlayingMetadata
+import com.phoebe.app.domain.RadioStation
 import com.phoebe.app.domain.RadioStationSearchQuery
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.RecentlyAddedKind
@@ -388,6 +391,7 @@ private fun PhoebeRootStateHolder(
     val smartPlaylists by state.smartPlaylists.collectAsState()
     val savedSearches by state.savedSearches.collectAsState()
     val listenBrainzFeedbackTarget by state.listenBrainzFeedbackTarget.collectAsState()
+    val radioNowPlaying by state.radioNowPlaying.collectAsState()
     val equalizerProfile by state.equalizerProfile.collectAsState()
     val equalizerRemoteUnavailable by state.equalizerRemoteUnavailable.collectAsState()
     val lastPlayedByArtist by state.lastPlayedByArtist.collectAsState()
@@ -398,7 +402,9 @@ private fun PhoebeRootStateHolder(
     val topMostPlayed by state.topMostPlayed.collectAsState()
     val topRecentlyPlayed by state.topRecentlyPlayed.collectAsState()
     val upNext = playerQueue.upNext
-    val currentTrack = shellPlayback.currentTrack
+    val currentTrack = remember(shellPlayback.currentTrack, radioNowPlaying) {
+        shellPlayback.currentTrack.withRadioNowPlaying(radioNowPlaying)
+    }
     val effectiveInternetRadioStartingIds = remember(internetRadioStartingIds, shellPlayback.currentTrack?.id, shellPlayback.isBuffering) {
         val bufferingRadioId = shellPlayback.currentTrack
             ?.id
@@ -434,6 +440,7 @@ private fun PhoebeRootStateHolder(
     var selectedPlaylistId by remember { mutableStateOf<String?>(null) }
     var replaceNextNavigationPath by remember { mutableStateOf(navigationPath != null) }
     var lastPublishedNavigationRoute by remember { mutableStateOf<PhoebeRoute?>(null) }
+    var suppressNextRadioStationRouteEffect by remember { mutableStateOf(false) }
     LaunchedEffect(currentRoutes, browseFallbackRoutes) {
         val guardedRoutes = currentRoutes.withUnavailableBrowseFallback(browseFallbackRoutes)
         if (currentRoutes != guardedRoutes) {
@@ -476,24 +483,65 @@ private fun PhoebeRootStateHolder(
             navigator.replaceRoot(PhoebeRoute.Browse(BrowseSection.Home))
         }
     }
+    val radioRouteMode = when (currentRoute) {
+        PhoebeRoute.RadioCountries -> RadioRouteMode.CountryIndex
+        is PhoebeRoute.RadioCountry -> RadioRouteMode.CountryStations
+        else -> RadioRouteMode.Home
+    }
+    val openRadioRoot: () -> Unit = {
+        state.searchInternetRadio(RadioStationSearchQuery())
+        if (navigator.currentRoute is PhoebeRoute.RadioCountries ||
+            navigator.currentRoute is PhoebeRoute.RadioCountry ||
+            navigator.currentRoute is PhoebeRoute.RadioStation
+        ) {
+            navigator.pop()
+        } else {
+            navigator.replaceAll(listOf(PhoebeRoute.Browse(BrowseSection.Radio)))
+        }
+    }
+    val openInternetRadioCountries: () -> Unit = {
+        state.searchInternetRadio(RadioStationSearchQuery())
+        navigator.replaceAll(
+            listOf(
+                PhoebeRoute.Browse(BrowseSection.Radio),
+                PhoebeRoute.RadioCountries,
+            ),
+        )
+    }
+    val openInternetRadioCountry: (String) -> Unit = { countryCode ->
+        navigator.replaceAll(
+            listOf(
+                PhoebeRoute.Browse(BrowseSection.Radio),
+                PhoebeRoute.RadioCountry(countryCode),
+            ),
+        )
+    }
+    val openInternetRadioStation: (RadioStation) -> Unit = { station ->
+        suppressNextRadioStationRouteEffect = true
+        state.playInternetRadioStation(station)
+        navigator.replaceAll(
+            listOf(
+                PhoebeRoute.Browse(BrowseSection.Radio),
+                PhoebeRoute.RadioStation(station.id),
+            ),
+        )
+    }
     val exitPlaylistDetail: () -> Unit = {
         selectedPlaylistId = null
         navigator.pop()
     }
-    val radioCountryResultsVisible = screen == AppScreen.Home &&
+    val radioCountryRouteVisible = screen == AppScreen.Home &&
         browseSection == BrowseSection.Radio &&
         selectedPlaylistId == null &&
-        radioDirectory.searchQuery.countryCode.isNotBlank()
+        (currentRoute is PhoebeRoute.RadioCountries || currentRoute is PhoebeRoute.RadioCountry)
     PlatformBackHandler(
-        enabled = radioCountryResultsVisible,
-        onBack = {
-            state.searchInternetRadio(RadioStationSearchQuery())
-        },
+        enabled = radioCountryRouteVisible,
+        onBack = openRadioRoot,
     )
     val canHandleBrowseBack = screen == AppScreen.Home &&
         (selectedPlaylistId != null || browseSection != BrowseSection.Home)
     PlatformBackHandler(
-        enabled = canHandleBrowseBack && !radioCountryResultsVisible,
+        enabled = canHandleBrowseBack && !radioCountryRouteVisible,
         onBack = {
             when {
                 screen == AppScreen.Home && selectedPlaylistId != null -> {
@@ -539,6 +587,35 @@ private fun PhoebeRootStateHolder(
             is AppScreen.PlaylistDetail -> state.preloadPlaylistDetail(screen.playlist)
             is AppScreen.Collections -> state.preloadCollections(screen.entry)
             is AppScreen.CollectionItems -> state.preloadCollectionItems(screen.entry, screen.value)
+            else -> Unit
+        }
+    }
+    LaunchedEffect(currentRoute) {
+        if (currentRoute !is PhoebeRoute.RadioStation) {
+            suppressNextRadioStationRouteEffect = false
+        }
+        when (currentRoute) {
+            is PhoebeRoute.Browse -> {
+                if (currentRoute.section == BrowseSection.Radio && radioDirectory.searchQuery.countryCode.isNotBlank()) {
+                    state.searchInternetRadio(RadioStationSearchQuery())
+                }
+            }
+            PhoebeRoute.RadioCountries -> {
+                if (!radioDirectory.searchQuery.isBlank) {
+                    state.searchInternetRadio(RadioStationSearchQuery())
+                } else {
+                    state.refreshInternetRadio()
+                }
+            }
+            is PhoebeRoute.RadioCountry -> state.browseInternetRadioCountry(currentRoute.countryCode)
+            is PhoebeRoute.RadioStation -> {
+                if (suppressNextRadioStationRouteEffect) {
+                    suppressNextRadioStationRouteEffect = false
+                } else {
+                    state.showInternetRadioStation(currentRoute.stationId)
+                    state.playInternetRadioStation(currentRoute.stationId)
+                }
+            }
             else -> Unit
         }
     }
@@ -1110,8 +1187,9 @@ private fun PhoebeRootStateHolder(
                     LocalMobileChromePadding provides mobileChromePadding,
                 ) {
                 val mobileContentRoutes = if (mobilePlayerAsSheet) mobileRoutes.dropLast(1) else mobileRoutes
+                val renderableMobileContentRoutes = mobileContentRoutes.renderablePhoebeRoutes()
                 PhoebeNavDisplay(
-                    backStack = mobileContentRoutes,
+                    backStack = renderableMobileContentRoutes,
                     modifier = Modifier.fillMaxSize(),
                     animateTransitions = supportsPredictiveBack(),
                     opaqueSceneBackgrounds = true,
@@ -1504,11 +1582,16 @@ private fun PhoebeRootStateHolder(
                         radioStartingIds = radioStartingIds,
                         onPlayRadioStation = state::playRadioStation,
                         internetRadioDirectory = radioDirectory,
+                        internetRadioRouteMode = radioRouteMode,
                         internetRadioStartingIds = effectiveInternetRadioStartingIds,
                         onInternetRadioSearch = state::searchInternetRadio,
                         onInternetRadioLoadMore = state::loadMoreInternetRadio,
                         onInternetRadioRefreshPopular = state::refreshInternetRadio,
                         onPlayInternetRadioStation = state::playInternetRadioStation,
+                        onInternetRadioCountries = openInternetRadioCountries,
+                        onInternetRadioCountry = openInternetRadioCountry,
+                        onOpenInternetRadioStation = openInternetRadioStation,
+                        onInternetRadioRoot = openRadioRoot,
                         onAddManualRadioStation = state::addManualRadioStation,
                         onUpdateManualRadioStation = state::updateManualRadioStation,
                         onDeleteManualRadioStation = state::deleteManualRadioStation,
@@ -1769,6 +1852,7 @@ private fun PhoebeRootStateHolder(
                         shellPlayback = shellPlayback,
                         playerTransport = playerTransport,
                         track = currentTrack,
+                        radioNowPlaying = radioNowPlaying,
                         upNext = upNext,
                         currentIndex = currentIndex,
                         lyricsTrack = lyricsTrack,
@@ -1833,6 +1917,7 @@ private fun PhoebeRootStateHolder(
                         decadeMixNotice = decadeMixNotice,
                         radioStations = radioStations,
                         radioDirectory = radioDirectory,
+                        radioRouteMode = radioRouteMode,
                         artistRadioAvailability = artistRadioAvailability,
                         radioStartingIds = radioStartingIds,
                         internetRadioStartingIds = effectiveInternetRadioStartingIds,
@@ -1905,6 +1990,10 @@ private fun PhoebeRootStateHolder(
                         onRadioLoadMore = state::loadMoreInternetRadio,
                         onRadioRefreshPopular = state::refreshInternetRadio,
                         onRadioPlay = state::playInternetRadioStation,
+                        onRadioCountries = openInternetRadioCountries,
+                        onRadioCountry = openInternetRadioCountry,
+                        onRadioStation = openInternetRadioStation,
+                        onRadioRoot = openRadioRoot,
                         onRadioAddManualStation = state::addManualRadioStation,
                         onRadioUpdateManualStation = state::updateManualRadioStation,
                         onRadioDeleteManualStation = state::deleteManualRadioStation,
@@ -2394,6 +2483,17 @@ private fun MobilePlayerHost(
             onClick = onClick,
         ),
         modifier = modifier,
+    )
+}
+
+private fun Track?.withRadioNowPlaying(metadata: RadioNowPlayingMetadata?): Track? {
+    val track = this ?: return null
+    val live = metadata?.takeIf { it.hasTrack } ?: return track
+    if (!track.id.startsWith("radio:")) return track
+    if (live.trackId != null && live.trackId != track.id) return track
+    return track.copy(
+        title = live.title.ifBlank { live.rawTitle ?: track.title },
+        artist = live.artist.ifBlank { track.artist },
     )
 }
 

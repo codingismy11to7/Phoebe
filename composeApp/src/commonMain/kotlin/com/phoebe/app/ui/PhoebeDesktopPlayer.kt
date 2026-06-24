@@ -29,6 +29,8 @@ import com.phoebe.app.domain.AppScreen
 import com.phoebe.app.domain.JellyfinSyncMode
 import com.phoebe.app.domain.MediaProviderType
 import com.phoebe.app.domain.PlayerState
+import com.phoebe.app.domain.RadioNowPlayingMetadata
+import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.isEmbyFamily
 import com.phoebe.app.domain.isNavidrome
 import com.phoebe.app.feature.auth.AuthWelcomeDesktopRoute
@@ -138,7 +140,8 @@ internal fun DesktopPlayer(
         playerChromeInitial
     }
     val hasLivePlayerChrome = playerFlow != null
-    val track = if (hasLivePlayerChrome) playerChrome.currentTrack else playbackState.track
+    val baseTrack = if (hasLivePlayerChrome) playerChrome.currentTrack else playbackState.track
+    val track = baseTrack.withRadioNowPlaying(playbackState.radioNowPlaying)
     val upNext = if (hasLivePlayerChrome) playerChrome.upNext else playbackState.upNext
     val lyricsTrack = playbackState.lyricsTrack
     val lyricsState = playbackState.lyricsState
@@ -159,6 +162,7 @@ internal fun DesktopPlayer(
     val decadeMixNotice = browseState.decadeMixNotice
     val radioStations = browseState.radioStations
     val radioDirectory = browseState.radioDirectory
+    val radioRouteMode = browseState.radioRouteMode
     val artistRadioAvailability = browseState.artistRadioAvailability
     val radioStartingIds = browseState.radioStartingIds
     val internetRadioStartingIds = browseState.internetRadioStartingIds
@@ -212,6 +216,10 @@ internal fun DesktopPlayer(
     val onRadioLoadMore = browseActions.onRadioLoadMore
     val onRadioRefreshPopular = browseActions.onRadioRefreshPopular
     val onRadioPlay = browseActions.onRadioPlay
+    val onRadioCountries = browseActions.onRadioCountries
+    val onRadioCountry = browseActions.onRadioCountry
+    val onRadioStation = browseActions.onRadioStation
+    val onRadioRoot = browseActions.onRadioRoot
     val onRadioAddManualStation = browseActions.onRadioAddManualStation
     val onRadioUpdateManualStation = browseActions.onRadioUpdateManualStation
     val onRadioDeleteManualStation = browseActions.onRadioDeleteManualStation
@@ -306,7 +314,7 @@ internal fun DesktopPlayer(
     val shuffle = if (hasLivePlayerChrome) playerChrome.shuffle else playerTransport.shuffle
     val repeat = if (hasLivePlayerChrome) playerChrome.repeat else playerTransport.repeat
     val volume = if (hasLivePlayerChrome) playerChrome.volume else playerTransport.volume
-    val displayRoutes = routes.ifEmpty { previewRoutesFor(screen, section) }
+    val displayRoutes = routes.ifEmpty { previewRoutesFor(screen, section) }.renderablePhoebeRoutes()
     var desktopUpNextExpanded by remember { mutableStateOf(true) }
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Box(
@@ -849,9 +857,14 @@ internal fun DesktopPlayer(
                                         onRadioLoadMore = onRadioLoadMore,
                                         onRadioRefreshPopular = onRadioRefreshPopular,
                                         onRadioPlay = onRadioPlay,
+                                        onRadioCountries = onRadioCountries,
+                                        onRadioCountry = onRadioCountry,
+                                        onRadioStation = onRadioStation,
+                                        onRadioRoot = onRadioRoot,
                                         onRadioAddManualStation = onRadioAddManualStation,
                                         onRadioUpdateManualStation = onRadioUpdateManualStation,
                                         onRadioDeleteManualStation = onRadioDeleteManualStation,
+                                        radioRouteMode = radioRouteMode,
                                         onDownloadPlaylist = onDownloadPlaylist,
                                     )
                                 }
@@ -933,6 +946,17 @@ internal fun DesktopPlayer(
         }
 }
 
+private fun Track?.withRadioNowPlaying(metadata: RadioNowPlayingMetadata?): Track? {
+    val track = this ?: return null
+    val live = metadata?.takeIf { it.hasTrack } ?: return track
+    if (!track.id.startsWith("radio:")) return track
+    if (live.trackId != null && live.trackId != track.id) return track
+    return track.copy(
+        title = live.title.ifBlank { live.rawTitle ?: track.title },
+        artist = live.artist.ifBlank { track.artist },
+    )
+}
+
 private fun shouldUseDesktopSharedElements(initial: PhoebeRoute?, target: PhoebeRoute?): Boolean =
     initial != null &&
         target != null &&
@@ -952,6 +976,9 @@ private fun PhoebeRoute.hasDesktopSharedElements(): Boolean = when (this) {
     PhoebeRoute.FavoriteAlbums,
     is PhoebeRoute.PlaylistDetail,
     is PhoebeRoute.PlaylistSlugDetail,
+    PhoebeRoute.RadioCountries,
+    is PhoebeRoute.RadioCountry,
+    is PhoebeRoute.RadioStation,
     is PhoebeRoute.RecentlyAdded,
     is PhoebeRoute.SongDetail,
     is PhoebeRoute.Lyrics,

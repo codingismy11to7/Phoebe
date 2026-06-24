@@ -8,6 +8,7 @@ import com.phoebe.app.data.PlayHistorySnapshot
 import com.phoebe.app.data.rankedEntries
 import com.phoebe.app.feature.home.HomeUiState
 import com.phoebe.app.feature.library.LibraryFilterTab
+import com.phoebe.app.feature.radio.RadioRouteMode
 import com.phoebe.app.feature.settings.SettingsCategory
 import com.phoebe.app.feature.settings.DownloadManagerUiSummary
 import com.phoebe.app.di.RouteViewModelFactory
@@ -44,6 +45,7 @@ import com.phoebe.app.domain.PlayerTransportState
 import com.phoebe.app.domain.PlayHistoryKind
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.RadioDirectoryState
+import com.phoebe.app.domain.RadioNowPlayingMetadata
 import com.phoebe.app.domain.RadioStation
 import com.phoebe.app.domain.RadioStationSearchQuery
 import com.phoebe.app.domain.ShellPlaybackState
@@ -74,6 +76,7 @@ internal data class PlaybackUiState(
     val playerTransport: PlayerTransportState = PlayerTransportState(),
     val player: PlayerState = PlayerState(),
     val track: Track?,
+    val radioNowPlaying: RadioNowPlayingMetadata? = null,
     val upNext: List<Track>,
     val currentIndex: Int,
     val lyricsTrack: Track? = null,
@@ -127,6 +130,7 @@ internal data class BrowseUiState(
     val decadeMixNotice: String? = null,
     val radioStations: List<PlexRadioStation> = emptyList(),
     val radioDirectory: RadioDirectoryState = RadioDirectoryState(),
+    val radioRouteMode: RadioRouteMode = RadioRouteMode.Home,
     val artistRadioAvailability: Map<String, ArtistRadioAvailability> = emptyMap(),
     val radioStartingIds: Set<String> = emptySet(),
     val internetRadioStartingIds: Set<String> = emptySet(),
@@ -164,6 +168,10 @@ internal data class BrowseActions(
     val onRadioLoadMore: () -> Unit = {},
     val onRadioRefreshPopular: () -> Unit = {},
     val onRadioPlay: (RadioStation) -> Unit = {},
+    val onRadioCountries: () -> Unit = {},
+    val onRadioCountry: (String) -> Unit = {},
+    val onRadioStation: (RadioStation) -> Unit = onRadioPlay,
+    val onRadioRoot: () -> Unit = {},
     val onRadioAddManualStation: (String, String) -> Unit = { _, _ -> },
     val onRadioUpdateManualStation: (RadioStation, String, String) -> Unit = { _, _, _ -> },
     val onRadioDeleteManualStation: (RadioStation) -> Unit = {},

@@ -73,6 +73,15 @@ sealed interface PhoebeRoute : NavKey {
     data class Browse(val section: BrowseSection = BrowseSection.Home) : PhoebeRoute
 
     @Serializable
+    data object RadioCountries : PhoebeRoute
+
+    @Serializable
+    data class RadioCountry(val countryCode: String) : PhoebeRoute
+
+    @Serializable
+    data class RadioStation(val stationId: String) : PhoebeRoute
+
+    @Serializable
     data class Collections(
         val entry: CollectionEntry,
     ) : PhoebeRoute
@@ -135,6 +144,9 @@ val phoebeRouteSerializersModule = SerializersModule {
         subclass(PhoebeRoute.ServerPicker::class, PhoebeRoute.ServerPicker.serializer())
         subclass(PhoebeRoute.LibraryPicker::class, PhoebeRoute.LibraryPicker.serializer())
         subclass(PhoebeRoute.Browse::class, PhoebeRoute.Browse.serializer())
+        subclass(PhoebeRoute.RadioCountries::class, PhoebeRoute.RadioCountries.serializer())
+        subclass(PhoebeRoute.RadioCountry::class, PhoebeRoute.RadioCountry.serializer())
+        subclass(PhoebeRoute.RadioStation::class, PhoebeRoute.RadioStation.serializer())
         subclass(PhoebeRoute.Collections::class, PhoebeRoute.Collections.serializer())
         subclass(PhoebeRoute.CollectionItems::class, PhoebeRoute.CollectionItems.serializer())
         subclass(PhoebeRoute.ArtistDetail::class, PhoebeRoute.ArtistDetail.serializer())
@@ -197,6 +209,9 @@ fun resolvePhoebeRoute(
     PhoebeRoute.ServerPicker -> route.resolved(AppScreen.ServerPicker)
     PhoebeRoute.LibraryPicker -> route.resolved(AppScreen.LibraryPicker)
     is PhoebeRoute.Browse -> route.resolved(AppScreen.Home)
+    PhoebeRoute.RadioCountries -> route.resolved(AppScreen.Home)
+    is PhoebeRoute.RadioCountry -> route.resolved(AppScreen.Home)
+    is PhoebeRoute.RadioStation -> route.resolved(AppScreen.Home)
     is PhoebeRoute.Collections -> route.resolved(AppScreen.Collections(route.entry))
     is PhoebeRoute.CollectionItems -> route.resolved(AppScreen.CollectionItems(route.entry, route.value))
     is PhoebeRoute.ArtistDetail -> catalog.findArtist(route.artistId)
@@ -247,6 +262,10 @@ fun Album.route(): PhoebeRoute = PhoebeRoute.AlbumDetail(id)
 fun Track.route(): PhoebeRoute = PhoebeRoute.SongDetail(id)
 fun Playlist.route(): PhoebeRoute = PhoebeRoute.PlaylistDetail(id)
 
+fun List<PhoebeRoute>.renderablePhoebeRoutes(): List<PhoebeRoute> =
+    filterNot { it is PhoebeRoute.RadioCountries || it is PhoebeRoute.RadioCountry || it is PhoebeRoute.RadioStation }
+        .ifEmpty { listOf(PhoebeRoute.SignIn) }
+
 val PhoebeRoute.telemetryName: String
     get() = when (this) {
         PhoebeRoute.SignIn -> "sign_in"
@@ -262,6 +281,9 @@ val PhoebeRoute.telemetryName: String
             BrowseSection.Downloads -> "downloads"
             BrowseSection.Settings -> "settings"
         }
+        PhoebeRoute.RadioCountries -> "radio_countries"
+        is PhoebeRoute.RadioCountry -> "radio_country"
+        is PhoebeRoute.RadioStation -> "radio_station"
         is PhoebeRoute.Collections -> "collections"
         is PhoebeRoute.CollectionItems -> "collection_items"
         is PhoebeRoute.AlbumDetail -> "album_detail"
