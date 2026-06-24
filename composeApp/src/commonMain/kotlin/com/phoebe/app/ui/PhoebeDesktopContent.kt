@@ -3,6 +3,7 @@ package com.phoebe.app.ui
 import com.phoebe.app.feature.library.*
 import com.phoebe.app.feature.radio.RadioRoute
 import com.phoebe.app.feature.radio.RadioRouteActions
+import com.phoebe.app.feature.radio.RadioRouteMode
 import com.phoebe.app.feature.radio.RadioRouteState
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.EnterTransition
@@ -205,11 +206,16 @@ internal fun DesktopContent(
     onLibraryAscending: (Boolean) -> Unit,
     onLibraryColumns: (LibraryColumnVisibility) -> Unit,
     radioDirectory: RadioDirectoryState = RadioDirectoryState(),
+    radioRouteMode: RadioRouteMode = RadioRouteMode.Home,
     internetRadioStartingIds: Set<String> = emptySet(),
     onRadioSearch: (RadioStationSearchQuery) -> Unit = {},
     onRadioLoadMore: () -> Unit = {},
     onRadioRefreshPopular: () -> Unit = {},
     onRadioPlay: (RadioStation) -> Unit = {},
+    onRadioCountries: () -> Unit = {},
+    onRadioCountry: (String) -> Unit = {},
+    onRadioStation: (RadioStation) -> Unit = onRadioPlay,
+    onRadioRoot: () -> Unit = {},
     onRadioAddManualStation: (String, String) -> Unit = { _, _ -> },
     onRadioUpdateManualStation: (RadioStation, String, String) -> Unit = { _, _, _ -> },
     onRadioDeleteManualStation: (RadioStation) -> Unit = {},
@@ -279,9 +285,14 @@ internal fun DesktopContent(
                 onAddManualStation = onRadioAddManualStation,
                 onUpdateManualStation = onRadioUpdateManualStation,
                 onDeleteManualStation = onRadioDeleteManualStation,
+                onCountry = { country -> onRadioCountry(country.code) },
+                onStation = onRadioStation,
+                onClearCountry = onRadioRoot,
+                onBrowseCountries = onRadioCountries,
             ),
             modifier = modifier,
             contentPadding = PaddingValues(horizontal = edgePadding, vertical = edgePadding),
+            mode = radioRouteMode,
         )
         return
     }

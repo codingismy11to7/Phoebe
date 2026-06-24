@@ -52,6 +52,42 @@ class DesktopPlaybackStartupPolicyTest {
     }
 
     @Test
+    fun desktopPlaylistDetectionSkipsHlsPlaylists() {
+        assertTrue(isLikelyDesktopPlaylistUri("https://radio.example/station.pls"))
+        assertTrue(isLikelyDesktopPlaylistUri("https://radio.example/station.m3u"))
+        assertFalse(isLikelyDesktopPlaylistUri("https://radio.example/live.m3u8"))
+    }
+
+    @Test
+    fun desktopPlaylistParsingFindsFirstStreamUrl() {
+        assertEquals(
+            "https://stream.example/live.mp3",
+            parseDesktopPlaylistStreamUri(
+                """
+                [playlist]
+                NumberOfEntries=1
+                File1=https://stream.example/live.mp3
+                Title1=Example
+                Length1=-1
+                Version=2
+                """.trimIndent(),
+                "https://radio.example/listen.pls",
+            ),
+        )
+        assertEquals(
+            "https://radio.example/listen/live.mp3",
+            parseDesktopPlaylistStreamUri(
+                """
+                #EXTM3U
+                #EXTINF:-1,Example
+                live.mp3
+                """.trimIndent(),
+                "https://radio.example/listen/station.m3u",
+            ),
+        )
+    }
+
+    @Test
     fun flatpakSandboxUsesPlexMp3TranscodeForAacStreams() {
         DesktopSandboxPlayback.flatpakSandboxOverride = { true }
         try {

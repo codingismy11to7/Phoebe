@@ -278,6 +278,31 @@ enum class RadioStationSource {
 }
 
 @Serializable
+enum class RadioNowPlayingSourceType {
+    Icy,
+    BbcRmsSegments,
+    KexpPlays,
+}
+
+@Serializable
+data class RadioNowPlayingSource(
+    val type: RadioNowPlayingSourceType = RadioNowPlayingSourceType.Icy,
+    val url: String? = null,
+)
+
+@Serializable
+data class RadioNowPlayingMetadata(
+    val trackId: String? = null,
+    val title: String = "",
+    val artist: String = "",
+    val rawTitle: String? = null,
+    val sourceType: RadioNowPlayingSourceType? = null,
+) {
+    val hasTrack: Boolean
+        get() = title.isNotBlank() || artist.isNotBlank()
+}
+
+@Serializable
 data class RadioStation(
     val id: String,
     val name: String,
@@ -293,6 +318,7 @@ data class RadioStation(
     val bitrateKbps: Int? = null,
     val clickCount: Int = 0,
     val source: RadioStationSource = RadioStationSource.RadioBrowser,
+    val nowPlayingSource: RadioNowPlayingSource? = RadioNowPlayingSource(),
 ) {
     val displaySubtitle: String
         get() = listOfNotNull(
@@ -311,13 +337,29 @@ data class RadioStation(
         }
 
     val faviconUrlOrFallback: String?
-        get() = faviconUrl ?: homepageUrl?.let { url ->
+        get() = faviconUrl ?: homepageOrigin?.let { "$it/favicon.ico" }
+
+    val fallbackArtworkUrl: String?
+        get() {
+            val origin = homepageOrigin ?: return null
+            val appleTouchIcon = "$origin/apple-touch-icon.png"
+            val favicon = "$origin/favicon.ico"
+            return when (faviconUrl) {
+                null -> favicon
+                appleTouchIcon -> favicon
+                favicon -> appleTouchIcon
+                else -> appleTouchIcon
+            }
+        }
+
+    private val homepageOrigin: String?
+        get() = homepageUrl?.let { url ->
             val schemeEnd = url.indexOf("://").takeIf { it > 0 } ?: return@let null
             val scheme = url.take(schemeEnd)
             if (scheme != "http" && scheme != "https") return@let null
             val hostStart = schemeEnd + 3
             val hostEnd = url.indexOf('/', startIndex = hostStart).takeIf { it > hostStart } ?: url.length
-            "${url.take(hostEnd).trimEnd('/')}/favicon.ico"
+            url.take(hostEnd).trimEnd('/')
         }
 }
 
@@ -432,6 +474,7 @@ data class Track(
     val titleSort: String? = null,
     val artistSort: String? = null,
     val albumSort: String? = null,
+    val radioNowPlayingSource: RadioNowPlayingSource? = null,
 )
 
 fun List<Track>.mergeDownloadCopiesById(): List<Track> {
@@ -450,6 +493,7 @@ fun List<Track>.mergeDownloadCopiesById(): List<Track> {
                 filepath = existing.filepath ?: track.filepath,
                 audioCodec = existing.audioCodec ?: track.audioCodec,
                 bitrateKbps = existing.bitrateKbps ?: track.bitrateKbps,
+                radioNowPlayingSource = existing.radioNowPlayingSource ?: track.radioNowPlayingSource,
             )
         }
     }

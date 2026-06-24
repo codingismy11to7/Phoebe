@@ -63,6 +63,7 @@ private fun BrowserRoutedApp() {
         navigationPath = navigationPath,
         onNavigationPathChange = { path, replace ->
             updatePhoebeBrowserPath(path, replace)
+            navigationPath = currentBrowserPath()
         },
     )
 }

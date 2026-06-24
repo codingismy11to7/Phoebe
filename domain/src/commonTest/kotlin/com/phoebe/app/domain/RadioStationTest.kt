@@ -23,10 +23,21 @@ class RadioStationTest {
     }
 
     @Test
+    fun fallbackArtworkUrlUsesHomepageAppleTouchIcon() {
+        val station = radioStation(
+            faviconUrl = "https://cdn.example/icon.png",
+            homepageUrl = "https://example.com/station/about",
+        )
+
+        assertEquals("https://example.com/apple-touch-icon.png", station.fallbackArtworkUrl)
+    }
+
+    @Test
     fun faviconUrlOrFallbackIgnoresUnsupportedHomepageScheme() {
         val station = radioStation(homepageUrl = "ftp://example.com/station")
 
         assertNull(station.faviconUrlOrFallback)
+        assertNull(station.fallbackArtworkUrl)
     }
 
     private fun radioStation(

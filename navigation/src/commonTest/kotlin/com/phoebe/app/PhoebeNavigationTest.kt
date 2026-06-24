@@ -16,7 +16,9 @@ import com.phoebe.app.ui.PhoebeRouteResolution
 import com.phoebe.app.ui.decodePhoebeRouteBackStack
 import com.phoebe.app.ui.encodePhoebeRouteBackStack
 import com.phoebe.app.ui.phoebeRouteSerializersModule
+import com.phoebe.app.ui.phoebeWebRoutesForPath
 import com.phoebe.app.ui.resolvePhoebeRoute
+import com.phoebe.app.ui.toPhoebeWebPath
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -38,6 +40,9 @@ class PhoebeNavigationTest {
             PhoebeRoute.LibraryPicker,
             PhoebeRoute.Browse(BrowseSection.Home),
             PhoebeRoute.Browse(BrowseSection.Search),
+            PhoebeRoute.RadioCountries,
+            PhoebeRoute.RadioCountry("US"),
+            PhoebeRoute.RadioStation("station-uuid-1"),
             PhoebeRoute.Collections(entry),
             PhoebeRoute.CollectionItems(entry, "Dream pop"),
             PhoebeRoute.ArtistDetail("artist-1"),
@@ -75,6 +80,39 @@ class PhoebeNavigationTest {
                 PhoebeRoute.RecentlyAdded(RecentlyAddedKind.Songs),
             ),
             decoded.toList(),
+        )
+    }
+
+    @Test
+    fun radioCountryWebRouteRoundTrips() {
+        val routes = phoebeWebRoutesForPath("/radio/us")
+
+        assertEquals(
+            listOf(PhoebeRoute.Browse(BrowseSection.Radio), PhoebeRoute.RadioCountry("US")),
+            routes,
+        )
+        assertEquals("/radio/US", routes.last().toPhoebeWebPath())
+    }
+
+    @Test
+    fun radioCountriesWebRouteRoundTrips() {
+        val routes = phoebeWebRoutesForPath("/radio/countries")
+
+        assertEquals(
+            listOf(PhoebeRoute.Browse(BrowseSection.Radio), PhoebeRoute.RadioCountries),
+            routes,
+        )
+        assertEquals("/radio/countries", routes.last().toPhoebeWebPath())
+    }
+
+    @Test
+    fun radioStationWebRouteRoundTrips() {
+        val route = PhoebeRoute.RadioStation("station/with spaces")
+        val routes = phoebeWebRoutesForPath(route.toPhoebeWebPath())
+
+        assertEquals(
+            listOf(PhoebeRoute.Browse(BrowseSection.Radio), route),
+            routes,
         )
     }
 

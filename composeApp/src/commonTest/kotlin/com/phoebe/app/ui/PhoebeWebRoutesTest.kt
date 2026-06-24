@@ -24,6 +24,11 @@ class PhoebeWebRoutesTest {
         assertEquals(listOf(PhoebeRoute.Browse(BrowseSection.Playlists)), phoebeWebRoutesForPath("/playlists"))
         assertEquals(listOf(PhoebeRoute.Browse(BrowseSection.Settings)), phoebeWebRoutesForPath("/settings"))
         assertEquals("/radio", PhoebeRoute.Browse(BrowseSection.Radio).toPhoebeWebPath())
+        assertEquals(
+            listOf(PhoebeRoute.Browse(BrowseSection.Radio), PhoebeRoute.RadioCountries),
+            phoebeWebRoutesForPath("/radio/countries"),
+        )
+        assertEquals("/radio/countries", PhoebeRoute.RadioCountries.toPhoebeWebPath())
     }
 
     @Test

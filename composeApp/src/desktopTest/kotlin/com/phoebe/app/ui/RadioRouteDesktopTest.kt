@@ -36,6 +36,7 @@ import com.phoebe.app.domain.RadioStationSource
 import com.phoebe.app.feature.library.LibrarySectionIndexMode
 import com.phoebe.app.feature.radio.RadioRoute
 import com.phoebe.app.feature.radio.RadioRouteActions
+import com.phoebe.app.feature.radio.RadioRouteMode
 import com.phoebe.app.feature.radio.RadioRouteState
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -45,17 +46,12 @@ import kotlin.test.assertNull
 class RadioRouteDesktopTest {
     @OptIn(ExperimentalTestApi::class, ExperimentalComposeUiApi::class)
     @Test
-    fun desktopRadioCountriesCollapseWithoutLeavingLazyItemsAndKeepSectionIndex() =
+    fun desktopRadioHomeShowsCountryEntryWithoutEmbeddingCountryRows() =
         runDesktopComposeUiTest(width = 900, height = 620) {
-            var searchedQuery: RadioStationSearchQuery? = null
+            var browseCountries = false
             val countries = listOf(
                 RadioCountry(name = "The United States Of America", code = "US", stationCount = 7349),
                 RadioCountry(name = "Germany", code = "DE", stationCount = 5951),
-                RadioCountry(name = "France", code = "FR", stationCount = 2640),
-                RadioCountry(name = "Japan", code = "JP", stationCount = 1238),
-                RadioCountry(name = "Argentina", code = "AR", stationCount = 1124),
-                RadioCountry(name = "Sweden", code = "SE", stationCount = 654),
-                RadioCountry(name = "Norway", code = "NO", stationCount = 431),
             )
             val stations = listOf(
                 RadioStation(
@@ -87,13 +83,14 @@ class RadioRouteDesktopTest {
                                 ),
                             ),
                             actions = RadioRouteActions(
-                                onSearch = { searchedQuery = it },
+                                onSearch = {},
                                 onLoadMore = {},
                                 onRefreshPopular = {},
                                 onPlay = {},
                                 onAddManualStation = { _, _ -> },
                                 onUpdateManualStation = { _, _, _ -> },
                                 onDeleteManualStation = {},
+                                onBrowseCountries = { browseCountries = true },
                             ),
                             contentPadding = PaddingValues(20.dp),
                         )
@@ -103,23 +100,63 @@ class RadioRouteDesktopTest {
 
             waitForIdle()
             onNodeWithContentDescription("Library section index", useUnmergedTree = true).assertIsDisplayed()
-            onNode(hasText("The United States Of America") and hasClickAction()).performClick()
-            assertEquals("US", searchedQuery?.countryCode)
-
-            onNodeWithText("Hide").performClick()
-            mainClock.advanceTimeBy(260)
-            waitForIdle()
-
             assertFalse(
                 onAllNodesWithText("The United States Of America").fetchSemanticsNodes().isNotEmpty(),
-                "Collapsed country rows should be removed from the lazy list, not left as invisible spaced items.",
+                "Home radio should link to the country browser instead of embedding all country rows.",
             )
+            onNode(hasText("Browse by country") and hasClickAction()).performClick()
+            assertEquals(true, browseCountries)
             onNodeWithText("BBC Radio 6 Music").assertIsDisplayed()
         }
 
     @OptIn(ExperimentalTestApi::class, ExperimentalComposeUiApi::class)
     @Test
-    fun desktopRadioCountryResultsExposeBackButton() =
+    fun desktopRadioCountryIndexUsesSectionLabelBackButton() =
+        runDesktopComposeUiTest(width = 900, height = 620) {
+            var searchedQuery: RadioStationSearchQuery? = null
+            var clearedCountry = false
+            val countries = listOf(
+                RadioCountry(name = "The United States Of America", code = "US", stationCount = 7349),
+                RadioCountry(name = "Germany", code = "DE", stationCount = 5951),
+                RadioCountry(name = "France", code = "FR", stationCount = 2640),
+            )
+
+            setContent {
+                PhoebeTheme {
+                    Box(Modifier.size(900.dp, 620.dp)) {
+                        RadioRoute(
+                            state = RadioRouteState(
+                                directory = RadioDirectoryState(countries = countries),
+                            ),
+                            actions = RadioRouteActions(
+                                onSearch = { searchedQuery = it },
+                                onLoadMore = {},
+                                onRefreshPopular = {},
+                                onPlay = {},
+                                onAddManualStation = { _, _ -> },
+                                onUpdateManualStation = { _, _, _ -> },
+                                onDeleteManualStation = {},
+                                onClearCountry = { clearedCountry = true },
+                            ),
+                            contentPadding = PaddingValues(20.dp),
+                            mode = RadioRouteMode.CountryIndex,
+                        )
+                    }
+                }
+            }
+
+            waitForIdle()
+            onNodeWithText("Browse by country").assertIsDisplayed()
+            onNode(hasText("BROWSE BY COUNTRY") and hasClickAction()).assertIsDisplayed().performClick()
+            assertEquals(true, clearedCountry)
+            onNode(hasText("Radio") and hasClickAction()).assertDoesNotExist()
+            onNode(hasText("The United States Of America") and hasClickAction()).performClick()
+            assertEquals("US", searchedQuery?.countryCode)
+        }
+
+    @OptIn(ExperimentalTestApi::class, ExperimentalComposeUiApi::class)
+    @Test
+    fun desktopRadioCountryResultsExposeCountriesBreadcrumbOnly() =
         runDesktopComposeUiTest(width = 900, height = 620) {
             val countries = listOf(
                 RadioCountry(name = "The United States Of America", code = "US", stationCount = 7349),
@@ -161,8 +198,14 @@ class RadioRouteDesktopTest {
                                 onAddManualStation = { _, _ -> },
                                 onUpdateManualStation = { _, _, _ -> },
                                 onDeleteManualStation = {},
+                                onBrowseCountries = { directory = RadioDirectoryState(countries = countries) },
                             ),
                             contentPadding = PaddingValues(20.dp),
+                            mode = if (directory.searchQuery.countryCode.isBlank()) {
+                                RadioRouteMode.CountryIndex
+                            } else {
+                                RadioRouteMode.CountryStations
+                            },
                         )
                     }
                 }
@@ -170,21 +213,16 @@ class RadioRouteDesktopTest {
 
             onNode(hasText("The United States Of America") and hasClickAction()).performClick()
             onNodeWithText("KEXP").assertIsDisplayed()
-            assertFalse(
-                onAllNodesWithText("RESULTS").fetchSemanticsNodes().isNotEmpty(),
-                "Country results should show the Back button without a RESULTS section label.",
-            )
+            onNodeWithText("RESULTS").assertDoesNotExist()
+            onNode(hasText("Radio") and hasClickAction()).assertDoesNotExist()
             assertFalse(
                 onAllNodesWithContentDescription("Library section index").fetchSemanticsNodes().isNotEmpty(),
                 "Country results should not show desktop scrollbar section tracking.",
             )
-            onNode(hasText("Back") and hasClickAction()).assertIsDisplayed().performClick()
+            onNode(hasText("Countries") and hasClickAction()).assertIsDisplayed().performClick()
             waitForIdle()
-            waitUntil {
-                onAllNodesWithText("The United States Of America").fetchSemanticsNodes().isNotEmpty()
-            }
 
-            onNodeWithText("The United States Of America").assertIsDisplayed()
+            assertEquals(true, directory.searchQuery.isBlank)
         }
 
     @OptIn(ExperimentalTestApi::class, ExperimentalComposeUiApi::class)
@@ -275,8 +313,13 @@ class RadioRouteDesktopTest {
     @Test
     fun mobileRadioFloatingAddActionFollowsScrollDirection() =
         runDesktopComposeUiTest(width = 390, height = 720) {
-            val countries = (1..60).map { index ->
-                RadioCountry(name = "Country $index", code = "C$index", stationCount = index)
+            val stations = (1..60).map { index ->
+                RadioStation(
+                    id = "recommended:$index",
+                    name = "Station $index",
+                    streamUrl = "https://radio.example/$index.mp3",
+                    source = RadioStationSource.Recommended,
+                )
             }
 
             setContent {
@@ -284,7 +327,7 @@ class RadioRouteDesktopTest {
                     Box(Modifier.size(390.dp, 720.dp)) {
                         RadioRoute(
                             state = RadioRouteState(
-                                directory = RadioDirectoryState(countries = countries),
+                                directory = RadioDirectoryState(recommendedStations = stations),
                             ),
                             actions = RadioRouteActions(
                                 onSearch = {},

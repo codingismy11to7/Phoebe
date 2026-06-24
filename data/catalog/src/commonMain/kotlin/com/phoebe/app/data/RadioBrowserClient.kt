@@ -95,6 +95,16 @@ class RadioBrowserClient(
         }
     }
 
+    suspend fun stationByUuid(uuid: String): RadioStation? {
+        val normalized = uuid.trim().takeIf { it.isNotBlank() } ?: return null
+        return withMirrorFallback { baseUrl ->
+            httpClient.get("$baseUrl/json/stations/byuuid/${normalized}") {
+                radioBrowserHeaders()
+                parameter("hidebroken", true)
+            }.body<List<RadioBrowserStationDto>>().mapNotNull { it.toRadioStation() }.firstOrNull()
+        }
+    }
+
     suspend fun resolvePlaybackUrl(station: RadioStation): String =
         if (station.source != RadioStationSource.RadioBrowser) {
             station.streamUrl

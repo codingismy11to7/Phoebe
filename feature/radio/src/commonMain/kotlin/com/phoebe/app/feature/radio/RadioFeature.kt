@@ -86,6 +86,12 @@ import kotlinx.coroutines.launch
 
 private const val RadioSearchDebounceMillis = 450L
 
+enum class RadioRouteMode {
+    Home,
+    CountryIndex,
+    CountryStations,
+}
+
 @Immutable
 data class RadioRouteState(
     val directory: RadioDirectoryState,
@@ -101,6 +107,10 @@ class RadioRouteActions(
     val onAddManualStation: (String, String) -> Unit,
     val onUpdateManualStation: (RadioStation, String, String) -> Unit,
     val onDeleteManualStation: (RadioStation) -> Unit,
+    val onCountry: (RadioCountry) -> Unit = { country -> onSearch(RadioStationSearchQuery(countryCode = country.code)) },
+    val onStation: (RadioStation) -> Unit = onPlay,
+    val onClearCountry: () -> Unit = { onSearch(RadioStationSearchQuery()) },
+    val onBrowseCountries: () -> Unit = {},
 )
 
 @OptIn(FlowPreview::class)
@@ -111,13 +121,12 @@ fun RadioRoute(
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(horizontal = 36.dp, vertical = 28.dp),
     sectionIndexMode: LibrarySectionIndexMode = LibrarySectionIndexMode.DesktopScrollbar,
+    mode: RadioRouteMode = RadioRouteMode.Home,
 ) {
     var queryText by remember(state.directory.searchQuery.text) { mutableStateOf(state.directory.searchQuery.text) }
     var editingStation by remember { mutableStateOf<RadioStation?>(null) }
     var showAddDialog by remember { mutableStateOf(false) }
     var mobileAddButtonVisible by remember { mutableStateOf(true) }
-    var countriesExpanded by remember { mutableStateOf(true) }
-    var pendingCountryReturn by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val scrollScope = rememberCoroutineScope()
     val indexScrollDispatcher = rememberLibrarySectionIndexSelectionDispatcher()
@@ -145,13 +154,14 @@ fun RadioRoute(
             state.directory.directoryStations.filter { it.matchesSearch(searchText) }
         }
     }
-    val showCountries = state.directory.searchQuery.isBlank &&
+    val showCountries = mode == RadioRouteMode.CountryIndex &&
+        state.directory.searchQuery.isBlank &&
         !hasTextSearch &&
         (state.directory.loading || state.directory.countries.isNotEmpty())
-    val showRecommended = state.directory.searchQuery.isBlank || hasTextSearch
+    val showRecommended = mode == RadioRouteMode.Home && (state.directory.searchQuery.isBlank || hasTextSearch)
     val showingDirectoryResults = !state.directory.searchQuery.isBlank
     val showResultsLabel = hasTextSearch || state.directory.searchQuery.text.isNotBlank()
-    val showSectionIndex = state.directory.searchQuery.countryCode.isBlank()
+    val showSectionIndex = mode != RadioRouteMode.CountryStations
     val keepSectionIndexLabelsVisible = false
     val scrollbarState by remember(listState) {
         derivedStateOf {
@@ -203,7 +213,6 @@ fun RadioRoute(
     val sectionAnchors = remember(
         state.directory.manualStations,
         state.directory.countries,
-        countriesExpanded,
         showCountries,
         state.directory.searchQuery,
         hasTextSearch,
@@ -217,17 +226,14 @@ fun RadioRoute(
             add("Top" to anchorItemIndex)
             anchorItemIndex += 2
 
-            if (state.directory.manualStations.isNotEmpty()) {
+            if (mode == RadioRouteMode.Home && state.directory.manualStations.isNotEmpty()) {
                 add("My" to anchorItemIndex)
                 anchorItemIndex += 1 + state.directory.manualStations.size
             }
 
             if (showCountries) {
                 add("Countries" to anchorItemIndex)
-                anchorItemIndex += 1
-                if (countriesExpanded) {
-                    anchorItemIndex += state.directory.countries.size
-                }
+                anchorItemIndex += 1 + state.directory.countries.size
             }
 
             if (!state.directory.searchQuery.isBlank || hasTextSearch) {
@@ -256,13 +262,6 @@ fun RadioRoute(
 
     LaunchedEffect(shouldLoadMore, state.directory.searchQuery, activeDirectoryStations.size) {
         if (shouldLoadMore) actions.onLoadMore()
-    }
-
-    LaunchedEffect(showCountries, pendingCountryReturn) {
-        if (showCountries && pendingCountryReturn) {
-            listState.scrollToItem(0)
-            pendingCountryReturn = false
-        }
     }
 
     LaunchedEffect(state.directory.countries.isEmpty()) {
@@ -322,21 +321,29 @@ fun RadioRoute(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(Modifier.weight(1f)) {
-                            Text("Radio", color = PhoebeUi.primaryText, fontSize = 30.sp, fontWeight = FontWeight.Black)
-                            Text("Browse internet stations and save your own streams", color = PhoebeUi.secondaryText, fontSize = 13.sp)
+                            Text(mode.title, color = PhoebeUi.primaryText, fontSize = 30.sp, fontWeight = FontWeight.Black)
+                            Text(mode.subtitle(state.directory.searchQuery.countryCode), color = PhoebeUi.secondaryText, fontSize = 13.sp)
                         }
-                        TextButton(
-                            onClick = { showAddDialog = true },
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.padding(end = 80.dp),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                         ) {
-                            Text("Add")
+                            if (mode == RadioRouteMode.Home) {
+                                TextButton(
+                                    onClick = { showAddDialog = true },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                ) {
+                                    Text("Add")
+                                }
+                            }
                         }
                     }
                 }
             }
 
-            item(contentType = "search") {
+            if (mode != RadioRouteMode.CountryIndex) {
+                item(contentType = "search") {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     RadioTextField(
                         value = queryText,
@@ -350,39 +357,47 @@ fun RadioRoute(
                         }
                     }
                 }
+                }
             }
 
-            if (state.directory.manualStations.isNotEmpty()) {
+            if (mode == RadioRouteMode.Home && state.directory.manualStations.isNotEmpty()) {
                 item(contentType = "manual-label") { SectionLabel("MY STATIONS", PhoebeUi.accentLight) }
-                items(state.directory.manualStations, key = { it.id }, contentType = { "manual-station" }) { station ->
+                items(state.directory.manualStations, key = { "manual:${it.id}" }, contentType = { "manual-station" }) { station ->
                     RadioStationRow(
                         station = station,
                         starting = station.id in state.startingStationIds,
-                        onPlay = { actions.onPlay(station) },
+                        onPlay = { actions.onStation(station) },
                         onEdit = { editingStation = station },
                         onDelete = { actions.onDeleteManualStation(station) },
                     )
                 }
             }
 
+            if (mode == RadioRouteMode.Home) {
+                item(contentType = "country-entry") {
+                    RadioBrowseCountriesRow(onClick = actions.onBrowseCountries)
+                }
+            }
+
             if (showCountries) {
                 item(contentType = "country-label") {
-                    RadioCollapsibleSectionLabel(
-                        label = "BROWSE BY COUNTRY",
-                        expanded = countriesExpanded,
-                        onClick = { countriesExpanded = !countriesExpanded },
-                    )
-                }
-                if (countriesExpanded) {
-                    items(state.directory.countries, key = { it.code }, contentType = { "country" }) { country ->
-                        RadioCountryRow(
-                            country = country,
-                            onClick = {
-                                queryText = ""
-                                actions.onSearch(RadioStationSearchQuery(countryCode = country.code))
-                            },
-                        )
+                    Row(
+                        modifier = Modifier.clickable(onClick = actions.onClearCountry),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        PhoebeIconView(PhoebeIcon.Back, tint = PhoebeUi.accentLight, modifier = Modifier.size(14.dp))
+                        SectionLabel("BROWSE BY COUNTRY", PhoebeUi.accentLight)
                     }
+                }
+                items(state.directory.countries, key = { it.code }, contentType = { "country" }) { country ->
+                    RadioCountryRow(
+                        country = country,
+                        onClick = {
+                            queryText = ""
+                            actions.onCountry(country)
+                        },
+                    )
                 }
             }
 
@@ -396,13 +411,21 @@ fun RadioRoute(
                         if (showingDirectoryResults) {
                             TextButton(
                                 onClick = {
-                                    pendingCountryReturn = true
                                     queryText = ""
-                                    actions.onSearch(RadioStationSearchQuery())
+                                    if (mode == RadioRouteMode.CountryStations) {
+                                        actions.onBrowseCountries()
+                                    } else {
+                                        actions.onClearCountry()
+                                    }
                                 },
                             ) {
                                 PhoebeIconView(PhoebeIcon.Back, tint = PhoebeUi.accentLight, modifier = Modifier.size(14.dp))
-                                Text("Back", modifier = Modifier.padding(start = 6.dp), color = PhoebeUi.accentLight, fontSize = 12.sp)
+                                Text(
+                                    if (mode == RadioRouteMode.CountryStations) "Countries" else "Back",
+                                    modifier = Modifier.padding(start = 6.dp),
+                                    color = PhoebeUi.accentLight,
+                                    fontSize = 12.sp,
+                                )
                             }
                         }
                         if (showResultsLabel) {
@@ -421,16 +444,16 @@ fun RadioRoute(
                     Text("No stations found.", color = PhoebeUi.mutedText, fontSize = 13.sp)
                 }
             }
-            items(activeDirectoryStations, key = { it.id }, contentType = { "directory-station" }) { station ->
+            items(activeDirectoryStations, key = { "directory:${it.id}" }, contentType = { "directory-station" }) { station ->
                 RadioStationRow(
                     station = station,
                     starting = station.id in state.startingStationIds,
-                    onPlay = { actions.onPlay(station) },
+                    onPlay = { actions.onStation(station) },
                     onEdit = null,
                     onDelete = null,
                 )
             }
-            if (state.directory.loadingMore) {
+            if (state.directory.loadingMore && mode != RadioRouteMode.Home) {
                 item(contentType = "loading-more") {
                     Row(
                         Modifier.fillMaxWidth().padding(vertical = 6.dp),
@@ -446,11 +469,11 @@ fun RadioRoute(
                     item(contentType = "recommended-label-$category") {
                         SectionLabel(category.uppercase(), PhoebeUi.accentLight)
                     }
-                    items(stations, key = { it.id }, contentType = { "recommended-station" }) { station ->
+                    items(stations, key = { "recommended:${it.id}" }, contentType = { "recommended-station" }) { station ->
                         RadioStationRow(
                             station = station,
                             starting = station.id in state.startingStationIds,
-                            onPlay = { actions.onPlay(station) },
+                            onPlay = { actions.onStation(station) },
                             onEdit = null,
                             onDelete = null,
                         )
@@ -483,7 +506,7 @@ fun RadioRoute(
         }
 
         AnimatedVisibility(
-            visible = showMobileAddButton,
+            visible = showMobileAddButton && mode == RadioRouteMode.Home,
             enter = fadeIn() + scaleIn(),
             exit = fadeOut() + scaleOut(),
             modifier = Modifier
@@ -529,28 +552,50 @@ fun RadioRoute(
 }
 
 @Composable
-private fun RadioCollapsibleSectionLabel(
-    label: String,
-    expanded: Boolean,
+private fun RadioBrowseCountriesRow(
     onClick: () -> Unit,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
+            .background(PhoebeUi.elevatedFill)
+            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(8.dp))
             .clickable(onClick = onClick)
-            .padding(vertical = 2.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
+            .padding(horizontal = 12.dp, vertical = 11.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        SectionLabel(label, PhoebeUi.accentLight)
-        Text(
-            text = if (expanded) "Hide" else "Show",
-            color = PhoebeUi.secondaryText,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.SemiBold,
-        )
+        Box(
+            Modifier
+                .size(38.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(PhoebeUi.subtleFill),
+            contentAlignment = Alignment.Center,
+        ) {
+            PhoebeIconView(PhoebeIcon.Search, tint = PhoebeUi.accentLight, modifier = Modifier.size(18.dp))
+        }
+        Column(Modifier.weight(1f)) {
+            Text("Browse by country", color = PhoebeUi.primaryText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("Explore the full Radio Browser country directory", color = PhoebeUi.secondaryText, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        PhoebeIconView(PhoebeIcon.Forward, tint = PhoebeUi.mutedText, modifier = Modifier.size(14.dp))
     }
+}
+
+private val RadioRouteMode.title: String
+    get() = when (this) {
+        RadioRouteMode.Home -> "Radio"
+        RadioRouteMode.CountryIndex -> "Browse by country"
+        RadioRouteMode.CountryStations -> "Country radio"
+    }
+
+private fun RadioRouteMode.subtitle(countryCode: String): String = when (this) {
+    RadioRouteMode.Home -> "Recommended streams and saved internet stations"
+    RadioRouteMode.CountryIndex -> "Choose a country from the Radio Browser directory"
+    RadioRouteMode.CountryStations -> countryCode.takeIf { it.isNotBlank() }
+        ?.let { "Stations broadcasting from $it" }
+        ?: "Stations broadcasting from the selected country"
 }
 
 @Composable
@@ -607,6 +652,7 @@ private fun RadioStationRow(
             ArtworkImage(
                 seed = station.name,
                 thumbUrl = station.faviconUrlOrFallback,
+                fallbackThumbUrl = station.fallbackArtworkUrl,
                 modifier = Modifier.size(38.dp),
                 radius = 8.dp,
                 elevated = false,

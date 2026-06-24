@@ -33,6 +33,7 @@ import com.phoebe.app.data.PlaylistService
 import com.phoebe.app.data.PlexClient
 import com.phoebe.app.data.PlexPlayHistorySyncer
 import com.phoebe.app.data.PlexPlaybackReporter
+import com.phoebe.app.data.RadioNowPlayingRepository
 import com.phoebe.app.data.RadioRepository
 import com.phoebe.app.data.SearchHistoryRepository
 import com.phoebe.app.data.SettingsService
@@ -104,6 +105,7 @@ data class AppGraphServices(
     val playHistoryRepository: PlayHistoryRepository,
     val playlistService: PlaylistService,
     val radioRepository: RadioRepository,
+    val radioNowPlayingRepository: RadioNowPlayingRepository,
     val appSettingsRepository: AppSettingsRepository,
     val searchHistoryRepository: SearchHistoryRepository,
     val userArtifactsRepository: UserArtifactsRepository,
@@ -161,6 +163,7 @@ interface AppGraphContributions {
     val playHistoryRepository: PlayHistoryRepository
     val playlistService: PlaylistService
     val radioRepository: RadioRepository
+    val radioNowPlayingRepository: RadioNowPlayingRepository
     val appSettingsRepository: AppSettingsRepository
     val searchHistoryRepository: SearchHistoryRepository
     val userArtifactsRepository: UserArtifactsRepository
@@ -217,6 +220,7 @@ interface AppGraphProviders {
         playHistoryRepository: PlayHistoryRepository,
         playlistService: PlaylistService,
         radioRepository: RadioRepository,
+        radioNowPlayingRepository: RadioNowPlayingRepository,
         appSettingsRepository: AppSettingsRepository,
         searchHistoryRepository: SearchHistoryRepository,
         userArtifactsRepository: UserArtifactsRepository,
@@ -259,6 +263,7 @@ interface AppGraphProviders {
             playHistoryRepository = playHistoryRepository,
             playlistService = playlistService,
             radioRepository = radioRepository,
+            radioNowPlayingRepository = radioNowPlayingRepository,
             appSettingsRepository = appSettingsRepository,
             searchHistoryRepository = searchHistoryRepository,
             userArtifactsRepository = userArtifactsRepository,
