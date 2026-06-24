@@ -19,8 +19,13 @@ import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.swipeDown
+import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
 import com.phoebe.app.domain.RadioCountry
@@ -28,12 +33,14 @@ import com.phoebe.app.domain.RadioDirectoryState
 import com.phoebe.app.domain.RadioStation
 import com.phoebe.app.domain.RadioStationSearchQuery
 import com.phoebe.app.domain.RadioStationSource
+import com.phoebe.app.feature.library.LibrarySectionIndexMode
 import com.phoebe.app.feature.radio.RadioRoute
 import com.phoebe.app.feature.radio.RadioRouteActions
 import com.phoebe.app.feature.radio.RadioRouteState
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 
 class RadioRouteDesktopTest {
     @OptIn(ExperimentalTestApi::class, ExperimentalComposeUiApi::class)
@@ -178,6 +185,136 @@ class RadioRouteDesktopTest {
             }
 
             onNodeWithText("The United States Of America").assertIsDisplayed()
+        }
+
+    @OptIn(ExperimentalTestApi::class, ExperimentalComposeUiApi::class)
+    @Test
+    fun radioSearchDebouncesTextInputClearsImmediatelyAndKeepsDesktopAddActionInHeader() =
+        runDesktopComposeUiTest(width = 900, height = 620) {
+            var searchedQuery: RadioStationSearchQuery? = null
+
+            setContent {
+                PhoebeTheme {
+                    Box(Modifier.size(900.dp, 620.dp)) {
+                        RadioRoute(
+                            state = RadioRouteState(
+                                directory = RadioDirectoryState(),
+                            ),
+                            actions = RadioRouteActions(
+                                onSearch = { searchedQuery = it },
+                                onLoadMore = {},
+                                onRefreshPopular = {},
+                                onPlay = {},
+                                onAddManualStation = { _, _ -> },
+                                onUpdateManualStation = { _, _, _ -> },
+                                onDeleteManualStation = {},
+                            ),
+                            contentPadding = PaddingValues(20.dp),
+                        )
+                    }
+                }
+            }
+
+            waitForIdle()
+            onNodeWithText("Add").assertIsDisplayed()
+
+            mainClock.autoAdvance = false
+            onAllNodes(hasSetTextAction())[0].performTextInput("jazz")
+            mainClock.advanceTimeBy(449)
+            assertNull(searchedQuery)
+
+            mainClock.advanceTimeBy(1)
+            mainClock.autoAdvance = true
+            waitUntil(timeoutMillis = 1_000) {
+                searchedQuery?.text == "jazz"
+            }
+
+            assertEquals("jazz", searchedQuery?.text)
+
+            searchedQuery = null
+            onAllNodes(hasSetTextAction())[0].performTextClearance()
+            waitUntil(timeoutMillis = 1_000) {
+                searchedQuery?.text == ""
+            }
+            assertEquals("", searchedQuery?.text)
+        }
+
+    @OptIn(ExperimentalTestApi::class, ExperimentalComposeUiApi::class)
+    @Test
+    fun mobileRadioUsesFloatingAddAction() =
+        runDesktopComposeUiTest(width = 390, height = 720) {
+            setContent {
+                PhoebeTheme {
+                    Box(Modifier.size(390.dp, 720.dp)) {
+                        RadioRoute(
+                            state = RadioRouteState(
+                                directory = RadioDirectoryState(),
+                            ),
+                            actions = RadioRouteActions(
+                                onSearch = {},
+                                onLoadMore = {},
+                                onRefreshPopular = {},
+                                onPlay = {},
+                                onAddManualStation = { _, _ -> },
+                                onUpdateManualStation = { _, _, _ -> },
+                                onDeleteManualStation = {},
+                            ),
+                            contentPadding = PaddingValues(20.dp),
+                            sectionIndexMode = LibrarySectionIndexMode.MobileScrollbar,
+                        )
+                    }
+                }
+            }
+
+            waitForIdle()
+            onNodeWithContentDescription("Add station").assertIsDisplayed().performClick()
+            onNodeWithText("Add station").assertIsDisplayed()
+        }
+
+    @OptIn(ExperimentalTestApi::class, ExperimentalComposeUiApi::class)
+    @Test
+    fun mobileRadioFloatingAddActionFollowsScrollDirection() =
+        runDesktopComposeUiTest(width = 390, height = 720) {
+            val countries = (1..60).map { index ->
+                RadioCountry(name = "Country $index", code = "C$index", stationCount = index)
+            }
+
+            setContent {
+                PhoebeTheme {
+                    Box(Modifier.size(390.dp, 720.dp)) {
+                        RadioRoute(
+                            state = RadioRouteState(
+                                directory = RadioDirectoryState(countries = countries),
+                            ),
+                            actions = RadioRouteActions(
+                                onSearch = {},
+                                onLoadMore = {},
+                                onRefreshPopular = {},
+                                onPlay = {},
+                                onAddManualStation = { _, _ -> },
+                                onUpdateManualStation = { _, _, _ -> },
+                                onDeleteManualStation = {},
+                            ),
+                            contentPadding = PaddingValues(20.dp),
+                            sectionIndexMode = LibrarySectionIndexMode.MobileScrollbar,
+                        )
+                    }
+                }
+            }
+
+            waitForIdle()
+            onNodeWithContentDescription("Add station").assertIsDisplayed()
+
+            onRoot().performTouchInput { swipeUp() }
+            waitForIdle()
+            assertFalse(
+                onAllNodesWithContentDescription("Add station").fetchSemanticsNodes().isNotEmpty(),
+                "Mobile add FAB should hide when scrolling down.",
+            )
+
+            onRoot().performTouchInput { swipeDown() }
+            waitForIdle()
+            onNodeWithContentDescription("Add station").assertIsDisplayed()
         }
 
     @OptIn(ExperimentalTestApi::class, ExperimentalComposeUiApi::class)

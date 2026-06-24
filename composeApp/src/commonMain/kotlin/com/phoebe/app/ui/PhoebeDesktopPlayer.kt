@@ -258,6 +258,7 @@ internal fun DesktopPlayer(
     val onDiscoverJellyfinServers = authSetupActions.onDiscoverJellyfinServers
     val onStartJellyfinQuickConnect = authSetupActions.onStartJellyfinQuickConnect
     val onFinishJellyfinQuickConnect = authSetupActions.onFinishJellyfinQuickConnect
+    val onOpenSignIn = authSetupActions.onOpenSignIn
     val onSignOut = authSetupActions.onSignOut
     val onAddLocalFolder = authSetupActions.onAddLocalFolder
     val onRemoveLocalFolder = authSetupActions.onRemoveLocalFolder
@@ -330,6 +331,7 @@ internal fun DesktopPlayer(
                         selectedPlaylistId = selectedPlaylistId,
                         onNavigate = onNavigate,
                         onPlaylist = onPlaylist,
+                        onOpenSignIn = onOpenSignIn,
                         onSignOut = onSignOut,
                         onAddLocalFolder = onAddLocalFolder,
                         onRemoveLocalFolder = onRemoveLocalFolder,

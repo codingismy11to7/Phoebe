@@ -182,6 +182,7 @@ internal fun Sidebar(
     selectedPlaylistId: String?,
     onNavigate: (BrowseSection) -> Unit,
     onPlaylist: (Playlist) -> Unit,
+    onOpenSignIn: () -> Unit,
     onSignOut: () -> Unit,
     onAddLocalFolder: (String?) -> Unit,
     onRemoveLocalFolder: (String) -> Unit,
@@ -190,10 +191,10 @@ internal fun Sidebar(
     appUpdateState: AppUpdateState = AppUpdateState.Idle,
     onInstallUpdate: () -> Unit = {},
 ) {
-    var profileExpanded by remember { mutableStateOf(false) }
     val pickLocalFolder = rememberPickLocalFolder(onPicked = onAddLocalFolder)
     val playlistActions = LocalPlaylistActions.current
     val remoteSignedIn = session?.token?.isNotBlank() == true
+    var profileExpanded by remember(remoteSignedIn) { mutableStateOf(!remoteSignedIn) }
     val mainNavEnabled = canBrowseMainSections(session, mediaSources)
     val providerName = session.providerLabel()
     val remoteSourceLabel = if (remoteSignedIn) "$providerName — streaming library" else "Streaming provider — Plex or Jellyfin"
@@ -390,6 +391,14 @@ internal fun Sidebar(
                             },
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                         ) { Text("Sign out", fontSize = 11.sp) }
+                    } else {
+                        OutlinedButton(
+                            onClick = {
+                                profileExpanded = false
+                                onOpenSignIn()
+                            },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        ) { Text("Sign in", fontSize = 11.sp) }
                     }
                     SectionLabel("Media sources", PhoebeUi.primaryText)
                     Text(remoteSourceLabel, color = PhoebeUi.mutedText, fontSize = 11.sp, lineHeight = 15.sp)

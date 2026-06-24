@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -42,15 +41,15 @@ internal fun SmartPlaylistCreateButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    FilledTonalButton(
+    TextButton(
         onClick = onClick,
         modifier = modifier,
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
     ) {
-        PhoebeIconView(PhoebeIcon.InterwovenArrows, tint = PhoebeUi.primaryText, modifier = Modifier.size(15.dp))
+        PhoebeIconView(PhoebeIcon.InterwovenArrows, tint = PhoebeUi.accentLight, modifier = Modifier.size(15.dp))
         Text(
             "Create Smart Playlist",
-            color = PhoebeUi.primaryText,
+            color = PhoebeUi.accentLight,
             fontSize = 12.sp,
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(start = 6.dp),

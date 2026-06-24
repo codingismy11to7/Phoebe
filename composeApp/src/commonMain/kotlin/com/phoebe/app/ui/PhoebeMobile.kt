@@ -308,6 +308,7 @@ internal fun MobileBrowseShell(
     onTogglePlayPause: () -> Unit,
     onPreviousTrack: () -> Unit,
     onNextTrack: () -> Unit,
+    onOpenSignIn: () -> Unit = {},
     onSignOut: () -> Unit,
     onAddLocalFolder: (String?) -> Unit,
     onRefreshLibrary: () -> Unit,
@@ -780,13 +781,23 @@ internal fun MobileBrowseShell(
                             menuExpanded = false
                         },
                     )
-                    DropdownMenuItem(
-                        text = { Text("Sign out") },
-                        onClick = {
-                            onSignOut()
-                            menuExpanded = false
-                        },
-                    )
+                    if (session?.token?.isNotBlank() == true) {
+                        DropdownMenuItem(
+                            text = { Text("Sign out") },
+                            onClick = {
+                                onSignOut()
+                                menuExpanded = false
+                            },
+                        )
+                    } else {
+                        DropdownMenuItem(
+                            text = { Text("Sign in") },
+                            onClick = {
+                                onOpenSignIn()
+                                menuExpanded = false
+                            },
+                        )
+                    }
                 },
             )
         }

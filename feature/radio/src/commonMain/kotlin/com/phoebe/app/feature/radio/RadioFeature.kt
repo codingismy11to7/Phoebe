@@ -1,11 +1,18 @@
 package com.phoebe.app.feature.radio
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -20,8 +27,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -33,12 +43,22 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -58,7 +78,13 @@ import com.phoebe.app.ui.PhoebeIcon
 import com.phoebe.app.ui.PhoebeIconView
 import com.phoebe.app.ui.PhoebeUi
 import com.phoebe.app.ui.SectionLabel
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+
+private const val RadioSearchDebounceMillis = 450L
 
 @Immutable
 data class RadioRouteState(
@@ -77,6 +103,7 @@ class RadioRouteActions(
     val onDeleteManualStation: (RadioStation) -> Unit,
 )
 
+@OptIn(FlowPreview::class)
 @Composable
 fun RadioRoute(
     state: RadioRouteState,
@@ -88,13 +115,21 @@ fun RadioRoute(
     var queryText by remember(state.directory.searchQuery.text) { mutableStateOf(state.directory.searchQuery.text) }
     var editingStation by remember { mutableStateOf<RadioStation?>(null) }
     var showAddDialog by remember { mutableStateOf(false) }
+    var mobileAddButtonVisible by remember { mutableStateOf(true) }
     var countriesExpanded by remember { mutableStateOf(true) }
     var pendingCountryReturn by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val scrollScope = rememberCoroutineScope()
     val indexScrollDispatcher = rememberLibrarySectionIndexSelectionDispatcher()
+    val layoutDirection = LocalLayoutDirection.current
     val searchText = queryText.trim()
     val hasTextSearch = searchText.isNotBlank()
+    var lastSubmittedSearchText by remember { mutableStateOf(state.directory.searchQuery.text.trim()) }
+    val submitSearch: (String) -> Unit = { text ->
+        val normalizedText = text.trim()
+        lastSubmittedSearchText = normalizedText
+        actions.onSearch(RadioStationSearchQuery(text = normalizedText))
+    }
     val recommendedStations = remember(state.directory.recommendedStations, searchText) {
         state.directory.recommendedStations.filter { station ->
             searchText.isBlank() || station.matchesSearch(searchText)
@@ -131,6 +166,17 @@ fun RadioRoute(
         derivedStateOf {
             listState.isScrollInProgress
         }
+    }
+    val showMobileAddButton = sectionIndexMode == LibrarySectionIndexMode.MobileScrollbar && mobileAddButtonVisible
+    val listContentPadding = if (sectionIndexMode == LibrarySectionIndexMode.MobileScrollbar) {
+        PaddingValues(
+            start = contentPadding.calculateStartPadding(layoutDirection),
+            top = contentPadding.calculateTopPadding(),
+            end = contentPadding.calculateEndPadding(layoutDirection),
+            bottom = contentPadding.calculateBottomPadding() + 24.dp,
+        )
+    } else {
+        contentPadding
     }
     val shouldLoadMore by remember(
         listState,
@@ -225,11 +271,47 @@ fun RadioRoute(
         }
     }
 
+    LaunchedEffect(state.directory.searchQuery.text) {
+        lastSubmittedSearchText = state.directory.searchQuery.text.trim()
+    }
+
+    LaunchedEffect(listState, sectionIndexMode) {
+        if (sectionIndexMode != LibrarySectionIndexMode.MobileScrollbar) {
+            mobileAddButtonVisible = true
+            return@LaunchedEffect
+        }
+
+        var previousIndex = listState.firstVisibleItemIndex
+        var previousOffset = listState.firstVisibleItemScrollOffset
+        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
+            .collect { (index, offset) ->
+                val scrollingDown = index > previousIndex || (index == previousIndex && offset > previousOffset)
+                val scrollingUp = index < previousIndex || (index == previousIndex && offset < previousOffset)
+                when {
+                    scrollingDown -> mobileAddButtonVisible = false
+                    scrollingUp -> mobileAddButtonVisible = true
+                }
+                previousIndex = index
+                previousOffset = offset
+            }
+    }
+
+    LaunchedEffect(Unit) {
+        snapshotFlow { queryText.trim() }
+            .distinctUntilChanged()
+            .debounce { text -> if (text.isEmpty()) 0L else RadioSearchDebounceMillis }
+            .collect { text ->
+                if (text != lastSubmittedSearchText) {
+                    submitSearch(text)
+                }
+            }
+    }
+
     Box(modifier.fillMaxSize().background(PhoebeUi.shellTop)) {
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = contentPadding,
+            contentPadding = listContentPadding,
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             if (sectionIndexMode != LibrarySectionIndexMode.MobileScrollbar) {
@@ -243,9 +325,12 @@ fun RadioRoute(
                             Text("Radio", color = PhoebeUi.primaryText, fontSize = 30.sp, fontWeight = FontWeight.Black)
                             Text("Browse internet stations and save your own streams", color = PhoebeUi.secondaryText, fontSize = 13.sp)
                         }
-                        FilledTonalButton(onClick = { showAddDialog = true }) {
-                            PhoebeIconView(PhoebeIcon.Plus, tint = PhoebeUi.primaryText, modifier = Modifier.size(15.dp))
-                            Text("Add", modifier = Modifier.padding(start = 8.dp))
+                        TextButton(
+                            onClick = { showAddDialog = true },
+                            modifier = Modifier.padding(end = 80.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                        ) {
+                            Text("Add")
                         }
                     }
                 }
@@ -256,28 +341,11 @@ fun RadioRoute(
                     RadioTextField(
                         value = queryText,
                         onValueChange = { queryText = it },
+                        onSubmit = { submitSearch(queryText) },
                         placeholder = "Search stations",
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        FilledTonalButton(
-                            onClick = {
-                                actions.onSearch(
-                                    RadioStationSearchQuery(
-                                        text = queryText,
-                                    ),
-                                )
-                            },
-                        ) {
-                            PhoebeIconView(PhoebeIcon.Search, tint = PhoebeUi.primaryText, modifier = Modifier.size(15.dp))
-                            Text("Search", modifier = Modifier.padding(start = 8.dp))
-                        }
-                        if (sectionIndexMode == LibrarySectionIndexMode.MobileScrollbar) {
-                            FilledTonalButton(onClick = { showAddDialog = true }) {
-                                PhoebeIconView(PhoebeIcon.Plus, tint = PhoebeUi.primaryText, modifier = Modifier.size(15.dp))
-                                Text("Add", modifier = Modifier.padding(start = 8.dp))
-                            }
-                        }
-                        if (state.directory.loading) {
+                    if (state.directory.loading) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                             CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = PhoebeUi.accentLight)
                         }
                     }
@@ -412,6 +480,27 @@ fun RadioRoute(
                         bottom = contentPadding.calculateBottomPadding() + 24.dp,
                     ),
             )
+        }
+
+        AnimatedVisibility(
+            visible = showMobileAddButton,
+            enter = fadeIn() + scaleIn(),
+            exit = fadeOut() + scaleOut(),
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(
+                    end = 24.dp,
+                    bottom = contentPadding.calculateBottomPadding() + 24.dp,
+                ),
+        ) {
+            FloatingActionButton(
+                onClick = { showAddDialog = true },
+                containerColor = PhoebeUi.accentLight,
+                contentColor = PhoebeUi.primaryText,
+                modifier = Modifier.semantics { contentDescription = "Add station" },
+            ) {
+                PhoebeIconView(PhoebeIcon.Plus, tint = PhoebeUi.primaryText, modifier = Modifier.size(20.dp))
+            }
         }
     }
 
@@ -593,6 +682,7 @@ private fun RadioTextField(
     onValueChange: (String) -> Unit,
     placeholder: String,
     modifier: Modifier = Modifier.fillMaxWidth(),
+    onSubmit: () -> Unit = {},
 ) {
     BasicTextField(
         value = value,
@@ -600,8 +690,18 @@ private fun RadioTextField(
         singleLine = true,
         textStyle = TextStyle(color = PhoebeUi.primaryText, fontSize = 13.sp),
         cursorBrush = SolidColor(PhoebeUi.accentLight),
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+        keyboardActions = KeyboardActions(onSearch = { onSubmit() }),
         modifier = modifier
             .height(42.dp)
+            .onPreviewKeyEvent { event ->
+                if (event.key == Key.Enter && event.type == KeyEventType.KeyDown) {
+                    onSubmit()
+                    true
+                } else {
+                    false
+                }
+            }
             .clip(RoundedCornerShape(8.dp))
             .background(PhoebeUi.subtleFill)
             .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(8.dp))

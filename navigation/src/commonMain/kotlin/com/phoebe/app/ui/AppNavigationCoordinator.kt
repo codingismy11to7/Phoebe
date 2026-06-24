@@ -52,6 +52,6 @@ class AppNavigationCoordinator {
         session?.selectedServer != null -> AppNavigationRequest.LibraryPicker
         session?.token?.isNotBlank() == true -> AppNavigationRequest.ServerPicker
         hasEnabledLocalFolders -> AppNavigationRequest.Home
-        else -> AppNavigationRequest.Radio
+        else -> AppNavigationRequest.SignIn
     }
 }
