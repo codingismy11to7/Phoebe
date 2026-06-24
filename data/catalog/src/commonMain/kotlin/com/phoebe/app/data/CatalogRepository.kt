@@ -103,6 +103,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.coroutineScope
@@ -114,6 +115,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.joinAll
@@ -264,6 +266,10 @@ class CatalogRepository(
         }
     }
 
+    fun close() {
+        persistenceScope.cancel()
+    }
+
     private suspend fun awaitPendingCatalogDbWrites(excluding: Job? = null) {
         while (true) {
             val pending = pendingCatalogDbWritesMutex.withLock {
@@ -280,6 +286,12 @@ class CatalogRepository(
                 .selectLastPlayedByTrack()
                 .asFlow()
                 .mapToList(Dispatchers.Default)
+                .catch { error ->
+                    if (error is CancellationException) throw error
+                    PhoebeLog.d("CatalogRepository") {
+                        "smart playlist last-played observer stopped: ${error.message}"
+                    }
+                }
                 .collect { rows ->
                     smartPlaylistLastPlayedByTrack.value = buildMap(rows.size) {
                         rows.forEach { row -> row.lastPlayed?.let { put(row.track_id, it) } }
@@ -292,6 +304,12 @@ class CatalogRepository(
                 .selectPlayCountsByTrack()
                 .asFlow()
                 .mapToList(Dispatchers.Default)
+                .catch { error ->
+                    if (error is CancellationException) throw error
+                    PhoebeLog.d("CatalogRepository") {
+                        "smart playlist play-count observer stopped: ${error.message}"
+                    }
+                }
                 .collect { rows ->
                     smartPlaylistPlayCountsByTrack.value = buildMap(rows.size) {
                         rows.forEach { row -> put(row.track_id, (row.playCount ?: 0L).toInt()) }

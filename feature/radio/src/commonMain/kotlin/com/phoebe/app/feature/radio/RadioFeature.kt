@@ -89,6 +89,7 @@ fun RadioRoute(
     var editingStation by remember { mutableStateOf<RadioStation?>(null) }
     var showAddDialog by remember { mutableStateOf(false) }
     var countriesExpanded by remember { mutableStateOf(true) }
+    var pendingCountryReturn by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val scrollScope = rememberCoroutineScope()
     val indexScrollDispatcher = rememberLibrarySectionIndexSelectionDispatcher()
@@ -113,6 +114,9 @@ fun RadioRoute(
         !hasTextSearch &&
         (state.directory.loading || state.directory.countries.isNotEmpty())
     val showRecommended = state.directory.searchQuery.isBlank || hasTextSearch
+    val showingDirectoryResults = !state.directory.searchQuery.isBlank
+    val showResultsLabel = hasTextSearch || state.directory.searchQuery.text.isNotBlank()
+    val showSectionIndex = state.directory.searchQuery.countryCode.isBlank()
     val keepSectionIndexLabelsVisible = false
     val scrollbarState by remember(listState) {
         derivedStateOf {
@@ -206,6 +210,13 @@ fun RadioRoute(
 
     LaunchedEffect(shouldLoadMore, state.directory.searchQuery, activeDirectoryStations.size) {
         if (shouldLoadMore) actions.onLoadMore()
+    }
+
+    LaunchedEffect(showCountries, pendingCountryReturn) {
+        if (showCountries && pendingCountryReturn) {
+            listState.scrollToItem(0)
+            pendingCountryReturn = false
+        }
     }
 
     LaunchedEffect(state.directory.countries.isEmpty()) {
@@ -309,7 +320,27 @@ fun RadioRoute(
 
             if (!state.directory.searchQuery.isBlank || hasTextSearch) {
                 item(contentType = "directory-label") {
-                    SectionLabel("RESULTS", PhoebeUi.accentLight)
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (showingDirectoryResults) {
+                            TextButton(
+                                onClick = {
+                                    pendingCountryReturn = true
+                                    queryText = ""
+                                    actions.onSearch(RadioStationSearchQuery())
+                                },
+                            ) {
+                                PhoebeIconView(PhoebeIcon.Back, tint = PhoebeUi.accentLight, modifier = Modifier.size(14.dp))
+                                Text("Back", modifier = Modifier.padding(start = 6.dp), color = PhoebeUi.accentLight, fontSize = 12.sp)
+                            }
+                        }
+                        if (showResultsLabel) {
+                            SectionLabel("RESULTS", PhoebeUi.accentLight)
+                        }
+                    }
                 }
             }
             state.directory.errorMessage?.takeUnless { state.directory.searchQuery.isBlank }?.let { message ->
@@ -360,7 +391,7 @@ fun RadioRoute(
             }
         }
 
-        if (sectionAnchors.size > 1) {
+        if (showSectionIndex && sectionAnchors.size > 1) {
             LibrarySectionIndex(
                 entries = sectionAnchors.map { (label, index) ->
                     LibraryScrollIndexEntry(label = label, itemIndex = index)

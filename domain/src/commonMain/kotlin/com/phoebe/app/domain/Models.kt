@@ -1838,14 +1838,13 @@ fun Track.playlistEntryKey(): String =
 fun Track.playHistoryIdentityKey(): String {
     val normalizedTitle = title.normalizedTrackIdentityField()
     val normalizedArtist = artist.normalizedTrackIdentityField()
-    val normalizedAlbum = album.normalizedTrackIdentityField()
-    if (normalizedTitle.isBlank() && normalizedArtist.isBlank() && normalizedAlbum.isBlank()) {
+    if (normalizedTitle.isBlank() && normalizedArtist.isBlank()) {
         return providerEquivalentTrackIdForIdentity()
     }
     val durationKey = durationMs.coerceAtLeast(0L).let { ms ->
         if (ms <= 0L) "0" else ((ms + 2_500L) / 5_000L * 5_000L).toString()
     }
-    return "$normalizedTitle|$normalizedArtist|$normalizedAlbum|$durationKey"
+    return "$normalizedTitle|$normalizedArtist|$durationKey"
 }
 
 private val WhitespaceRegex = Regex("""\s+""")

@@ -3,6 +3,9 @@ package com.phoebe.app.ui
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -12,6 +15,7 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -104,6 +108,76 @@ class RadioRouteDesktopTest {
                 "Collapsed country rows should be removed from the lazy list, not left as invisible spaced items.",
             )
             onNodeWithText("BBC Radio 6 Music").assertIsDisplayed()
+        }
+
+    @OptIn(ExperimentalTestApi::class, ExperimentalComposeUiApi::class)
+    @Test
+    fun desktopRadioCountryResultsExposeBackButton() =
+        runDesktopComposeUiTest(width = 900, height = 620) {
+            val countries = listOf(
+                RadioCountry(name = "The United States Of America", code = "US", stationCount = 7349),
+                RadioCountry(name = "Germany", code = "DE", stationCount = 5951),
+            )
+            val countryStation = RadioStation(
+                id = "radio-browser:us-1",
+                name = "KEXP",
+                streamUrl = "https://radio.example/kexp.mp3",
+                countryCode = "US",
+                source = RadioStationSource.RadioBrowser,
+            )
+            var directory by mutableStateOf(
+                RadioDirectoryState(
+                    countries = countries,
+                ),
+            )
+
+            setContent {
+                PhoebeTheme {
+                    Box(Modifier.size(900.dp, 620.dp)) {
+                        RadioRoute(
+                            state = RadioRouteState(directory = directory),
+                            actions = RadioRouteActions(
+                                onSearch = { query ->
+                                    directory = if (query.isBlank) {
+                                        RadioDirectoryState(countries = countries)
+                                    } else {
+                                        RadioDirectoryState(
+                                            countries = countries,
+                                            directoryStations = listOf(countryStation),
+                                            searchQuery = query.normalized(),
+                                        )
+                                    }
+                                },
+                                onLoadMore = {},
+                                onRefreshPopular = {},
+                                onPlay = {},
+                                onAddManualStation = { _, _ -> },
+                                onUpdateManualStation = { _, _, _ -> },
+                                onDeleteManualStation = {},
+                            ),
+                            contentPadding = PaddingValues(20.dp),
+                        )
+                    }
+                }
+            }
+
+            onNode(hasText("The United States Of America") and hasClickAction()).performClick()
+            onNodeWithText("KEXP").assertIsDisplayed()
+            assertFalse(
+                onAllNodesWithText("RESULTS").fetchSemanticsNodes().isNotEmpty(),
+                "Country results should show the Back button without a RESULTS section label.",
+            )
+            assertFalse(
+                onAllNodesWithContentDescription("Library section index").fetchSemanticsNodes().isNotEmpty(),
+                "Country results should not show desktop scrollbar section tracking.",
+            )
+            onNode(hasText("Back") and hasClickAction()).assertIsDisplayed().performClick()
+            waitForIdle()
+            waitUntil {
+                onAllNodesWithText("The United States Of America").fetchSemanticsNodes().isNotEmpty()
+            }
+
+            onNodeWithText("The United States Of America").assertIsDisplayed()
         }
 
     @OptIn(ExperimentalTestApi::class, ExperimentalComposeUiApi::class)

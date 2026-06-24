@@ -581,12 +581,24 @@ class AppState(
 
     private fun Track.matchesTrackId(trackId: String): Boolean {
         if (id == trackId) return true
+        val idPrefix = providerPrefixForTrackId(id)
+        if (idPrefix != null && id.removePrefix(idPrefix) == trackId) return true
+        val trackIdPrefix = providerPrefixForTrackId(trackId)
+        return trackIdPrefix != null && trackId.removePrefix(trackIdPrefix) == id
+    }
+
+    private fun providerPrefixForTrackId(trackId: String): String? {
         for (provider in MediaProviderType.entries) {
             val prefix = "${provider.catalogPrefix}:"
-            if (id.startsWith(prefix) && id.removePrefix(prefix) == trackId) return true
-            if (trackId.startsWith(prefix) && trackId.removePrefix(prefix) == id) return true
+            if (trackId.startsWith(prefix)) return prefix
         }
-        return false
+        return null
+    }
+
+    private fun MutableMap<String, Track>.putFirst(key: String, track: Track) {
+        if (key !in this) {
+            this[key] = track
+        }
     }
 
     /**
@@ -1371,9 +1383,21 @@ class AppState(
     }
 
     suspend fun resolveTracksByIds(trackIds: Collection<String>): Map<String, Track> {
-        val (radioIds, catalogIds) = trackIds.partition { it.startsWith("radio:") }
+        val requestedIds = trackIds.filter { it.isNotBlank() }.distinct()
+        if (requestedIds.isEmpty()) return emptyMap()
+        val playbackTracks = resolveActivePlaybackTracksByIds(requestedIds)
+        val unresolvedIds = requestedIds.filter { it !in playbackTracks }
+        val (radioIds, catalogIds) = unresolvedIds.partition { it.startsWith("radio:") }
         val catalogTracks = if (catalogIds.isNotEmpty()) {
-            dependencies.catalogRepository.resolveTracksByIds(catalogIds)
+            runCatching {
+                withTimeout(PlayHistoryCatalogResolveTimeoutMs) {
+                    dependencies.catalogRepository.resolveTracksByIds(catalogIds)
+                }
+            }.getOrElse { error ->
+                if (error is CancellationException && error !is TimeoutCancellationException) throw error
+                PhoebeLog.d("AppState") { "catalog play-history lookup timed out for ${catalogIds.size} tracks" }
+                emptyMap()
+            }
         } else {
             emptyMap()
         }
@@ -1391,7 +1415,44 @@ class AppState(
                 null
             }
         }.toMap()
-        return catalogTracks + radioTracks
+        return catalogTracks + playbackTracks + radioTracks
+    }
+
+    private fun resolveActivePlaybackTracksByIds(trackIds: Collection<String>): Map<String, Track> {
+        val playbackState = dependencies.audioPlayer.state.value
+        val candidates = buildList {
+            playbackState.currentTrack?.let(::add)
+            addAll(playbackState.queue)
+            mutableMusicAssistantRemotePlayback.value?.tracks?.let(::addAll)
+        }
+        if (candidates.isEmpty()) return emptyMap()
+
+        val prefixedCandidates = mutableMapOf<String, Track>()
+        val unprefixedCandidates = mutableMapOf<String, Track>()
+        val prefixedByUnprefixedId = mutableMapOf<String, Track>()
+        candidates.forEach { track ->
+            val prefix = providerPrefixForTrackId(track.id)
+            if (prefix == null) {
+                unprefixedCandidates.putFirst(track.id, track)
+            } else {
+                prefixedCandidates.putFirst(track.id, track)
+                prefixedByUnprefixedId.putFirst(track.id.removePrefix(prefix), track)
+            }
+        }
+
+        return buildMap {
+            trackIds.forEach { requestedId ->
+                val prefix = providerPrefixForTrackId(requestedId)
+                val track = if (prefix == null) {
+                    unprefixedCandidates[requestedId] ?: prefixedByUnprefixedId[requestedId]
+                } else {
+                    prefixedCandidates[requestedId] ?: unprefixedCandidates[requestedId.removePrefix(prefix)]
+                }
+                if (track != null) {
+                    put(requestedId, track)
+                }
+            }
+        }
     }
 
     fun toggleFavoriteRadioStation(track: Track) = scope.launch {
@@ -2754,6 +2815,8 @@ private data class PlaybackHistoryRecord(
 )
 
 private const val PlaybackHistoryDedupeWindowMs = 30_000L
+
+private const val PlayHistoryCatalogResolveTimeoutMs = 1_500L
 
 private const val ProviderPlayHistoryDebounceMs = 8_000L
 
