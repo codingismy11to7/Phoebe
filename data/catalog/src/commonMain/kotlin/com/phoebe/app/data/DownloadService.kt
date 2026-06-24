@@ -7,6 +7,7 @@ import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.Track
 import com.phoebe.app.platform.DownloadNotifier
 import com.phoebe.app.platform.PlatformStorage
+import com.phoebe.app.platform.currentNetworkMeteringStatus
 import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
@@ -30,11 +31,13 @@ class DownloadService(
     private val platformStorage: PlatformStorage,
 ) {
     suspend fun download(track: Track): DownloadServiceResult {
+        downloadPolicyBlockResult()?.let { return it }
         val result = catalogRepository.download(track)
         return DownloadServiceResult(result, downloadMessage(result, singular = "song", plural = "songs"))
     }
 
     suspend fun download(session: PlexSession?, album: Album): DownloadServiceResult {
+        downloadPolicyBlockResult()?.let { return it }
         val result = catalogRepository.downloadAlbum(session, album)
         return DownloadServiceResult(
             result,
@@ -43,6 +46,7 @@ class DownloadService(
     }
 
     suspend fun download(session: PlexSession?, artist: Artist): DownloadServiceResult {
+        downloadPolicyBlockResult()?.let { return it }
         val result = catalogRepository.downloadArtist(session, artist)
         return DownloadServiceResult(
             result,
@@ -51,6 +55,7 @@ class DownloadService(
     }
 
     suspend fun download(session: PlexSession?, playlist: Playlist): DownloadServiceResult {
+        downloadPolicyBlockResult()?.let { return it }
         catalogRepository.previewQueuedDownloadsForPlaylist(playlist)
         val result = catalogRepository.downloadPlaylist(session, playlist)
         return DownloadServiceResult(
@@ -89,6 +94,42 @@ class DownloadService(
         }
     }
 
+    suspend fun retryFailedDownloads(trackIds: Set<String> = emptySet()): DownloadServiceResult {
+        downloadPolicyBlockResult()?.let { return it }
+        val result = catalogRepository.retryFailedDownloads(trackIds)
+        return DownloadServiceResult(result, downloadMessage(result, singular = "song", plural = "songs"))
+    }
+
+    suspend fun cancelDownloadsWithoutDeleting(trackIds: Set<String>): String {
+        val cancelled = catalogRepository.cancelDownloadsWithoutDeleting(trackIds)
+        return if (cancelled == 0) {
+            "No active downloads to cancel."
+        } else {
+            "Cancelled $cancelled ${if (cancelled == 1) "download" else "downloads"}."
+        }
+    }
+
+    suspend fun deleteCompletedDownloads(): String {
+        val deleted = catalogRepository.deleteCompletedDownloads()
+        return if (deleted == 0) {
+            "No completed downloads to delete."
+        } else {
+            "Deleted $deleted completed ${if (deleted == 1) "download" else "downloads"}."
+        }
+    }
+
+    suspend fun clearFailedDownloads(): String {
+        val cleared = catalogRepository.clearFailedDownloads()
+        return if (cleared == 0) {
+            "No failed downloads to clear."
+        } else {
+            "Cleared $cleared failed ${if (cleared == 1) "download" else "downloads"}."
+        }
+    }
+
+    fun managerSummary(): DownloadManagerSummary =
+        catalogRepository.downloadManagerSummary()
+
     suspend fun tracksForPlaylist(session: PlexSession?, playlist: Playlist): List<Track> =
         catalogRepository.tracksForPlaylist(session, playlist)
 
@@ -98,6 +139,15 @@ class DownloadService(
             "No downloaded songs to delete."
         } else {
             "Deleted $deleted downloaded ${if (deleted == 1) "song" else "songs"}."
+        }
+    }
+
+    suspend fun deleteDownloadsForTrackIds(trackIds: Set<String>): String {
+        val deleted = catalogRepository.deleteDownloadsForTrackIds(trackIds)
+        return if (deleted == 0) {
+            "No downloads to delete."
+        } else {
+            "Deleted $deleted ${if (deleted == 1) "download" else "downloads"}."
         }
     }
 
@@ -146,5 +196,18 @@ class DownloadService(
     private fun String.compactDownloadMessageDetail(maxLength: Int): String {
         val compact = replace(Regex("\\s+"), " ").trim()
         return if (compact.length <= maxLength) compact else compact.take(maxLength - 1).trimEnd() + "…"
+    }
+
+    private fun downloadPolicyBlockResult(): DownloadServiceResult? {
+        val policy = appSettingsRepository.settings.value.downloadPolicy.normalized()
+        if (!policy.wifiOnly) return null
+        val network = currentNetworkMeteringStatus()
+        if (!network.isMetered && !network.isCellular) return null
+        val message = if (network.isCellular) {
+            "Downloads are paused on cellular because Wi-Fi only is on."
+        } else {
+            "Downloads are paused on a metered network because Wi-Fi only is on."
+        }
+        return DownloadServiceResult(DownloadBatchResult(), message)
     }
 }

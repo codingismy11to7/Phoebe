@@ -351,13 +351,17 @@ fun ProgressLine(
                 val down = awaitFirstDown()
                 down.consume()
                 var scrubMs = offsetToMs(down.position.x)
+                val committedMs = scrubMs
                 scrubPositionMs = scrubMs
+                onSeek(scrubMs)
                 val pointerId = down.id
                 while (true) {
                     val event = awaitPointerEvent()
                     val change = event.changes.firstOrNull { it.id == pointerId } ?: break
                     if (!change.pressed) {
-                        onSeek(scrubMs)
+                        if (scrubMs != committedMs) {
+                            onSeek(scrubMs)
+                        }
                         scrubPositionMs = null
                         break
                     }

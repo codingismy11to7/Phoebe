@@ -29,12 +29,83 @@ class PlaylistExporterTest {
         val tracks = listOf(sampleTrack("alpha"))
         val exported = PlaylistExporter.export(tracks, PlaylistExportFormat.Csv)
         assertEquals(
-            """
-            title,artist,album,duration_ms,path
-            "alpha","Local Artist","Local Album",180000,"file:///music/alpha.mp3"
-            """.trimIndent(),
+            lines(
+                "title,artist,album,duration_ms,path",
+                "\"alpha\",\"Local Artist\",\"Local Album\",180000,\"file:///music/alpha.mp3\"",
+            ),
             exported,
         )
+    }
+
+    @Test
+    fun jsonIncludesVersionAndTracks() {
+        val exported = PlaylistExporter.export(listOf(sampleTrack("alpha")), PlaylistExportFormat.Json)
+
+        assertTrue(exported.contains("\"version\""))
+        assertTrue(exported.contains("1"))
+        assertTrue(exported.contains("\"title\""))
+        assertTrue(exported.contains("\"alpha\""))
+    }
+
+    @Test
+    fun jsonEscapesControlCharacters() {
+        val track = sampleTrack("line\tone").copy(artist = "Artist\bName", album = "Album\u000CName")
+        val exported = PlaylistExporter.export(listOf(track), PlaylistExportFormat.Json)
+
+        assertTrue(exported.contains("line\\tone"))
+        assertTrue(exported.contains("Artist\\bName"))
+        assertTrue(exported.contains("Album\\fName"))
+    }
+
+    @Test
+    fun importerMatchesM3uByPathAndCountsDuplicates() {
+        val tracks = listOf(sampleTrack("alpha"), sampleTrack("beta"))
+        val preview = PlaylistImporter.preview(
+            lines(
+                "#EXTM3U",
+                "#EXTINF:180,Local Artist - alpha",
+                "file:///music/alpha.mp3",
+                "#EXTINF:180,Local Artist - alpha",
+                "file:///music/alpha.mp3",
+                "#EXTINF:180,Missing - nope",
+                "file:///music/nope.mp3",
+            ),
+            tracks,
+        )
+
+        assertEquals(listOf("local:test:alpha"), preview.matchedTracks.map { it.id })
+        assertEquals(1, preview.matchedCount)
+        assertEquals(1, preview.duplicateCount)
+        assertEquals(1, preview.skippedCount)
+    }
+
+    @Test
+    fun importerTrimsM3uDurationWhitespace() {
+        val tracks = listOf(sampleTrack("alpha"))
+        val preview = PlaylistImporter.preview(
+            lines(
+                "#EXTM3U",
+                "#EXTINF: 180,Local Artist - alpha",
+                "file:///music/alpha.mp3",
+            ),
+            tracks,
+        )
+
+        assertEquals(listOf("local:test:alpha"), preview.matchedTracks.map { it.id })
+    }
+
+    @Test
+    fun importerMatchesCsvByTitleArtistDurationTolerance() {
+        val tracks = listOf(sampleTrack("alpha"))
+        val preview = PlaylistImporter.preview(
+            lines(
+                "title,artist,album,duration_ms,path",
+                "alpha,Local Artist,Local Album,181000,",
+            ),
+            tracks,
+        )
+
+        assertEquals(listOf("local:test:alpha"), preview.matchedTracks.map { it.id })
     }
 
     private fun sampleTrack(title: String) = Track(
@@ -47,4 +118,6 @@ class PlaylistExporterTest {
         downloadUrl = "",
         localUri = "file:///music/$title.mp3",
     )
+
+    private fun lines(vararg value: String): String = value.joinToString("\n")
 }

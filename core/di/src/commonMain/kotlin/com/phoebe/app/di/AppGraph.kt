@@ -10,8 +10,13 @@ import com.phoebe.app.data.CatalogItemMutationService
 import com.phoebe.app.data.CatalogRepository
 import com.phoebe.app.data.CatalogSyncService
 import com.phoebe.app.data.DownloadService
+import com.phoebe.app.data.ImportExportService
 import com.phoebe.app.data.LibraryPreferencesService
 import com.phoebe.app.data.LibraryUiRepository
+import com.phoebe.app.data.LastFmAccountRepository
+import com.phoebe.app.data.LastFmClient
+import com.phoebe.app.data.LastFmPlaybackReporter
+import com.phoebe.app.data.LastFmService
 import com.phoebe.app.data.ListenBrainzClient
 import com.phoebe.app.data.ListenBrainzAccountRepository
 import com.phoebe.app.data.ListenBrainzPlaybackReporter
@@ -33,6 +38,7 @@ import com.phoebe.app.data.SearchHistoryRepository
 import com.phoebe.app.data.SettingsService
 import com.phoebe.app.data.SessionRepository
 import com.phoebe.app.data.SubsonicClient
+import com.phoebe.app.data.UserArtifactsRepository
 import com.phoebe.app.data.db.DatabaseWriteGate
 import com.phoebe.app.db.PhoebeDatabase
 import com.phoebe.app.platform.DownloadNotifier
@@ -100,6 +106,8 @@ data class AppGraphServices(
     val radioRepository: RadioRepository,
     val appSettingsRepository: AppSettingsRepository,
     val searchHistoryRepository: SearchHistoryRepository,
+    val userArtifactsRepository: UserArtifactsRepository,
+    val importExportService: ImportExportService,
     val settingsService: SettingsService,
     val providerRegistry: MusicProviderRegistry,
     val plexPlayHistorySyncer: PlexPlayHistorySyncer,
@@ -109,6 +117,9 @@ data class AppGraphServices(
     val listenBrainzAccountRepository: ListenBrainzAccountRepository,
     val listenBrainzPlaybackReporter: ListenBrainzPlaybackReporter,
     val listenBrainzService: ListenBrainzService,
+    val lastFmAccountRepository: LastFmAccountRepository,
+    val lastFmPlaybackReporter: LastFmPlaybackReporter,
+    val lastFmService: LastFmService,
     val secureCredentialStore: SecureCredentialStore,
     val audioPlayer: AudioPlayer,
     val castController: CastController,
@@ -152,6 +163,8 @@ interface AppGraphContributions {
     val radioRepository: RadioRepository
     val appSettingsRepository: AppSettingsRepository
     val searchHistoryRepository: SearchHistoryRepository
+    val userArtifactsRepository: UserArtifactsRepository
+    val importExportService: ImportExportService
     val settingsService: SettingsService
     val plexPlayHistorySyncer: PlexPlayHistorySyncer
     val jellyfinPlayHistorySyncer: JellyfinPlayHistorySyncer
@@ -160,6 +173,9 @@ interface AppGraphContributions {
     val listenBrainzAccountRepository: ListenBrainzAccountRepository
     val listenBrainzPlaybackReporter: ListenBrainzPlaybackReporter
     val listenBrainzService: ListenBrainzService
+    val lastFmAccountRepository: LastFmAccountRepository
+    val lastFmPlaybackReporter: LastFmPlaybackReporter
+    val lastFmService: LastFmService
     val audioPlayer: AudioPlayer
     val castController: CastController
     val playbackTransportService: PlaybackTransportService
@@ -203,6 +219,8 @@ interface AppGraphProviders {
         radioRepository: RadioRepository,
         appSettingsRepository: AppSettingsRepository,
         searchHistoryRepository: SearchHistoryRepository,
+        userArtifactsRepository: UserArtifactsRepository,
+        importExportService: ImportExportService,
         settingsService: SettingsService,
         providerRegistry: MusicProviderRegistry,
         plexPlayHistorySyncer: PlexPlayHistorySyncer,
@@ -212,6 +230,9 @@ interface AppGraphProviders {
         listenBrainzAccountRepository: ListenBrainzAccountRepository,
         listenBrainzPlaybackReporter: ListenBrainzPlaybackReporter,
         listenBrainzService: ListenBrainzService,
+        lastFmAccountRepository: LastFmAccountRepository,
+        lastFmPlaybackReporter: LastFmPlaybackReporter,
+        lastFmService: LastFmService,
         secureCredentialStore: SecureCredentialStore,
         audioPlayer: AudioPlayer,
         castController: CastController,
@@ -240,6 +261,8 @@ interface AppGraphProviders {
             radioRepository = radioRepository,
             appSettingsRepository = appSettingsRepository,
             searchHistoryRepository = searchHistoryRepository,
+            userArtifactsRepository = userArtifactsRepository,
+            importExportService = importExportService,
             settingsService = settingsService,
             providerRegistry = providerRegistry,
             plexPlayHistorySyncer = plexPlayHistorySyncer,
@@ -249,6 +272,9 @@ interface AppGraphProviders {
             listenBrainzAccountRepository = listenBrainzAccountRepository,
             listenBrainzPlaybackReporter = listenBrainzPlaybackReporter,
             listenBrainzService = listenBrainzService,
+            lastFmAccountRepository = lastFmAccountRepository,
+            lastFmPlaybackReporter = lastFmPlaybackReporter,
+            lastFmService = lastFmService,
             secureCredentialStore = secureCredentialStore,
             audioPlayer = audioPlayer,
             castController = castController,
@@ -350,6 +376,21 @@ interface AppGraphProviders {
         ListenBrainzPlaybackReporter(
             client = client,
             credentialStore = credentialStore,
+            accountRepository = accountRepository,
+            audioPlayer = audioPlayer,
+            appSettings = appSettingsRepository.settings,
+        )
+
+    @Provides
+    @SingleIn(AppScope::class)
+    fun provideLastFmPlaybackReporter(
+        client: LastFmClient,
+        accountRepository: LastFmAccountRepository,
+        audioPlayer: AudioPlayer,
+        appSettingsRepository: AppSettingsRepository,
+    ): LastFmPlaybackReporter =
+        LastFmPlaybackReporter(
+            client = client,
             accountRepository = accountRepository,
             audioPlayer = audioPlayer,
             appSettings = appSettingsRepository.settings,

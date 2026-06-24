@@ -158,8 +158,19 @@ class DesktopPlaybackStartupPolicyTest {
     }
 
     @Test
-    fun remoteNonJavaFxStreamsCanUseSampledStreamingWhenJavaSoundCanDecodeTheCodec() {
+    fun remoteNonJavaFxFormatsBufferSoTimelineSeekCanRepositionPlayback() {
         assertEquals("flac", DesktopPlaybackStartupPolicy.streamingSampledExtensionFromSuffix("flac"))
+        assertFalse(
+            DesktopSandboxPlayback.shouldStreamRemoteSampledPlayback(
+                "https://music.example.test/library/track.flac?token=abc",
+            ),
+        )
+        assertTrue(
+            DesktopSandboxPlayback.shouldEagerlyBufferRemotePlayback(
+                uri = "https://music.example.test/library/track.flac?token=abc",
+                preferredSampledExtension = null,
+            ),
+        )
     }
 
     @Test

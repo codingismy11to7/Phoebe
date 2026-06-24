@@ -87,6 +87,8 @@ private class AndroidSecureCredentialStore : SecureCredentialStore {
 private val SecureCredentialKey.fileName: String
     get() = when (this) {
         SecureCredentialKey.ListenBrainzUserToken -> "listenbrainz-user-token"
+        SecureCredentialKey.LastFmSharedSecret -> "lastfm-shared-secret"
+        SecureCredentialKey.LastFmSessionKey -> "lastfm-session-key"
     }
 
 private const val AndroidKeyStore = "AndroidKeyStore"

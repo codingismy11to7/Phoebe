@@ -3,6 +3,9 @@ package com.phoebe.app
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.AudioAnalysisFrame
 import com.phoebe.app.domain.AppSettings
+import com.phoebe.app.domain.AudioProcessingCapabilities
+import com.phoebe.app.domain.AudioProcessingSettings
+import com.phoebe.app.domain.DownloadPolicySettings
 import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.CollectionFacet
@@ -34,6 +37,9 @@ import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.RadioDirectoryState
 import com.phoebe.app.domain.RadioStation
 import com.phoebe.app.domain.RadioStationSearchQuery
+import com.phoebe.app.domain.SavedSearch
+import com.phoebe.app.domain.SmartPlaylist
+import com.phoebe.app.domain.SmartPlaylistTemplate
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.TrackMetadataUpdate
 import com.phoebe.app.domain.canTogglePlexLike
@@ -50,7 +56,9 @@ import com.phoebe.app.domain.displayName
 import com.phoebe.app.domain.supportsRemotePlaylists
 import com.phoebe.app.domain.isJellyfin
 import com.phoebe.app.domain.providerLabel
+import com.phoebe.app.domain.parseAdvancedSearchQuery
 import com.phoebe.app.data.DownloadServiceResult
+import com.phoebe.app.data.BackupRestoreMode
 import com.phoebe.app.data.JellyfinQuickConnectResult
 import com.phoebe.app.data.JellyfinPlayHistorySyncResult
 import com.phoebe.app.data.ListenBrainzFeedbackScore
@@ -67,7 +75,9 @@ import com.phoebe.app.domain.RecentSearchItem
 import com.phoebe.app.platform.MemoryPressureLevel
 import com.phoebe.app.platform.PhoebeAppLifecycle
 import com.phoebe.app.platform.PhoebeLog
+import com.phoebe.app.platform.currentNetworkMeteringStatus
 import com.phoebe.app.platform.currentTimeMs
+import com.phoebe.app.platform.defaultDownloadWifiOnly
 import com.phoebe.app.platform.isDesktopPlatform
 import com.phoebe.app.platform.discoverJellyfinServers as discoverJellyfinServersOnNetwork
 import com.phoebe.app.platform.openExternalUrl
@@ -110,6 +120,8 @@ class AppState(
     val catalog = dependencies.catalogRepository.catalog
     val downloads = dependencies.catalogRepository.downloads
     val downloadEvents = dependencies.catalogRepository.downloadEvents
+    val smartPlaylists = dependencies.userArtifactsRepository.smartPlaylists
+    val savedSearches = dependencies.userArtifactsRepository.savedSearches
     val catalogRefreshing: StateFlow<Boolean> = dependencies.catalogRepository.catalogRefreshing
     val catalogSyncState = dependencies.catalogRepository.catalogSyncState
     val tracksLoading = dependencies.catalogRepository.tracksLoading
@@ -270,6 +282,8 @@ class AppState(
 
     private val mutableActiveDownloadJobCount = MutableStateFlow(0)
     val activeDownloadJobCount: StateFlow<Int> = mutableActiveDownloadJobCount
+    val audioProcessingCapabilities: AudioProcessingCapabilities
+        get() = dependencies.audioPlayer.audioProcessingCapabilities
 
     private var collectionMixGeneration = 0
     private var recentAlbumWarmSignature: String? = null
@@ -287,6 +301,7 @@ class AppState(
     private var artistDetailPreloadJob: Job? = null
     private val activeDownloadJobs = mutableSetOf<Job>()
     private var lastPlaybackHistoryRecord = PlaybackHistoryRecord()
+    private var pendingLastFmAuth: PendingLastFmAuth? = null
     private var disposed = false
 
     fun dispose() {
@@ -323,6 +338,17 @@ class AppState(
         mutableActiveDownloadJobCount.value = activeDownloadJobs.size
     }
 
+    private suspend fun applyPlatformDownloadPolicyDefault() {
+        val policy = appSettings.value.downloadPolicy.normalized()
+        if (policy.wifiOnlyConfigured) return
+        dependencies.appSettingsRepository.setDownloadPolicySettings(
+            policy.copy(
+                wifiOnly = defaultDownloadWifiOnly(),
+                wifiOnlyConfigured = true,
+            ),
+        )
+    }
+
     init {
         scope.launch {
             PhoebeLog.d("AppState") { "startup restore begin" }
@@ -331,7 +357,9 @@ class AppState(
             dependencies.sessionRepository.restore(refreshConnections = false)
             dependencies.mediaSourcesRepository.restore()
             dependencies.appSettingsRepository.restore()
+            applyPlatformDownloadPolicyDefault()
             dependencies.listenBrainzAccountRepository.restore()
+            dependencies.lastFmAccountRepository.restore()
             val restoredSettings = appSettings.value
             mutablePersistEqualizerSettings.value = restoredSettings.persistEqualizerSettings
             val startupEqualizer = if (restoredSettings.persistEqualizerSettings) {
@@ -402,6 +430,7 @@ class AppState(
         dependencies.plexPlaybackReporter.start(scope)
         syncPlayHistoryAfterProviderReports()
         dependencies.listenBrainzPlaybackReporter.start(scope)
+        dependencies.lastFmPlaybackReporter.start(scope)
     }
 
     private fun checkForUpdatesInBackground() {
@@ -417,6 +446,7 @@ class AppState(
             appSettings.collect { settings ->
                 mutablePersistEqualizerSettings.value = settings.persistEqualizerSettings
                 dependencies.audioPlayer.setCrossfadeDurationMs(settings.crossfadeSeconds * 1_000L)
+                dependencies.audioPlayer.setAudioProcessing(settings.audioProcessing)
                 if (settings.persistEqualizerSettings) {
                     val profile = settings.equalizerProfile.normalized()
                     if (mutableEqualizerProfile.value != profile) {
@@ -1561,6 +1591,92 @@ class AppState(
         }
     }
 
+    fun createSmartPlaylist(template: SmartPlaylistTemplate, title: String = template.title) = scope.launch {
+        val now = currentTimeMs()
+        val normalizedTitle = title.trim().ifBlank { template.title }
+        val playlist = template
+            .instantiate(nowMs = now, suffix = uniqueSmartPlaylistSuffix(normalizedTitle, now))
+            .copy(title = normalizedTitle)
+        dependencies.userArtifactsRepository.upsertSmartPlaylist(playlist)
+        dependencies.catalogRepository.refreshSmartPlaylists()
+        mutableMessage.value = "Created smart playlist ${playlist.title}."
+        requestNavigation(AppNavigationRequest.PlaylistDetail(playlist.id))
+    }
+
+    fun updateSmartPlaylist(playlist: SmartPlaylist) = scope.launch {
+        val updated = playlist.copy(updatedAtMs = currentTimeMs())
+        dependencies.userArtifactsRepository.upsertSmartPlaylist(updated)
+        dependencies.catalogRepository.refreshSmartPlaylists()
+        mutableMessage.value = "Updated smart playlist ${updated.title}."
+    }
+
+    fun renameSmartPlaylist(playlist: SmartPlaylist, title: String) = scope.launch {
+        val normalizedTitle = title.trim().ifBlank { playlist.title }
+        val updated = dependencies.userArtifactsRepository.updateSmartPlaylist(playlist.id, currentTimeMs()) {
+            it.copy(title = normalizedTitle)
+        }
+        dependencies.catalogRepository.refreshSmartPlaylists()
+        mutableMessage.value = if (updated != null) {
+            "Renamed smart playlist."
+        } else {
+            "Couldn't find that smart playlist."
+        }
+    }
+
+    fun duplicateSmartPlaylist(playlist: SmartPlaylist) = scope.launch {
+        val now = currentTimeMs()
+        val duplicate = dependencies.userArtifactsRepository.duplicateSmartPlaylist(
+            id = playlist.id,
+            nowMs = now,
+            suffix = uniqueSmartPlaylistSuffix("${playlist.title} Copy", now),
+        )
+        dependencies.catalogRepository.refreshSmartPlaylists()
+        if (duplicate != null) {
+            mutableMessage.value = "Duplicated ${playlist.title}."
+            requestNavigation(AppNavigationRequest.PlaylistDetail(duplicate.id))
+        } else {
+            mutableMessage.value = "Couldn't duplicate that smart playlist."
+        }
+    }
+
+    fun setSmartPlaylistEnabled(playlist: SmartPlaylist, enabled: Boolean) = scope.launch {
+        dependencies.userArtifactsRepository.updateSmartPlaylist(playlist.id, currentTimeMs()) {
+            it.copy(enabled = enabled)
+        }
+        dependencies.catalogRepository.refreshSmartPlaylists()
+        mutableMessage.value = if (enabled) "Enabled ${playlist.title}." else "Disabled ${playlist.title}."
+    }
+
+    fun deleteSmartPlaylist(playlist: SmartPlaylist) = scope.launch {
+        dependencies.userArtifactsRepository.deleteSmartPlaylist(playlist.id)
+        dependencies.catalogRepository.refreshSmartPlaylists()
+        mutableMessage.value = "Deleted smart playlist ${playlist.title}."
+        requestNavigation(AppNavigationRequest.Home)
+    }
+
+    fun saveSearch(queryText: String, title: String = queryText) = scope.launch {
+        val normalizedQuery = queryText.trim()
+        if (normalizedQuery.isBlank()) {
+            mutableMessage.value = "Type a search before saving it."
+            return@launch
+        }
+        val now = currentTimeMs()
+        val savedSearch = SavedSearch(
+            id = "saved:search:${uniqueSearchSuffix(normalizedQuery, now)}",
+            title = title.trim().ifBlank { normalizedQuery },
+            query = parseAdvancedSearchQuery(normalizedQuery),
+            createdAtMs = now,
+            updatedAtMs = now,
+        )
+        dependencies.userArtifactsRepository.upsertSavedSearch(savedSearch)
+        mutableMessage.value = "Saved search ${savedSearch.title}."
+    }
+
+    fun deleteSavedSearch(search: SavedSearch) = scope.launch {
+        dependencies.userArtifactsRepository.deleteSavedSearch(search.id)
+        mutableMessage.value = "Deleted saved search ${search.title}."
+    }
+
     fun clearDecadeMixNotice() {
         mutableDecadeMixNotice.value = null
     }
@@ -1917,6 +2033,14 @@ class AppState(
         dependencies.settingsService.setBlurredArtworkAppearance(enabled)
     }
 
+    fun setAudioProcessingSettings(settings: AudioProcessingSettings) = scope.launch {
+        dependencies.appSettingsRepository.setAudioProcessingSettings(settings)
+    }
+
+    fun setDownloadPolicySettings(settings: DownloadPolicySettings) = scope.launch {
+        dependencies.appSettingsRepository.setDownloadPolicySettings(settings)
+    }
+
     fun installAvailableUpdate() = scope.launch {
         dependencies.appUpdateService.installAvailableUpdate { message ->
             mutableMessage.value = message
@@ -1967,6 +2091,68 @@ class AppState(
 
     fun submitListenBrainzFeedback(score: ListenBrainzFeedbackScore) = scope.launch {
         mutableMessage.value = dependencies.listenBrainzService.submitCurrentTrackFeedback(score)
+    }
+
+    fun startLastFmAuthorization(apiKey: String, sharedSecret: String) = scope.launch {
+        mutableMessage.value = "Opening Last.fm authorization..."
+        runCatching {
+            val request = dependencies.lastFmService.createAuthorizationRequest(apiKey, sharedSecret, LAST_FM_CONNECT_TIMEOUT_MS)
+            pendingLastFmAuth = PendingLastFmAuth(request.apiKey, request.sharedSecret, request.token)
+            openExternalUrl(request.authorizationUrl)
+            request
+        }.onSuccess {
+            mutableMessage.value = "Authorize Phoebe in Last.fm, then return here and click Finish."
+        }.onFailure { error ->
+            mutableMessage.value = if (error is TimeoutCancellationException) {
+                "Last.fm did not respond. Check the API credentials and try again."
+            } else {
+                error.message ?: "Couldn't start Last.fm authorization."
+            }
+        }
+    }
+
+    fun finishLastFmAuthorization() = scope.launch {
+        val pending = pendingLastFmAuth
+        if (pending == null) {
+            mutableMessage.value = "Start Last.fm authorization first."
+            return@launch
+        }
+        mutableMessage.value = "Finishing Last.fm connection..."
+        runCatching {
+            dependencies.lastFmService.connectAuthorizedToken(
+                pending.apiKey,
+                pending.sharedSecret,
+                pending.token,
+                LAST_FM_CONNECT_TIMEOUT_MS,
+            )
+        }.onSuccess { message ->
+            pendingLastFmAuth = null
+            mutableMessage.value = message
+        }.onFailure { error ->
+            mutableMessage.value = if (error is TimeoutCancellationException) {
+                "Last.fm did not respond. Confirm authorization completed and try Finish again."
+            } else {
+                error.message ?: "Couldn't finish Last.fm authorization."
+            }
+        }
+    }
+
+    fun disconnectLastFm() = scope.launch {
+        runCatching {
+            dependencies.lastFmService.disconnect()
+        }.onSuccess { message ->
+            mutableMessage.value = message
+        }.onFailure { error ->
+            mutableMessage.value = error.message ?: "Couldn't disconnect Last.fm."
+        }
+    }
+
+    fun setLastFmSubmitNowPlaying(enabled: Boolean) = scope.launch {
+        dependencies.lastFmService.setSubmitNowPlaying(enabled)
+    }
+
+    fun setLastFmSubmitScrobbles(enabled: Boolean) = scope.launch {
+        dependencies.lastFmService.setSubmitScrobbles(enabled)
     }
 
     fun setEqualizerEnabled(enabled: Boolean) {
@@ -2036,12 +2222,18 @@ class AppState(
     }
 
     private fun launchDownload(block: suspend () -> DownloadServiceResult): Job {
+        cellularDownloadNotice()?.let { notice ->
+            mutablePlaybackSnackbar.value = notice
+        }
         lateinit var downloadJob: Job
         downloadJob = scope.launch {
             try {
                 downloadedArtworkCacheJob?.cancel()
                 val result = block()
                 mutableMessage.value = result.message
+                if (result.message.startsWith("Downloads are paused")) {
+                    mutablePlaybackSnackbar.value = result.message
+                }
                 dependencies.downloadService.notifyDownloadFinishedIfNeeded(result.batch)
             } catch (error: CancellationException) {
                 throw error
@@ -2060,6 +2252,14 @@ class AppState(
         return downloadJob
     }
 
+    private fun cellularDownloadNotice(): String? {
+        val policy = appSettings.value.downloadPolicy.normalized()
+        if (policy.wifiOnly) return null
+        val network = currentNetworkMeteringStatus()
+        if (!network.isCellular) return null
+        return "Downloading over cellular. Turn on Wi-Fi only in Settings to pause mobile-network downloads."
+    }
+
     fun setDownloadDirectory(uri: String?) = scope.launch {
         val result = dependencies.downloadService.setDownloadDirectory(uri)
         mutableDownloadDirectory.value = result.uri
@@ -2070,6 +2270,27 @@ class AppState(
 
     fun deleteAllDownloads() = scope.launch {
         mutableMessage.value = dependencies.downloadService.deleteAllDownloads()
+    }
+
+    fun deleteCompletedDownloads() = scope.launch {
+        mutableMessage.value = dependencies.downloadService.deleteCompletedDownloads()
+    }
+
+    fun clearFailedDownloads() = scope.launch {
+        mutableMessage.value = dependencies.downloadService.clearFailedDownloads()
+    }
+
+    fun retryFailedDownloads(trackIds: Set<String> = emptySet()) = launchDownload {
+        mutableMessage.value = "Retrying failed downloads…"
+        dependencies.downloadService.retryFailedDownloads(trackIds)
+    }
+
+    fun cancelDownloadsWithoutDeleting(trackIds: Set<String>) = scope.launch {
+        mutableMessage.value = dependencies.downloadService.cancelDownloadsWithoutDeleting(trackIds)
+    }
+
+    fun deleteDownloadsByTrackIds(trackIds: Set<String>) = scope.launch {
+        mutableMessage.value = dependencies.downloadService.deleteDownloadsForTrackIds(trackIds)
     }
 
     fun deleteDownloads(tracks: List<Track>) = scope.launch {
@@ -2141,6 +2362,22 @@ class AppState(
     fun removePlaylistTracks(playlist: Playlist, tracks: List<Track>) = scope.launch {
         dependencies.playlistService.removePlaylistTracks(session.value, playlist, tracks)
             ?.let { mutableMessage.value = it }
+    }
+
+    fun deletePlaylist(playlist: Playlist) = scope.launch {
+        if (playlist.isSmartPlaylist()) {
+            deleteSmartPlaylist(dependencies.userArtifactsRepository.smartPlaylists.value.firstOrNull { it.id == playlist.id } ?: run {
+                mutableMessage.value = "Couldn't find that smart playlist."
+                return@launch
+            })
+            return@launch
+        }
+        mutableMessage.value = dependencies.playlistService.deletePlaylist(session.value, playlist)
+    }
+
+    fun saveSmartPlaylistToProvider(playlist: Playlist) = scope.launch {
+        val result = dependencies.playlistService.saveSmartPlaylistToProvider(session.value, playlist)
+        result.message?.let { mutableMessage.value = it }
     }
 
     fun toggleLikedTrack(track: Track) = scope.launch {
@@ -2260,6 +2497,28 @@ class AppState(
         mutableMessage.value = dependencies.catalogItemMutationService.importRadioStations()
     }
 
+    fun exportBackupPackage() = scope.launch {
+        val payload = dependencies.importExportService.exportBackupPackage()
+        runCatching {
+            dependencies.platformStorage.writeText("exports/phoebe-backup.json", payload)
+        }.fold(
+            onSuccess = { mutableMessage.value = "Exported Phoebe backup package." },
+            onFailure = { error -> mutableMessage.value = error.message ?: "Couldn't export Phoebe backup." },
+        )
+    }
+
+    fun importBackupPackage(mode: BackupRestoreMode = BackupRestoreMode.Merge) = scope.launch {
+        val payload = dependencies.platformStorage.readText("exports/phoebe-backup.json")
+        if (payload.isNullOrBlank()) {
+            mutableMessage.value = "No Phoebe backup export found."
+            return@launch
+        }
+        val preview = dependencies.importExportService.restoreBackupPackage(payload, mode)
+        dependencies.catalogRepository.refreshSmartPlaylists()
+        mutableMessage.value = "Restored ${preview.smartPlaylistCount} smart playlists, " +
+            "${preview.savedSearchCount} saved searches, and ${preview.metadataOverrideCount} metadata overrides."
+    }
+
     fun addLocalFolderFromUri(rootUri: String?) = scope.launch {
         if (rootUri.isNullOrBlank()) return@launch
         val label = rootUri.trimEnd('/').substringAfterLast('/').substringBefore('?', "Local").ifBlank { "Local" }
@@ -2279,16 +2538,16 @@ class AppState(
         }
         refreshCatalogSuspended(catalogMessage = null)
         mutableMessage.value = "Removed local folder."
-        if (defaultBrowseRequest() == AppNavigationRequest.SignIn) {
-            requestNavigation(AppNavigationRequest.SignIn)
+        if (defaultBrowseRequest() == AppNavigationRequest.Radio) {
+            requestNavigation(AppNavigationRequest.Radio)
         }
     }
 
     fun setLocalFolderEnabled(id: String, enabled: Boolean) = scope.launch {
         dependencies.mediaSourcesRepository.setLocalFolderEnabled(id, enabled)
         refreshCatalogSuspended(catalogMessage = null)
-        if (defaultBrowseRequest() == AppNavigationRequest.SignIn) {
-            requestNavigation(AppNavigationRequest.SignIn)
+        if (defaultBrowseRequest() == AppNavigationRequest.Radio) {
+            requestNavigation(AppNavigationRequest.Radio)
         }
     }
 
@@ -2350,7 +2609,50 @@ class AppState(
             .onFailure { mutableMessage.value = it.message ?: "Something went sideways." }
         mutableBusy.value = false
     }
+
+    private fun uniqueSmartPlaylistSuffix(title: String, nowMs: Long): String {
+        val base = title
+            .lowercase()
+            .map { char -> if (char.isLetterOrDigit()) char else '-' }
+            .joinToString("")
+            .trim('-')
+            .replace(Regex("-+"), "-")
+            .ifBlank { "playlist" }
+        val existingIds = dependencies.userArtifactsRepository.smartPlaylists.value.mapTo(mutableSetOf()) { it.id }
+        var candidate = "$base-$nowMs"
+        var index = 2
+        while ("${SmartPlaylist.IdPrefix}$candidate" in existingIds) {
+            candidate = "$base-$nowMs-$index"
+            index++
+        }
+        return candidate
+    }
+
+    private fun uniqueSearchSuffix(queryText: String, nowMs: Long): String {
+        val base = queryText
+            .lowercase()
+            .map { char -> if (char.isLetterOrDigit()) char else '-' }
+            .joinToString("")
+            .trim('-')
+            .replace(Regex("-+"), "-")
+            .take(36)
+            .ifBlank { "search" }
+        val existingIds = dependencies.userArtifactsRepository.savedSearches.value.mapTo(mutableSetOf()) { it.id }
+        var candidate = "$base-$nowMs"
+        var index = 2
+        while ("saved:search:$candidate" in existingIds) {
+            candidate = "$base-$nowMs-$index"
+            index++
+        }
+        return candidate
+    }
 }
+
+private data class PendingLastFmAuth(
+    val apiKey: String,
+    val sharedSecret: String,
+    val token: String,
+)
 
 private fun PlexSession?.canUsePlexBackgroundFetches(): Boolean {
     val server = this?.selectedServer ?: return false
@@ -2460,3 +2762,4 @@ private const val InternetRadioStartupTimeoutMs = 30_000L
 private const val PLEX_SIGN_IN_TIMEOUT_MS = 20_000L
 
 private const val LISTEN_BRAINZ_CONNECT_TIMEOUT_MS = 45_000L
+private const val LAST_FM_CONNECT_TIMEOUT_MS = 45_000L

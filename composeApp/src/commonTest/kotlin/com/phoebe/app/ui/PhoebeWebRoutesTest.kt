@@ -40,7 +40,23 @@ class PhoebeWebRoutesTest {
     }
 
     @Test
-    fun browsePathsRemainAvailableWhenFallbackCanBrowse() {
+    fun radioPathDoesNotRequireBrowseSource() {
+        val fallback = listOf(PhoebeRoute.SignIn)
+        val route = listOf(PhoebeRoute.Browse(BrowseSection.Radio))
+
+        assertEquals(route, route.withUnavailableBrowseFallback(fallback))
+    }
+
+    @Test
+    fun sourceBackedBrowsePathsUseRadioFallbackWhenNoBrowseSourceIsAvailable() {
+        val fallback = listOf(PhoebeRoute.Browse(BrowseSection.Radio))
+        val route = listOf(PhoebeRoute.Browse(BrowseSection.Library))
+
+        assertEquals(fallback, route.withUnavailableBrowseFallback(fallback))
+    }
+
+    @Test
+    fun sourceBackedBrowsePathsRemainAvailableWhenFallbackCanBrowse() {
         val fallback = listOf(PhoebeRoute.Browse(BrowseSection.Home))
         val route = listOf(PhoebeRoute.Browse(BrowseSection.Library))
 

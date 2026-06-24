@@ -1876,6 +1876,7 @@ fun PlaylistDetailPanel(
                                     showClear = true,
                                 )
                             }
+                            PlaylistManagementMenuButton(playlist)
                         }
                         SearchPill(
                             query = searchQuery,

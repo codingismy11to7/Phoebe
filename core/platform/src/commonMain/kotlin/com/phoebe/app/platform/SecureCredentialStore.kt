@@ -4,6 +4,8 @@ import com.phoebe.app.domain.ListenBrainzCredentialStorageStatus
 
 enum class SecureCredentialKey {
     ListenBrainzUserToken,
+    LastFmSharedSecret,
+    LastFmSessionKey,
 }
 
 data class SecureCredentialAvailability(

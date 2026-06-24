@@ -13,9 +13,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -294,6 +296,36 @@ class PlaybackClickTargetDesktopTest {
         onNodeWithTag(PlaybackTestTags.playTrack(tracks[2].id)).performClick()
 
         assertEquals(1, playedIndex)
+    }
+
+    @OptIn(ExperimentalTestApi::class, ExperimentalComposeUiApi::class)
+    @Test
+    fun desktopProgressLineClickSeeksToTappedPosition() = runDesktopComposeUiTest(width = 420, height = 80) {
+        var seekPositionMs: Long? = null
+
+        setContent {
+            PhoebeTheme {
+                Box(Modifier.size(420.dp, 80.dp)) {
+                    ProgressLine(
+                        positionMs = 0L,
+                        bufferedPositionMs = 0L,
+                        durationMs = 60_000L,
+                        waveformSeed = "desktop-progress-click",
+                        modifier = Modifier.size(width = 400.dp, height = 48.dp),
+                        onSeek = { seekPositionMs = it },
+                        barHeight = 20.dp,
+                    )
+                }
+            }
+        }
+
+        onNodeWithContentDescription("Playback progress, 0:00 of 1:00").performTouchInput {
+            val target = Offset(width * 0.75f, 10f)
+            down(target)
+            up()
+        }
+
+        assertEquals(45_000L, seekPositionMs)
     }
 }
 

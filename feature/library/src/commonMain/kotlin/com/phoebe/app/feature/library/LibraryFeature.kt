@@ -45,6 +45,7 @@ class LibraryRouteActions(
 
 @Immutable
 data class PlaylistsRouteState(
+    val catalog: CatalogSnapshot = CatalogSnapshot(),
     val catalogRefreshing: Boolean,
     val searchQuery: String,
 )
@@ -169,6 +170,7 @@ fun PlaylistsDesktopRoute(
     searchPillModifier: Modifier = Modifier.width(270.dp),
 ) {
     PlaylistsDesktopView(
+        catalog = state.catalog,
         searchQuery = state.searchQuery,
         onSearchQuery = actions.onSearchQuery,
         onPlaylist = actions.onPlaylist,
@@ -187,6 +189,7 @@ fun PlaylistsMobileRoute(
     modifier: Modifier = Modifier,
 ) {
     PlaylistsMobileView(
+        catalog = state.catalog,
         catalogRefreshing = state.catalogRefreshing,
         searchQuery = state.searchQuery,
         onSearchQuery = actions.onSearchQuery,

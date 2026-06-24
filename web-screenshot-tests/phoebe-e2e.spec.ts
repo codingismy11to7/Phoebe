@@ -82,15 +82,20 @@ for (const path of [
   });
 }
 
-for (const path of ['/', '/library', '/settings', '/artist/modern-baseball'] as const) {
-  test(`web path ${path} redirects to sign in without sources`, async ({ page }) => {
+for (const { path, expected } of [
+  { path: '/', expected: '/radio' },
+  { path: '/library', expected: '/radio' },
+  { path: '/settings', expected: '/settings' },
+  { path: '/artist/modern-baseball', expected: '/radio' },
+] as const) {
+  test(`web path ${path} resolves without sources`, async ({ page }) => {
     await page.goto(path, { waitUntil: 'domcontentloaded' });
     await waitForPhoebeCanvas(page);
-    await expect(page).toHaveURL(/\/signin$/);
+    await expect(page).toHaveURL(new RegExp(`${escapeRegExp(expected)}$`));
 
     await page.reload({ waitUntil: 'domcontentloaded' });
     await waitForPhoebeCanvas(page);
-    await expect(page).toHaveURL(/\/signin$/);
+    await expect(page).toHaveURL(new RegExp(`${escapeRegExp(expected)}$`));
   });
 }
 

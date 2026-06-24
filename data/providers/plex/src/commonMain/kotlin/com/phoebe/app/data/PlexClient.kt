@@ -1255,6 +1255,19 @@ class PlexClient(
         }
     }
 
+    suspend fun deletePlaylist(server: PlexServer, token: String, playlistRatingKey: String) {
+        withReachableBase(server) { base ->
+            val response = httpClient.delete("$base/playlists/$playlistRatingKey") {
+                plexServerAuth(token)
+                header(HttpHeaders.Accept, "application/json")
+            }
+            if (!response.status.isSuccess()) {
+                val body = response.bodyAsText()
+                error("Plex delete playlist failed (${response.status.value}) via $base: ${body.take(200)}")
+            }
+        }
+    }
+
     suspend fun movePlaylistItemToTop(
         server: PlexServer,
         token: String,

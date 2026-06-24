@@ -42,6 +42,8 @@ import com.phoebe.app.feature.radio.RadioRouteActions
 import com.phoebe.app.feature.radio.RadioRouteState
 import com.phoebe.app.feature.search.SearchDesktopRouteActions
 import com.phoebe.app.feature.search.SearchMobileRoute
+import com.phoebe.app.feature.settings.DownloadManagerUiSummary
+import com.phoebe.app.feature.settings.SettingsCategory
 import com.phoebe.app.feature.settings.SettingsMobileRoute
 import com.phoebe.app.feature.settings.SettingsRouteActions
 import com.phoebe.app.feature.settings.SettingsRouteState
@@ -188,6 +190,8 @@ import com.phoebe.app.domain.AppScreen
 import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.ArtistRadioAvailability
 import com.phoebe.app.domain.AudioAnalysisFrame
+import com.phoebe.app.domain.AudioProcessingCapabilities
+import com.phoebe.app.domain.AudioProcessingSettings
 import com.phoebe.app.domain.HomeSection
 import com.phoebe.app.domain.JellyfinLibraryPageKind
 import com.phoebe.app.domain.JellyfinSyncMode
@@ -196,6 +200,8 @@ import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryUiPreferences
 import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.CollectionEntry
+import com.phoebe.app.domain.DownloadItem
+import com.phoebe.app.domain.DownloadPolicySettings
 import com.phoebe.app.domain.EqualizerProfile
 import com.phoebe.app.domain.LocalFolderMediaSourceConfig
 import com.phoebe.app.domain.MediaSourcesState
@@ -318,19 +324,33 @@ internal fun MobileBrowseShell(
     onImportFavoritePlaylists: () -> Unit,
     onExportRadioStations: () -> Unit,
     onImportRadioStations: () -> Unit,
+    onExportBackupPackage: () -> Unit = {},
+    onImportBackupPackage: () -> Unit = {},
+    onReplaceFromBackupPackage: () -> Unit = {},
     appSettings: AppSettings,
     homeScreenLayoutMode: HomeScreenLayoutMode = HomeScreenLayoutMode.Default,
     onCrossfadeSeconds: (Int) -> Unit,
     onScanLibraryOnLaunch: (Boolean) -> Unit,
     onNotifyWhenDownloadFinishes: (Boolean) -> Unit,
     onPersistEqualizerSettings: (Boolean) -> Unit = {},
+    onAudioProcessingSettings: (AudioProcessingSettings) -> Unit = {},
+    audioProcessingCapabilities: AudioProcessingCapabilities = AudioProcessingCapabilities(),
     onVisualizerPreset: (NowPlayingVisualizerPreset) -> Unit = {},
     onBlurredArtworkAppearance: (Boolean) -> Unit = {},
     downloadDirectory: String?,
     downloadCount: Int,
+    downloadItems: List<DownloadItem> = emptyList(),
+    downloadManager: DownloadManagerUiSummary = DownloadManagerUiSummary(total = downloadCount, complete = downloadCount),
     defaultDownloadDirectoryLabel: String,
     onDownloadDirectory: (String?) -> Unit,
     onDeleteAllDownloads: () -> Unit,
+    onDeleteCompletedDownloads: () -> Unit = {},
+    onClearFailedDownloads: () -> Unit = {},
+    onRetryFailedDownloads: () -> Unit = {},
+    onRetryDownloads: (Set<String>) -> Unit = {},
+    onCancelDownloads: (Set<String>) -> Unit = {},
+    onDeleteDownloads: (Set<String>) -> Unit = {},
+    onDownloadPolicySettings: (DownloadPolicySettings) -> Unit = {},
     useLightAppearance: Boolean,
     onUseLightAppearanceChange: (Boolean) -> Unit,
     appearanceTintId: String,
@@ -342,6 +362,11 @@ internal fun MobileBrowseShell(
     onListenBrainzSubmitNowPlaying: (Boolean) -> Unit = {},
     onListenBrainzSubmitListens: (Boolean) -> Unit = {},
     onListenBrainzSubmitCurrentTrackFeedback: (Boolean) -> Unit = {},
+    onStartLastFmAuthorization: (String, String) -> Unit = { _, _ -> },
+    onFinishLastFmAuthorization: () -> Unit = {},
+    onDisconnectLastFm: () -> Unit = {},
+    onLastFmSubmitNowPlaying: (Boolean) -> Unit = {},
+    onLastFmSubmitScrobbles: (Boolean) -> Unit = {},
     appUpdateState: AppUpdateState = AppUpdateState.Idle,
     routeViewModelFactory: RouteViewModelFactory,
     onInstallUpdate: () -> Unit = {},
@@ -361,6 +386,7 @@ internal fun MobileBrowseShell(
     val updateInstalling = installingUpdateState != null
     val toolbarTitle = when {
         section == BrowseSection.Settings -> "Settings"
+        section == BrowseSection.Downloads -> "Downloads"
         selectedPlaylistId != null -> "Playlist"
         else -> mobileSectionTitle(section)
     }
@@ -391,28 +417,44 @@ internal fun MobileBrowseShell(
         CompositionLocalProvider(LocalMobileChromePadding provides chromePadding) {
             Box(Modifier.fillMaxSize()) {
             when {
-                section == BrowseSection.Settings && selectedPlaylistId == null -> SettingsMobileRoute(
+                (section == BrowseSection.Settings || section == BrowseSection.Downloads) && selectedPlaylistId == null -> SettingsMobileRoute(
                     state = SettingsRouteState(
                         isLightMode = useLightAppearance,
                         tintId = appearanceTintId,
                         downloadDirectory = downloadDirectory,
                         downloadCount = downloadCount,
+                        downloadItems = downloadItems,
+                        downloadManager = downloadManager,
                         appSettings = appSettings,
+                        audioProcessingCapabilities = audioProcessingCapabilities,
                         libraryUi = libraryUi,
                         defaultDownloadDirectoryLabel = defaultDownloadDirectoryLabel,
                         homeScreenLayoutMode = homeScreenLayoutMode,
                         session = session,
                         listenBrainzCredentialAvailability = listenBrainzCredentialAvailability,
+                        initialCategory = if (section == BrowseSection.Downloads) {
+                            SettingsCategory.Downloads
+                        } else {
+                            SettingsCategory.Account
+                        },
                     ),
                     actions = SettingsRouteActions(
                         onLightModeChange = onUseLightAppearanceChange,
                         onTintChange = onAppearanceTintChange,
                         onDownloadDirectory = onDownloadDirectory,
                         onDeleteAllDownloads = onDeleteAllDownloads,
+                        onDeleteCompletedDownloads = onDeleteCompletedDownloads,
+                        onClearFailedDownloads = onClearFailedDownloads,
+                        onRetryFailedDownloads = onRetryFailedDownloads,
+                        onRetryDownloads = onRetryDownloads,
+                        onCancelDownloads = onCancelDownloads,
+                        onDeleteDownloads = onDeleteDownloads,
+                        onDownloadPolicySettings = onDownloadPolicySettings,
                         onCrossfadeSeconds = onCrossfadeSeconds,
                         onScanLibraryOnLaunch = onScanLibraryOnLaunch,
                         onNotifyWhenDownloadFinishes = onNotifyWhenDownloadFinishes,
                         onPersistEqualizerSettings = onPersistEqualizerSettings,
+                        onAudioProcessingSettings = onAudioProcessingSettings,
                         onVisualizerPreset = onVisualizerPreset,
                         onBlurredArtworkAppearance = onBlurredArtworkAppearance,
                         onHomeSections = onHomeSections,
@@ -424,12 +466,20 @@ internal fun MobileBrowseShell(
                         onImportFavoritePlaylists = onImportFavoritePlaylists,
                         onExportRadioStations = onExportRadioStations,
                         onImportRadioStations = onImportRadioStations,
+                        onExportBackupPackage = onExportBackupPackage,
+                        onImportBackupPackage = onImportBackupPackage,
+                        onReplaceFromBackupPackage = onReplaceFromBackupPackage,
                         onHomeScreenLayoutModeChange = onHomeScreenLayoutModeChange,
                         onConnectListenBrainz = onConnectListenBrainz,
                         onDisconnectListenBrainz = onDisconnectListenBrainz,
                         onListenBrainzSubmitNowPlaying = onListenBrainzSubmitNowPlaying,
                         onListenBrainzSubmitListens = onListenBrainzSubmitListens,
                         onListenBrainzSubmitCurrentTrackFeedback = onListenBrainzSubmitCurrentTrackFeedback,
+                        onStartLastFmAuthorization = onStartLastFmAuthorization,
+                        onFinishLastFmAuthorization = onFinishLastFmAuthorization,
+                        onDisconnectLastFm = onDisconnectLastFm,
+                        onLastFmSubmitNowPlaying = onLastFmSubmitNowPlaying,
+                        onLastFmSubmitScrobbles = onLastFmSubmitScrobbles,
                     ),
                     modifier = Modifier.fillMaxSize().padding(top = chromePadding.top, bottom = chromePadding.bottom),
                 )
@@ -560,6 +610,7 @@ internal fun MobileBrowseShell(
                 )
                 section == BrowseSection.Playlists && selectedPlaylistId == null -> PlaylistsMobileRoute(
                     state = PlaylistsRouteState(
+                        catalog = catalog,
                         catalogRefreshing = catalogRefreshing,
                         searchQuery = searchQuery,
                     ),
@@ -691,6 +742,18 @@ internal fun MobileBrowseShell(
                             enabled = false,
                         )
                     }
+                    DropdownMenuItem(
+                        text = {
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                PhoebeIconView(PhoebeIcon.Download, tint = PhoebeUi.secondaryText, modifier = Modifier.size(18.dp))
+                                Text("Downloads")
+                            }
+                        },
+                        onClick = {
+                            onNavigate(BrowseSection.Downloads)
+                            menuExpanded = false
+                        },
+                    )
                     DropdownMenuItem(
                         text = {
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {

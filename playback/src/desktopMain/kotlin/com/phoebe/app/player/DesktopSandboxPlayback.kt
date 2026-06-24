@@ -40,8 +40,8 @@ internal object DesktopSandboxPlayback {
      * streaming was added in 1.2.x but is unreliable against real Plex transcode/direct URLs,
      * so keep the buffer-first path inside the sandbox.
      */
-    fun shouldStreamRemoteSampledPlayback(uri: String): Boolean =
-        DesktopPlaybackStartupPolicy.isRemoteUri(uri) && !isFlatpakSandbox()
+    @Suppress("UNUSED_PARAMETER")
+    fun shouldStreamRemoteSampledPlayback(uri: String): Boolean = false
 
     fun bufferedRemotePlaybackUri(activeUri: String, downloadUri: String?): String {
         val download = downloadUri?.takeIf { it.isNotBlank() && DesktopPlaybackStartupPolicy.isRemoteUri(it) }

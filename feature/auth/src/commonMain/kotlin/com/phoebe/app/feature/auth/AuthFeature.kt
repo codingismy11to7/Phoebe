@@ -30,6 +30,7 @@ class AuthWelcomeRouteActions(
     val onStartJellyfinQuickConnect: (String) -> Unit,
     val onFinishJellyfinQuickConnect: () -> Unit,
     val onAddLocalFolder: (String?) -> Unit = {},
+    val onOpenRadio: () -> Unit = {},
 )
 
 @Immutable
@@ -81,6 +82,7 @@ fun AuthWelcomeDesktopRoute(
         onDiscoverJellyfinServers = actions.onDiscoverJellyfinServers,
         onStartJellyfinQuickConnect = actions.onStartJellyfinQuickConnect,
         onFinishJellyfinQuickConnect = actions.onFinishJellyfinQuickConnect,
+        onOpenRadio = actions.onOpenRadio,
         showLocalFolderHint = state.showLocalFolderHint,
         modifier = modifier,
     )
@@ -107,6 +109,7 @@ fun AuthWelcomeMobileRoute(
         onStartJellyfinQuickConnect = actions.onStartJellyfinQuickConnect,
         onFinishJellyfinQuickConnect = actions.onFinishJellyfinQuickConnect,
         onAddLocalFolder = actions.onAddLocalFolder,
+        onOpenRadio = actions.onOpenRadio,
         initialProvidersExpanded = state.initialProvidersExpanded,
         modifier = modifier,
     )

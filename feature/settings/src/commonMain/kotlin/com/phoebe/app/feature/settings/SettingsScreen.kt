@@ -63,6 +63,12 @@ import androidx.compose.ui.zIndex
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.phoebe.app.domain.AppSettings
+import com.phoebe.app.domain.AudioProcessingCapabilities
+import com.phoebe.app.domain.AudioProcessingSettings
+import com.phoebe.app.domain.DownloadItem
+import com.phoebe.app.domain.DownloadPolicySettings
+import com.phoebe.app.domain.DownloadState
+import com.phoebe.app.domain.FeatureCapability
 import com.phoebe.app.domain.HomeSection
 import com.phoebe.app.domain.ListenBrainzCredentialStorageStatus
 import com.phoebe.app.domain.LibraryUiPreferences
@@ -111,16 +117,27 @@ fun SettingsDesktopView(
     onTintChange: (String) -> Unit,
     downloadDirectory: String?,
     downloadCount: Int,
+    downloadItems: List<DownloadItem> = emptyList(),
+    downloadManager: DownloadManagerUiSummary = DownloadManagerUiSummary(total = downloadCount, complete = downloadCount),
     appSettings: AppSettings,
+    audioProcessingCapabilities: AudioProcessingCapabilities = AudioProcessingCapabilities(),
     libraryUi: LibraryUiPreferences,
     defaultDownloadDirectoryLabel: String,
     onDownloadDirectory: (String?) -> Unit,
     onDeleteAllDownloads: () -> Unit,
+    onDeleteCompletedDownloads: () -> Unit = {},
+    onClearFailedDownloads: () -> Unit = {},
+    onRetryFailedDownloads: () -> Unit = {},
+    onRetryDownloads: (Set<String>) -> Unit = {},
+    onCancelDownloads: (Set<String>) -> Unit = {},
+    onDeleteDownloads: (Set<String>) -> Unit = {},
+    onDownloadPolicySettings: (DownloadPolicySettings) -> Unit = {},
     onCrossfadeSeconds: (Int) -> Unit,
     onScanLibraryOnLaunch: (Boolean) -> Unit,
     onNotifyWhenDownloadFinishes: (Boolean) -> Unit,
     onPersistEqualizerSettings: (Boolean) -> Unit = {},
     onPersistVolumeSettings: (Boolean) -> Unit = {},
+    onAudioProcessingSettings: (AudioProcessingSettings) -> Unit = {},
     onVisualizerPreset: (NowPlayingVisualizerPreset) -> Unit = {},
     onBlurredArtworkAppearance: (Boolean) -> Unit = {},
     onHomeSections: (List<HomeSection>) -> Unit,
@@ -132,6 +149,9 @@ fun SettingsDesktopView(
     onImportFavoritePlaylists: () -> Unit,
     onExportRadioStations: () -> Unit,
     onImportRadioStations: () -> Unit,
+    onExportBackupPackage: () -> Unit = {},
+    onImportBackupPackage: () -> Unit = {},
+    onReplaceFromBackupPackage: () -> Unit = {},
     homeScreenLayoutMode: HomeScreenLayoutMode = HomeScreenLayoutMode.Default,
     onHomeScreenLayoutModeChange: (HomeScreenLayoutMode) -> Unit = {},
     session: PlexSession? = null,
@@ -141,6 +161,11 @@ fun SettingsDesktopView(
     onListenBrainzSubmitNowPlaying: (Boolean) -> Unit = {},
     onListenBrainzSubmitListens: (Boolean) -> Unit = {},
     onListenBrainzSubmitCurrentTrackFeedback: (Boolean) -> Unit = {},
+    onStartLastFmAuthorization: (String, String) -> Unit = { _, _ -> },
+    onFinishLastFmAuthorization: () -> Unit = {},
+    onDisconnectLastFm: () -> Unit = {},
+    onLastFmSubmitNowPlaying: (Boolean) -> Unit = {},
+    onLastFmSubmitScrobbles: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
     initialCategory: SettingsCategory = SettingsCategory.AudioPlayback,
 ) {
@@ -195,10 +220,12 @@ fun SettingsDesktopView(
                     )
                     SettingsCategory.AudioPlayback -> AudioPlaybackSettingsCard(
                         settings = appSettings,
+                        capabilities = audioProcessingCapabilities,
                         onCrossfadeSeconds = onCrossfadeSeconds,
                         onScanLibraryOnLaunch = onScanLibraryOnLaunch,
                         onPersistEqualizerSettings = onPersistEqualizerSettings,
                         onPersistVolumeSettings = onPersistVolumeSettings,
+                        onAudioProcessingSettings = onAudioProcessingSettings,
                     )
                     SettingsCategory.Account -> AccountSettingsCard(
                         session = session,
@@ -209,6 +236,11 @@ fun SettingsDesktopView(
                         onListenBrainzSubmitNowPlaying = onListenBrainzSubmitNowPlaying,
                         onListenBrainzSubmitListens = onListenBrainzSubmitListens,
                         onListenBrainzSubmitCurrentTrackFeedback = onListenBrainzSubmitCurrentTrackFeedback,
+                        onStartLastFmAuthorization = onStartLastFmAuthorization,
+                        onFinishLastFmAuthorization = onFinishLastFmAuthorization,
+                        onDisconnectLastFm = onDisconnectLastFm,
+                        onLastFmSubmitNowPlaying = onLastFmSubmitNowPlaying,
+                        onLastFmSubmitScrobbles = onLastFmSubmitScrobbles,
                     )
                     SettingsCategory.Library -> {
                         LibraryGridSizeSettingsCard(
@@ -221,13 +253,28 @@ fun SettingsDesktopView(
                         BottomTabSettingsCard(libraryUi.mobileBottomTabs, onMobileBottomTabs)
                         FavoritePlaylistSettingsCard(onExportFavoritePlaylists, onImportFavoritePlaylists)
                         RadioStationsSettingsCard(onExportRadioStations, onImportRadioStations)
+                        BackupSettingsCard(
+                            onExportBackupPackage = onExportBackupPackage,
+                            onImportBackupPackage = onImportBackupPackage,
+                            onReplaceFromBackupPackage = onReplaceFromBackupPackage,
+                        )
                     }
                     SettingsCategory.Downloads -> DownloadsSettingsCard(
                         downloadDirectory = downloadDirectory,
                         downloadCount = downloadCount,
+                        downloadItems = downloadItems,
+                        downloadManager = downloadManager,
+                        appSettings = appSettings,
                         defaultDownloadDirectoryLabel = defaultDownloadDirectoryLabel,
                         onDownloadDirectory = onDownloadDirectory,
                         onDeleteAllDownloads = onDeleteAllDownloads,
+                        onDeleteCompletedDownloads = onDeleteCompletedDownloads,
+                        onClearFailedDownloads = onClearFailedDownloads,
+                        onRetryFailedDownloads = onRetryFailedDownloads,
+                        onRetryDownloads = onRetryDownloads,
+                        onCancelDownloads = onCancelDownloads,
+                        onDeleteDownloads = onDeleteDownloads,
+                        onDownloadPolicySettings = onDownloadPolicySettings,
                     )
                     SettingsCategory.Personalization -> PersonalMixSettingsCard(libraryUi.personalMix, onPersonalMix)
                     SettingsCategory.Notifications -> NotificationsSettingsCard(
@@ -250,16 +297,27 @@ fun SettingsMobileView(
     onTintChange: (String) -> Unit,
     downloadDirectory: String?,
     downloadCount: Int,
+    downloadItems: List<DownloadItem> = emptyList(),
+    downloadManager: DownloadManagerUiSummary = DownloadManagerUiSummary(total = downloadCount, complete = downloadCount),
     appSettings: AppSettings,
+    audioProcessingCapabilities: AudioProcessingCapabilities = AudioProcessingCapabilities(),
     libraryUi: LibraryUiPreferences,
     defaultDownloadDirectoryLabel: String,
     onDownloadDirectory: (String?) -> Unit,
     onDeleteAllDownloads: () -> Unit,
+    onDeleteCompletedDownloads: () -> Unit = {},
+    onClearFailedDownloads: () -> Unit = {},
+    onRetryFailedDownloads: () -> Unit = {},
+    onRetryDownloads: (Set<String>) -> Unit = {},
+    onCancelDownloads: (Set<String>) -> Unit = {},
+    onDeleteDownloads: (Set<String>) -> Unit = {},
+    onDownloadPolicySettings: (DownloadPolicySettings) -> Unit = {},
     onCrossfadeSeconds: (Int) -> Unit,
     onScanLibraryOnLaunch: (Boolean) -> Unit,
     onNotifyWhenDownloadFinishes: (Boolean) -> Unit,
     onPersistEqualizerSettings: (Boolean) -> Unit = {},
     onPersistVolumeSettings: (Boolean) -> Unit = {},
+    onAudioProcessingSettings: (AudioProcessingSettings) -> Unit = {},
     onVisualizerPreset: (NowPlayingVisualizerPreset) -> Unit = {},
     onBlurredArtworkAppearance: (Boolean) -> Unit = {},
     onHomeSections: (List<HomeSection>) -> Unit,
@@ -271,6 +329,9 @@ fun SettingsMobileView(
     onImportFavoritePlaylists: () -> Unit,
     onExportRadioStations: () -> Unit,
     onImportRadioStations: () -> Unit,
+    onExportBackupPackage: () -> Unit = {},
+    onImportBackupPackage: () -> Unit = {},
+    onReplaceFromBackupPackage: () -> Unit = {},
     homeScreenLayoutMode: HomeScreenLayoutMode = HomeScreenLayoutMode.Default,
     onHomeScreenLayoutModeChange: (HomeScreenLayoutMode) -> Unit = {},
     session: PlexSession? = null,
@@ -280,6 +341,11 @@ fun SettingsMobileView(
     onListenBrainzSubmitNowPlaying: (Boolean) -> Unit = {},
     onListenBrainzSubmitListens: (Boolean) -> Unit = {},
     onListenBrainzSubmitCurrentTrackFeedback: (Boolean) -> Unit = {},
+    onStartLastFmAuthorization: (String, String) -> Unit = { _, _ -> },
+    onFinishLastFmAuthorization: () -> Unit = {},
+    onDisconnectLastFm: () -> Unit = {},
+    onLastFmSubmitNowPlaying: (Boolean) -> Unit = {},
+    onLastFmSubmitScrobbles: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -299,6 +365,11 @@ fun SettingsMobileView(
             onListenBrainzSubmitNowPlaying = onListenBrainzSubmitNowPlaying,
             onListenBrainzSubmitListens = onListenBrainzSubmitListens,
             onListenBrainzSubmitCurrentTrackFeedback = onListenBrainzSubmitCurrentTrackFeedback,
+            onStartLastFmAuthorization = onStartLastFmAuthorization,
+            onFinishLastFmAuthorization = onFinishLastFmAuthorization,
+            onDisconnectLastFm = onDisconnectLastFm,
+            onLastFmSubmitNowPlaying = onLastFmSubmitNowPlaying,
+            onLastFmSubmitScrobbles = onLastFmSubmitScrobbles,
             compact = true,
         )
         SectionLabel("APPEARANCE", PhoebeUi.accentLight)
@@ -327,22 +398,40 @@ fun SettingsMobileView(
         BottomTabSettingsCard(libraryUi.mobileBottomTabs, onMobileBottomTabs, compact = true)
         FavoritePlaylistSettingsCard(onExportFavoritePlaylists, onImportFavoritePlaylists, compact = true)
         RadioStationsSettingsCard(onExportRadioStations, onImportRadioStations, compact = true)
+        BackupSettingsCard(
+            onExportBackupPackage = onExportBackupPackage,
+            onImportBackupPackage = onImportBackupPackage,
+            onReplaceFromBackupPackage = onReplaceFromBackupPackage,
+            compact = true,
+        )
         SectionLabel("AUDIO PLAYBACK", PhoebeUi.accentLight)
         AudioPlaybackSettingsCard(
             settings = appSettings,
+            capabilities = audioProcessingCapabilities,
             onCrossfadeSeconds = onCrossfadeSeconds,
             onScanLibraryOnLaunch = onScanLibraryOnLaunch,
             onPersistEqualizerSettings = onPersistEqualizerSettings,
             onPersistVolumeSettings = onPersistVolumeSettings,
+            onAudioProcessingSettings = onAudioProcessingSettings,
             compact = true,
         )
         SectionLabel("DOWNLOADS", PhoebeUi.accentLight)
         DownloadsSettingsCard(
             downloadDirectory = downloadDirectory,
             downloadCount = downloadCount,
+            downloadItems = downloadItems,
+            downloadManager = downloadManager,
+            appSettings = appSettings,
             defaultDownloadDirectoryLabel = defaultDownloadDirectoryLabel,
             onDownloadDirectory = onDownloadDirectory,
             onDeleteAllDownloads = onDeleteAllDownloads,
+            onDeleteCompletedDownloads = onDeleteCompletedDownloads,
+            onClearFailedDownloads = onClearFailedDownloads,
+            onRetryFailedDownloads = onRetryFailedDownloads,
+            onRetryDownloads = onRetryDownloads,
+            onCancelDownloads = onCancelDownloads,
+            onDeleteDownloads = onDeleteDownloads,
+            onDownloadPolicySettings = onDownloadPolicySettings,
             compact = true,
         )
         SectionLabel("PERSONALIZATION", PhoebeUi.accentLight)
@@ -566,15 +655,18 @@ private fun TintSwatch(
 @Composable
 private fun AudioPlaybackSettingsCard(
     settings: AppSettings,
+    capabilities: AudioProcessingCapabilities,
     onCrossfadeSeconds: (Int) -> Unit,
     onScanLibraryOnLaunch: (Boolean) -> Unit,
     onPersistEqualizerSettings: (Boolean) -> Unit,
     onPersistVolumeSettings: (Boolean) -> Unit = {},
+    onAudioProcessingSettings: (AudioProcessingSettings) -> Unit,
     compact: Boolean = false,
 ) {
     var localCrossfade by remember(settings.crossfadeSeconds) { mutableIntStateOf(settings.crossfadeSeconds) }
-    SettingsCard {
-        Text("Audio Playback", color = PhoebeUi.primaryText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        val audio = settings.audioProcessing.normalized()
+        SettingsCard {
+            Text("Audio Playback", color = PhoebeUi.primaryText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
         Text("Transitions and library scan", color = PhoebeUi.mutedText, fontSize = 12.sp, modifier = Modifier.padding(bottom = 14.dp))
         Text("Crossfade", color = PhoebeUi.secondaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
         Slider(
@@ -601,6 +693,13 @@ private fun AudioPlaybackSettingsCard(
             Text("${localCrossfade}s", color = PhoebeUi.accentLight, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
             Text("12s", color = PhoebeUi.mutedText, fontSize = 11.sp)
         }
+        SettingsSwitchRow(
+            title = "Gapless playback",
+            subtitle = capabilitySubtitle(capabilities.gapless, "Keep album playback continuous when the engine supports it"),
+            checked = audio.gaplessEnabled && capabilities.gapless.isSupported,
+            enabled = capabilities.gapless.isSupported,
+            onCheckedChange = { checked -> onAudioProcessingSettings(audio.copy(gaplessEnabled = checked)) },
+        )
         Spacer(Modifier.height(12.dp))
         SettingsSwitchRow(
             title = "Persist equalizer",
@@ -625,6 +724,15 @@ private fun AudioPlaybackSettingsCard(
     }
 }
 
+private val FeatureCapability.isSupported: Boolean
+    get() = this is FeatureCapability.Supported
+
+private fun capabilitySubtitle(capability: FeatureCapability, supported: String): String =
+    when (capability) {
+        FeatureCapability.Supported -> supported
+        is FeatureCapability.Unsupported -> capability.reason
+    }
+
 @Composable
 private fun NotificationsSettingsCard(
     settings: AppSettings,
@@ -646,14 +754,31 @@ private fun NotificationsSettingsCard(
 private fun DownloadsSettingsCard(
     downloadDirectory: String?,
     downloadCount: Int,
+    downloadItems: List<DownloadItem>,
+    downloadManager: DownloadManagerUiSummary,
+    appSettings: AppSettings,
     defaultDownloadDirectoryLabel: String,
     onDownloadDirectory: (String?) -> Unit,
     onDeleteAllDownloads: () -> Unit,
+    onDeleteCompletedDownloads: () -> Unit,
+    onClearFailedDownloads: () -> Unit,
+    onRetryFailedDownloads: () -> Unit,
+    onRetryDownloads: (Set<String>) -> Unit,
+    onCancelDownloads: (Set<String>) -> Unit,
+    onDeleteDownloads: (Set<String>) -> Unit,
+    onDownloadPolicySettings: (DownloadPolicySettings) -> Unit,
     compact: Boolean = false,
 ) {
     val pickDownloadDirectory = rememberPickDownloadDirectory(onPicked = onDownloadDirectory)
     val display = downloadDirectory?.let(::displayDownloadDirectory) ?: defaultDownloadDirectoryLabel
     var confirmDeleteAll by remember { mutableStateOf(false) }
+    var selectedTab by remember { mutableStateOf(DownloadManagerTab.Active) }
+    val policy = appSettings.downloadPolicy.normalized()
+    val filteredItems = remember(downloadItems, selectedTab) {
+        downloadItems
+            .filter { item -> selectedTab.includes(item) }
+            .sortedWith(compareBy<DownloadItem> { it.state.sortOrder }.thenByDescending { it.updatedAtMs }.thenBy { it.title })
+    }
     SettingsCard {
         Text("Downloads", color = PhoebeUi.primaryText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
         Text("Offline songs", color = PhoebeUi.mutedText, fontSize = 12.sp, modifier = Modifier.padding(bottom = 14.dp))
@@ -715,11 +840,29 @@ private fun DownloadsSettingsCard(
             }
         }
         Spacer(Modifier.height(14.dp))
-        Text("Downloaded songs", color = PhoebeUi.secondaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Text("Download manager", color = PhoebeUi.secondaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        FlowRow(
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            DownloadMetricChip("Active", downloadManager.active)
+            DownloadMetricChip("Complete", downloadManager.complete)
+            DownloadMetricChip("Failed", downloadManager.failed)
+            DownloadMetricChip("All", downloadManager.total)
+        }
+        if (downloadManager.estimatedBytes > 0L) {
+            Text(
+                "Estimated storage ${formatBytes(downloadManager.estimatedBytes)}",
+                color = PhoebeUi.secondaryText,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(top = 6.dp)
+                .padding(top = 10.dp)
                 .clip(RoundedCornerShape(10.dp))
                 .background(PhoebeUi.subtleFill)
                 .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(10.dp))
@@ -729,12 +872,12 @@ private fun DownloadsSettingsCard(
         ) {
             Column(Modifier.weight(1f)) {
                 Text(
-                    if (downloadCount == 1) "1 downloaded song" else "$downloadCount downloaded songs",
+                    if (downloadManager.total == 1) "1 tracked download" else "${downloadManager.total} tracked downloads",
                     color = PhoebeUi.primaryText,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                 )
-                Text("Remove offline files and clear download status", color = PhoebeUi.secondaryText, fontSize = 12.sp)
+                Text("Retry failures, clear finished files, or reset download status", color = PhoebeUi.secondaryText, fontSize = 12.sp)
             }
             Text(
                 "Delete all",
@@ -747,6 +890,77 @@ private fun DownloadsSettingsCard(
                     .padding(horizontal = 8.dp, vertical = 6.dp),
             )
         }
+        FlowRow(
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            DownloadManagerAction(
+                label = "Retry failed",
+                enabled = downloadManager.failed > 0,
+                onClick = onRetryFailedDownloads,
+            )
+            DownloadManagerAction(
+                label = "Clear failed",
+                enabled = downloadManager.failed > 0,
+                onClick = onClearFailedDownloads,
+            )
+            DownloadManagerAction(
+                label = "Delete complete",
+                enabled = downloadManager.complete > 0,
+                onClick = onDeleteCompletedDownloads,
+            )
+        }
+        Spacer(Modifier.height(14.dp))
+        DownloadManagerTabs(
+            selected = selectedTab,
+            summary = downloadManager,
+            onSelected = { selectedTab = it },
+        )
+        Spacer(Modifier.height(8.dp))
+        DownloadManagerList(
+            items = filteredItems,
+            selectedTab = selectedTab,
+            compact = compact,
+            onRetry = { item -> onRetryDownloads(setOf(item.trackId)) },
+            onCancel = { item -> onCancelDownloads(setOf(item.trackId)) },
+            onDelete = { item -> onDeleteDownloads(setOf(item.trackId)) },
+        )
+        Spacer(Modifier.height(14.dp))
+        Text("Download policy", color = PhoebeUi.secondaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        MixValueSlider(
+            label = "Concurrent downloads",
+            value = policy.maxConcurrentDownloads,
+            range = DownloadPolicySettings.MinConcurrentDownloads..DownloadPolicySettings.MaxConcurrentDownloads,
+            suffix = "",
+            compact = compact,
+        ) { value ->
+            onDownloadPolicySettings(policy.copy(maxConcurrentDownloads = value))
+        }
+        SettingsSwitchRow(
+            title = "Retry failed downloads",
+            subtitle = "Automatically requeue failed downloads when the manager runs",
+            checked = policy.autoRetryFailedDownloads,
+            onCheckedChange = { checked -> onDownloadPolicySettings(policy.copy(autoRetryFailedDownloads = checked)) },
+        )
+        SettingsSwitchRow(
+            title = "Wi-Fi only",
+            subtitle = "Avoid starting downloads on metered mobile networks when the platform can detect them",
+            checked = policy.wifiOnly,
+            onCheckedChange = { checked -> onDownloadPolicySettings(policy.withWifiOnly(checked)) },
+        )
+        SettingsSwitchRow(
+            title = "Completion alerts",
+            subtitle = "Use download completion notifications for this device",
+            checked = policy.notifyOnCompletion,
+            onCheckedChange = { checked -> onDownloadPolicySettings(policy.copy(notifyOnCompletion = checked)) },
+        )
+        Text(
+            "Quality: Original",
+            color = PhoebeUi.secondaryText,
+            fontSize = 12.sp,
+            modifier = Modifier.padding(top = 4.dp),
+        )
     }
     if (confirmDeleteAll) {
         DeleteDownloadsDialog(
@@ -759,6 +973,254 @@ private fun DownloadsSettingsCard(
         )
     }
 }
+
+@Composable
+private fun DownloadMetricChip(
+    label: String,
+    value: Int,
+) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(PhoebeUi.subtleFill)
+            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(8.dp))
+            .padding(horizontal = 10.dp, vertical = 7.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, color = PhoebeUi.secondaryText, fontSize = 12.sp)
+        Text(value.toString(), color = PhoebeUi.primaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun DownloadManagerAction(
+    label: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Text(
+        label,
+        color = if (enabled) PhoebeUi.accentLight else PhoebeUi.mutedText,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+    )
+}
+
+private enum class DownloadManagerTab(val label: String) {
+    Active("Active"),
+    Complete("Complete"),
+    Failed("Failed"),
+    All("All"),
+    ;
+
+    fun includes(item: DownloadItem): Boolean = when (this) {
+        Active -> item.state == DownloadState.Queued || item.state == DownloadState.Downloading
+        Complete -> item.state == DownloadState.Complete
+        Failed -> item.state == DownloadState.Failed
+        All -> true
+    }
+}
+
+private val DownloadState.sortOrder: Int
+    get() = when (this) {
+        DownloadState.Downloading -> 0
+        DownloadState.Queued -> 1
+        DownloadState.Failed -> 2
+        DownloadState.Complete -> 3
+    }
+
+@Composable
+private fun DownloadManagerTabs(
+    selected: DownloadManagerTab,
+    summary: DownloadManagerUiSummary,
+    onSelected: (DownloadManagerTab) -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(PhoebeUi.subtleFill)
+            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(10.dp))
+            .padding(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        DownloadManagerTab.entries.forEach { tab ->
+            val isSelected = tab == selected
+            val count = when (tab) {
+                DownloadManagerTab.Active -> summary.active
+                DownloadManagerTab.Complete -> summary.complete
+                DownloadManagerTab.Failed -> summary.failed
+                DownloadManagerTab.All -> summary.total
+            }
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(36.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { onSelected(tab) }
+                    .background(if (isSelected) PhoebeUi.accent.copy(alpha = 0.16f) else Color.Transparent)
+                    .border(
+                        BorderStroke(1.dp, if (isSelected) PhoebeUi.accent.copy(alpha = 0.32f) else Color.Transparent),
+                        RoundedCornerShape(8.dp),
+                    ),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "${tab.label} $count",
+                    color = if (isSelected) PhoebeUi.accentLight else PhoebeUi.secondaryText,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DownloadManagerList(
+    items: List<DownloadItem>,
+    selectedTab: DownloadManagerTab,
+    compact: Boolean,
+    onRetry: (DownloadItem) -> Unit,
+    onCancel: (DownloadItem) -> Unit,
+    onDelete: (DownloadItem) -> Unit,
+) {
+    if (items.isEmpty()) {
+        Text(
+            "No ${selectedTab.label.lowercase()} downloads",
+            color = PhoebeUi.mutedText,
+            fontSize = 12.sp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .background(PhoebeUi.subtleFill)
+                .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(10.dp))
+                .padding(horizontal = 12.dp, vertical = 12.dp),
+        )
+        return
+    }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(PhoebeUi.subtleFill)
+            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(10.dp)),
+    ) {
+        items.take(if (compact) 6 else 10).forEachIndexed { index, item ->
+            DownloadManagerRow(
+                item = item,
+                onRetry = onRetry,
+                onCancel = onCancel,
+                onDelete = onDelete,
+            )
+            if (index != items.lastIndex && index != (if (compact) 5 else 9)) {
+                Box(Modifier.fillMaxWidth().height(1.dp).background(PhoebeUi.border.copy(alpha = 0.55f)))
+            }
+        }
+        if (items.size > if (compact) 6 else 10) {
+            Text(
+                "${items.size - if (compact) 6 else 10} more downloads in this tab",
+                color = PhoebeUi.mutedText,
+                fontSize = 11.sp,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun DownloadManagerRow(
+    item: DownloadItem,
+    onRetry: (DownloadItem) -> Unit,
+    onCancel: (DownloadItem) -> Unit,
+    onDelete: (DownloadItem) -> Unit,
+) {
+    val stateTint = downloadStateTint(item.state)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            PhoebeIconView(PhoebeIcon.Download, tint = stateTint, modifier = Modifier.size(15.dp))
+            Column(Modifier.weight(1f)) {
+                Text(item.title, color = PhoebeUi.primaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(item.artist, color = PhoebeUi.secondaryText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Text(item.state.label, color = stateTint, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+        }
+        if (item.state == DownloadState.Downloading || item.state == DownloadState.Queued) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(PhoebeUi.progressTrack),
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxWidth(item.progress.coerceIn(0f, 1f))
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(PhoebeUi.accentLight),
+                )
+            }
+        }
+        item.error?.takeIf { it.isNotBlank() }?.let { error ->
+            Text(error, color = PhoebeUi.mutedText, fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (item.state == DownloadState.Failed) {
+                DownloadManagerAction("Retry", enabled = item.downloadUrl.isNotBlank(), onClick = { onRetry(item) })
+            }
+            if (item.state == DownloadState.Queued || item.state == DownloadState.Downloading) {
+                DownloadManagerAction("Cancel", enabled = true, onClick = { onCancel(item) })
+            }
+            DownloadManagerAction(
+                label = if (item.state == DownloadState.Complete) "Delete file" else "Remove",
+                enabled = true,
+                onClick = { onDelete(item) },
+            )
+            item.totalBytes?.takeIf { it > 0L }?.let { total ->
+                Text(
+                    "${formatBytes(item.downloadedBytes)} / ${formatBytes(total)}",
+                    color = PhoebeUi.mutedText,
+                    fontSize = 11.sp,
+                )
+            }
+        }
+    }
+}
+
+private val DownloadState.label: String
+    get() = when (this) {
+        DownloadState.Queued -> "Queued"
+        DownloadState.Downloading -> "Downloading"
+        DownloadState.Complete -> "Complete"
+        DownloadState.Failed -> "Failed"
+    }
+
+@Composable
+private fun downloadStateTint(state: DownloadState): Color =
+    when (state) {
+        DownloadState.Queued -> PhoebeUi.secondaryText
+        DownloadState.Downloading -> PhoebeUi.accentLight
+        DownloadState.Complete -> PhoebeUi.primaryText
+        DownloadState.Failed -> PhoebeUi.mutedText
+    }
 
 @Composable
 private fun DeleteDownloadsDialog(
@@ -807,6 +1269,17 @@ private fun displayDownloadDirectory(uri: String): String =
         .replace("%20", " ")
         .substringAfterLast("tree/", uri)
         .ifBlank { uri }
+
+private fun formatBytes(bytes: Long): String {
+    val mib = 1024L * 1024L
+    val gib = mib * 1024L
+    return when {
+        bytes >= gib -> "${((bytes * 10L) / gib) / 10.0} GB"
+        bytes >= mib -> "${((bytes * 10L) / mib) / 10.0} MB"
+        bytes >= 1024L -> "${bytes / 1024L} KB"
+        else -> "$bytes B"
+    }
+}
 
 @Composable
 private fun PersonalMixSettingsCard(
@@ -1208,6 +1681,40 @@ private fun RadioStationsSettingsCard(
     }
 }
 
+@Composable
+private fun BackupSettingsCard(
+    onExportBackupPackage: () -> Unit,
+    onImportBackupPackage: () -> Unit,
+    onReplaceFromBackupPackage: () -> Unit,
+    compact: Boolean = false,
+) {
+    SettingsCard {
+        Text("Phoebe backup", color = PhoebeUi.primaryText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Text(
+            "Export or restore settings, smart playlists, saved searches, and local metadata overrides",
+            color = PhoebeUi.mutedText,
+            fontSize = 12.sp,
+            lineHeight = 17.sp,
+            modifier = Modifier.padding(bottom = if (compact) 8.dp else 12.dp),
+        )
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            TextButton(onClick = onExportBackupPackage) {
+                Text("Export", color = PhoebeUi.accentLight)
+            }
+            TextButton(onClick = onImportBackupPackage) {
+                Text("Merge", color = PhoebeUi.accentLight)
+            }
+            TextButton(onClick = onReplaceFromBackupPackage) {
+                Text("Replace", color = PhoebeUi.accentLight)
+            }
+        }
+    }
+}
+
 private val HomeSection.icon: PhoebeIcon
     get() = when (this) {
         HomeSection.Mixes -> PhoebeIcon.Music
@@ -1270,6 +1777,7 @@ private fun SettingsSwitchRow(
     title: String,
     subtitle: String,
     checked: Boolean,
+    enabled: Boolean = true,
     onCheckedChange: (Boolean) -> Unit,
 ) {
     Row(
@@ -1280,12 +1788,13 @@ private fun SettingsSwitchRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(title, color = PhoebeUi.primaryText, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-            Text(subtitle, color = PhoebeUi.secondaryText, fontSize = 12.sp)
+            Text(title, color = if (enabled) PhoebeUi.primaryText else PhoebeUi.mutedText, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Text(subtitle, color = if (enabled) PhoebeUi.secondaryText else PhoebeUi.mutedText, fontSize = 12.sp)
         }
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
+            enabled = enabled,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = Color.White,
                 checkedTrackColor = PhoebeUi.accentLight,
@@ -1306,6 +1815,11 @@ private fun AccountSettingsCard(
     onListenBrainzSubmitNowPlaying: (Boolean) -> Unit,
     onListenBrainzSubmitListens: (Boolean) -> Unit,
     onListenBrainzSubmitCurrentTrackFeedback: (Boolean) -> Unit,
+    onStartLastFmAuthorization: (String, String) -> Unit,
+    onFinishLastFmAuthorization: () -> Unit,
+    onDisconnectLastFm: () -> Unit,
+    onLastFmSubmitNowPlaying: (Boolean) -> Unit,
+    onLastFmSubmitScrobbles: (Boolean) -> Unit,
     compact: Boolean = false,
 ) {
     val signedIn = session?.token?.isNotBlank() == true
@@ -1382,6 +1896,17 @@ private fun AccountSettingsCard(
             onSubmitNowPlaying = onListenBrainzSubmitNowPlaying,
             onSubmitListens = onListenBrainzSubmitListens,
             onSubmitCurrentTrackFeedback = onListenBrainzSubmitCurrentTrackFeedback,
+            compact = compact,
+        )
+        Spacer(Modifier.height(12.dp))
+        LastFmSettingsSection(
+            appSettings = appSettings,
+            credentialAvailability = listenBrainzCredentialAvailability,
+            onStartAuthorization = onStartLastFmAuthorization,
+            onFinishAuthorization = onFinishLastFmAuthorization,
+            onDisconnect = onDisconnectLastFm,
+            onSubmitNowPlaying = onLastFmSubmitNowPlaying,
+            onSubmitScrobbles = onLastFmSubmitScrobbles,
             compact = compact,
         )
     }
@@ -1481,6 +2006,7 @@ private fun ListenBrainzSettingsSection(
                 onTokenChange = { token = it },
                 onSubmit = submitConnect,
                 enabled = !isConnecting,
+                placeholder = "User token",
                 compact = compact,
             )
             Spacer(Modifier.height(8.dp))
@@ -1533,11 +2059,166 @@ private fun ListenBrainzSettingsSection(
 }
 
 @Composable
+private fun LastFmSettingsSection(
+    appSettings: AppSettings,
+    credentialAvailability: SecureCredentialAvailability,
+    onStartAuthorization: (String, String) -> Unit,
+    onFinishAuthorization: () -> Unit,
+    onDisconnect: () -> Unit,
+    onSubmitNowPlaying: (Boolean) -> Unit,
+    onSubmitScrobbles: (Boolean) -> Unit,
+    compact: Boolean,
+) {
+    val settings = appSettings.lastFm
+    val nowMs = LocalNowMs.current
+    var apiKey by remember(settings.connected) { mutableStateOf(settings.apiKey.orEmpty()) }
+    var sharedSecret by remember(settings.connected) { mutableStateOf("") }
+    var isConnecting by remember(settings.connected) { mutableStateOf(false) }
+    var awaitingAuthorization by remember(settings.connected) { mutableStateOf(false) }
+    var authorizationNotice by remember(settings.connected) { mutableStateOf<String?>(null) }
+    LaunchedEffect(settings.connected, settings.lastValidatedAtMs, settings.lastError) {
+        isConnecting = false
+        if (settings.connected) {
+            apiKey = settings.apiKey.orEmpty()
+            sharedSecret = ""
+            awaitingAuthorization = false
+            authorizationNotice = null
+        } else if (settings.lastError != null) {
+            authorizationNotice = null
+        }
+    }
+    LaunchedEffect(isConnecting, apiKey, sharedSecret, awaitingAuthorization) {
+        if (!isConnecting) return@LaunchedEffect
+        delay(ListenBrainzConnectUiTimeoutMs)
+        isConnecting = false
+    }
+    val canStartAuthorization = apiKey.isNotBlank() && sharedSecret.isNotBlank()
+    val startAuthorization = {
+        when {
+            apiKey.isBlank() -> authorizationNotice = "Enter a Last.fm API key."
+            sharedSecret.isBlank() -> authorizationNotice = "Enter a Last.fm shared secret."
+            !isConnecting -> {
+                authorizationNotice = "A Last.fm approval page should open shortly. Return here and click Finish."
+                awaitingAuthorization = true
+                onStartAuthorization(apiKey.trim(), sharedSecret.trim())
+            }
+        }
+    }
+    val finishAuthorization = {
+        if (awaitingAuthorization && !isConnecting) {
+            isConnecting = true
+            onFinishAuthorization()
+        }
+    }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(PhoebeUi.subtleFill)
+            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(12.dp))
+            .padding(horizontal = 14.dp, vertical = 14.dp),
+    ) {
+        Text("Last.fm", color = PhoebeUi.primaryText, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        Text(
+            if (settings.connected) "Scrobbling as ${settings.username}" else "Connect optional Last.fm scrobbling",
+            color = PhoebeUi.secondaryText,
+            fontSize = 12.sp,
+            modifier = Modifier.padding(top = 3.dp, bottom = 12.dp),
+        )
+        if (settings.connected) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(PhoebeUi.panel.copy(alpha = 0.52f))
+                    .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(10.dp))
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+            ) {
+                settings.username?.let { AccountDetailRow(label = "Username", value = it) }
+                AccountDetailRow(label = "Storage", value = listenBrainzStorageLabel(settings.storageStatus, credentialAvailability))
+                settings.lastNowPlayingSubmittedAtMs?.let {
+                    AccountDetailRow(label = "Last now playing", value = formatLastPlayed(it, nowMs))
+                }
+                settings.lastScrobbleSubmittedAtMs?.let {
+                    AccountDetailRow(label = "Last scrobble", value = formatLastPlayed(it, nowMs))
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            SettingsSwitchRow(
+                title = "Now playing",
+                subtitle = "Show the current track on Last.fm",
+                checked = settings.submitNowPlaying,
+                onCheckedChange = onSubmitNowPlaying,
+            )
+            SettingsSwitchRow(
+                title = "Scrobbles",
+                subtitle = "Submit after half the track or four minutes",
+                checked = settings.submitScrobbles,
+                onCheckedChange = onSubmitScrobbles,
+            )
+            (settings.lastScrobbleError ?: settings.lastError)?.let { error ->
+                Text(error, color = PhoebeUi.accentLight, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+            }
+            TextButton(onClick = onDisconnect, modifier = Modifier.align(Alignment.End)) {
+                Text("Disconnect", color = PhoebeUi.accentLight, fontWeight = FontWeight.SemiBold)
+            }
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ListenBrainzTokenField(apiKey, { apiKey = it }, startAuthorization, !isConnecting, "API key", compact)
+                ListenBrainzTokenField(sharedSecret, { sharedSecret = it }, startAuthorization, !isConnecting, "Shared secret", compact)
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(listenBrainzStorageNote(credentialAvailability), color = PhoebeUi.secondaryText, fontSize = 12.sp)
+            Text(
+                authorizationNotice ?: if (awaitingAuthorization) {
+                    "Approve Phoebe in the Last.fm browser page, then finish here."
+                } else {
+                    "Phoebe will open Last.fm and save the session key after authorization."
+                },
+                color = PhoebeUi.secondaryText,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            if (isConnecting) {
+                Text("Connecting...", color = PhoebeUi.secondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+            }
+            settings.lastError?.let { error ->
+                Text(error, color = PhoebeUi.accentLight, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(top = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = { openExternalUrl(LastFmApiAccountsUrl) }) {
+                    Text("API account", color = PhoebeUi.secondaryText)
+                }
+                TextButton(enabled = awaitingAuthorization && !isConnecting, onClick = finishAuthorization) {
+                    Text(
+                        "Finish",
+                        color = if (awaitingAuthorization && !isConnecting) PhoebeUi.accentLight else PhoebeUi.mutedText,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                TextButton(enabled = !isConnecting, onClick = startAuthorization) {
+                    Text(
+                        "Authorize",
+                        color = if (!isConnecting && canStartAuthorization) PhoebeUi.accentLight else PhoebeUi.mutedText,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun ListenBrainzTokenField(
     token: String,
     onTokenChange: (String) -> Unit,
     onSubmit: () -> Unit,
     enabled: Boolean,
+    placeholder: String,
     compact: Boolean,
 ) {
     BasicTextField(
@@ -1560,7 +2241,7 @@ private fun ListenBrainzTokenField(
         decorationBox = { innerTextField ->
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
                 if (token.isBlank()) {
-                    Text("User token", color = PhoebeUi.mutedText, fontSize = if (compact) 12.sp else 13.sp)
+                    Text(placeholder, color = PhoebeUi.mutedText, fontSize = if (compact) 12.sp else 13.sp)
                 }
                 innerTextField()
             }
@@ -1710,6 +2391,7 @@ private fun GenericPlaceholderCard(title: String, compact: Boolean = false) {
 }
 
 private const val ListenBrainzSettingsUrl = "https://listenbrainz.org/settings/"
+private const val LastFmApiAccountsUrl = "https://www.last.fm/api/account/create"
 private const val ListenBrainzConnectUiTimeoutMs = 50_000L
 private const val ProjectGitHubUrl = "https://github.com/${PhoebeBuildInfo.githubOwner}/${PhoebeBuildInfo.githubRepo}"
 private const val CreatorWebsiteUrl = "https://joetr.com"

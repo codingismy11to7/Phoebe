@@ -13,6 +13,15 @@ expect fun isIosPlatform(): Boolean
 
 expect fun supportsPredictiveBack(): Boolean
 
+data class NetworkMeteringStatus(
+    val isMetered: Boolean = false,
+    val isCellular: Boolean = false,
+)
+
+expect fun currentNetworkMeteringStatus(): NetworkMeteringStatus
+
+expect fun defaultDownloadWifiOnly(): Boolean
+
 expect class PlatformStorage() {
     suspend fun readText(name: String): String?
     suspend fun writeText(name: String, value: String)

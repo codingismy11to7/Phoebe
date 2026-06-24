@@ -26,6 +26,7 @@ fun phoebeWebRoutesForPath(path: String?): List<PhoebeRoute> {
         "radio" -> listOf(PhoebeRoute.Browse(BrowseSection.Radio))
         "lyrics" -> parseLyricsPath(segments)
         "playlists" -> parsePlaylistsPath(segments)
+        "downloads" -> listOf(PhoebeRoute.Browse(BrowseSection.Downloads))
         "settings" -> listOf(PhoebeRoute.Browse(BrowseSection.Settings))
         "signin" -> listOf(PhoebeRoute.SignIn)
         "setup" -> parseSetupPath(segments)
@@ -45,13 +46,40 @@ fun List<PhoebeRoute>.withUnavailableBrowseFallback(
     fallbackRoutes: List<PhoebeRoute>,
 ): List<PhoebeRoute> {
     val safeFallbackRoutes = fallbackRoutes.ifEmpty { listOf(PhoebeRoute.SignIn) }
-    val needsBrowseSource = firstOrNull() is PhoebeRoute.Browse
-    val fallbackHasBrowseSource = safeFallbackRoutes.firstOrNull() is PhoebeRoute.Browse
-    return if (needsBrowseSource && !fallbackHasBrowseSource) {
+    val needsBrowseSource = firstOrNull().requiresBrowseSource()
+    val sourceAvailable = safeFallbackRoutes.firstOrNull().requiresBrowseSource()
+    return if (needsBrowseSource && !sourceAvailable) {
         safeFallbackRoutes
     } else {
         this
     }
+}
+
+private fun PhoebeRoute?.requiresBrowseSource(): Boolean = when (this) {
+    is PhoebeRoute.Browse -> section.requiresBrowseSource()
+    is PhoebeRoute.AlbumDetail,
+    is PhoebeRoute.ArtistAlbumSlugDetail,
+    is PhoebeRoute.ArtistDetail,
+    is PhoebeRoute.ArtistSlugDetail,
+    is PhoebeRoute.CollectionItems,
+    is PhoebeRoute.Collections,
+    is PhoebeRoute.PlayHistory,
+    is PhoebeRoute.PlaylistDetail,
+    is PhoebeRoute.PlaylistSlugDetail,
+    is PhoebeRoute.RecentlyAdded,
+    is PhoebeRoute.SongDetail,
+    PhoebeRoute.FavoriteAlbums,
+    PhoebeRoute.FavoriteArtists,
+    PhoebeRoute.FavoritePlaylists,
+    -> true
+
+    PhoebeRoute.LibraryPicker,
+    is PhoebeRoute.Lyrics,
+    PhoebeRoute.Player,
+    PhoebeRoute.ServerPicker,
+    PhoebeRoute.SignIn,
+    null,
+    -> false
 }
 
 fun PhoebeRoute.toPhoebeWebPath(
@@ -67,6 +95,7 @@ fun PhoebeRoute.toPhoebeWebPath(
         BrowseSection.Radio -> "/radio"
         BrowseSection.Lyrics -> "/lyrics"
         BrowseSection.Playlists -> "/playlists"
+        BrowseSection.Downloads -> "/downloads"
         BrowseSection.Settings -> "/settings"
     }
     is PhoebeRoute.Collections -> "/collections/${entry.target.pathSegment()}/${entry.facet.pathSegment()}"

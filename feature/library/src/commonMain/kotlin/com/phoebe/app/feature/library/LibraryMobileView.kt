@@ -1328,6 +1328,7 @@ fun FavoritePlaylistsMobileView(
 
 @Composable
 fun PlaylistsMobileView(
+    catalog: CatalogSnapshot,
     catalogRefreshing: Boolean,
     searchQuery: String,
     onSearchQuery: (String) -> Unit,
@@ -1336,6 +1337,10 @@ fun PlaylistsMobileView(
 ) {
     val playlistActions = LocalPlaylistActions.current
     val playlists = playlistActions.playlists
+    var showSmartPlaylistDialog by remember { mutableStateOf(false) }
+    if (showSmartPlaylistDialog) {
+        SmartPlaylistTemplateDialog(catalog = catalog, onDismiss = { showSmartPlaylistDialog = false })
+    }
     val preparedVisiblePlaylists = remember(playlists, searchQuery) {
         filterPlaylistsByQuery(playlists, searchQuery)
     }
@@ -1395,6 +1400,15 @@ fun PlaylistsMobileView(
                         onClick = { playlistActions.onRequestCreatePlaylist(emptyList()) },
                     )
                 }
+                item(contentType = "create-smart") {
+                    MobilePlaylistRow(
+                        icon = PhoebeIcon.InterwovenArrows,
+                        title = "Create Smart Playlist",
+                        subtitle = null,
+                        accent = true,
+                        onClick = { showSmartPlaylistDialog = true },
+                    )
+                }
                 if (playlists.isEmpty()) {
                     item(contentType = "empty") {
                         Text(
@@ -1418,15 +1432,21 @@ fun PlaylistsMobileView(
                 } else {
                     items(preparedVisiblePlaylists, key = { it.id }, contentType = { "playlist" }) { playlist ->
                         val liked = playlist.isLikedSongsPlaylist()
+                        val smart = playlist.isSmartPlaylist()
                         MobilePlaylistRow(
-                            icon = if (liked) PhoebeIcon.Heart else null,
+                            icon = when {
+                                liked -> PhoebeIcon.Heart
+                                smart -> PhoebeIcon.InterwovenArrows
+                                else -> null
+                            },
                             title = playlist.title,
                             subtitle = "${playlist.trackCount} songs",
                             thumbUrl = playlist.thumbUrl,
-                            accent = liked,
+                            accent = liked || smart,
                             sharedKey = "playlist:${playlist.id}",
                             onClick = { onPlaylist(playlist) },
                             onLongClick = { playlistActions.onShufflePlaylist(playlist) },
+                            trailingContent = { PlaylistManagementMenuButton(playlist) },
                         )
                     }
                 }
@@ -1445,6 +1465,7 @@ fun MobilePlaylistRow(
     sharedKey: String? = null,
     onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null,
+    trailingContent: (@Composable () -> Unit)? = null,
 ) {
     Row(
         Modifier
@@ -1502,6 +1523,7 @@ fun MobilePlaylistRow(
                 Text(subtitle, color = PhoebeUi.mutedText, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
+        trailingContent?.invoke()
         PhoebeIconView(PhoebeIcon.Forward, tint = PhoebeUi.mutedText, modifier = Modifier.size(12.dp))
     }
 }

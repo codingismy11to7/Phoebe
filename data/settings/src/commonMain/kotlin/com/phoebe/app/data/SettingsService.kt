@@ -11,6 +11,7 @@ import dev.zacsweers.metro.SingleIn
 class SettingsService(
     private val appSettingsRepository: AppSettingsRepository,
     private val searchHistoryRepository: SearchHistoryRepository,
+    private val userArtifactsRepository: UserArtifactsRepository,
 ) {
     suspend fun prependRecentSearch(item: RecentSearchItem) {
         searchHistoryRepository.prepend(item)
@@ -22,6 +23,10 @@ class SettingsService(
 
     suspend fun clearRecentSearches() {
         searchHistoryRepository.clear()
+    }
+
+    suspend fun clearUserArtifacts() {
+        userArtifactsRepository.clearUserArtifacts()
     }
 
     suspend fun setCrossfadeSeconds(seconds: Int) {

@@ -45,6 +45,7 @@ fun BrowseSection.mobileBottomTab(): MobileBottomTab? = when (this) {
     BrowseSection.Playlists -> MobileBottomTab.Playlists
     BrowseSection.Radio -> MobileBottomTab.Radio
     BrowseSection.Lyrics,
+    BrowseSection.Downloads,
     BrowseSection.Settings,
     -> null
 }
@@ -122,6 +123,7 @@ fun mobileSectionTitle(section: BrowseSection): String = when (section) {
     BrowseSection.Radio -> "Radio"
     BrowseSection.Lyrics -> "Lyrics"
     BrowseSection.Playlists -> "Playlists"
+    BrowseSection.Downloads -> "Downloads"
     BrowseSection.Settings -> "Settings"
 }
 

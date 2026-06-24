@@ -1,0 +1,71 @@
+ALTER TABLE AppSettingsRow ADD COLUMN downloadPolicySettings TEXT NOT NULL DEFAULT '{"quality":"Original","maxConcurrentDownloads":3,"autoRetryFailedDownloads":true,"wifiOnly":false,"wifiOnlyConfigured":false,"notifyOnCompletion":true}';
+ALTER TABLE AppSettingsRow ADD COLUMN audioProcessingSettings TEXT NOT NULL DEFAULT '{"gaplessEnabled":true,"crossfeedEnabled":false,"crossfeedAmount":0.35,"selectedOutputDeviceId":null,"exclusiveMode":false,"bitPerfectPreference":false}';
+
+ALTER TABLE AlbumRow ADD COLUMN albumArtist TEXT;
+
+ALTER TABLE TrackRow ADD COLUMN albumArtist TEXT;
+ALTER TABLE TrackRow ADD COLUMN composer TEXT;
+ALTER TABLE TrackRow ADD COLUMN sampleRateHz INTEGER;
+ALTER TABLE TrackRow ADD COLUMN bitDepth INTEGER;
+ALTER TABLE TrackRow ADD COLUMN channelCount INTEGER;
+ALTER TABLE TrackRow ADD COLUMN trackNumber INTEGER;
+ALTER TABLE TrackRow ADD COLUMN discNumber INTEGER;
+ALTER TABLE TrackRow ADD COLUMN bpm INTEGER;
+ALTER TABLE TrackRow ADD COLUMN replayGainTrackGainDb REAL;
+ALTER TABLE TrackRow ADD COLUMN replayGainTrackPeak REAL;
+ALTER TABLE TrackRow ADD COLUMN replayGainAlbumGainDb REAL;
+ALTER TABLE TrackRow ADD COLUMN replayGainAlbumPeak REAL;
+ALTER TABLE TrackRow ADD COLUMN musicBrainzTrackId TEXT;
+ALTER TABLE TrackRow ADD COLUMN musicBrainzReleaseId TEXT;
+ALTER TABLE TrackRow ADD COLUMN comments TEXT;
+ALTER TABLE TrackRow ADD COLUMN explicit INTEGER;
+ALTER TABLE TrackRow ADD COLUMN titleSort TEXT;
+ALTER TABLE TrackRow ADD COLUMN artistSort TEXT;
+ALTER TABLE TrackRow ADD COLUMN albumSort TEXT;
+
+ALTER TABLE LocalFileMetadataCacheRow ADD COLUMN albumArtist TEXT;
+ALTER TABLE LocalFileMetadataCacheRow ADD COLUMN composer TEXT;
+ALTER TABLE LocalFileMetadataCacheRow ADD COLUMN sampleRateHz INTEGER;
+ALTER TABLE LocalFileMetadataCacheRow ADD COLUMN bitDepth INTEGER;
+ALTER TABLE LocalFileMetadataCacheRow ADD COLUMN channelCount INTEGER;
+ALTER TABLE LocalFileMetadataCacheRow ADD COLUMN trackNumber INTEGER;
+ALTER TABLE LocalFileMetadataCacheRow ADD COLUMN discNumber INTEGER;
+ALTER TABLE LocalFileMetadataCacheRow ADD COLUMN bpm INTEGER;
+ALTER TABLE LocalFileMetadataCacheRow ADD COLUMN replayGainTrackGainDb REAL;
+ALTER TABLE LocalFileMetadataCacheRow ADD COLUMN replayGainTrackPeak REAL;
+ALTER TABLE LocalFileMetadataCacheRow ADD COLUMN replayGainAlbumGainDb REAL;
+ALTER TABLE LocalFileMetadataCacheRow ADD COLUMN replayGainAlbumPeak REAL;
+ALTER TABLE LocalFileMetadataCacheRow ADD COLUMN musicBrainzTrackId TEXT;
+ALTER TABLE LocalFileMetadataCacheRow ADD COLUMN musicBrainzReleaseId TEXT;
+ALTER TABLE LocalFileMetadataCacheRow ADD COLUMN comments TEXT;
+ALTER TABLE LocalFileMetadataCacheRow ADD COLUMN explicit INTEGER;
+ALTER TABLE LocalFileMetadataCacheRow ADD COLUMN titleSort TEXT;
+ALTER TABLE LocalFileMetadataCacheRow ADD COLUMN artistSort TEXT;
+ALTER TABLE LocalFileMetadataCacheRow ADD COLUMN albumSort TEXT;
+
+CREATE TABLE SmartPlaylistRow (
+    id TEXT NOT NULL PRIMARY KEY,
+    title TEXT NOT NULL,
+    filterSpec TEXT NOT NULL,
+    sortSpec TEXT NOT NULL,
+    trackLimit INTEGER,
+    createdAtMs INTEGER NOT NULL,
+    updatedAtMs INTEGER NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE SavedSearchRow (
+    id TEXT NOT NULL PRIMARY KEY,
+    title TEXT NOT NULL,
+    querySpec TEXT NOT NULL,
+    createdAtMs INTEGER NOT NULL,
+    updatedAtMs INTEGER NOT NULL
+);
+
+CREATE TABLE LocalMetadataOverrideRow (
+    trackId TEXT NOT NULL PRIMARY KEY,
+    updateSpec TEXT NOT NULL,
+    providerType TEXT,
+    syncStatus TEXT NOT NULL DEFAULT 'LocalOnly',
+    updatedAtMs INTEGER NOT NULL
+);

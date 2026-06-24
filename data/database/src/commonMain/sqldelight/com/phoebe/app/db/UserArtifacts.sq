@@ -1,0 +1,76 @@
+-- User-owned artifacts that are local to Phoebe and never imply provider sync by themselves.
+
+CREATE TABLE SmartPlaylistRow (
+    id TEXT NOT NULL PRIMARY KEY,
+    title TEXT NOT NULL,
+    filterSpec TEXT NOT NULL,
+    sortSpec TEXT NOT NULL,
+    trackLimit INTEGER,
+    createdAtMs INTEGER NOT NULL,
+    updatedAtMs INTEGER NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE SavedSearchRow (
+    id TEXT NOT NULL PRIMARY KEY,
+    title TEXT NOT NULL,
+    querySpec TEXT NOT NULL,
+    createdAtMs INTEGER NOT NULL,
+    updatedAtMs INTEGER NOT NULL
+);
+
+CREATE TABLE LocalMetadataOverrideRow (
+    trackId TEXT NOT NULL PRIMARY KEY,
+    updateSpec TEXT NOT NULL,
+    providerType TEXT,
+    syncStatus TEXT NOT NULL DEFAULT 'LocalOnly',
+    updatedAtMs INTEGER NOT NULL
+);
+
+selectSmartPlaylists:
+SELECT * FROM SmartPlaylistRow ORDER BY title COLLATE NOCASE;
+
+selectEnabledSmartPlaylists:
+SELECT * FROM SmartPlaylistRow WHERE enabled != 0 ORDER BY title COLLATE NOCASE;
+
+upsertSmartPlaylist:
+INSERT OR REPLACE INTO SmartPlaylistRow(
+    id, title, filterSpec, sortSpec, trackLimit, createdAtMs, updatedAtMs, enabled
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+
+deleteSmartPlaylist:
+DELETE FROM SmartPlaylistRow WHERE id = ?;
+
+clearSmartPlaylists:
+DELETE FROM SmartPlaylistRow;
+
+selectSavedSearches:
+SELECT * FROM SavedSearchRow ORDER BY title COLLATE NOCASE;
+
+upsertSavedSearch:
+INSERT OR REPLACE INTO SavedSearchRow(
+    id, title, querySpec, createdAtMs, updatedAtMs
+) VALUES (?, ?, ?, ?, ?);
+
+deleteSavedSearch:
+DELETE FROM SavedSearchRow WHERE id = ?;
+
+clearSavedSearches:
+DELETE FROM SavedSearchRow;
+
+selectLocalMetadataOverrides:
+SELECT * FROM LocalMetadataOverrideRow ORDER BY updatedAtMs DESC;
+
+selectLocalMetadataOverride:
+SELECT * FROM LocalMetadataOverrideRow WHERE trackId = ? LIMIT 1;
+
+upsertLocalMetadataOverride:
+INSERT OR REPLACE INTO LocalMetadataOverrideRow(
+    trackId, updateSpec, providerType, syncStatus, updatedAtMs
+) VALUES (?, ?, ?, ?, ?);
+
+deleteLocalMetadataOverride:
+DELETE FROM LocalMetadataOverrideRow WHERE trackId = ?;
+
+clearLocalMetadataOverrides:
+DELETE FROM LocalMetadataOverrideRow;

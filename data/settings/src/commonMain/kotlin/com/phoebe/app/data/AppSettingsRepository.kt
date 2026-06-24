@@ -3,7 +3,10 @@ package com.phoebe.app.data
 import app.cash.sqldelight.async.coroutines.awaitAsOneOrNull
 import com.phoebe.app.db.PhoebeDatabase
 import com.phoebe.app.domain.AppSettings
+import com.phoebe.app.domain.AudioProcessingSettings
+import com.phoebe.app.domain.DownloadPolicySettings
 import com.phoebe.app.domain.EqualizerProfile
+import com.phoebe.app.domain.LastFmSettings
 import com.phoebe.app.domain.ListenBrainzSettings
 import com.phoebe.app.domain.NowPlayingVisualizerPreset
 import dev.zacsweers.metro.AppScope
@@ -113,9 +116,33 @@ class AppSettingsRepository(
         }
     }
 
+    suspend fun setLastFmSettings(settings: LastFmSettings) {
+        updateAndSave { current ->
+            current.copy(lastFm = settings.normalized())
+        }
+    }
+
+    suspend fun setDownloadPolicySettings(settings: DownloadPolicySettings) {
+        updateAndSave { current ->
+            current.copy(downloadPolicy = settings.normalized())
+        }
+    }
+
+    suspend fun setAudioProcessingSettings(settings: AudioProcessingSettings) {
+        updateAndSave { current ->
+            current.copy(audioProcessing = settings.normalized())
+        }
+    }
+
     suspend fun updateListenBrainzSettings(transform: (ListenBrainzSettings) -> ListenBrainzSettings) {
         updateAndSave { current ->
             current.copy(listenBrainz = transform(current.listenBrainz).normalized())
+        }
+    }
+
+    suspend fun updateLastFmSettings(transform: (LastFmSettings) -> LastFmSettings) {
+        updateAndSave { current ->
+            current.copy(lastFm = transform(current.lastFm).normalized())
         }
     }
 
@@ -138,6 +165,9 @@ class AppSettingsRepository(
                     nowPlayingVisualizerPreset = normalized.nowPlayingVisualizerPreset.name,
                     blurredArtworkAppearance = normalized.blurredArtworkAppearance.toDb(),
                     listenBrainzSettings = json.encodeToString(normalized.listenBrainz),
+                    lastFmSettings = json.encodeToString(normalized.lastFm),
+                    downloadPolicySettings = json.encodeToString(normalized.downloadPolicy),
+                    audioProcessingSettings = json.encodeToString(normalized.audioProcessing),
                 )
                 mutableState.value = normalized
             }
@@ -156,6 +186,9 @@ class AppSettingsRepository(
             nowPlayingVisualizerPreset = NowPlayingVisualizerPreset.fromStoredName(nowPlayingVisualizerPreset),
             blurredArtworkAppearance = blurredArtworkAppearance.toBool(),
             listenBrainz = decodeListenBrainzSettings(listenBrainzSettings),
+            lastFm = decodeLastFmSettings(lastFmSettings),
+            downloadPolicy = decodeDownloadPolicySettings(downloadPolicySettings),
+            audioProcessing = decodeAudioProcessingSettings(audioProcessingSettings),
         ).normalized()
 
     private fun decodeEqualizerProfile(value: String): EqualizerProfile =
@@ -174,6 +207,33 @@ class AppSettingsRepository(
             ListenBrainzSettings.Disconnected
         } catch (_: IllegalArgumentException) {
             ListenBrainzSettings.Disconnected
+        }
+
+    private fun decodeLastFmSettings(value: String): LastFmSettings =
+        try {
+            json.decodeFromString<LastFmSettings>(value).normalized()
+        } catch (_: SerializationException) {
+            LastFmSettings.Disconnected
+        } catch (_: IllegalArgumentException) {
+            LastFmSettings.Disconnected
+        }
+
+    private fun decodeDownloadPolicySettings(value: String): DownloadPolicySettings =
+        try {
+            json.decodeFromString<DownloadPolicySettings>(value).normalized()
+        } catch (_: SerializationException) {
+            DownloadPolicySettings()
+        } catch (_: IllegalArgumentException) {
+            DownloadPolicySettings()
+        }
+
+    private fun decodeAudioProcessingSettings(value: String): AudioProcessingSettings =
+        try {
+            json.decodeFromString<AudioProcessingSettings>(value).normalized()
+        } catch (_: SerializationException) {
+            AudioProcessingSettings()
+        } catch (_: IllegalArgumentException) {
+            AudioProcessingSettings()
         }
 }
 

@@ -2,6 +2,8 @@ package com.phoebe.app.data
 
 import app.cash.sqldelight.async.coroutines.awaitAsList
 import app.cash.sqldelight.async.coroutines.awaitAsOneOrNull
+import app.cash.sqldelight.coroutines.asFlow
+import app.cash.sqldelight.coroutines.mapToList
 import com.phoebe.app.data.db.DatabaseWriteGate
 import com.phoebe.app.db.PhoebeDatabase
 import com.phoebe.app.db.DownloadRow
@@ -24,6 +26,8 @@ import com.phoebe.app.domain.DownloadState
 import com.phoebe.app.domain.DownloadStatusEvent
 import com.phoebe.app.domain.JellyfinLibraryPageKind
 import com.phoebe.app.domain.JellyfinSyncMode
+import com.phoebe.app.domain.LocalMetadataOverride
+import com.phoebe.app.domain.MetadataOverrideSyncStatus
 import com.phoebe.app.domain.MusicLibrary
 import com.phoebe.app.domain.MediaProviderType
 import com.phoebe.app.domain.PlexServer
@@ -36,7 +40,9 @@ import com.phoebe.app.domain.PENDING_LIKED_SONGS_PLAYLIST_ID
 import com.phoebe.app.domain.PlexRadioStation
 import com.phoebe.app.domain.PlexRadioStationCategory
 import com.phoebe.app.domain.Playlist
+import com.phoebe.app.domain.SmartPlaylist
 import com.phoebe.app.domain.Track
+import com.phoebe.app.domain.TrackFilterContext
 import com.phoebe.app.domain.TrackMetadataUpdate
 import com.phoebe.app.domain.canAddToLocalPlaylist
 import com.phoebe.app.domain.canAddToPlexPlaylist
@@ -56,8 +62,10 @@ import com.phoebe.app.domain.isNavidrome
 import com.phoebe.app.domain.isPlex
 import com.phoebe.app.domain.isPlexLibraryTrack
 import com.phoebe.app.domain.isRemoteLibraryTrack
+import com.phoebe.app.domain.filterWith
 import com.phoebe.app.domain.mergeDownloadCopiesById
 import com.phoebe.app.domain.remoteProviderPrefix
+import com.phoebe.app.domain.sortedWith
 import com.phoebe.app.domain.serverAuthToken
 import com.phoebe.app.domain.supportsPlexPlaylists
 import com.phoebe.app.domain.supportsPlexRatings
@@ -156,6 +164,15 @@ data class DownloadFailureSample(
     val targetPath: String,
 )
 
+data class DownloadManagerSummary(
+    val activeCount: Int = 0,
+    val completeCount: Int = 0,
+    val failedCount: Int = 0,
+    val totalCount: Int = 0,
+    val completedBytes: Long = 0L,
+    val totalBytes: Long? = null,
+)
+
 private data class DownloadDeletePlan(
     val deletedIds: Set<String>,
     val localUris: List<String>,
@@ -209,6 +226,7 @@ class CatalogRepository(
     private val storage: PlatformStorage,
     private val httpClient: HttpClient,
     private val mediaSourcesRepository: MediaSourcesRepository,
+    private val userArtifactsRepository: UserArtifactsRepository,
     private val databaseWriteGate: DatabaseWriteGate,
 ) {
     private val json = PhoebeDataJson
@@ -230,6 +248,12 @@ class CatalogRepository(
     private val persistenceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val pendingCatalogDbWrites = mutableSetOf<Job>()
     private val pendingCatalogDbWritesMutex = Mutex()
+    private val smartPlaylistLastPlayedByTrack = MutableStateFlow<Map<String, Long>>(emptyMap())
+    private val smartPlaylistPlayCountsByTrack = MutableStateFlow<Map<String, Int>>(emptyMap())
+
+    init {
+        observeSmartPlaylistPlayHistory()
+    }
 
     suspend fun awaitDatabaseIdle() {
         while (true) {
@@ -248,6 +272,39 @@ class CatalogRepository(
             if (pending.isEmpty()) return
             pending.joinAll()
         }
+    }
+
+    private fun observeSmartPlaylistPlayHistory() {
+        persistenceScope.launch {
+            database.playHistoryQueries
+                .selectLastPlayedByTrack()
+                .asFlow()
+                .mapToList(Dispatchers.Default)
+                .collect { rows ->
+                    smartPlaylistLastPlayedByTrack.value = buildMap(rows.size) {
+                        rows.forEach { row -> row.lastPlayed?.let { put(row.track_id, it) } }
+                    }
+                    refreshSmartPlaylistSnapshotFromPlayHistory()
+                }
+        }
+        persistenceScope.launch {
+            database.playHistoryQueries
+                .selectPlayCountsByTrack()
+                .asFlow()
+                .mapToList(Dispatchers.Default)
+                .collect { rows ->
+                    smartPlaylistPlayCountsByTrack.value = buildMap(rows.size) {
+                        rows.forEach { row -> put(row.track_id, (row.playCount ?: 0L).toInt()) }
+                    }
+                    refreshSmartPlaylistSnapshotFromPlayHistory()
+                }
+        }
+    }
+
+    private fun refreshSmartPlaylistSnapshotFromPlayHistory() {
+        val snapshot = mutableCatalog.value
+        if (snapshot.playlists.none { it.isSmartPlaylist() }) return
+        mutableCatalog.value = withSmartPlaylists(snapshot)
     }
 
     private suspend fun enqueueCatalogDbWrite(block: suspend () -> Unit) {
@@ -365,7 +422,7 @@ class CatalogRepository(
         items.forEach { item -> downloadItemsByTrackId[item.trackId] = item }
         mutableDownloads.value = items
         if (syncCatalog) {
-            mutableCatalog.value = mutableCatalog.value.copy(downloads = items)
+            mutableCatalog.value = withSmartPlaylists(mutableCatalog.value.copy(downloads = items))
         }
     }
 
@@ -485,14 +542,34 @@ class CatalogRepository(
                 removeMissingLocalArtworkReferences(cachedShell.copy(downloads = downloads))
             }
             replaceDownloadSnapshot(restoredShell.downloads, syncCatalog = false)
-            mutableCatalog.value = restoredShell
-            trace.disk("hydrateCachedTracksFromDatabase") {
-                runCatching { hydrateCachedTracksAfterShellRestore(restoredShell) }
-                    .onFailure { error ->
-                        PhoebeLog.d("CatalogRepository") {
-                            "cached track hydration failed: ${error.message}"
+            if (userArtifactsRepository.smartPlaylists.value.any { it.enabled }) {
+                val restoredTracks = trace.disk("hydrateCachedTracksFromDatabase") {
+                    runCatching { readTracksFromDatabase() }
+                        .onFailure { error ->
+                            PhoebeLog.d("CatalogRepository") {
+                                "cached track hydration failed: ${error.message}"
+                            }
                         }
-                    }
+                        .getOrNull()
+                }
+                val restoredDownloads = restoredTracks?.downloads?.ifEmpty { restoredShell.downloads } ?: restoredShell.downloads
+                replaceDownloadSnapshot(restoredDownloads, syncCatalog = false)
+                mutableCatalog.value = withSmartPlaylists(
+                    restoredShell.copy(
+                        tracksByParent = restoredTracks?.tracksByParent.orEmpty(),
+                        downloads = restoredDownloads,
+                    ),
+                )
+            } else {
+                mutableCatalog.value = restoredShell
+                trace.disk("hydrateCachedTracksFromDatabase") {
+                    runCatching { hydrateCachedTracksAfterShellRestore(restoredShell) }
+                        .onFailure { error ->
+                            PhoebeLog.d("CatalogRepository") {
+                                "cached track hydration failed: ${error.message}"
+                            }
+                        }
+                }
             }
             trace.mark(
                 "restoreCachedCatalog complete",
@@ -522,7 +599,7 @@ class CatalogRepository(
         trace.disk("migrateLegacyCatalogToDatabase") {
             withContext(Dispatchers.Default) { runCatalogDbWrite { persist(repaired) } }
         }
-        mutableCatalog.value = repaired
+        mutableCatalog.value = withSmartPlaylists(repaired)
         storage.delete(LegacyCatalogFile)
         trace.mark(
             "restoreCachedCatalog from legacy file",
@@ -2800,9 +2877,11 @@ class CatalogRepository(
             if (!cur.hasSameCatalogShell(restoredShell)) return
             val restoredDownloads = tracks.downloads.ifEmpty { cur.downloads }
             replaceDownloadSnapshot(restoredDownloads, syncCatalog = false)
-            mutableCatalog.value = cur.copy(
-                tracksByParent = tracks.tracksByParent,
-                downloads = restoredDownloads,
+            mutableCatalog.value = withSmartPlaylists(
+                cur.copy(
+                    tracksByParent = tracks.tracksByParent,
+                    downloads = restoredDownloads,
+                ),
             )
         }
     }
@@ -2832,9 +2911,11 @@ class CatalogRepository(
             }
             val restoredDownloads = tracks.downloads.ifEmpty { cur.downloads }
             replaceDownloadSnapshot(restoredDownloads, syncCatalog = false)
-            mutableCatalog.value = cur.copy(
-                tracksByParent = mergedTracksByParent,
-                downloads = restoredDownloads,
+            mutableCatalog.value = withSmartPlaylists(
+                cur.copy(
+                    tracksByParent = mergedTracksByParent,
+                    downloads = restoredDownloads,
+                ),
             )
         }
     }
@@ -2911,7 +2992,7 @@ class CatalogRepository(
                 val existing = nextParents[parentId].orEmpty()
                 nextParents = nextParents + (parentId to mergeTrackLists(existing, tracks))
             }
-            mutableCatalog.value = cur.copy(tracksByParent = nextParents)
+            mutableCatalog.value = withSmartPlaylists(cur.copy(tracksByParent = nextParents))
         }
     }
 
@@ -4288,6 +4369,9 @@ class CatalogRepository(
         }?.id
 
     suspend fun tracksForPlaylist(session: PlexSession?, playlist: Playlist): List<Track> {
+        if (playlist.isSmartPlaylist()) {
+            return materializedSmartPlaylistTracks(playlist.id, mutableCatalog.value)
+        }
         if (playlist.isLocalPlaylist()) {
             return mutableCatalog.value.tracksByParent[playlist.id].orEmpty()
         }
@@ -4364,6 +4448,11 @@ class CatalogRepository(
         } finally {
             popTracksLoading(playlist.id)
         }
+    }
+
+    suspend fun refreshSmartPlaylists() {
+        val updated = withSmartPlaylists(mutableCatalog.value)
+        mutableCatalog.value = updated
     }
 
     suspend fun findOrCreateLikedSongsPlaylist(session: PlexSession?): Playlist? {
@@ -4734,6 +4823,56 @@ class CatalogRepository(
         return playlist
     }
 
+    suspend fun deletePlaylist(session: PlexSession?, playlist: Playlist): Boolean {
+        if (playlist.isLikedSongsPlaylist()) return false
+        if (playlist.isSmartPlaylist()) {
+            userArtifactsRepository.deleteSmartPlaylist(playlist.id)
+            deletePlaylistLocally(playlist.id)
+            return true
+        }
+        if (playlist.isLocalPlaylist()) {
+            deletePlaylistLocally(playlist.id)
+            return true
+        }
+        val remotePrefix = playlist.remoteProviderPrefix() ?: return false
+        if (remotePrefix != "plex") return false
+        if (session?.supportsPlexPlaylists() != true) return false
+        val server = session.selectedServer ?: return false
+        val token = session.serverAuthToken() ?: return false
+        val playlistRating = plexRatingKey(playlist.id) ?: return false
+        val deleted = runCatching {
+            plexClient.deletePlaylist(server, token, playlistRating)
+        }.onFailure { error ->
+            PhoebeLog.d("CatalogRepository") { "deletePlaylist Plex failed for '${playlist.title}': ${error.message}" }
+        }.isSuccess
+        if (deleted) deletePlaylistLocally(playlist.id)
+        return deleted
+    }
+
+    suspend fun createProviderPlaylistFromSmartPlaylist(session: PlexSession?, playlist: Playlist): Playlist? {
+        if (!playlist.isSmartPlaylist()) return null
+        val s = session ?: return null
+        if (!s.supportsRemotePlaylists()) return null
+        val providerType = s.providerType
+        val tracks = tracksForPlaylist(s, playlist)
+            .filter { !it.isLocalMediaPlayback() && it.belongsToProvider(providerType) }
+        if (tracks.isEmpty()) return null
+        return createPlaylist(s, playlist.title, tracks)
+    }
+
+    private suspend fun deletePlaylistLocally(playlistId: String) {
+        val snapshot = mutableCatalog.value
+        val updated = snapshot.copy(
+            playlists = snapshot.playlists.filterNot { it.id == playlistId },
+            tracksByParent = snapshot.tracksByParent - playlistId,
+        )
+        publish(updated, persist = false)
+        runCatalogDbWrite {
+            database.catalogQueries.deleteTrackParentsForParent(playlistId)
+            database.catalogQueries.deletePlaylistById(playlistId)
+        }
+    }
+
     private suspend fun createPlexPlaylist(
         server: PlexServer,
         library: MusicLibrary,
@@ -4793,6 +4932,10 @@ class CatalogRepository(
     ) {
         PhoebeLog.d("CatalogRepository") { "addTracksToPlaylist entry → playlist='${playlist.title}' (${playlist.id}), tracks=${tracks.map { it.id }}" }
         if (tracks.isEmpty()) return
+        if (playlist.isSmartPlaylist()) {
+            PhoebeLog.d("CatalogRepository") { "addTracksToPlaylist: '${playlist.title}' is a read-only smart playlist" }
+            return
+        }
         if (playlist.isLocalPlaylist()) {
             addTracksToLocalPlaylist(playlist, tracks)
             return
@@ -4941,6 +5084,7 @@ class CatalogRepository(
         toIndex: Int,
     ): Boolean {
         if (fromIndex == toIndex) return true
+        if (playlist.isSmartPlaylist()) return false
         var snapshot = mutableCatalog.value
         val playlistId = playlist.id
         var existing = snapshot.tracksByParent[playlistId].orEmpty()
@@ -4998,6 +5142,7 @@ class CatalogRepository(
         tracks: List<Track>,
     ): Boolean {
         if (tracks.isEmpty()) return true
+        if (playlist.isSmartPlaylist()) return false
         if (!playlist.supportsTrackRemoval()) return false
         val playlistId = playlist.id
         var snapshot = mutableCatalog.value
@@ -5224,7 +5369,15 @@ class CatalogRepository(
             title = update.title.trim().ifBlank { existing.title },
             artist = update.artist.trim().ifBlank { existing.artist },
             album = update.album.trim().ifBlank { existing.album },
+            albumArtist = update.albumArtist?.trim()?.takeIf { it.isNotBlank() },
             genre = update.genre?.trim()?.takeIf { it.isNotBlank() },
+            mood = update.mood?.trim()?.takeIf { it.isNotBlank() },
+            style = update.style?.trim()?.takeIf { it.isNotBlank() },
+            composer = update.composer?.trim()?.takeIf { it.isNotBlank() },
+            comments = update.comments?.trim()?.takeIf { it.isNotBlank() },
+            titleSort = update.titleSort?.trim()?.takeIf { it.isNotBlank() },
+            artistSort = update.artistSort?.trim()?.takeIf { it.isNotBlank() },
+            albumSort = update.albumSort?.trim()?.takeIf { it.isNotBlank() },
         )
 
         var plexAttempted = false
@@ -5260,11 +5413,38 @@ class CatalogRepository(
             album = cleanUpdate.album,
             year = cleanUpdate.year,
             genre = cleanUpdate.genre,
+            albumArtist = cleanUpdate.albumArtist,
+            mood = cleanUpdate.mood,
+            style = cleanUpdate.style,
+            trackNumber = cleanUpdate.trackNumber,
+            discNumber = cleanUpdate.discNumber,
+            composer = cleanUpdate.composer,
+            comments = cleanUpdate.comments,
+            explicit = cleanUpdate.explicit,
+            titleSort = cleanUpdate.titleSort,
+            artistSort = cleanUpdate.artistSort,
+            albumSort = cleanUpdate.albumSort,
         )
         val updatedTracks = snapshot.tracksByParent.mapValues { (_, tracks) ->
             tracks.map { if (it.id == edited.id) edited else it }
         }
         publish(snapshot.copy(tracksByParent = updatedTracks), persist = true)
+        val providerCanSync = plexSynced || (plexAttempted && session?.isEmbyFamily() == true)
+        if (!providerCanSync) {
+            userArtifactsRepository.upsertMetadataOverride(
+                LocalMetadataOverride(
+                    trackId = cleanUpdate.trackId,
+                    update = cleanUpdate,
+                    providerType = session?.providerType,
+                    syncStatus = if (session == null || session.isPlex()) {
+                        MetadataOverrideSyncStatus.LocalOnly
+                    } else {
+                        MetadataOverrideSyncStatus.ProviderUnsupported
+                    },
+                    updatedAtMs = currentTimeMs(),
+                ),
+            )
+        }
         return MetadataUpdateResult(savedLocally = true, plexAttempted = plexAttempted, plexSynced = plexSynced)
     }
 
@@ -5675,6 +5855,104 @@ class CatalogRepository(
         }
     }
 
+    suspend fun retryFailedDownloads(trackIds: Set<String> = emptySet()): DownloadBatchResult = withContext(Dispatchers.Default) {
+        downloadMutex.withLock {
+            val failedItems = currentDownloadItems()
+                .filter { it.state == DownloadState.Failed }
+                .filter { trackIds.isEmpty() || it.trackId in trackIds }
+                .filter { it.downloadUrl.isNotBlank() }
+                .map {
+                    it.copy(
+                        state = DownloadState.Queued,
+                        progress = 0f,
+                        downloadedBytes = 0L,
+                        totalBytes = null,
+                        error = null,
+                        updatedAtMs = currentTimeMs(),
+                    )
+                }
+            if (failedItems.isEmpty()) return@withLock DownloadBatchResult()
+            publishDownloadItems(failedItems, persist = true, syncCatalog = false)
+            val tracks = failedItems.map { item ->
+                Track(
+                    id = item.trackId,
+                    title = item.title,
+                    artist = item.artist,
+                    album = "",
+                    durationMs = 0L,
+                    streamUrl = "",
+                    downloadUrl = item.downloadUrl,
+                    filepath = item.targetPath.takeIf { it.isNotBlank() },
+                )
+            }
+            val completed = downloadTracksContinuously(
+                tracks = tracks,
+                parallelism = downloadParallelism().coerceAtLeast(1),
+            )
+            syncCatalogDownloadItems()
+            buildDownloadBatchResult(
+                label = "retryFailedDownloads",
+                total = tracks.size,
+                completed = completed,
+                failed = (tracks.size - completed).coerceAtLeast(0),
+                failedTrackIds = tracks.mapTo(mutableSetOf()) { it.id },
+            )
+        }
+    }
+
+    suspend fun cancelDownloadsWithoutDeleting(trackIds: Set<String>): Int {
+        if (trackIds.isEmpty()) return 0
+        downloadCancellationMutex.withLock {
+            canceledDownloadTrackIds += trackIds
+        }
+        val canceled = currentDownloadItems()
+            .filter { it.trackId in trackIds && it.state in setOf(DownloadState.Queued, DownloadState.Downloading) }
+            .map {
+                it.copy(
+                    state = DownloadState.Failed,
+                    progress = 0f,
+                    downloadedBytes = 0L,
+                    totalBytes = null,
+                    error = "Download cancelled.",
+                    updatedAtMs = currentTimeMs(),
+                )
+            }
+        publishDownloadItems(canceled, persist = true, syncCatalog = true)
+        return canceled.size
+    }
+
+    suspend fun deleteCompletedDownloads(): Int {
+        val completedIds = currentDownloadItems()
+            .filter { it.state == DownloadState.Complete }
+            .mapTo(mutableSetOf()) { it.trackId }
+        if (completedIds.isEmpty()) return 0
+        return deleteDownloadsForTrackIds(completedIds)
+    }
+
+    suspend fun clearFailedDownloads(): Int {
+        val failedIds = currentDownloadItems()
+            .filter { it.state == DownloadState.Failed }
+            .mapTo(mutableSetOf()) { it.trackId }
+        clearDownloadItemsForTrackIds(failedIds)
+        return failedIds.size
+    }
+
+    fun downloadManagerSummary(): DownloadManagerSummary {
+        val downloads = currentDownloadItems()
+        val totalBytes = downloads
+            .mapNotNull { it.totalBytes }
+            .takeIf { it.isNotEmpty() }
+            ?.sum()
+        return DownloadManagerSummary(
+            activeCount = downloads.count { it.state == DownloadState.Queued || it.state == DownloadState.Downloading },
+            completeCount = downloads.count { it.state == DownloadState.Complete },
+            failedCount = downloads.count { it.state == DownloadState.Failed },
+            totalCount = downloads.size,
+            completedBytes = downloads.filter { it.state == DownloadState.Complete }.sumOf { it.downloadedBytes },
+            totalBytes = totalBytes,
+        )
+    }
+
     suspend fun deleteAllDownloads(): Int {
         val downloads = currentDownloadItems()
         if (downloads.isEmpty()) return 0
@@ -5685,6 +5963,11 @@ class CatalogRepository(
         val trackIds = tracks.map { it.id }.toSet()
         if (trackIds.isEmpty()) return 0
         return deleteDownloadsForTrackIds(trackIds, tracks)
+    }
+
+    suspend fun deleteDownloadsForTrackIds(trackIds: Set<String>): Int {
+        if (trackIds.isEmpty()) return 0
+        return deleteDownloadsForTrackIds(trackIds, emptyList())
     }
 
     suspend fun cancelDownloadsForTracks(tracks: List<Track>) {
@@ -6396,7 +6679,7 @@ class CatalogRepository(
         val snapshot = mutableCatalog.value
         if (snapshot.downloads != downloads) {
             mutableDownloads.value = downloads
-            mutableCatalog.value = snapshot.copy(downloads = downloads)
+            mutableCatalog.value = withSmartPlaylists(snapshot.copy(downloads = downloads))
         }
     }
 
@@ -6730,7 +7013,8 @@ class CatalogRepository(
     }
 
     private suspend fun persistCatalogShell(snapshot: CatalogSnapshot) = withContext(Dispatchers.Default) {
-        val snapshot = snapshot.withPlaylistUserStateFrom(mutableCatalog.value)
+        val snapshot = snapshot.withoutSmartPlaylistArtifacts()
+            .withPlaylistUserStateFrom(mutableCatalog.value.withoutSmartPlaylistArtifacts())
         database.transaction {
             snapshot.artists.forEachIndexed { index, artist ->
                 database.catalogQueries.upsertArtist(
@@ -6966,11 +7250,67 @@ class CatalogRepository(
         return hash
     }
 
+    private fun withSmartPlaylists(snapshot: CatalogSnapshot): CatalogSnapshot {
+        val base = snapshot.withoutSmartPlaylistArtifacts()
+        val smartPlaylists = userArtifactsRepository.smartPlaylists.value.filter { it.enabled }
+        if (smartPlaylists.isEmpty()) return base
+        val allTracks = base.tracksByParent.values.asSequence().flatten().distinctBy { it.id }.toList()
+        val smartTracksByParent = smartPlaylists.associate { smart ->
+            smart.id to materializedSmartPlaylistTracks(smart.id, base, smart, allTracks)
+        }
+        val smartRows = smartPlaylists.map { smart ->
+            Playlist(
+                id = smart.id,
+                title = smart.title,
+                trackCount = smartTracksByParent[smart.id].orEmpty().size,
+            )
+        }
+        return base.copy(
+            playlists = (smartRows.sortedBy { it.title.lowercase() } + base.playlists.sortedBy { it.title.lowercase() }),
+            tracksByParent = base.tracksByParent + smartTracksByParent,
+        )
+    }
+
+    private fun CatalogSnapshot.withoutSmartPlaylistArtifacts(): CatalogSnapshot =
+        copy(
+            playlists = playlists.filterNot { it.isSmartPlaylist() },
+            tracksByParent = tracksByParent.filterKeys { !it.startsWith(SmartPlaylist.IdPrefix) },
+        )
+
+    private fun materializedSmartPlaylistTracks(
+        playlistId: String,
+        snapshot: CatalogSnapshot,
+        smartPlaylist: SmartPlaylist? = userArtifactsRepository.smartPlaylists.value.firstOrNull { it.id == playlistId },
+        allTracks: List<Track> = snapshot.withoutSmartPlaylistArtifacts().tracksByParent.values.asSequence().flatten().distinctBy { it.id }.toList(),
+    ): List<Track> {
+        val smart = smartPlaylist ?: return emptyList()
+        val base = snapshot.withoutSmartPlaylistArtifacts()
+        val downloadedIds = base.downloads.asSequence()
+            .filter { it.state == DownloadState.Complete }
+            .mapTo(mutableSetOf()) { it.trackId }
+        val providerByTrackId = allTracks
+            .mapNotNull { track ->
+                val provider = MediaProviderType.entries.firstOrNull { track.id.startsWith("${it.catalogPrefix}:") }
+                provider?.let { track.id to it }
+            }
+            .toMap()
+        val context = TrackFilterContext(
+            downloadedTrackIds = downloadedIds,
+            lastPlayedByTrackId = smartPlaylistLastPlayedByTrack.value,
+            playCountByTrackId = smartPlaylistPlayCountsByTrack.value,
+            providerByTrackId = providerByTrackId,
+        )
+        val sorted = allTracks
+            .filterWith(smart.filter, context)
+            .sortedWith(smart.sort, context)
+        return smart.limit?.coerceAtLeast(0)?.let { sorted.take(it) } ?: sorted
+    }
+
     private suspend fun publish(snapshot: CatalogSnapshot, persist: Boolean) {
-        val snapshot = snapshot.withPlaylistUserStateFrom(mutableCatalog.value)
+        val snapshot = withSmartPlaylists(snapshot.withPlaylistUserStateFrom(mutableCatalog.value))
         mutableCatalog.value = snapshot
         if (persist) {
-            persistAsync(snapshot)
+            persistAsync(snapshot.withoutSmartPlaylistArtifacts())
         }
     }
 
@@ -6982,7 +7322,7 @@ class CatalogRepository(
 
     /** Persist the entire snapshot off the UI thread. */
     private suspend fun persistAsync(snapshot: CatalogSnapshot) {
-        val snapshot = snapshot.withPlaylistUserStateFrom(mutableCatalog.value)
+        val snapshot = snapshot.withoutSmartPlaylistArtifacts().withPlaylistUserStateFrom(mutableCatalog.value.withoutSmartPlaylistArtifacts())
         withContext(Dispatchers.Default) {
             runCatalogDbWrite {
                 if (snapshot.hasRestorableCatalogContent()) {
@@ -7246,6 +7586,7 @@ class CatalogRepository(
     }
 
     private suspend fun persist(snapshot: CatalogSnapshot) {
+        val snapshot = snapshot.withoutSmartPlaylistArtifacts()
         database.transaction {
             database.catalogQueries.clearTrackParents()
             database.catalogQueries.clearTracks()

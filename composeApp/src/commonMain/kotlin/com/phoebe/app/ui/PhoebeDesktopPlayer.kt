@@ -88,6 +88,7 @@ import com.phoebe.app.feature.playback.QueueRouteState
 import com.phoebe.app.feature.search.SearchDesktopRoute
 import com.phoebe.app.feature.search.SearchDesktopRouteActions
 import com.phoebe.app.feature.settings.SettingsDesktopRoute
+import com.phoebe.app.feature.settings.SettingsCategory
 import com.phoebe.app.feature.settings.SettingsRouteActions
 import com.phoebe.app.feature.settings.SettingsRouteState
 import kotlinx.coroutines.flow.StateFlow
@@ -174,6 +175,7 @@ internal fun DesktopPlayer(
     val appSettings = settingsState.appSettings
     val downloadDirectory = settingsState.downloadDirectory
     val downloadCount = settingsState.downloadCount
+    val downloadManager = settingsState.downloadManager
     val defaultDownloadDirectoryLabel = settingsState.defaultDownloadDirectoryLabel
     val useLightAppearance = settingsState.useLightAppearance
     val appearanceTintId = settingsState.appearanceTintId
@@ -276,6 +278,9 @@ internal fun DesktopPlayer(
     val onImportFavoritePlaylists = settingsActions.onImportFavoritePlaylists
     val onExportRadioStations = settingsActions.onExportRadioStations
     val onImportRadioStations = settingsActions.onImportRadioStations
+    val onExportBackupPackage = settingsActions.onExportBackupPackage
+    val onImportBackupPackage = settingsActions.onImportBackupPackage
+    val onReplaceFromBackupPackage = settingsActions.onReplaceFromBackupPackage
     val onCrossfadeSeconds = settingsActions.onCrossfadeSeconds
     val onScanLibraryOnLaunch = settingsActions.onScanLibraryOnLaunch
     val onNotifyWhenDownloadFinishes = settingsActions.onNotifyWhenDownloadFinishes
@@ -285,6 +290,9 @@ internal fun DesktopPlayer(
     val onBlurredArtworkAppearance = settingsActions.onBlurredArtworkAppearance
     val onDownloadDirectory = settingsActions.onDownloadDirectory
     val onDeleteAllDownloads = settingsActions.onDeleteAllDownloads
+    val onDeleteCompletedDownloads = settingsActions.onDeleteCompletedDownloads
+    val onClearFailedDownloads = settingsActions.onClearFailedDownloads
+    val onRetryFailedDownloads = settingsActions.onRetryFailedDownloads
     val onUseLightAppearanceChange = settingsActions.onUseLightAppearanceChange
     val onAppearanceTintChange = settingsActions.onAppearanceTintChange
     val onConnectListenBrainz = settingsActions.onConnectListenBrainz
@@ -408,6 +416,7 @@ internal fun DesktopPlayer(
                                         onDiscoverJellyfinServers = onDiscoverJellyfinServers,
                                         onStartJellyfinQuickConnect = onStartJellyfinQuickConnect,
                                         onFinishJellyfinQuickConnect = onFinishJellyfinQuickConnect,
+                                        onOpenRadio = { onNavigate(BrowseSection.Radio) },
                                     ),
                                     modifier = Modifier.fillMaxSize(),
                                 )
@@ -743,30 +752,45 @@ internal fun DesktopPlayer(
                                                 onRetry = onRetryLyrics,
                                             )
                                         }
-                                    section == BrowseSection.Settings && selectedPlaylistId == null -> SettingsDesktopRoute(
+                                    (section == BrowseSection.Settings || section == BrowseSection.Downloads) && selectedPlaylistId == null -> SettingsDesktopRoute(
                                         state = SettingsRouteState(
                                             isLightMode = useLightAppearance,
                                             tintId = appearanceTintId,
                                             downloadDirectory = downloadDirectory,
                                             downloadCount = downloadCount,
+                                            downloadItems = settingsState.downloadItems,
+                                            downloadManager = downloadManager,
                                             appSettings = appSettings,
+                                            audioProcessingCapabilities = settingsActions.audioProcessingCapabilities,
                                             libraryUi = libraryUi,
                                             defaultDownloadDirectoryLabel = defaultDownloadDirectoryLabel,
                                             homeScreenLayoutMode = settingsState.homeScreenLayoutMode,
                                             session = session,
                                             listenBrainzCredentialAvailability = listenBrainzCredentialAvailability,
-                                            initialCategory = settingsInitialCategory,
+                                            initialCategory = if (section == BrowseSection.Downloads) {
+                                                SettingsCategory.Downloads
+                                            } else {
+                                                settingsInitialCategory
+                                            },
                                         ),
                                         actions = SettingsRouteActions(
                                             onLightModeChange = onUseLightAppearanceChange,
                                             onTintChange = onAppearanceTintChange,
                                             onDownloadDirectory = onDownloadDirectory,
                                             onDeleteAllDownloads = onDeleteAllDownloads,
+                                            onDeleteCompletedDownloads = onDeleteCompletedDownloads,
+                                            onClearFailedDownloads = onClearFailedDownloads,
+                                            onRetryFailedDownloads = onRetryFailedDownloads,
+                                            onRetryDownloads = settingsActions.onRetryDownloads,
+                                            onCancelDownloads = settingsActions.onCancelDownloads,
+                                            onDeleteDownloads = settingsActions.onDeleteDownloads,
+                                            onDownloadPolicySettings = settingsActions.onDownloadPolicySettings,
                                             onCrossfadeSeconds = onCrossfadeSeconds,
                                             onScanLibraryOnLaunch = onScanLibraryOnLaunch,
                                             onNotifyWhenDownloadFinishes = onNotifyWhenDownloadFinishes,
                                             onPersistEqualizerSettings = onPersistEqualizerSettingsFromSettings,
                                             onPersistVolumeSettings = onPersistVolumeSettingsFromSettings,
+                                            onAudioProcessingSettings = settingsActions.onAudioProcessingSettings,
                                             onVisualizerPreset = onVisualizerPresetFromSettings,
                                             onBlurredArtworkAppearance = onBlurredArtworkAppearance,
                                             onHomeSections = onHomeSections,
@@ -778,12 +802,20 @@ internal fun DesktopPlayer(
                                             onImportFavoritePlaylists = onImportFavoritePlaylists,
                                             onExportRadioStations = onExportRadioStations,
                                             onImportRadioStations = onImportRadioStations,
+                                            onExportBackupPackage = onExportBackupPackage,
+                                            onImportBackupPackage = onImportBackupPackage,
+                                            onReplaceFromBackupPackage = onReplaceFromBackupPackage,
                                             onHomeScreenLayoutModeChange = settingsActions.onHomeScreenLayoutModeChange,
                                             onConnectListenBrainz = onConnectListenBrainz,
                                             onDisconnectListenBrainz = onDisconnectListenBrainz,
                                             onListenBrainzSubmitNowPlaying = onListenBrainzSubmitNowPlaying,
                                             onListenBrainzSubmitListens = onListenBrainzSubmitListens,
                                             onListenBrainzSubmitCurrentTrackFeedback = onListenBrainzSubmitCurrentTrackFeedback,
+                                            onStartLastFmAuthorization = settingsActions.onStartLastFmAuthorization,
+                                            onFinishLastFmAuthorization = settingsActions.onFinishLastFmAuthorization,
+                                            onDisconnectLastFm = settingsActions.onDisconnectLastFm,
+                                            onLastFmSubmitNowPlaying = settingsActions.onLastFmSubmitNowPlaying,
+                                            onLastFmSubmitScrobbles = settingsActions.onLastFmSubmitScrobbles,
                                         ),
                                         modifier = Modifier.fillMaxSize(),
                                     )

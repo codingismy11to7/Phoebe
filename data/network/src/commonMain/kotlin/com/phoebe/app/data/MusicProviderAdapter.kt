@@ -28,7 +28,92 @@ data class ProviderCapabilities(
     val libraryRadio: Boolean = false,
     val itemRadio: Boolean = false,
     val collectionFacets: Set<CollectionFacet> = setOf(CollectionFacet.Genre),
+    val matrix: ProviderCapabilityMatrix = ProviderCapabilityMatrix(),
 )
+
+data class ProviderCapabilityMatrix(
+    val signIn: CapabilityStatus = CapabilityStatus.Supported,
+    val discovery: CapabilityStatus = CapabilityStatus.Unsupported("Server discovery is not available for this provider."),
+    val catalogPaging: CapabilityStatus = CapabilityStatus.Unsupported("This provider loads the catalog as a single library snapshot."),
+    val playlists: CapabilityStatus = CapabilityStatus.Supported,
+    val playlistMutation: CapabilityStatus = CapabilityStatus.Supported,
+    val favorites: CapabilityStatus = CapabilityStatus.Supported,
+    val ratings: CapabilityStatus = CapabilityStatus.Supported,
+    val metadataFields: Set<ProviderMetadataField> = setOf(
+        ProviderMetadataField.Title,
+        ProviderMetadataField.Artist,
+        ProviderMetadataField.Album,
+        ProviderMetadataField.Year,
+        ProviderMetadataField.Genre,
+    ),
+    val radioAndMixes: CapabilityStatus = CapabilityStatus.Unsupported("Radio is not available for this provider."),
+    val playHistoryImport: CapabilityStatus = CapabilityStatus.Unsupported("Play history import is not available for this provider."),
+    val streaming: CapabilityStatus = CapabilityStatus.Supported,
+    val downloads: CapabilityStatus = CapabilityStatus.Supported,
+    val transcodeQuality: CapabilityStatus = CapabilityStatus.Unsupported("Only original quality downloads are available."),
+    val internetRadio: CapabilityStatus = CapabilityStatus.Unsupported("Internet radio is managed locally by Phoebe."),
+)
+
+sealed interface CapabilityStatus {
+    data object Supported : CapabilityStatus
+    data class Unsupported(val reason: String) : CapabilityStatus
+}
+
+enum class ProviderMetadataField {
+    Title,
+    Artist,
+    Album,
+    AlbumArtist,
+    Year,
+    Genre,
+    Mood,
+    Style,
+    TrackNumber,
+    DiscNumber,
+    Composer,
+    Comments,
+    Explicit,
+    SortFields,
+}
+
+fun ProviderCapabilities.unavailableReason(action: ProviderAction): String? =
+    when (action) {
+        ProviderAction.ServerDiscovery -> matrix.discovery.reasonOrNull().takeIf { !serverDiscovery }
+        ProviderAction.CatalogPaging -> matrix.catalogPaging.reasonOrNull().takeIf { !pagedCatalog }
+        ProviderAction.Playlists -> matrix.playlists.reasonOrNull().takeIf { !playlists }
+        ProviderAction.PlaylistMutation -> matrix.playlistMutation.reasonOrNull().takeIf { !playlistMutation }
+        ProviderAction.Favorites -> matrix.favorites.reasonOrNull().takeIf { !favorites }
+        ProviderAction.Ratings -> matrix.ratings.reasonOrNull().takeIf { !ratings }
+        ProviderAction.MetadataEdit -> "Metadata edits stay local for this provider.".takeIf { !metadataEdit }
+        ProviderAction.Radio -> matrix.radioAndMixes.reasonOrNull().takeIf { !libraryRadio && !itemRadio }
+        ProviderAction.Streaming -> matrix.streaming.reasonOrNull().takeIf { !nativeStreaming }
+        ProviderAction.RemoteControl -> "Remote control is not available for this provider.".takeIf { !remotePlayerControl }
+        ProviderAction.Downloads -> matrix.downloads.reasonOrNull()
+        ProviderAction.TranscodeQuality -> matrix.transcodeQuality.reasonOrNull()
+        ProviderAction.InternetRadio -> matrix.internetRadio.reasonOrNull()
+    }
+
+enum class ProviderAction {
+    ServerDiscovery,
+    CatalogPaging,
+    Playlists,
+    PlaylistMutation,
+    Favorites,
+    Ratings,
+    MetadataEdit,
+    Radio,
+    Streaming,
+    RemoteControl,
+    Downloads,
+    TranscodeQuality,
+    InternetRadio,
+}
+
+private fun CapabilityStatus.reasonOrNull(): String? =
+    when (this) {
+        CapabilityStatus.Supported -> null
+        is CapabilityStatus.Unsupported -> reason
+    }
 
 data class ProviderItemPage<T>(
     val items: List<T>,

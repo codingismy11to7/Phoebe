@@ -14,6 +14,8 @@ import com.phoebe.app.domain.DownloadState
 import com.phoebe.app.domain.DownloadStatusEvent
 import com.phoebe.app.domain.MediaProviderType
 import com.phoebe.app.domain.Playlist
+import com.phoebe.app.domain.SmartPlaylist
+import com.phoebe.app.domain.SmartPlaylistTemplate
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.catalogPrefix
 import com.phoebe.app.domain.isRemoteLibraryTrack
@@ -268,16 +270,26 @@ val LocalTracksLoading = compositionLocalOf { emptySet<String>() }
 
 data class PlaylistActions(
     val playlists: List<Playlist> = emptyList(),
+    val smartPlaylists: List<SmartPlaylist> = emptyList(),
     val playlistsEnabled: Boolean = false,
     val onAddTrackToPlaylist: (Playlist, Track) -> Unit = { _, _ -> },
     val onMovePlaylistTrack: (Playlist, Int, Int) -> Unit = { _, _, _ -> },
     val onRemovePlaylistTracks: (Playlist, List<Track>) -> Unit = { _, _ -> },
     val onCopyPlaylistToPlaylist: (source: Playlist, target: Playlist) -> Unit = { _, _ -> },
+    val onDeletePlaylist: (Playlist) -> Unit = {},
+    val onSaveSmartPlaylistToProvider: (Playlist) -> Unit = {},
     val onCreatePlaylist: (title: String, initialTracks: List<Track>) -> Unit = { _, _ -> },
     val onRequestCreatePlaylist: (initialTracks: List<Track>) -> Unit = {},
     val onOpenLikedSongs: () -> Unit = {},
     val onExportLocalPlaylist: (Playlist, PlaylistExportFormat) -> Unit = { _, _ -> },
     val onShufflePlaylist: (Playlist) -> Unit = {},
+    val smartPlaylistTemplates: List<SmartPlaylistTemplate> = SmartPlaylistTemplate.Defaults,
+    val onCreateSmartPlaylist: (SmartPlaylistTemplate, String) -> Unit = { _, _ -> },
+    val onUpdateSmartPlaylist: (SmartPlaylist) -> Unit = {},
+    val onRenameSmartPlaylist: (SmartPlaylist, String) -> Unit = { _, _ -> },
+    val onDuplicateSmartPlaylist: (SmartPlaylist) -> Unit = {},
+    val onSetSmartPlaylistEnabled: (SmartPlaylist, Boolean) -> Unit = { _, _ -> },
+    val onDeleteSmartPlaylist: (SmartPlaylist) -> Unit = {},
 )
 
 val LocalPlaylistActions = compositionLocalOf { PlaylistActions() }

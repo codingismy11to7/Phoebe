@@ -116,6 +116,82 @@ class RevisionMigrationDesktopTest {
                 )
                 statement.execute(
                     """
+                    CREATE TABLE ArtistRow (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        title TEXT NOT NULL,
+                        thumbUrl TEXT,
+                        albumCount INTEGER NOT NULL DEFAULT 0,
+                        songCount INTEGER NOT NULL DEFAULT 0,
+                        sortKey INTEGER NOT NULL DEFAULT 0,
+                        dateAddedMs INTEGER,
+                        genre TEXT,
+                        mood TEXT,
+                        style TEXT,
+                        rating REAL,
+                        favorite INTEGER NOT NULL DEFAULT 0
+                    )
+                    """.trimIndent(),
+                )
+                statement.execute(
+                    """
+                    CREATE TABLE AlbumRow (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        title TEXT NOT NULL,
+                        artist TEXT NOT NULL,
+                        year INTEGER,
+                        thumbUrl TEXT,
+                        sortKey INTEGER NOT NULL DEFAULT 0,
+                        dateAddedMs INTEGER,
+                        genre TEXT,
+                        mood TEXT,
+                        style TEXT,
+                        rating REAL,
+                        favorite INTEGER NOT NULL DEFAULT 0
+                    )
+                    """.trimIndent(),
+                )
+                statement.execute(
+                    """
+                    CREATE TABLE PlaylistRow (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        title TEXT NOT NULL,
+                        trackCount INTEGER NOT NULL,
+                        plKey TEXT,
+                        thumbUrl TEXT,
+                        sortKey INTEGER NOT NULL DEFAULT 0,
+                        rating REAL,
+                        favorite INTEGER NOT NULL DEFAULT 0
+                    )
+                    """.trimIndent(),
+                )
+                statement.execute(
+                    """
+                    CREATE TABLE TrackRow (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        title TEXT NOT NULL,
+                        artist TEXT NOT NULL,
+                        album TEXT NOT NULL,
+                        durationMs INTEGER NOT NULL,
+                        streamUrl TEXT NOT NULL,
+                        downloadUrl TEXT NOT NULL,
+                        thumbUrl TEXT,
+                        localArtworkUri TEXT,
+                        localUri TEXT,
+                        year INTEGER,
+                        genre TEXT,
+                        mood TEXT,
+                        style TEXT,
+                        filepath TEXT,
+                        audioCodec TEXT,
+                        bitrateKbps INTEGER,
+                        dateAddedMs INTEGER,
+                        rating REAL,
+                        parentAlbumId TEXT
+                    )
+                    """.trimIndent(),
+                )
+                statement.execute(
+                    """
                     CREATE TABLE TrackParentRow (
                         parentId TEXT NOT NULL,
                         trackId TEXT NOT NULL,
@@ -125,6 +201,65 @@ class RevisionMigrationDesktopTest {
                     """.trimIndent(),
                 )
                 statement.execute("CREATE INDEX TrackParentRow_parent_position ON TrackParentRow(parentId, position)")
+                statement.execute(
+                    """
+                    CREATE TABLE CollectionTagRow (
+                        target TEXT NOT NULL,
+                        facet TEXT NOT NULL,
+                        itemId TEXT NOT NULL,
+                        value TEXT NOT NULL,
+                        PRIMARY KEY (target, facet, itemId, value)
+                    )
+                    """.trimIndent(),
+                )
+                statement.execute(
+                    """
+                    CREATE TABLE CollectionValueRow (
+                        target TEXT NOT NULL,
+                        facet TEXT NOT NULL,
+                        value TEXT NOT NULL,
+                        key TEXT NOT NULL,
+                        fastKey TEXT,
+                        filterField TEXT,
+                        itemsLoaded INTEGER NOT NULL DEFAULT 0,
+                        PRIMARY KEY (target, facet, value)
+                    )
+                    """.trimIndent(),
+                )
+                statement.execute(
+                    """
+                    CREATE TABLE CollectionValueLoadRow (
+                        target TEXT NOT NULL,
+                        facet TEXT NOT NULL,
+                        PRIMARY KEY (target, facet)
+                    )
+                    """.trimIndent(),
+                )
+                statement.execute(
+                    """
+                    CREATE TABLE LocalFileMetadataCacheRow (
+                        folderId TEXT NOT NULL,
+                        uri TEXT NOT NULL,
+                        sizeBytes INTEGER NOT NULL,
+                        modifiedAtMs INTEGER NOT NULL,
+                        trackId TEXT NOT NULL,
+                        albumId TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        artist TEXT NOT NULL,
+                        album TEXT NOT NULL,
+                        durationMs INTEGER NOT NULL,
+                        year INTEGER,
+                        genre TEXT,
+                        mood TEXT,
+                        style TEXT,
+                        bitrateKbps INTEGER,
+                        audioCodec TEXT,
+                        filepath TEXT,
+                        dateAddedMs INTEGER NOT NULL,
+                        PRIMARY KEY (folderId, uri)
+                    )
+                    """.trimIndent(),
+                )
                 statement.execute(
                     """
                     CREATE TABLE LibraryPrefsRow (

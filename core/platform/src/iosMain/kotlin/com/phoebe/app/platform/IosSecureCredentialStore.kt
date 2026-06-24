@@ -96,6 +96,8 @@ private class IosSecureCredentialStore : SecureCredentialStore {
 private val SecureCredentialKey.account: String
     get() = when (this) {
         SecureCredentialKey.ListenBrainzUserToken -> "userToken"
+        SecureCredentialKey.LastFmSharedSecret -> "lastFmSharedSecret"
+        SecureCredentialKey.LastFmSessionKey -> "lastFmSessionKey"
     }
 
 @Suppress("UNCHECKED_CAST")
