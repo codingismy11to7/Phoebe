@@ -113,6 +113,7 @@ class AppDependencies(
 
     fun close() {
         runCatching { audioPlayer.close() }
+        runCatching { catalogRepository.close() }
         runCatching { playHistoryRepository.close() }
         runCatching { Telemetry.close() }
     }

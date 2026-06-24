@@ -595,6 +595,12 @@ class AppState(
         return null
     }
 
+    private fun MutableMap<String, Track>.putFirst(key: String, track: Track) {
+        if (key !in this) {
+            this[key] = track
+        }
+    }
+
     /**
      * When the OS exposes a system volume, the slider mirrors it: the per-player output
      * stays at unity and hardware volume keys / rockers propagate into PlayerState.volume
@@ -1427,10 +1433,10 @@ class AppState(
         candidates.forEach { track ->
             val prefix = providerPrefixForTrackId(track.id)
             if (prefix == null) {
-                unprefixedCandidates.putIfAbsent(track.id, track)
+                unprefixedCandidates.putFirst(track.id, track)
             } else {
-                prefixedCandidates.putIfAbsent(track.id, track)
-                prefixedByUnprefixedId.putIfAbsent(track.id.removePrefix(prefix), track)
+                prefixedCandidates.putFirst(track.id, track)
+                prefixedByUnprefixedId.putFirst(track.id.removePrefix(prefix), track)
             }
         }
 
