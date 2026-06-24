@@ -83,10 +83,10 @@ for (const path of [
 }
 
 for (const { path, expected } of [
-  { path: '/', expected: '/radio' },
-  { path: '/library', expected: '/radio' },
+  { path: '/', expected: '/signin' },
+  { path: '/library', expected: '/signin' },
   { path: '/settings', expected: '/settings' },
-  { path: '/artist/modern-baseball', expected: '/radio' },
+  { path: '/artist/modern-baseball', expected: '/signin' },
 ] as const) {
   test(`web path ${path} resolves without sources`, async ({ page }) => {
     await page.goto(path, { waitUntil: 'domcontentloaded' });

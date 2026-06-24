@@ -51,5 +51,6 @@ class MobileSignInWelcomeScreenTest {
 
         onNodeWithText("Sign in with Plex").assertIsDisplayed()
         onNodeWithText("Sign in with Jellyfin").assertIsDisplayed()
+        assertTrue(onAllNodesWithText("Listen to radio").fetchSemanticsNodes().isNotEmpty())
     }
 }

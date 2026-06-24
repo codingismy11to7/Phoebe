@@ -206,6 +206,7 @@ internal data class AuthSetupActions(
     val onDiscoverJellyfinServers: () -> Unit = {},
     val onStartJellyfinQuickConnect: (String) -> Unit = {},
     val onFinishJellyfinQuickConnect: () -> Unit = {},
+    val onOpenSignIn: () -> Unit = {},
     val onSignOut: () -> Unit,
     val onAddLocalFolder: (String?) -> Unit,
     val onRemoveLocalFolder: (String) -> Unit,

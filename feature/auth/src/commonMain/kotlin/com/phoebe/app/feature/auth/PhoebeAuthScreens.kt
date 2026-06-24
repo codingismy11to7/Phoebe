@@ -805,6 +805,13 @@ fun MobileSignInWelcomeScreen(
                         }
                     }
                     ProviderChoiceRow(
+                        icon = PhoebeIcon.Radio,
+                        title = "Listen to radio",
+                        subtitle = "Browse internet radio without signing in",
+                        lightMode = lightMode,
+                        onClick = onOpenRadio,
+                    )
+                    ProviderChoiceRow(
                         icon = PhoebeIcon.Plus,
                         title = "Add local files",
                         subtitle = "Choose music stored on this device",

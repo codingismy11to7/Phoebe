@@ -259,7 +259,6 @@ private fun SavedSearchStrip(
             if (canSave) {
                 SavedSearchActionChip(
                     title = "Save current",
-                    icon = PhoebeIcon.Plus,
                     accent = true,
                     onClick = { actions.saveSearch(normalizedQuery, normalizedQuery) },
                 )
@@ -324,22 +323,17 @@ private fun SavedSearchChip(
 @Composable
 private fun SavedSearchActionChip(
     title: String,
-    icon: PhoebeIcon,
     accent: Boolean,
     onClick: () -> Unit,
 ) {
     Row(
         modifier = Modifier
             .clip(RoundedCornerShape(999.dp))
-            .background(if (accent) PhoebeUi.accent.copy(alpha = 0.18f) else PhoebeUi.sidebar)
-            .border(BorderStroke(1.dp, if (accent) PhoebeUi.accentLight.copy(alpha = 0.30f) else PhoebeUi.border), RoundedCornerShape(999.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 5.dp),
+            .padding(horizontal = 8.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        PhoebeIconView(icon, tint = if (accent) PhoebeUi.accentLight else PhoebeUi.mutedText, modifier = Modifier.size(13.dp))
-        Text(title, color = PhoebeUi.secondaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Text(title, color = if (accent) PhoebeUi.accentLight else PhoebeUi.secondaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 

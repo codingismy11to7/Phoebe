@@ -25,11 +25,11 @@ class AppNavigationCoordinatorTest {
     }
 
     @Test
-    fun initialRequestUsesRadioWhenNoBrowseSourceExists() {
+    fun initialRequestUsesSignInWhenNoBrowseSourceExists() {
         val coordinator = AppNavigationCoordinator()
 
         assertEquals(
-            AppNavigationRequest.Radio,
+            AppNavigationRequest.SignIn,
             coordinator.initialRequest(
                 session = null,
                 hasEnabledLocalFolders = false,
