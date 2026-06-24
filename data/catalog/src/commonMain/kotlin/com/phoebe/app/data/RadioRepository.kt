@@ -107,9 +107,9 @@ class RadioRepository(
         val session = sessionRepository.session.value
         if (session?.isNavidrome() == true) {
             val server = session.selectedServer
-            val username = session.userName
-            val password = session.token
-            if (server != null && username != null && password != null) {
+            if (server != null) {
+                val username = session.userName
+                val password = session.token
                 val result = runCatching {
                     subsonicClient.createInternetRadioStation(server, username, password, name, streamUrl)
                 }
@@ -130,11 +130,11 @@ class RadioRepository(
 
     suspend fun updateManualStation(id: String, name: String, streamUrl: String): Result<RadioStation> {
         val session = sessionRepository.session.value
-        val prefix = if (session?.isNavidrome() == true) "subsonic:${session.selectedServer?.id}:" else null
+        val server = session?.takeIf { it.isNavidrome() }?.selectedServer
+        val prefix = server?.let { "subsonic:${it.id}:" }
         if (prefix != null && id.startsWith(prefix)) {
-            val server = session!!.selectedServer!!
-            val username = session.userName!!
-            val password = session.token!!
+            val username = session.userName
+            val password = session.token
             val serverId = id.removePrefix(prefix)
             val result = runCatching {
                 subsonicClient.updateInternetRadioStation(server, username, password, serverId, name, streamUrl)
@@ -155,11 +155,11 @@ class RadioRepository(
 
     suspend fun deleteManualStation(id: String) {
         val session = sessionRepository.session.value
-        val prefix = if (session?.isNavidrome() == true) "subsonic:${session.selectedServer?.id}:" else null
+        val server = session?.takeIf { it.isNavidrome() }?.selectedServer
+        val prefix = server?.let { "subsonic:${it.id}:" }
         if (prefix != null && id.startsWith(prefix)) {
-            val server = session!!.selectedServer!!
-            val username = session.userName!!
-            val password = session.token!!
+            val username = session.userName
+            val password = session.token
             val serverId = id.removePrefix(prefix)
             val result = runCatching {
                 subsonicClient.deleteInternetRadioStation(server, username, password, serverId)
@@ -287,8 +287,8 @@ class RadioRepository(
         val session = sessionRepository.session.value ?: return
         if (!session.isNavidrome()) return
         val server = session.selectedServer ?: return
-        val username = session.userName ?: return
-        val password = session.token ?: return
+        val username = session.userName
+        val password = session.token
         val synced = subsonicClient.getInternetRadioStations(server, username, password)
         withContext(Dispatchers.Default) {
             val prefix = "subsonic:${server.id}:"

@@ -251,6 +251,7 @@ internal fun DesktopContent(
     if (section == BrowseSection.Playlists) {
         PlaylistsDesktopRoute(
             state = PlaylistsRouteState(
+                catalog = catalog,
                 catalogRefreshing = catalogRefreshing,
                 searchQuery = searchQuery,
             ),
@@ -299,6 +300,7 @@ internal fun DesktopContent(
                 BrowseSection.Search -> "Search"
                 BrowseSection.Library -> "Your Library"
                 BrowseSection.Lyrics -> "Lyrics"
+                BrowseSection.Downloads -> "Downloads"
                 BrowseSection.Settings -> "Settings"
                 BrowseSection.Home -> "Home"
                 BrowseSection.Playlists -> "Playlists"
@@ -307,6 +309,7 @@ internal fun DesktopContent(
                 BrowseSection.Search -> "Find your sound"
                 BrowseSection.Library -> "Albums, artists, and songs"
                 BrowseSection.Lyrics -> "Follow along"
+                BrowseSection.Downloads -> "Offline songs"
                 BrowseSection.Settings -> "Customize your listening experience"
                 BrowseSection.Home -> "Now playing"
                 BrowseSection.Playlists -> "Your playlists"

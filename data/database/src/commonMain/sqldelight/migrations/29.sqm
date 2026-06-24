@@ -1,0 +1,1 @@
+ALTER TABLE AppSettingsRow ADD COLUMN lastFmSettings TEXT NOT NULL DEFAULT '{"enabled":false,"username":null,"apiKey":null,"submitNowPlaying":true,"submitScrobbles":true,"storageStatus":"Unknown","connectedAtMs":null,"lastValidatedAtMs":null,"lastSubmittedAtMs":null,"lastNowPlayingSubmittedAtMs":null,"lastScrobbleSubmittedAtMs":null,"lastScrobbleError":null,"lastError":null}';

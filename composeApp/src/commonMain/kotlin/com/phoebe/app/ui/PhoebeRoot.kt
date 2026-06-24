@@ -207,10 +207,15 @@ import com.phoebe.app.feature.playback.MobilePlaybackRoute
 import com.phoebe.app.feature.playback.MobilePlaybackRouteActions
 import com.phoebe.app.feature.playback.MobilePlaybackRouteState
 import com.phoebe.app.feature.search.LocalSearchHistory
+import com.phoebe.app.feature.search.LocalSavedSearchActions
+import com.phoebe.app.feature.search.SavedSearchActions
 import com.phoebe.app.feature.search.rememberSearchHistoryState
+import com.phoebe.app.feature.settings.DownloadManagerUiSummary
+import com.phoebe.app.feature.settings.SettingsCategory
 import com.phoebe.app.domain.ShellPlaybackState
 import com.phoebe.app.data.catalogAlbumsForArtist
 import com.phoebe.app.data.catalogTracksForArtist
+import com.phoebe.app.data.BackupRestoreMode
 import com.phoebe.app.data.PlayHistoryRankedEntries
 import com.phoebe.app.data.PlayHistorySnapshot
 import com.phoebe.app.data.trackIndexKey
@@ -220,6 +225,8 @@ import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.AudioAnalysisFrame
 import com.phoebe.app.domain.CollectionEntry
 import com.phoebe.app.domain.CollectionTarget
+import com.phoebe.app.domain.DownloadItem
+import com.phoebe.app.domain.DownloadState
 import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryUiPreferences
@@ -377,6 +384,8 @@ private fun PhoebeRootStateHolder(
     val libraries by state.libraries.collectAsState()
     val libraryUi by state.libraryUi.collectAsState()
     val appSettings by state.appSettings.collectAsState()
+    val smartPlaylists by state.smartPlaylists.collectAsState()
+    val savedSearches by state.savedSearches.collectAsState()
     val listenBrainzFeedbackTarget by state.listenBrainzFeedbackTarget.collectAsState()
     val equalizerProfile by state.equalizerProfile.collectAsState()
     val equalizerRemoteUnavailable by state.equalizerRemoteUnavailable.collectAsState()
@@ -505,6 +514,8 @@ private fun PhoebeRootStateHolder(
         searchQuery = ""
     }
     val recentSearchItems by state.recentSearchItems.collectAsState()
+    val downloads by state.downloads.collectAsState()
+    val activeDownloadJobCount by state.activeDownloadJobCount.collectAsState()
     var libraryFilter by remember { mutableStateOf(LibraryFilterTab.Artists) }
 
     LaunchedEffect(currentRoute) {
@@ -563,6 +574,9 @@ private fun PhoebeRootStateHolder(
     val catalogSyncInProgress = catalogWorkActive || catalogSyncState.isActive
     val catalogRefreshing = catalogSyncState.showGlobalProgress ||
         (catalogSyncInProgress && !activeCatalogSurfaceHasContent)
+    val downloadManagerSummary = remember(downloads, activeDownloadJobCount) {
+        downloads.toDownloadManagerUiSummary(activeDownloadJobCount)
+    }
     val trackHeavySectionsEnabled by produceState(false, catalogSyncInProgress) {
         if (catalogSyncInProgress) {
             value = false
@@ -851,26 +865,37 @@ private fun PhoebeRootStateHolder(
         onRemoveRecentSearch = state::removeRecentSearch,
         onClearRecentSearches = state::clearRecentSearches,
     )
+    val savedSearchActions = remember(savedSearches, state) {
+        SavedSearchActions(
+            savedSearches = savedSearches,
+            saveSearch = { query, title -> state.saveSearch(query, title) },
+            deleteSearch = { search -> state.deleteSavedSearch(search) },
+        )
+    }
     var createPlaylistFor by remember { mutableStateOf<List<Track>?>(null) }
     var metadataEditorTrack by remember { mutableStateOf<Track?>(null) }
     val catalogActionsKey = catalogHomeMetadataKey to catalog.playlists.size
     val sessionKey = session?.selectedServer?.id to session?.selectedLibrary?.key
-    val playlistActions = remember(catalogActionsKey, sessionKey, mediaSources.localFolders) {
+    val playlistActions = remember(catalogActionsKey, sessionKey, mediaSources.localFolders, smartPlaylists) {
         val plexReady = session.supportsRemotePlaylists()
         val localReady = mediaSources.localFolders.any { it.enabled }
         val providerType = session?.providerType
         val list = catalog.playlists.filter { playlist ->
             playlist.isLocalPlaylist() ||
+                playlist.isSmartPlaylist() ||
                 playlist.isLikedSongsPlaylist() ||
                 (plexReady && providerType != null && playlist.isRemoteProviderPlaylist() && playlist.belongsToProvider(providerType))
-        }
+        }.sortedWith(compareByDescending<Playlist> { it.isSmartPlaylist() }.thenBy { it.title.lowercase() })
         PlaylistActions(
             playlists = list,
+            smartPlaylists = smartPlaylists,
             playlistsEnabled = plexReady || localReady,
             onAddTrackToPlaylist = { playlist, track -> state.addToPlaylist(playlist, track) },
             onMovePlaylistTrack = { playlist, from, to -> state.movePlaylistTrack(playlist, from, to) },
             onRemovePlaylistTracks = { playlist, tracks -> state.removePlaylistTracks(playlist, tracks) },
             onCopyPlaylistToPlaylist = { source, target -> state.copyPlaylistIntoPlaylist(source, target) },
+            onDeletePlaylist = { playlist -> state.deletePlaylist(playlist) },
+            onSaveSmartPlaylistToProvider = { playlist -> state.saveSmartPlaylistToProvider(playlist) },
             onCreatePlaylist = { title, initialTracks -> state.createPlaylist(title, initialTracks) },
             onRequestCreatePlaylist = { initialTracks ->
                 val canCreate = when {
@@ -885,6 +910,12 @@ private fun PhoebeRootStateHolder(
             onOpenLikedSongs = { state.openLikedSongsPlaylist() },
             onExportLocalPlaylist = { playlist, format -> state.exportLocalPlaylist(playlist, format) },
             onShufflePlaylist = { playlist -> state.playPlaylistShuffled(playlist) },
+            onCreateSmartPlaylist = { template, title -> state.createSmartPlaylist(template, title) },
+            onUpdateSmartPlaylist = { playlist -> state.updateSmartPlaylist(playlist) },
+            onRenameSmartPlaylist = { playlist, title -> state.renameSmartPlaylist(playlist, title) },
+            onDuplicateSmartPlaylist = { playlist -> state.duplicateSmartPlaylist(playlist) },
+            onSetSmartPlaylistEnabled = { playlist, enabled -> state.setSmartPlaylistEnabled(playlist, enabled) },
+            onDeleteSmartPlaylist = { playlist -> state.deleteSmartPlaylist(playlist) },
         )
     }
     val likedTracksKey = if (trackHeavySectionsEnabled) catalog.trackIndexKey() else -1L
@@ -978,6 +1009,7 @@ private fun PhoebeRootStateHolder(
         LocalMetadataEditorActions provides metadataEditorActions,
         LocalDragDrop provides dragDrop,
         LocalSearchHistory provides searchHistory,
+        LocalSavedSearchActions provides savedSearchActions,
     ) {
     createPlaylistFor?.let { seedTracks ->
         CreatePlaylistDialog(
@@ -1025,7 +1057,8 @@ private fun PhoebeRootStateHolder(
             if (compact) {
                 SharedTransitionLayout(Modifier.fillMaxSize()) {
                 val sharedTransitionScope = this
-                val mobileChromeVisible = canBrowseMainSections(session, mediaSources) &&
+                val canBrowseSourceBackedSections = canBrowseMainSections(session, mediaSources)
+                val mobileChromeVisible = (canBrowseSourceBackedSections || browseSection == BrowseSection.Radio) &&
                     screen != AppScreen.SignIn &&
                     screen != AppScreen.ServerPicker &&
                     screen != AppScreen.LibraryPicker
@@ -1138,6 +1171,10 @@ private fun PhoebeRootStateHolder(
                             onStartJellyfinQuickConnect = state::startJellyfinQuickConnect,
                             onFinishJellyfinQuickConnect = state::finishJellyfinQuickConnect,
                             onAddLocalFolder = state::addLocalFolderFromUri,
+                            onOpenRadio = {
+                                selectedPlaylistId = null
+                                navigator.openBrowse(BrowseSection.Radio)
+                            },
                         ),
                         modifier = Modifier.fillMaxSize(),
                     )
@@ -1422,6 +1459,7 @@ private fun PhoebeRootStateHolder(
                                 browseSection == BrowseSection.Library ||
                                 browseSection == BrowseSection.Radio ||
                                 browseSection == BrowseSection.Playlists ||
+                                browseSection == BrowseSection.Downloads ||
                                 browseSection == BrowseSection.Settings
                             if (!scoped && newQuery.isNotBlank()) {
                                 navigator.openBrowse(BrowseSection.Search)
@@ -1487,19 +1525,33 @@ private fun PhoebeRootStateHolder(
                         onImportFavoritePlaylists = state::importFavoritePlaylists,
                         onExportRadioStations = state::exportRadioStations,
                         onImportRadioStations = state::importRadioStations,
+                        onExportBackupPackage = state::exportBackupPackage,
+                        onImportBackupPackage = { state.importBackupPackage() },
+                        onReplaceFromBackupPackage = { state.importBackupPackage(BackupRestoreMode.Replace) },
                         appSettings = appSettings,
+                        audioProcessingCapabilities = state.audioProcessingCapabilities,
                         homeScreenLayoutMode = homeScreenLayoutMode,
                         onCrossfadeSeconds = state::setCrossfadeSeconds,
                         onScanLibraryOnLaunch = state::setScanLibraryOnLaunch,
                         onNotifyWhenDownloadFinishes = state::setNotifyWhenDownloadFinishes,
                         onPersistEqualizerSettings = state::setPersistEqualizerSettings,
+                        onAudioProcessingSettings = state::setAudioProcessingSettings,
                         onVisualizerPreset = state::setNowPlayingVisualizerPreset,
                         onBlurredArtworkAppearance = state::setBlurredArtworkAppearance,
                         downloadDirectory = downloadDirectory,
-                        downloadCount = catalog.downloads.size,
+                        downloadCount = downloads.size,
+                        downloadItems = downloads,
+                        downloadManager = downloadManagerSummary,
                         defaultDownloadDirectoryLabel = state.defaultDownloadDirectoryLabel,
                         onDownloadDirectory = state::setDownloadDirectory,
                         onDeleteAllDownloads = state::deleteAllDownloads,
+                        onDeleteCompletedDownloads = state::deleteCompletedDownloads,
+                        onClearFailedDownloads = state::clearFailedDownloads,
+                        onRetryFailedDownloads = { state.retryFailedDownloads() },
+                        onRetryDownloads = state::retryFailedDownloads,
+                        onCancelDownloads = state::cancelDownloadsWithoutDeleting,
+                        onDeleteDownloads = state::deleteDownloadsByTrackIds,
+                        onDownloadPolicySettings = state::setDownloadPolicySettings,
                         useLightAppearance = useLightAppearance,
                         onUseLightAppearanceChange = onUseLightAppearanceChange,
                         appearanceTintId = appearanceTintId,
@@ -1511,6 +1563,11 @@ private fun PhoebeRootStateHolder(
                         onListenBrainzSubmitNowPlaying = state::setListenBrainzSubmitNowPlaying,
                         onListenBrainzSubmitListens = state::setListenBrainzSubmitListens,
                         onListenBrainzSubmitCurrentTrackFeedback = state::setListenBrainzSubmitCurrentTrackFeedback,
+                        onStartLastFmAuthorization = state::startLastFmAuthorization,
+                        onFinishLastFmAuthorization = state::finishLastFmAuthorization,
+                        onDisconnectLastFm = state::disconnectLastFm,
+                        onLastFmSubmitNowPlaying = state::setLastFmSubmitNowPlaying,
+                        onLastFmSubmitScrobbles = state::setLastFmSubmitScrobbles,
                         appUpdateState = appUpdateState,
                         routeViewModelFactory = state.routeViewModelFactory,
                         onInstallUpdate = state::installAvailableUpdate,
@@ -1558,6 +1615,7 @@ private fun PhoebeRootStateHolder(
                             MobileBottomNavigation(
                                 section = browseSection,
                                 onSection = { section ->
+                                    if (!canBrowseSourceBackedSections && section.requiresBrowseSource()) return@MobileBottomNavigation
                                     navigator.openBrowse(section)
                                     selectedPlaylistId = null
                                 },
@@ -1793,6 +1851,7 @@ private fun PhoebeRootStateHolder(
                                 browseSection == BrowseSection.Library ||
                                 browseSection == BrowseSection.Radio ||
                                 browseSection == BrowseSection.Playlists ||
+                                browseSection == BrowseSection.Downloads ||
                                 browseSection == BrowseSection.Settings
                             if (
                                 !scoped &&
@@ -1889,11 +1948,18 @@ private fun PhoebeRootStateHolder(
                     settingsState = SettingsUiState(
                         appSettings = appSettings,
                         downloadDirectory = downloadDirectory,
-                        downloadCount = catalog.downloads.size,
+                        downloadCount = downloads.size,
+                        downloadItems = downloads,
+                        downloadManager = downloadManagerSummary,
                         defaultDownloadDirectoryLabel = state.defaultDownloadDirectoryLabel,
                         useLightAppearance = useLightAppearance,
                         appearanceTintId = appearanceTintId,
                         homeScreenLayoutMode = homeScreenLayoutMode,
+                        settingsInitialCategory = if (browseSection == BrowseSection.Downloads) {
+                            SettingsCategory.Downloads
+                        } else {
+                            SettingsCategory.AudioPlayback
+                        },
                         listenBrainzCredentialAvailability = state.listenBrainzCredentialAvailability,
                     ),
                     settingsActions = SettingsActions(
@@ -1906,15 +1972,27 @@ private fun PhoebeRootStateHolder(
                         onImportFavoritePlaylists = state::importFavoritePlaylists,
                         onExportRadioStations = state::exportRadioStations,
                         onImportRadioStations = state::importRadioStations,
+                        onExportBackupPackage = state::exportBackupPackage,
+                        onImportBackupPackage = { state.importBackupPackage() },
+                        onReplaceFromBackupPackage = { state.importBackupPackage(BackupRestoreMode.Replace) },
                         onCrossfadeSeconds = state::setCrossfadeSeconds,
                         onScanLibraryOnLaunch = state::setScanLibraryOnLaunch,
                         onNotifyWhenDownloadFinishes = state::setNotifyWhenDownloadFinishes,
                         onPersistEqualizerSettings = state::setPersistEqualizerSettings,
                         onPersistVolumeSettings = state::setPersistVolumeSettings,
+                        onAudioProcessingSettings = state::setAudioProcessingSettings,
+                        audioProcessingCapabilities = state.audioProcessingCapabilities,
                         onVisualizerPreset = state::setNowPlayingVisualizerPreset,
                         onBlurredArtworkAppearance = state::setBlurredArtworkAppearance,
                         onDownloadDirectory = state::setDownloadDirectory,
                         onDeleteAllDownloads = state::deleteAllDownloads,
+                        onDeleteCompletedDownloads = state::deleteCompletedDownloads,
+                        onClearFailedDownloads = state::clearFailedDownloads,
+                        onRetryFailedDownloads = { state.retryFailedDownloads() },
+                        onRetryDownloads = state::retryFailedDownloads,
+                        onCancelDownloads = state::cancelDownloadsWithoutDeleting,
+                        onDeleteDownloads = state::deleteDownloadsByTrackIds,
+                        onDownloadPolicySettings = state::setDownloadPolicySettings,
                         onUseLightAppearanceChange = onUseLightAppearanceChange,
                         onAppearanceTintChange = onAppearanceTintChange,
                         onHomeScreenLayoutModeChange = onHomeScreenLayoutModeChange,
@@ -1923,6 +2001,11 @@ private fun PhoebeRootStateHolder(
                         onListenBrainzSubmitNowPlaying = state::setListenBrainzSubmitNowPlaying,
                         onListenBrainzSubmitListens = state::setListenBrainzSubmitListens,
                         onListenBrainzSubmitCurrentTrackFeedback = state::setListenBrainzSubmitCurrentTrackFeedback,
+                        onStartLastFmAuthorization = state::startLastFmAuthorization,
+                        onFinishLastFmAuthorization = state::finishLastFmAuthorization,
+                        onDisconnectLastFm = state::disconnectLastFm,
+                        onLastFmSubmitNowPlaying = state::setLastFmSubmitNowPlaying,
+                        onLastFmSubmitScrobbles = state::setLastFmSubmitScrobbles,
                     ),
                 )
             }
@@ -2161,6 +2244,7 @@ private fun catalogHasContentForSurface(
             BrowseSection.Radio -> true
             BrowseSection.Lyrics -> true
             BrowseSection.Playlists -> catalog.playlists.isNotEmpty()
+            BrowseSection.Downloads -> true
             BrowseSection.Settings -> true
         }
         AppScreen.SignIn,
@@ -2327,3 +2411,15 @@ private fun resolveAlbumForTrack(catalog: CatalogSnapshot, track: Track): Album?
         album.title.equals(albumTitle, ignoreCase = true)
     }
 }
+
+private fun List<DownloadItem>.toDownloadManagerUiSummary(activeDownloadJobCount: Int): DownloadManagerUiSummary =
+    DownloadManagerUiSummary(
+        total = size,
+        active = maxOf(
+            count { it.state == DownloadState.Queued || it.state == DownloadState.Downloading },
+            activeDownloadJobCount,
+        ),
+        complete = count { it.state == DownloadState.Complete },
+        failed = count { it.state == DownloadState.Failed },
+        estimatedBytes = filter { it.state == DownloadState.Complete }.sumOf { it.downloadedBytes },
+    )

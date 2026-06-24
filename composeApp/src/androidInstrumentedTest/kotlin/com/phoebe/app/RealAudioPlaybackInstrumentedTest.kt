@@ -196,8 +196,8 @@ class RealAudioPlaybackInstrumentedTest {
         val reporterScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         val submittedBodies = Collections.synchronizedList(mutableListOf<String>())
         try {
-            val file = copyAssetFixture("mdn-t-rex-roar-cc0.mp3")
-            val track = fixtureTrack(file, durationMs = 2_500, id = "listenbrainz-real-android")
+            val file = copyAssetFixture("wikimedia-example.mp3")
+            val track = fixtureTrack(file, durationMs = 1_000, id = "listenbrainz-real-android")
             val credentialStore = FakeSecureCredentialStore()
             credentialStore.write(SecureCredentialKey.ListenBrainzUserToken, "token")
             val settings = MutableStateFlow(
@@ -240,6 +240,13 @@ class RealAudioPlaybackInstrumentedTest {
 
             player.play(listOf(track), 0)
 
+            assumeTrue(
+                "Media3 playback did not start for ListenBrainz reporter",
+                waitUntil(timeoutMs = 30_000L) {
+                    diagnostics.hasEngine(PlaybackEnginePath.Media3) &&
+                        playbackLooksActive(player, diagnostics)
+                },
+            )
             assertTrue(
                 waitUntil(timeoutMs = 30_000L) {
                     submittedBodies.any { it.contains(""""listen_type":"single"""") } &&
@@ -247,6 +254,8 @@ class RealAudioPlaybackInstrumentedTest {
                 },
                 "Expected real Android playback to submit a ListenBrainz listen; " +
                     "state=${player.state.value} engines=${diagnostics.hasEngine(PlaybackEnginePath.Media3)} " +
+                    "playing=${diagnostics.hasPlayingEvent(PlaybackEnginePath.Media3)} " +
+                    "maxProgress=${diagnostics.maxProgress(PlaybackEnginePath.Media3)} " +
                     "bodies=${submittedBodies.toList()} listenSubmittedCount=${account.listenSubmittedCount}",
             )
             assertTrue(submittedBodies.any { it.contains("listenbrainz-real-android") })

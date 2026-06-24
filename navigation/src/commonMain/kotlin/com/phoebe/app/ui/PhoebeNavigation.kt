@@ -573,6 +573,7 @@ class PhoebeNavigator(
             AppNavigationRequest.ServerPicker -> openSetupRoute(PhoebeRoute.ServerPicker)
             AppNavigationRequest.LibraryPicker -> openSetupRoute(PhoebeRoute.LibraryPicker)
             AppNavigationRequest.Home -> openHomeFromAppRequest()
+            AppNavigationRequest.Radio -> openBrowse(BrowseSection.Radio)
             AppNavigationRequest.Player -> openPlayer()
             is AppNavigationRequest.PlaylistDetail -> {
                 replaceRoot(PhoebeRoute.Browse())
@@ -616,6 +617,7 @@ fun AppNavigationRequest.toPhoebeRoute(): PhoebeRoute = when (this) {
     AppNavigationRequest.ServerPicker -> PhoebeRoute.ServerPicker
     AppNavigationRequest.LibraryPicker -> PhoebeRoute.LibraryPicker
     AppNavigationRequest.Home -> PhoebeRoute.Browse()
+    AppNavigationRequest.Radio -> PhoebeRoute.Browse(BrowseSection.Radio)
     AppNavigationRequest.Player -> PhoebeRoute.Player
     is AppNavigationRequest.PlaylistDetail -> PhoebeRoute.PlaylistDetail(playlistId)
 }

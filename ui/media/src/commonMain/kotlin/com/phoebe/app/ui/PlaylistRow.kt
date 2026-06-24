@@ -30,6 +30,7 @@ fun PlaylistRow(
     active: Boolean = false,
     onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null,
+    trailingContent: (@Composable () -> Unit)? = null,
 ) {
     Row(
         modifier = Modifier
@@ -68,9 +69,10 @@ fun PlaylistRow(
                 }
             }
         }
-        Column {
+        Column(Modifier.weight(1f)) {
             Text(title, color = PhoebeUi.secondaryText, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (subtitle != null) Text(subtitle, color = PhoebeUi.mutedText, fontSize = 12.sp)
         }
+        trailingContent?.invoke()
     }
 }

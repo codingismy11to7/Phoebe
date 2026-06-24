@@ -186,6 +186,7 @@ fun SignInWelcomeScreen(
     onDiscoverJellyfinServers: () -> Unit,
     onStartJellyfinQuickConnect: (String) -> Unit,
     onFinishJellyfinQuickConnect: () -> Unit,
+    onOpenRadio: () -> Unit = {},
     showLocalFolderHint: Boolean,
     modifier: Modifier = Modifier,
 ) {
@@ -288,6 +289,12 @@ fun SignInWelcomeScreen(
                     selected = true
                 )
             }
+            DesktopProviderChip(
+                text = "Radio",
+                icon = PhoebeIcon.Radio,
+                onClick = onOpenRadio,
+                selected = false,
+            )
         }
         AnimatedVisibility(expandedProvider != null) {
             val provider = expandedProvider
@@ -479,6 +486,7 @@ fun MobileSignInWelcomeScreen(
     onStartJellyfinQuickConnect: (String) -> Unit,
     onFinishJellyfinQuickConnect: () -> Unit,
     onAddLocalFolder: (String?) -> Unit,
+    onOpenRadio: () -> Unit = {},
     initialProvidersExpanded: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
@@ -623,6 +631,27 @@ fun MobileSignInWelcomeScreen(
                     },
                     modifier = Modifier.fillMaxWidth(),
                 )
+            }
+            AnimatedVisibility(
+                visible = !providersExpanded,
+                enter = fadeIn(animationSpec = tween(180)) + expandVertically(animationSpec = tween(220)),
+                exit = fadeOut(animationSpec = tween(120)) + shrinkVertically(animationSpec = tween(180)),
+            ) {
+                Column {
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedButton(
+                        onClick = onOpenRadio,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = if (lightMode) PhoebeUi.primaryText else Color.White,
+                        ),
+                        border = null,
+                    ) {
+                        PhoebeIconView(PhoebeIcon.Radio, tint = if (lightMode) PhoebeUi.primaryText else Color.White, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Listen to radio", fontSize = 14.sp)
+                    }
+                }
             }
 
             AnimatedVisibility(

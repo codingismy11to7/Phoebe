@@ -8,6 +8,7 @@ import com.phoebe.app.data.MusicProviderRegistry
 import com.phoebe.app.data.PlexClient
 import com.phoebe.app.data.SessionRepository
 import com.phoebe.app.data.SubsonicClient
+import com.phoebe.app.data.UserArtifactsRepository
 import com.phoebe.app.data.db.DatabaseWriteGate
 import com.phoebe.app.db.PhoebeDatabase
 import com.phoebe.app.platform.PlatformStorage
@@ -35,6 +36,7 @@ fun testCatalogRepository(
         storage = storage,
         httpClient = httpClient,
         mediaSourcesRepository = mediaSourcesRepository,
+        userArtifactsRepository = UserArtifactsRepository(database),
         databaseWriteGate = databaseWriteGate,
     )
 

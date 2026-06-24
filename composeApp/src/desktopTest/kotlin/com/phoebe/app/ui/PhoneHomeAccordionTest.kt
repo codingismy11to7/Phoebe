@@ -6,9 +6,12 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
 import com.phoebe.app.domain.Album
@@ -263,7 +266,9 @@ class PhoneHomeAccordionTest {
             }
         }
 
-        onNodeWithText("Expanded").performClick()
+        onNode(hasText("Expanded") and hasClickAction())
+            .performScrollTo()
+            .performClick()
         waitForIdle()
 
         assertEquals(HomeScreenLayoutMode.Expanded, selected)

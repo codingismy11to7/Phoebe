@@ -5,6 +5,7 @@ import androidx.compose.runtime.Immutable
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.RecentSearchItem
+import com.phoebe.app.domain.SavedSearch
 import com.phoebe.app.domain.Track
 
 @Immutable
@@ -25,5 +26,20 @@ val LocalSearchHistory = compositionLocalOf {
         recordTrack = {},
         removeItem = {},
         clearItems = {},
+    )
+}
+
+@Immutable
+data class SavedSearchActions(
+    val savedSearches: List<SavedSearch>,
+    val saveSearch: (query: String, title: String) -> Unit,
+    val deleteSearch: (SavedSearch) -> Unit,
+)
+
+val LocalSavedSearchActions = compositionLocalOf {
+    SavedSearchActions(
+        savedSearches = emptyList(),
+        saveSearch = { _, _ -> },
+        deleteSearch = {},
     )
 }

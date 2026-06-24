@@ -6,7 +6,9 @@ import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.canAddToLocalPlaylist
 import com.phoebe.app.domain.canAddToPlexPlaylist
+import com.phoebe.app.domain.displayName
 import com.phoebe.app.domain.isLocalPlaylist
+import com.phoebe.app.domain.isLikedSongsPlaylist
 import com.phoebe.app.domain.isRemoteProviderPlaylist
 import com.phoebe.app.domain.playlistEntryKey
 import com.phoebe.app.domain.supportsRemotePlaylists
@@ -107,6 +109,30 @@ class PlaylistService(
             "Removed $count ${if (count == 1) "song" else "songs"} from ${playlist.title}."
         } else {
             "Couldn't remove songs from ${playlist.title}."
+        }
+    }
+
+    suspend fun deletePlaylist(session: PlexSession?, playlist: Playlist): String {
+        if (playlist.isLikedSongsPlaylist()) return "Liked Songs can't be deleted."
+        if (playlist.isSmartPlaylist()) return "Use smart playlist management to delete smart playlists."
+        val deleted = catalogRepository.deletePlaylist(session, playlist)
+        return if (deleted) {
+            "Deleted ${playlist.title}."
+        } else {
+            "Couldn't delete ${playlist.title}."
+        }
+    }
+
+    suspend fun saveSmartPlaylistToProvider(session: PlexSession?, playlist: Playlist): PlaylistCreateResult {
+        if (!playlist.isSmartPlaylist()) return PlaylistCreateResult(message = "Only smart playlists can be saved to a provider.")
+        if (!session.supportsRemotePlaylists()) {
+            return PlaylistCreateResult(message = "Sign in and select a music library to save smart playlists.")
+        }
+        val created = catalogRepository.createProviderPlaylistFromSmartPlaylist(session, playlist)
+        return if (created != null) {
+            PlaylistCreateResult(playlist = created, message = "Saved ${playlist.title} to ${session?.providerType?.displayName}.")
+        } else {
+            PlaylistCreateResult(message = "No provider songs from ${playlist.title} could be saved.")
         }
     }
 

@@ -10,6 +10,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -116,6 +118,20 @@ actual fun isDesktopPlatform(): Boolean = false
 actual fun isIosPlatform(): Boolean = false
 
 actual fun supportsPredictiveBack(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+
+actual fun currentNetworkMeteringStatus(): NetworkMeteringStatus {
+    val context = AndroidContextHolder.applicationOrNull ?: return NetworkMeteringStatus()
+    val connectivity = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        ?: return NetworkMeteringStatus()
+    val activeNetwork = connectivity.activeNetwork
+    val capabilities = activeNetwork?.let(connectivity::getNetworkCapabilities)
+    return NetworkMeteringStatus(
+        isMetered = connectivity.isActiveNetworkMetered,
+        isCellular = capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true,
+    )
+}
+
+actual fun defaultDownloadWifiOnly(): Boolean = false
 
 actual class PlatformStorage actual constructor() {
     private val root: File

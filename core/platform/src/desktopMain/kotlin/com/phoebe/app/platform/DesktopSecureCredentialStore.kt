@@ -317,11 +317,15 @@ private fun commandExists(command: String): Boolean {
 private val SecureCredentialKey.account: String
     get() = when (this) {
         SecureCredentialKey.ListenBrainzUserToken -> "userToken"
+        SecureCredentialKey.LastFmSharedSecret -> "lastFmSharedSecret"
+        SecureCredentialKey.LastFmSessionKey -> "lastFmSessionKey"
     }
 
 private val SecureCredentialKey.windowsTargetName: String
     get() = when (this) {
         SecureCredentialKey.ListenBrainzUserToken -> "Phoebe.ListenBrainzToken"
+        SecureCredentialKey.LastFmSharedSecret -> "Phoebe.LastFmSharedSecret"
+        SecureCredentialKey.LastFmSessionKey -> "Phoebe.LastFmSessionKey"
     }
 
 private const val MacListenBrainzService = "com.phoebe.listenbrainz"

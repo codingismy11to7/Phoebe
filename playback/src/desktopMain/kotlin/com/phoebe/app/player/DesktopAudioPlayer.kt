@@ -83,6 +83,9 @@ class DesktopAudioPlayer(
     private var prefetchedCrossfade: PrefetchedCrossfade? = null
     private var crossfadePrefetchFuture: CompletableFuture<PrefetchedCrossfade?>? = null
     private var fullyBufferedPlayback = false
+    private var pendingManualSeekGeneration = -1
+    private var pendingManualSeekPositionMs = 0L
+    private var pendingManualSeekUntilMs = 0L
     private val httpClient = HttpClient.newBuilder()
         .version(HttpClient.Version.HTTP_1_1)
         .connectTimeout(Duration.ofSeconds(15))
@@ -419,6 +422,9 @@ class DesktopAudioPlayer(
         val generation = activePlayGeneration
         playbackExecutor.execute {
             if (!isPlayRequestCurrent(generation)) return@execute
+            pendingManualSeekGeneration = generation
+            pendingManualSeekPositionMs = positionMs.coerceAtLeast(0L)
+            pendingManualSeekUntilMs = System.currentTimeMillis() + ManualSeekPlatformSettleMs
             val stream = sampledStream
             if (stream != null) {
                 runCatching { stream.line.flush() }
@@ -1180,7 +1186,7 @@ class DesktopAudioPlayer(
         } else {
             (playback.line.microsecondPosition / 1_000L).coerceAtLeast(0L)
         }
-        val positionMs = audiblePositionMs
+        val positionMs = stabilizedPlatformPositionMs(audiblePositionMs, generation)
             .coerceAtMost(decodedPositionMs.takeIf { it > 0L } ?: audiblePositionMs)
             .let { position -> if (durationMs > 0L) position.coerceAtMost(durationMs) else position }
         val decodedBufferedMs = maxOf(positionMs, decodedPositionMs)
@@ -1746,7 +1752,7 @@ class DesktopAudioPlayer(
         fallbackPositionMs: Long? = null,
     ) {
         if (!isPlayRequestCurrent(generation)) return
-        val platformPositionMs = javafxDurationMs(mediaPlayer.currentTime)
+        val platformPositionMs = stabilizedPlatformPositionMs(javafxDurationMs(mediaPlayer.currentTime), generation)
         val positionMs = maxOf(platformPositionMs, fallbackPositionMs ?: platformPositionMs)
         val durationMs = javafxDurationMs(mediaPlayer.media.duration)
         val platformBufferedMs = javafxDurationMs(mediaPlayer.bufferProgressTime).coerceAtLeast(positionMs)
@@ -1780,6 +1786,21 @@ class DesktopAudioPlayer(
         )
     }
 
+    private fun stabilizedPlatformPositionMs(platformPositionMs: Long, generation: Int): Long {
+        if (pendingManualSeekGeneration != generation) return platformPositionMs
+        val nowMs = System.currentTimeMillis()
+        if (nowMs > pendingManualSeekUntilMs) {
+            pendingManualSeekGeneration = -1
+            return platformPositionMs
+        }
+        val targetPositionMs = pendingManualSeekPositionMs
+        if (kotlin.math.abs(platformPositionMs - targetPositionMs) <= ManualSeekPlatformSettleToleranceMs) {
+            pendingManualSeekGeneration = -1
+            return platformPositionMs
+        }
+        return targetPositionMs
+    }
+
     private fun trackDurationOrClipDuration(generation: Int, clip: Clip): Long {
         val stateDuration = state.value.durationMs.takeIf { it > 0L }
         if (stateDuration != null && isPlayRequestCurrent(generation)) return stateDuration
@@ -1803,7 +1824,7 @@ class DesktopAudioPlayer(
                     fallbackBasePositionMs = rawPositionMs
                     fallbackBaseAtNs = nowNs
                 }
-                val positionMs = if (playing) {
+                val platformPositionMs = if (playing) {
                     val elapsedMs = (nowNs - fallbackBaseAtNs).coerceAtLeast(0L) / 1_000_000L
                     maxOf(rawPositionMs, fallbackBasePositionMs + elapsedMs).let { position ->
                         if (durationMs > 0L) position.coerceAtMost(durationMs) else position
@@ -1811,6 +1832,7 @@ class DesktopAudioPlayer(
                 } else {
                     rawPositionMs
                 }
+                val positionMs = stabilizedPlatformPositionMs(platformPositionMs, generation)
                 val completed = durationMs > 0L && positionMs + SampledClipEndToleranceMs >= durationMs
                 val effectivePlaying = playing && !completed
                 diagnostics.playbackProgress(PlaybackEnginePath.SampledClip, positionMs, durationMs)
@@ -2074,6 +2096,9 @@ internal object DesktopPlaybackStartupPolicy {
 
     fun shouldPrefetchRemoteForCrossfade(uri: String): Boolean = isRemoteUri(uri)
 }
+
+private const val ManualSeekPlatformSettleMs = 1_500L
+private const val ManualSeekPlatformSettleToleranceMs = 750L
 
 private object JavaFxRuntime {
     private val started = AtomicBoolean(false)

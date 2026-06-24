@@ -25,6 +25,19 @@ class AppNavigationCoordinatorTest {
     }
 
     @Test
+    fun initialRequestUsesRadioWhenNoBrowseSourceExists() {
+        val coordinator = AppNavigationCoordinator()
+
+        assertEquals(
+            AppNavigationRequest.Radio,
+            coordinator.initialRequest(
+                session = null,
+                hasEnabledLocalFolders = false,
+            ),
+        )
+    }
+
+    @Test
     fun restoredBrowseRequestIgnoresLocalOnlyStartupState() {
         val coordinator = AppNavigationCoordinator()
 

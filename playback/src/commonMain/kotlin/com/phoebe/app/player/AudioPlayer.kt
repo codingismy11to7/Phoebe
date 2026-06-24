@@ -1,6 +1,9 @@
 package com.phoebe.app.player
 
 import com.phoebe.app.domain.EqualizerProfile
+import com.phoebe.app.domain.AudioOutputDevice
+import com.phoebe.app.domain.AudioProcessingCapabilities
+import com.phoebe.app.domain.AudioProcessingSettings
 import com.phoebe.app.domain.AudioAnalysisFrame
 import com.phoebe.app.domain.PlayerState
 import com.phoebe.app.domain.RepeatMode
@@ -14,6 +17,10 @@ interface AudioPlayer {
     val state: StateFlow<PlayerState>
     val audioAnalysis: StateFlow<AudioAnalysisFrame>
         get() = EmptyAudioAnalysisState
+    val audioProcessingCapabilities: AudioProcessingCapabilities
+        get() = AudioProcessingCapabilities()
+    val outputDevices: StateFlow<List<AudioOutputDevice>>
+        get() = EmptyAudioOutputDevicesState
 
     fun play(queue: List<Track>, startIndex: Int = 0)
     fun playShuffled(queue: List<Track>, startIndex: Int = 0) {
@@ -50,6 +57,8 @@ interface AudioPlayer {
     fun setVolume(volume: Float)
     fun setCrossfadeDurationMs(durationMs: Long)
     fun setEqualizer(profile: EqualizerProfile)
+    fun setAudioProcessing(settings: AudioProcessingSettings) = Unit
+    fun setOutputDevice(id: String?) = Unit
 
     /**
      * Keep per-app output at unity while [updateReportedVolume] mirrors the OS level on the slider.
@@ -72,5 +81,7 @@ interface AudioPlayer {
 
     fun close() = Unit
 }
+
+private val EmptyAudioOutputDevicesState = MutableStateFlow<List<AudioOutputDevice>>(emptyList())
 
 expect fun createAudioPlayer(): AudioPlayer

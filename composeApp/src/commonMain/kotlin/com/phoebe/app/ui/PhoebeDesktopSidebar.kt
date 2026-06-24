@@ -271,6 +271,13 @@ internal fun Sidebar(
                 onClick = { onNavigate(BrowseSection.Library) },
             )
             NavRow(
+                PhoebeIcon.PlaylistPlay,
+                "Playlists",
+                active = activeSection == BrowseSection.Playlists && selectedPlaylistId == null,
+                enabled = mainNavEnabled,
+                onClick = { onNavigate(BrowseSection.Playlists) },
+            )
+            NavRow(
                 PhoebeIcon.Radio,
                 "Radio",
                 active = activeSection == BrowseSection.Radio && selectedPlaylistId == null,

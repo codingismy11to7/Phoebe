@@ -6,6 +6,8 @@ import com.phoebe.app.data.AppSettingsRepository
 import com.phoebe.app.data.ListenBrainzAccountRepository
 import com.phoebe.app.data.ListenBrainzClient
 import com.phoebe.app.domain.AppSettings
+import com.phoebe.app.domain.AudioProcessingSettings
+import com.phoebe.app.domain.DownloadPolicySettings
 import com.phoebe.app.domain.EqualizerProfile
 import com.phoebe.app.domain.NowPlayingVisualizerPreset
 import com.phoebe.app.platform.SecureCredentialKey
@@ -128,6 +130,38 @@ class AppSettingsRepositoryDesktopTest {
         assertEquals(31, repository.settings.value.equalizerProfile.bandCount)
         assertEquals(12f, repository.settings.value.equalizerProfile.gainsDb.first())
         assertEquals(31, repository.settings.value.equalizerProfile.gainsDb.size)
+    }
+
+    @Test
+    fun downloadPolicyAndAudioProcessingPersistAndNormalize() = runTest {
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+
+        AppSettingsRepository(db).run {
+            setDownloadPolicySettings(
+                DownloadPolicySettings(
+                    maxConcurrentDownloads = 99,
+                    wifiOnly = true,
+                    notifyOnCompletion = false,
+                ),
+            )
+            setAudioProcessingSettings(
+                AudioProcessingSettings(
+                    crossfeedEnabled = true,
+                    crossfeedAmount = 1.5f,
+                    exclusiveMode = true,
+                    bitPerfectPreference = true,
+                ),
+            )
+        }
+        val restored = AppSettingsRepository(db).apply { restore() }.settings.value
+
+        assertEquals(DownloadPolicySettings.MaxConcurrentDownloads, restored.downloadPolicy.maxConcurrentDownloads)
+        assertTrue(restored.downloadPolicy.wifiOnly)
+        assertFalse(restored.downloadPolicy.notifyOnCompletion)
+        assertEquals(1f, restored.audioProcessing.crossfeedAmount)
+        assertFalse(restored.audioProcessing.exclusiveMode)
+        assertFalse(restored.audioProcessing.bitPerfectPreference)
     }
 
     @Test

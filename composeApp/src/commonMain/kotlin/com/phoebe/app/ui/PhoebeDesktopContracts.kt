@@ -9,6 +9,7 @@ import com.phoebe.app.data.rankedEntries
 import com.phoebe.app.feature.home.HomeUiState
 import com.phoebe.app.feature.library.LibraryFilterTab
 import com.phoebe.app.feature.settings.SettingsCategory
+import com.phoebe.app.feature.settings.DownloadManagerUiSummary
 import com.phoebe.app.di.RouteViewModelFactory
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.AppSettings
@@ -16,8 +17,12 @@ import com.phoebe.app.domain.AppScreen
 import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.ArtistRadioAvailability
 import com.phoebe.app.domain.AudioAnalysisFrame
+import com.phoebe.app.domain.AudioProcessingCapabilities
+import com.phoebe.app.domain.AudioProcessingSettings
 import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.CollectionEntry
+import com.phoebe.app.domain.DownloadItem
+import com.phoebe.app.domain.DownloadPolicySettings
 import com.phoebe.app.domain.EqualizerProfile
 import com.phoebe.app.domain.HomeSection
 import com.phoebe.app.domain.JellyfinLibraryPageKind
@@ -98,6 +103,7 @@ internal data class PlaybackActions(
     val onEqualizerGain: (Int, Float) -> Unit = { _, _ -> },
     val onEqualizerReset: () -> Unit = {},
     val onPersistEqualizerSettings: (Boolean) -> Unit = {},
+    val onAudioProcessingSettings: (AudioProcessingSettings) -> Unit = {},
     val onVisualizerPreset: (NowPlayingVisualizerPreset) -> Unit = {},
     val onListenBrainzFeedback: (ListenBrainzFeedbackScore) -> Unit = {},
     val onPlayQueue: (Int) -> Unit,
@@ -217,6 +223,8 @@ internal data class SettingsUiState(
     val appSettings: AppSettings,
     val downloadDirectory: String?,
     val downloadCount: Int,
+    val downloadItems: List<DownloadItem> = emptyList(),
+    val downloadManager: DownloadManagerUiSummary = DownloadManagerUiSummary(total = downloadCount, complete = downloadCount),
     val defaultDownloadDirectoryLabel: String,
     val useLightAppearance: Boolean,
     val appearanceTintId: String,
@@ -235,15 +243,27 @@ internal data class SettingsActions(
     val onImportFavoritePlaylists: () -> Unit,
     val onExportRadioStations: () -> Unit,
     val onImportRadioStations: () -> Unit,
+    val onExportBackupPackage: () -> Unit = {},
+    val onImportBackupPackage: () -> Unit = {},
+    val onReplaceFromBackupPackage: () -> Unit = {},
     val onCrossfadeSeconds: (Int) -> Unit,
     val onScanLibraryOnLaunch: (Boolean) -> Unit,
     val onNotifyWhenDownloadFinishes: (Boolean) -> Unit,
     val onPersistEqualizerSettings: (Boolean) -> Unit = {},
     val onPersistVolumeSettings: (Boolean) -> Unit = {},
+    val onAudioProcessingSettings: (AudioProcessingSettings) -> Unit = {},
+    val audioProcessingCapabilities: AudioProcessingCapabilities = AudioProcessingCapabilities(),
     val onVisualizerPreset: (NowPlayingVisualizerPreset) -> Unit = {},
     val onBlurredArtworkAppearance: (Boolean) -> Unit = {},
     val onDownloadDirectory: (String?) -> Unit,
     val onDeleteAllDownloads: () -> Unit,
+    val onDeleteCompletedDownloads: () -> Unit = {},
+    val onClearFailedDownloads: () -> Unit = {},
+    val onRetryFailedDownloads: () -> Unit = {},
+    val onRetryDownloads: (Set<String>) -> Unit = {},
+    val onCancelDownloads: (Set<String>) -> Unit = {},
+    val onDeleteDownloads: (Set<String>) -> Unit = {},
+    val onDownloadPolicySettings: (DownloadPolicySettings) -> Unit = {},
     val onUseLightAppearanceChange: (Boolean) -> Unit,
     val onAppearanceTintChange: (String) -> Unit,
     val onHomeScreenLayoutModeChange: (HomeScreenLayoutMode) -> Unit = {},
@@ -252,4 +272,9 @@ internal data class SettingsActions(
     val onListenBrainzSubmitNowPlaying: (Boolean) -> Unit = {},
     val onListenBrainzSubmitListens: (Boolean) -> Unit = {},
     val onListenBrainzSubmitCurrentTrackFeedback: (Boolean) -> Unit = {},
+    val onStartLastFmAuthorization: (String, String) -> Unit = { _, _ -> },
+    val onFinishLastFmAuthorization: () -> Unit = {},
+    val onDisconnectLastFm: () -> Unit = {},
+    val onLastFmSubmitNowPlaying: (Boolean) -> Unit = {},
+    val onLastFmSubmitScrobbles: (Boolean) -> Unit = {},
 )

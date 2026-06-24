@@ -1,5 +1,6 @@
 plugins {
     id("phoebe.data")
+    kotlin("plugin.serialization")
 }
 
 kotlin {
@@ -7,6 +8,7 @@ kotlin {
         commonMain {
             dependencies {
                 implementation(project(":domain"))
+                implementation(libs.serialization.json)
             }
         }
         commonTest {

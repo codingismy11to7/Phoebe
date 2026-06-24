@@ -62,6 +62,10 @@ actual fun isIosPlatform(): Boolean = false
 
 actual fun supportsPredictiveBack(): Boolean = false
 
+actual fun currentNetworkMeteringStatus(): NetworkMeteringStatus = NetworkMeteringStatus()
+
+actual fun defaultDownloadWifiOnly(): Boolean = true
+
 private val storageRoot: File by lazy {
     desktopPlatformStorageRoot()
 }
@@ -238,8 +242,10 @@ private fun File.isDescendantOf(parent: File): Boolean =
 actual fun openExternalUrl(url: String) {
     val desktop = runCatching { if (Desktop.isDesktopSupported()) Desktop.getDesktop() else null }.getOrNull()
     if (desktop != null && desktop.isSupported(Desktop.Action.BROWSE)) {
-        desktop.browse(URI(url))
-        return
+        val opened = runCatching {
+            desktop.browse(URI(url))
+        }.isSuccess
+        if (opened) return
     }
     openExternalUrlWithSystemHandler(url)
 }

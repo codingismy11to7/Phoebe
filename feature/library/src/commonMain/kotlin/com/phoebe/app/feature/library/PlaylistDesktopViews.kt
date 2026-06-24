@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.sp
 import com.phoebe.app.data.filterPlaylistsByQuery
 import com.phoebe.app.data.filterTracksByQuery
 import com.phoebe.app.data.sortTracksForLibrary
+import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryUiPreferences
@@ -80,11 +81,14 @@ fun PlaylistDetailDesktopView(
             headlineLineHeight = headlineLineHeight,
             searchPillModifier = searchPillModifier,
         ) {
-            LikeButton(
-                liked = favoriteActions.isFavorite(playlist),
-                enabled = true,
-                onClick = { favoriteActions.onTogglePlaylist(playlist) },
-            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                LikeButton(
+                    liked = favoriteActions.isFavorite(playlist),
+                    enabled = true,
+                    onClick = { favoriteActions.onTogglePlaylist(playlist) },
+                )
+                PlaylistManagementMenuButton(playlist)
+            }
         }
 
         PlaylistDetailDesktopContent(
@@ -106,6 +110,7 @@ fun PlaylistDetailDesktopView(
 
 @Composable
 fun PlaylistsDesktopView(
+    catalog: CatalogSnapshot,
     searchQuery: String,
     onSearchQuery: (String) -> Unit,
     onPlaylist: (Playlist) -> Unit,
@@ -116,6 +121,10 @@ fun PlaylistsDesktopView(
     searchPillModifier: Modifier = Modifier.width(270.dp),
 ) {
     val playlistActions = LocalPlaylistActions.current
+    var showSmartPlaylistDialog by remember { mutableStateOf(false) }
+    if (showSmartPlaylistDialog) {
+        SmartPlaylistTemplateDialog(catalog = catalog, onDismiss = { showSmartPlaylistDialog = false })
+    }
     Column(
         modifier.padding(
             start = edgePadding,
@@ -134,7 +143,9 @@ fun PlaylistsDesktopView(
             headlineFontSize = headlineFontSize,
             headlineLineHeight = headlineLineHeight,
             searchPillModifier = searchPillModifier,
-        )
+        ) {
+            SmartPlaylistCreateButton(onClick = { showSmartPlaylistDialog = true })
+        }
         PlaylistsDesktopContent(
             playlists = playlistActions.playlists,
             playlistsEnabled = playlistActions.playlistsEnabled,
@@ -368,15 +379,21 @@ private fun PlaylistsDesktopContent(
                 ) {
                     items(preparedVisiblePlaylists, key = { it.id }, contentType = { "playlist" }) { playlist ->
                         val liked = playlist.isLikedSongsPlaylist()
+                        val smart = playlist.isSmartPlaylist()
                         Box(Modifier.draggablePlaylist(playlist).playlistDropTarget(playlist)) {
                             PlaylistRow(
-                                icon = if (liked) PhoebeIcon.Heart else null,
+                                icon = when {
+                                    liked -> PhoebeIcon.Heart
+                                    smart -> PhoebeIcon.InterwovenArrows
+                                    else -> null
+                                },
                                 title = playlist.title,
                                 subtitle = "${playlist.trackCount} songs",
                                 thumbUrl = playlist.thumbUrl,
-                                accent = liked,
+                                accent = liked || smart,
                                 onClick = { onPlaylist(playlist) },
                                 onLongClick = { onShufflePlaylist(playlist) },
+                                trailingContent = { PlaylistManagementMenuButton(playlist) },
                             )
                         }
                     }

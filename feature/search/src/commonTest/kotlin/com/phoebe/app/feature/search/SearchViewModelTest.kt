@@ -3,6 +3,8 @@ package com.phoebe.app.feature.search
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.CatalogSnapshot
+import com.phoebe.app.domain.DownloadItem
+import com.phoebe.app.domain.DownloadState
 import com.phoebe.app.domain.Track
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -32,9 +34,32 @@ class SearchViewModelTest {
 
         val state = viewModel.state.value
         assertEquals("moon", state.query)
-        assertEquals(listOf("track-moon"), state.results.tracks.map { it.id })
+        assertEquals(listOf("plex:track-moon"), state.results.tracks.map { it.id })
         assertEquals("album-moon", state.results.topAlbum?.id)
         assertEquals("artist-moon", state.results.topArtist?.id)
+    }
+
+    @Test
+    fun advancedQueryFiltersTracks() = runTest {
+        val viewModel = SearchViewModel(SearchResultsFactory())
+        viewModel.updateCatalog(testCatalog(), catalogRefreshing = false)
+
+        viewModel.onQuery("song artist:Moon year:2024..2024 downloaded:true codec:flac")
+
+        assertEquals(listOf("plex:track-moon"), viewModel.state.value.results.tracks.map { it.id })
+    }
+
+    @Test
+    fun filterOnlyQueryReturnsTracksWithoutEntityTextMatches() = runTest {
+        val viewModel = SearchViewModel(SearchResultsFactory())
+        viewModel.updateCatalog(testCatalog(), catalogRefreshing = false)
+
+        viewModel.onQuery("downloaded:true")
+
+        val state = viewModel.state.value
+        assertEquals(listOf("plex:track-moon"), state.results.tracks.map { it.id })
+        assertEquals(emptyList(), state.results.albums)
+        assertEquals(emptyList(), state.results.artists)
     }
 
     @Test
@@ -74,13 +99,15 @@ class SearchViewModelTest {
             year = 2024,
         )
         val moonTrack = Track(
-            id = "track-moon",
+            id = "plex:track-moon",
             title = "Moon Song",
             artist = moonArtist.title,
             album = moonAlbum.title,
             durationMs = 180_000L,
             streamUrl = "https://example.com/moon",
             downloadUrl = "https://example.com/moon.mp3",
+            year = 2024,
+            audioCodec = "flac",
         )
         val otherTrack = Track(
             id = "track-sun",
@@ -97,6 +124,14 @@ class SearchViewModelTest {
             tracksByParent = mapOf(
                 moonAlbum.id to listOf(moonTrack),
                 otherAlbum.id to listOf(otherTrack),
+            ),
+            downloads = listOf(
+                DownloadItem(
+                    trackId = moonTrack.id,
+                    title = moonTrack.title,
+                    artist = moonTrack.artist,
+                    state = DownloadState.Complete,
+                ),
             ),
         )
     }

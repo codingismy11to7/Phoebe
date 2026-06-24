@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -29,6 +30,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -49,6 +51,8 @@ import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.tooling.preview.PreviewScreenSizes
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.phoebe.app.data.artistAlbumCountSubtitle
 import com.phoebe.app.data.filterAlbumsByQuery
 import com.phoebe.app.data.filterArtistsByQuery
@@ -56,8 +60,15 @@ import com.phoebe.app.data.filterTracksByQuery
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.CatalogSnapshot
+import com.phoebe.app.domain.DownloadState
+import com.phoebe.app.domain.MediaProviderType
 import com.phoebe.app.domain.RecentSearchItem
+import com.phoebe.app.domain.SavedSearch
 import com.phoebe.app.domain.Track
+import com.phoebe.app.domain.TrackFilterContext
+import com.phoebe.app.domain.catalogPrefix
+import com.phoebe.app.domain.filterWith
+import com.phoebe.app.domain.parseAdvancedSearchQuery
 import com.phoebe.app.ui.ArtworkImage
 import com.phoebe.app.ui.AutoScrollingText
 import com.phoebe.app.ui.PhoebeIcon
@@ -113,17 +124,223 @@ fun deriveSearchUiResults(
             topTrack = null,
         )
     }
-    val matchingTracks = filterTracksByQuery(tracks, query)
-    val albums = filterAlbumsByQuery(catalog.albums, query)
-    val artists = filterArtistsByQuery(catalog.artists, query)
+    val advancedQuery = parseAdvancedSearchQuery(query)
+    val filterContext = catalog.toTrackFilterContext()
+    val filteredTracks = tracks.filterWith(advancedQuery.filter, filterContext)
+    val textQuery = advancedQuery.text.ifBlank { query.takeIf { advancedQuery.filter.rules.isEmpty() }.orEmpty() }
+    val matchingTracks = if (textQuery.isBlank()) filteredTracks else filterTracksByQuery(filteredTracks, textQuery)
+    val albums = if (textQuery.isBlank()) emptyList() else filterAlbumsByQuery(catalog.albums, textQuery)
+    val artists = if (textQuery.isBlank()) emptyList() else filterArtistsByQuery(catalog.artists, textQuery)
     return SearchUiResults(
         tracks = matchingTracks,
         albums = albums,
         artists = artists,
-        topArtist = bestSearchMatch(artists, query) { it.title },
-        topAlbum = bestSearchMatch(albums, query) { it.title },
-        topTrack = bestSearchMatch(matchingTracks, query) { it.title },
+        topArtist = bestSearchMatch(artists, textQuery) { it.title },
+        topAlbum = bestSearchMatch(albums, textQuery) { it.title },
+        topTrack = bestSearchMatch(matchingTracks, textQuery) { it.title },
     )
+}
+
+private fun CatalogSnapshot.toTrackFilterContext(): TrackFilterContext {
+    val downloadedIds = downloads
+        .asSequence()
+        .filter { it.state == DownloadState.Complete }
+        .mapTo(mutableSetOf()) { it.trackId }
+    val providers = tracksByParent.values
+        .asSequence()
+        .flatten()
+        .associate { track -> track.id to track.providerTypeFromId() }
+        .filterValues { it != null }
+        .mapValues { (_, value) -> value ?: MediaProviderType.Plex }
+    return TrackFilterContext(
+        downloadedTrackIds = downloadedIds,
+        providerByTrackId = providers,
+    )
+}
+
+private fun Track.providerTypeFromId(): MediaProviderType? =
+    MediaProviderType.entries.firstOrNull { provider -> id.startsWith("${provider.catalogPrefix}:") }
+
+@Composable
+private fun SearchInputWithSyntaxHelp(
+    searchQuery: String,
+    onSearchQuery: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var showSyntax by remember { mutableStateOf(false) }
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        SearchPill(searchQuery, onSearchQuery, Modifier.weight(1f))
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .background(PhoebeUi.sidebar)
+                .border(BorderStroke(1.dp, PhoebeUi.border), CircleShape)
+                .clickable { showSyntax = true }
+                .semantics { contentDescription = "Search syntax" },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("?", color = PhoebeUi.accentLight, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+    if (showSyntax) {
+        SearchSyntaxDialog(onDismiss = { showSyntax = false })
+    }
+}
+
+@Composable
+private fun SearchSyntaxDialog(onDismiss: () -> Unit) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(horizontal = 24.dp, vertical = 24.dp)
+                .widthIn(min = 300.dp, max = 460.dp)
+                .clip(RoundedCornerShape(18.dp))
+                .background(PhoebeUi.modalSurface)
+                .border(BorderStroke(1.dp, PhoebeUi.accentLight.copy(alpha = 0.18f)), RoundedCornerShape(18.dp))
+                .padding(horizontal = 22.dp, vertical = 22.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Text("Search syntax", color = PhoebeUi.primaryText, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                SearchSyntaxLine("artist:Beach House", "match artist text")
+                SearchSyntaxLine("album:\"Once Twice Melody\"", "quote multi-word values")
+                SearchSyntaxLine("year:1999", "match one year")
+                SearchSyntaxLine("year:1990..1999", "match a year range")
+                SearchSyntaxLine("rating:>=4", "compare numeric values")
+                SearchSyntaxLine("downloaded:true", "filter downloaded songs")
+                SearchSyntaxLine("local:false explicit:false", "combine filters")
+                SearchSyntaxLine("codec:flac provider:plex", "match exact source fields")
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = onDismiss) {
+                    Text("Done", color = PhoebeUi.accentLight, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SearchSyntaxLine(example: String, description: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(example, color = PhoebeUi.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        Text(description, color = PhoebeUi.secondaryText, fontSize = 12.sp)
+    }
+}
+
+@Composable
+private fun SavedSearchStrip(
+    searchQuery: String,
+    onSearchQuery: (String) -> Unit,
+    compact: Boolean,
+) {
+    val actions = LocalSavedSearchActions.current
+    val normalizedQuery = searchQuery.trim()
+    val canSave = normalizedQuery.isNotBlank() &&
+        actions.savedSearches.none { it.title.equals(normalizedQuery, ignoreCase = true) }
+    if (!canSave && actions.savedSearches.isEmpty()) return
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                "Saved searches",
+                color = PhoebeUi.mutedText,
+                fontSize = if (compact) 11.sp else 12.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            if (canSave) {
+                SavedSearchActionChip(
+                    title = "Save current",
+                    icon = PhoebeIcon.Plus,
+                    accent = true,
+                    onClick = { actions.saveSearch(normalizedQuery, normalizedQuery) },
+                )
+            }
+        }
+        if (actions.savedSearches.isNotEmpty()) {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(actions.savedSearches, key = { it.id }) { savedSearch ->
+                    SavedSearchChip(
+                        savedSearch = savedSearch,
+                        onOpen = { onSearchQuery(savedSearch.title) },
+                        onDelete = { actions.deleteSearch(savedSearch) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SavedSearchChip(
+    savedSearch: SavedSearch,
+    onOpen: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(PhoebeUi.sidebar)
+            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(999.dp))
+            .padding(start = 11.dp, end = 5.dp, top = 5.dp, bottom = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        Row(
+            modifier = Modifier.clickable(onClick = onOpen),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            PhoebeIconView(PhoebeIcon.Search, tint = PhoebeUi.accentLight, modifier = Modifier.size(13.dp))
+            Text(
+                savedSearch.title,
+                color = PhoebeUi.secondaryText,
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.width(150.dp),
+            )
+        }
+        Box(
+            modifier = Modifier
+                .size(24.dp)
+                .clip(CircleShape)
+                .clickable(onClick = onDelete),
+            contentAlignment = Alignment.Center,
+        ) {
+            PhoebeIconView(PhoebeIcon.Close, tint = PhoebeUi.mutedText, modifier = Modifier.size(12.dp))
+        }
+    }
+}
+
+@Composable
+private fun SavedSearchActionChip(
+    title: String,
+    icon: PhoebeIcon,
+    accent: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(if (accent) PhoebeUi.accent.copy(alpha = 0.18f) else PhoebeUi.sidebar)
+            .border(BorderStroke(1.dp, if (accent) PhoebeUi.accentLight.copy(alpha = 0.30f) else PhoebeUi.border), RoundedCornerShape(999.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        PhoebeIconView(icon, tint = if (accent) PhoebeUi.accentLight else PhoebeUi.mutedText, modifier = Modifier.size(13.dp))
+        Text(title, color = PhoebeUi.secondaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+    }
 }
 
 internal fun <T> bestSearchMatch(items: List<T>, query: String, label: (T) -> String): T? {
@@ -201,7 +418,8 @@ fun SearchDesktopView(
                         Text("Search", color = PhoebeUi.primaryText, fontSize = 30.sp, fontWeight = FontWeight.Black)
                         Text("Find your favorite music", color = PhoebeUi.mutedText, fontSize = 13.sp)
                     }
-                    SearchPill(searchQuery, onSearchQuery, Modifier.fillMaxWidth())
+                    SearchInputWithSyntaxHelp(searchQuery, onSearchQuery, Modifier.fillMaxWidth())
+                    SavedSearchStrip(searchQuery, onSearchQuery, compact = true)
                 }
             } else {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -209,8 +427,9 @@ fun SearchDesktopView(
                         Text("Search", color = PhoebeUi.primaryText, fontSize = 30.sp, fontWeight = FontWeight.Black)
                         Text("Find your favorite music", color = PhoebeUi.mutedText, fontSize = 13.sp)
                     }
-                    SearchPill(searchQuery, onSearchQuery, Modifier.width(380.dp))
+                    SearchInputWithSyntaxHelp(searchQuery, onSearchQuery, Modifier.width(428.dp))
                 }
+                SavedSearchStrip(searchQuery, onSearchQuery, compact = false)
             }
             if (catalogRefreshing) {
                 loadingContent()
@@ -369,7 +588,10 @@ fun SearchMobileView(
         contentPadding = PaddingValues(bottom = 18.dp),
     ) {
         item(contentType = "search-field") {
-            SearchPill(searchQuery, onSearchQuery, Modifier.fillMaxWidth())
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                SearchInputWithSyntaxHelp(searchQuery, onSearchQuery, Modifier.fillMaxWidth())
+                SavedSearchStrip(searchQuery, onSearchQuery, compact = true)
+            }
         }
         if (catalogRefreshing) {
             item(contentType = "loading") { loadingContent() }

@@ -73,6 +73,10 @@ actual fun isIosPlatform(): Boolean = true
 
 actual fun supportsPredictiveBack(): Boolean = false
 
+actual fun currentNetworkMeteringStatus(): NetworkMeteringStatus = NetworkMeteringStatus()
+
+actual fun defaultDownloadWifiOnly(): Boolean = false
+
 actual suspend fun discoverJellyfinServers(): List<PlexServer> = emptyList()
 
 actual class PlatformStorage actual constructor() {

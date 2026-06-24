@@ -12,6 +12,7 @@ sealed interface AppNavigationRequest {
     data object ServerPicker : AppNavigationRequest
     data object LibraryPicker : AppNavigationRequest
     data object Home : AppNavigationRequest
+    data object Radio : AppNavigationRequest
     data object Player : AppNavigationRequest
     data class PlaylistDetail(val playlistId: String) : AppNavigationRequest
 }

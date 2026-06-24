@@ -5,9 +5,13 @@ import com.phoebe.app.data.CatalogItemMutationService
 import com.phoebe.app.data.CatalogRepository
 import com.phoebe.app.data.CatalogSyncService
 import com.phoebe.app.data.DownloadService
+import com.phoebe.app.data.ImportExportService
 import com.phoebe.app.data.LibraryPreferencesService
 import com.phoebe.app.data.LibraryUiRepository
 import com.phoebe.app.data.JellyfinPlayHistorySyncer
+import com.phoebe.app.data.LastFmAccountRepository
+import com.phoebe.app.data.LastFmPlaybackReporter
+import com.phoebe.app.data.LastFmService
 import com.phoebe.app.data.ListenBrainzAccountRepository
 import com.phoebe.app.data.ListenBrainzPlaybackReporter
 import com.phoebe.app.data.ListenBrainzService
@@ -23,6 +27,7 @@ import com.phoebe.app.data.RadioRepository
 import com.phoebe.app.data.SearchHistoryRepository
 import com.phoebe.app.data.SettingsService
 import com.phoebe.app.data.SessionRepository
+import com.phoebe.app.data.UserArtifactsRepository
 import com.phoebe.app.data.db.DatabaseWriteGate
 import com.phoebe.app.data.db.clearAllAppData
 import com.phoebe.app.data.db.createPhoebeDatabase
@@ -60,6 +65,8 @@ class AppDependencies(
     val radioRepository: RadioRepository,
     val appSettingsRepository: AppSettingsRepository,
     val searchHistoryRepository: SearchHistoryRepository,
+    val userArtifactsRepository: UserArtifactsRepository,
+    val importExportService: ImportExportService,
     val settingsService: SettingsService,
     val providerRegistry: MusicProviderRegistry,
     val plexPlayHistorySyncer: PlexPlayHistorySyncer,
@@ -69,6 +76,9 @@ class AppDependencies(
     val listenBrainzAccountRepository: ListenBrainzAccountRepository,
     val listenBrainzPlaybackReporter: ListenBrainzPlaybackReporter,
     val listenBrainzService: ListenBrainzService,
+    val lastFmAccountRepository: LastFmAccountRepository,
+    val lastFmPlaybackReporter: LastFmPlaybackReporter,
+    val lastFmService: LastFmService,
     val secureCredentialStore: SecureCredentialStore,
     val audioPlayer: AudioPlayer,
     val castController: CastController,
@@ -84,6 +94,7 @@ class AppDependencies(
     suspend fun deleteDatabaseDataForSignOut() {
         catalogRepository.awaitDatabaseIdle()
         listenBrainzAccountRepository.disconnect()
+        lastFmAccountRepository.disconnect()
         databaseWriteGate.withWrite {
             database.clearAllAppData(clearPlayHistory = true)
         }
@@ -95,6 +106,7 @@ class AppDependencies(
         libraryUiRepository.resetInMemoryState()
         radioRepository.resetInMemoryState()
         appSettingsRepository.resetInMemoryState()
+        userArtifactsRepository.resetInMemoryState()
         searchHistoryRepository.clear()
         lyricsRepository.clearMemoryCache()
     }
@@ -117,11 +129,13 @@ class AppDependencies(
             val sessionRepository = services.sessionRepository
             val mediaSourcesRepository = services.mediaSourcesRepository
             val searchHistoryRepository = services.searchHistoryRepository
+            val userArtifactsRepository = services.userArtifactsRepository
             val radioRepository = services.radioRepository
 
             sessionRepository.restore(refreshConnections = false)
             mediaSourcesRepository.restore()
             searchHistoryRepository.restore()
+            userArtifactsRepository.restore()
             radioRepository.restore()
             return AppDependencies(
                 appGraph = appGraph,
@@ -141,6 +155,8 @@ class AppDependencies(
                 radioRepository = radioRepository,
                 appSettingsRepository = services.appSettingsRepository,
                 searchHistoryRepository = searchHistoryRepository,
+                userArtifactsRepository = userArtifactsRepository,
+                importExportService = services.importExportService,
                 settingsService = services.settingsService,
                 providerRegistry = services.providerRegistry,
                 plexPlayHistorySyncer = services.plexPlayHistorySyncer,
@@ -150,6 +166,9 @@ class AppDependencies(
                 listenBrainzAccountRepository = services.listenBrainzAccountRepository,
                 listenBrainzPlaybackReporter = services.listenBrainzPlaybackReporter,
                 listenBrainzService = services.listenBrainzService,
+                lastFmAccountRepository = services.lastFmAccountRepository,
+                lastFmPlaybackReporter = services.lastFmPlaybackReporter,
+                lastFmService = services.lastFmService,
                 secureCredentialStore = services.secureCredentialStore,
                 audioPlayer = services.audioPlayer,
                 castController = services.castController,

@@ -66,6 +66,8 @@ private class WebSecureCredentialStore : SecureCredentialStore {
 private val SecureCredentialKey.webStorageName: String
     get() = when (this) {
         SecureCredentialKey.ListenBrainzUserToken -> "listenbrainz-user-token"
+        SecureCredentialKey.LastFmSharedSecret -> "lastfm-shared-secret"
+        SecureCredentialKey.LastFmSessionKey -> "lastfm-session-key"
     }
 
 private const val WebCredentialAvailabilityPersistent = "persistent"

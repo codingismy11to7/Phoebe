@@ -231,6 +231,7 @@ data class Album(
     /** User rating normalized to 0..5 stars. Plex stores this as 0..10. */
     val rating: Float? = null,
     val favorite: Boolean = false,
+    val albumArtist: String? = null,
 )
 
 @Serializable
@@ -243,7 +244,9 @@ data class Playlist(
     /** User rating normalized to 0..5 stars. Plex stores this as 0..10. */
     val rating: Float? = null,
     val favorite: Boolean = false,
-)
+) {
+    fun isSmartPlaylist(): Boolean = id.startsWith(SmartPlaylist.IdPrefix)
+}
 
 @Serializable
 data class PlexRadioStation(
@@ -410,6 +413,25 @@ data class Track(
     val playlistItemId: Long? = null,
     /** Plex album rating key for flat track index responses, if known. */
     val parentAlbumId: String? = null,
+    val albumArtist: String? = null,
+    val composer: String? = null,
+    val sampleRateHz: Int? = null,
+    val bitDepth: Int? = null,
+    val channelCount: Int? = null,
+    val trackNumber: Int? = null,
+    val discNumber: Int? = null,
+    val bpm: Int? = null,
+    val replayGainTrackGainDb: Float? = null,
+    val replayGainTrackPeak: Float? = null,
+    val replayGainAlbumGainDb: Float? = null,
+    val replayGainAlbumPeak: Float? = null,
+    val musicBrainzTrackId: String? = null,
+    val musicBrainzReleaseId: String? = null,
+    val comments: String? = null,
+    val explicit: Boolean? = null,
+    val titleSort: String? = null,
+    val artistSort: String? = null,
+    val albumSort: String? = null,
 )
 
 fun List<Track>.mergeDownloadCopiesById(): List<Track> {
@@ -434,6 +456,7 @@ fun List<Track>.mergeDownloadCopiesById(): List<Track> {
     return merged.values.toList()
 }
 
+@Serializable
 data class TrackMetadataUpdate(
     val trackId: String,
     val title: String,
@@ -441,7 +464,444 @@ data class TrackMetadataUpdate(
     val album: String,
     val year: Int? = null,
     val genre: String? = null,
+    val albumArtist: String? = null,
+    val mood: String? = null,
+    val style: String? = null,
+    val trackNumber: Int? = null,
+    val discNumber: Int? = null,
+    val composer: String? = null,
+    val comments: String? = null,
+    val explicit: Boolean? = null,
+    val titleSort: String? = null,
+    val artistSort: String? = null,
+    val albumSort: String? = null,
 )
+
+@Serializable
+data class TrackFilterSpec(
+    val rules: List<TrackFilterRule> = emptyList(),
+    val match: TrackFilterMatch = TrackFilterMatch.All,
+) {
+    fun matches(track: Track, context: TrackFilterContext = TrackFilterContext()): Boolean =
+        when (match) {
+            TrackFilterMatch.All -> rules.all { it.matches(track, context) }
+            TrackFilterMatch.Any -> rules.isEmpty() || rules.any { it.matches(track, context) }
+        }
+}
+
+@Serializable
+enum class TrackFilterMatch {
+    All,
+    Any,
+}
+
+@Serializable
+data class TrackFilterRule(
+    val field: FilterField,
+    val operator: FilterOperator,
+    val value: String = "",
+) {
+    fun matches(track: Track, context: TrackFilterContext = TrackFilterContext()): Boolean =
+        evaluateTrackFilterRule(track, context, this)
+}
+
+@Serializable
+enum class FilterField {
+    Title,
+    Artist,
+    Album,
+    AlbumArtist,
+    Composer,
+    Genre,
+    Mood,
+    Style,
+    Year,
+    Rating,
+    Favorite,
+    Downloaded,
+    Local,
+    Codec,
+    BitrateKbps,
+    SampleRateHz,
+    BitDepth,
+    ChannelCount,
+    Bpm,
+    DateAddedMs,
+    LastPlayedMs,
+    PlayCount,
+    Explicit,
+    Provider,
+}
+
+@Serializable
+enum class FilterOperator {
+    Equals,
+    NotEquals,
+    Contains,
+    NotContains,
+    StartsWith,
+    EndsWith,
+    GreaterThan,
+    GreaterThanOrEquals,
+    LessThan,
+    LessThanOrEquals,
+    Between,
+    IsTrue,
+    IsFalse,
+    IsEmpty,
+    IsNotEmpty,
+}
+
+@Serializable
+data class FilterSort(
+    val field: FilterField = FilterField.Title,
+    val ascending: Boolean = true,
+)
+
+@Serializable
+data class TrackFilterContext(
+    val favoriteTrackIds: Set<String> = emptySet(),
+    val downloadedTrackIds: Set<String> = emptySet(),
+    val lastPlayedByTrackId: Map<String, Long> = emptyMap(),
+    val playCountByTrackId: Map<String, Int> = emptyMap(),
+    val providerByTrackId: Map<String, MediaProviderType> = emptyMap(),
+)
+
+@Serializable
+data class SmartPlaylist(
+    val id: String,
+    val title: String,
+    val filter: TrackFilterSpec = TrackFilterSpec(),
+    val sort: FilterSort = FilterSort(),
+    val limit: Int? = null,
+    val createdAtMs: Long,
+    val updatedAtMs: Long,
+    val enabled: Boolean = true,
+) {
+    companion object {
+        const val IdPrefix = "smart:playlist:"
+    }
+}
+
+@Serializable
+data class SmartPlaylistTemplate(
+    val id: String,
+    val title: String,
+    val description: String,
+    val filter: TrackFilterSpec,
+    val sort: FilterSort = FilterSort(),
+    val limit: Int? = null,
+) {
+    fun instantiate(nowMs: Long, suffix: String = nowMs.toString()): SmartPlaylist =
+        SmartPlaylist(
+            id = "${SmartPlaylist.IdPrefix}$suffix",
+            title = title,
+            filter = filter,
+            sort = sort,
+            limit = limit,
+            createdAtMs = nowMs,
+            updatedAtMs = nowMs,
+        )
+
+    companion object {
+        val HighlyRated = SmartPlaylistTemplate(
+            id = "highly-rated",
+            title = "Highly Rated",
+            description = "Songs rated four stars or higher.",
+            filter = TrackFilterSpec(
+                rules = listOf(TrackFilterRule(FilterField.Rating, FilterOperator.GreaterThanOrEquals, "4")),
+            ),
+            sort = FilterSort(FilterField.Rating, ascending = false),
+            limit = 100,
+        )
+        val RecentlyAdded = SmartPlaylistTemplate(
+            id = "recently-added",
+            title = "Recently Added",
+            description = "Newest tracks in the library.",
+            filter = TrackFilterSpec(
+                rules = listOf(TrackFilterRule(FilterField.DateAddedMs, FilterOperator.IsNotEmpty)),
+            ),
+            sort = FilterSort(FilterField.DateAddedMs, ascending = false),
+            limit = 100,
+        )
+        val RecentlyPlayed = SmartPlaylistTemplate(
+            id = "recently-played",
+            title = "Recently Played",
+            description = "Songs you played most recently.",
+            filter = TrackFilterSpec(
+                rules = listOf(TrackFilterRule(FilterField.LastPlayedMs, FilterOperator.IsNotEmpty)),
+            ),
+            sort = FilterSort(FilterField.LastPlayedMs, ascending = false),
+            limit = 100,
+        )
+        val MostPlayed = SmartPlaylistTemplate(
+            id = "most-played",
+            title = "Most Played",
+            description = "Songs with the highest play counts.",
+            filter = TrackFilterSpec(
+                rules = listOf(TrackFilterRule(FilterField.PlayCount, FilterOperator.GreaterThan, "0")),
+            ),
+            sort = FilterSort(FilterField.PlayCount, ascending = false),
+            limit = 100,
+        )
+        val NotPlayedRecently = SmartPlaylistTemplate(
+            id = "not-played-recently",
+            title = "Not Played Recently",
+            description = "Songs with no recent play history.",
+            filter = TrackFilterSpec(
+                match = TrackFilterMatch.Any,
+                rules = listOf(
+                    TrackFilterRule(FilterField.LastPlayedMs, FilterOperator.IsEmpty),
+                    TrackFilterRule(FilterField.PlayCount, FilterOperator.Equals, "0"),
+                ),
+            ),
+            sort = FilterSort(FilterField.DateAddedMs, ascending = false),
+            limit = 100,
+        )
+        val DownloadedFavorites = SmartPlaylistTemplate(
+            id = "downloaded-favorites",
+            title = "Downloaded Favorites",
+            description = "Favorite songs that are available offline.",
+            filter = TrackFilterSpec(
+                rules = listOf(
+                    TrackFilterRule(FilterField.Favorite, FilterOperator.IsTrue),
+                    TrackFilterRule(FilterField.Downloaded, FilterOperator.IsTrue),
+                ),
+            ),
+            sort = FilterSort(FilterField.Title),
+        )
+        val Lossless = SmartPlaylistTemplate(
+            id = "lossless",
+            title = "Lossless",
+            description = "FLAC or ALAC tracks, including high resolution files.",
+            filter = TrackFilterSpec(
+                match = TrackFilterMatch.Any,
+                rules = listOf(
+                    TrackFilterRule(FilterField.Codec, FilterOperator.Equals, "flac"),
+                    TrackFilterRule(FilterField.Codec, FilterOperator.Equals, "alac"),
+                    TrackFilterRule(FilterField.BitDepth, FilterOperator.GreaterThanOrEquals, "24"),
+                ),
+            ),
+            sort = FilterSort(FilterField.AlbumArtist),
+        )
+        val ByDecade = SmartPlaylistTemplate(
+            id = "by-decade",
+            title = "1990s",
+            description = "A decade playlist for songs released from 1990 through 1999.",
+            filter = TrackFilterSpec(
+                rules = listOf(TrackFilterRule(FilterField.Year, FilterOperator.Between, "1990..1999")),
+            ),
+            sort = FilterSort(FilterField.Year),
+        )
+
+        fun byDecade(decadeStart: Int): SmartPlaylistTemplate {
+            val start = decadeStart - (decadeStart % 10)
+            val end = start + 9
+            return SmartPlaylistTemplate(
+                id = "decade-$start",
+                title = "${start}s",
+                description = "Songs released from $start through $end.",
+                filter = TrackFilterSpec(
+                    rules = listOf(TrackFilterRule(FilterField.Year, FilterOperator.Between, "$start..$end")),
+                ),
+                sort = FilterSort(FilterField.Year),
+            )
+        }
+
+        fun byGenre(genre: String): SmartPlaylistTemplate {
+            val normalized = genre.trim()
+            return SmartPlaylistTemplate(
+                id = "genre-${normalized.smartPlaylistTemplateSlug()}",
+                title = normalized,
+                description = "Songs tagged with $normalized.",
+                filter = TrackFilterSpec(
+                    rules = listOf(TrackFilterRule(FilterField.Genre, FilterOperator.Contains, normalized)),
+                ),
+                sort = FilterSort(FilterField.AlbumArtist),
+            )
+        }
+
+        val Defaults: List<SmartPlaylistTemplate> = listOf(
+            HighlyRated,
+            RecentlyAdded,
+            RecentlyPlayed,
+            MostPlayed,
+            NotPlayedRecently,
+            DownloadedFavorites,
+            Lossless,
+            ByDecade,
+        )
+    }
+}
+
+private fun String.smartPlaylistTemplateSlug(): String =
+    lowercase()
+        .map { char -> if (char.isLetterOrDigit()) char else '-' }
+        .joinToString("")
+        .trim('-')
+        .replace(Regex("-+"), "-")
+        .ifBlank { "genre" }
+
+@Serializable
+data class AdvancedSearchQuery(
+    val text: String = "",
+    val scopes: Set<AdvancedSearchScope> = setOf(AdvancedSearchScope.Tracks),
+    val filter: TrackFilterSpec = TrackFilterSpec(),
+    val sort: FilterSort? = null,
+    val savedSearchId: String? = null,
+)
+
+@Serializable
+enum class AdvancedSearchScope {
+    Artists,
+    Albums,
+    Tracks,
+    Playlists,
+}
+
+@Serializable
+data class SavedSearch(
+    val id: String,
+    val title: String,
+    val query: AdvancedSearchQuery,
+    val createdAtMs: Long,
+    val updatedAtMs: Long,
+)
+
+@Serializable
+data class LocalMetadataOverride(
+    val trackId: String,
+    val update: TrackMetadataUpdate,
+    val providerType: MediaProviderType? = null,
+    val syncStatus: MetadataOverrideSyncStatus = MetadataOverrideSyncStatus.LocalOnly,
+    val updatedAtMs: Long,
+)
+
+@Serializable
+enum class MetadataOverrideSyncStatus {
+    LocalOnly,
+    PendingProviderSync,
+    SyncedToProvider,
+    ProviderUnsupported,
+    Failed,
+}
+
+fun List<Track>.filterWith(spec: TrackFilterSpec, context: TrackFilterContext = TrackFilterContext()): List<Track> =
+    filter { track -> spec.matches(track, context) }
+
+fun List<Track>.sortedWith(sort: FilterSort, context: TrackFilterContext = TrackFilterContext()): List<Track> {
+    val comparator = compareBy<Track> { track -> track.sortValue(sort.field, context) }
+        .thenBy { track -> track.title.lowercase() }
+        .thenBy { track -> track.artist.lowercase() }
+    return if (sort.ascending) sortedWith(comparator) else sortedWith(comparator.reversed())
+}
+
+private fun evaluateTrackFilterRule(track: Track, context: TrackFilterContext, rule: TrackFilterRule): Boolean =
+    when (rule.field) {
+        FilterField.Title -> compareString(track.title, rule)
+        FilterField.Artist -> compareString(track.artist, rule)
+        FilterField.Album -> compareString(track.album, rule)
+        FilterField.AlbumArtist -> compareString(track.albumArtist, rule)
+        FilterField.Composer -> compareString(track.composer, rule)
+        FilterField.Genre -> compareString(track.genre, rule)
+        FilterField.Mood -> compareString(track.mood, rule)
+        FilterField.Style -> compareString(track.style, rule)
+        FilterField.Codec -> compareString(track.audioCodec, rule)
+        FilterField.Provider -> compareString(context.providerByTrackId[track.id]?.catalogPrefix, rule)
+        FilterField.Year -> compareNumber(track.year?.toDouble(), rule)
+        FilterField.Rating -> compareNumber(track.rating?.toDouble(), rule)
+        FilterField.BitrateKbps -> compareNumber(track.bitrateKbps?.toDouble(), rule)
+        FilterField.SampleRateHz -> compareNumber(track.sampleRateHz?.toDouble(), rule)
+        FilterField.BitDepth -> compareNumber(track.bitDepth?.toDouble(), rule)
+        FilterField.ChannelCount -> compareNumber(track.channelCount?.toDouble(), rule)
+        FilterField.Bpm -> compareNumber(track.bpm?.toDouble(), rule)
+        FilterField.DateAddedMs -> compareNumber(track.dateAddedMs?.toDouble(), rule)
+        FilterField.LastPlayedMs -> compareNumber(context.lastPlayedByTrackId[track.id]?.toDouble(), rule)
+        FilterField.PlayCount -> compareNumber(context.playCountByTrackId[track.id]?.toDouble(), rule)
+        FilterField.Favorite -> compareBoolean(track.id in context.favoriteTrackIds, rule)
+        FilterField.Downloaded -> compareBoolean(track.id in context.downloadedTrackIds || !track.localUri.isNullOrBlank(), rule)
+        FilterField.Local -> compareBoolean(!track.localUri.isNullOrBlank(), rule)
+        FilterField.Explicit -> compareBoolean(track.explicit == true, rule)
+    }
+
+private fun compareString(actual: String?, rule: TrackFilterRule): Boolean {
+    val normalizedActual = actual.orEmpty().trim()
+    val normalizedExpected = rule.value.trim()
+    return when (rule.operator) {
+        FilterOperator.Equals -> normalizedActual.equals(normalizedExpected, ignoreCase = true)
+        FilterOperator.NotEquals -> !normalizedActual.equals(normalizedExpected, ignoreCase = true)
+        FilterOperator.Contains -> normalizedActual.contains(normalizedExpected, ignoreCase = true)
+        FilterOperator.NotContains -> !normalizedActual.contains(normalizedExpected, ignoreCase = true)
+        FilterOperator.StartsWith -> normalizedActual.startsWith(normalizedExpected, ignoreCase = true)
+        FilterOperator.EndsWith -> normalizedActual.endsWith(normalizedExpected, ignoreCase = true)
+        FilterOperator.IsEmpty -> normalizedActual.isEmpty()
+        FilterOperator.IsNotEmpty -> normalizedActual.isNotEmpty()
+        else -> false
+    }
+}
+
+private fun compareNumber(actual: Double?, rule: TrackFilterRule): Boolean =
+    when (rule.operator) {
+        FilterOperator.IsEmpty -> actual == null
+        FilterOperator.IsNotEmpty -> actual != null
+        else -> {
+            val number = actual ?: return false
+            when (rule.operator) {
+                FilterOperator.Equals -> rule.value.toDoubleOrNull()?.let { number == it } ?: false
+                FilterOperator.NotEquals -> rule.value.toDoubleOrNull()?.let { number != it } ?: false
+                FilterOperator.GreaterThan -> rule.value.toDoubleOrNull()?.let { number > it } ?: false
+                FilterOperator.GreaterThanOrEquals -> rule.value.toDoubleOrNull()?.let { number >= it } ?: false
+                FilterOperator.LessThan -> rule.value.toDoubleOrNull()?.let { number < it } ?: false
+                FilterOperator.LessThanOrEquals -> rule.value.toDoubleOrNull()?.let { number <= it } ?: false
+                FilterOperator.Between -> {
+                    val separator = rule.value.indexOf("..")
+                    if (separator < 0) return false
+                    val start = rule.value.substring(0, separator).toDoubleOrNull() ?: return false
+                    val end = rule.value.substring(separator + 2).toDoubleOrNull() ?: return false
+                    number in start..end
+                }
+                else -> false
+            }
+        }
+    }
+
+private fun compareBoolean(actual: Boolean, rule: TrackFilterRule): Boolean =
+    when (rule.operator) {
+        FilterOperator.IsTrue -> actual
+        FilterOperator.IsFalse -> !actual
+        FilterOperator.Equals -> actual == rule.value.toBooleanStrictOrNull()
+        FilterOperator.NotEquals -> actual != rule.value.toBooleanStrictOrNull()
+        else -> false
+    }
+
+private fun Track.sortValue(field: FilterField, context: TrackFilterContext): String =
+    when (field) {
+        FilterField.Title -> titleSort ?: title
+        FilterField.Artist -> artistSort ?: artist
+        FilterField.Album -> albumSort ?: album
+        FilterField.AlbumArtist -> albumArtist.orEmpty()
+        FilterField.Composer -> composer.orEmpty()
+        FilterField.Genre -> genre.orEmpty()
+        FilterField.Mood -> mood.orEmpty()
+        FilterField.Style -> style.orEmpty()
+        FilterField.Year -> year?.toString()?.padStart(4, '0').orEmpty()
+        FilterField.Rating -> rating?.toString().orEmpty()
+        FilterField.Codec -> audioCodec.orEmpty()
+        FilterField.BitrateKbps -> bitrateKbps?.toString().orEmpty()
+        FilterField.SampleRateHz -> sampleRateHz?.toString().orEmpty()
+        FilterField.BitDepth -> bitDepth?.toString().orEmpty()
+        FilterField.ChannelCount -> channelCount?.toString().orEmpty()
+        FilterField.Bpm -> bpm?.toString().orEmpty()
+        FilterField.DateAddedMs -> dateAddedMs?.toString().orEmpty()
+        FilterField.Explicit -> explicit?.toString().orEmpty()
+        FilterField.LastPlayedMs -> context.lastPlayedByTrackId[id]?.toString()?.padStart(20, '0').orEmpty()
+        FilterField.PlayCount -> context.playCountByTrackId[id]?.toString()?.padStart(12, '0').orEmpty()
+        FilterField.Favorite,
+        FilterField.Downloaded,
+        FilterField.Local,
+        FilterField.Provider,
+        -> ""
+    }.lowercase()
 
 @Serializable
 enum class LibrarySortBy {
@@ -519,6 +979,9 @@ data class AppSettings(
     val nowPlayingVisualizerPreset: NowPlayingVisualizerPreset = NowPlayingVisualizerPreset.Default,
     val blurredArtworkAppearance: Boolean = true,
     val listenBrainz: ListenBrainzSettings = ListenBrainzSettings(),
+    val lastFm: LastFmSettings = LastFmSettings(),
+    val downloadPolicy: DownloadPolicySettings = DownloadPolicySettings(),
+    val audioProcessing: AudioProcessingSettings = AudioProcessingSettings(),
 ) {
     fun normalized(): AppSettings =
         copy(
@@ -526,6 +989,9 @@ data class AppSettings(
             savedVolume = savedVolume.coerceIn(MinSavedVolume, MaxSavedVolume),
             equalizerProfile = equalizerProfile.normalized(),
             listenBrainz = listenBrainz.normalized(),
+            lastFm = lastFm.normalized(),
+            downloadPolicy = downloadPolicy.normalized(),
+            audioProcessing = audioProcessing.normalized(),
         )
 
     companion object {
@@ -536,6 +1002,89 @@ data class AppSettings(
         const val MaxSavedVolume = 1f
         const val DefaultSavedVolume = 0.7f
     }
+}
+
+@Serializable
+data class DownloadPolicySettings(
+    val quality: DownloadQuality = DownloadQuality.Original,
+    val maxConcurrentDownloads: Int = DefaultMaxConcurrentDownloads,
+    val autoRetryFailedDownloads: Boolean = true,
+    val wifiOnly: Boolean = false,
+    val wifiOnlyConfigured: Boolean = false,
+    val notifyOnCompletion: Boolean = true,
+) {
+    fun normalized(): DownloadPolicySettings =
+        copy(maxConcurrentDownloads = maxConcurrentDownloads.coerceIn(MinConcurrentDownloads, MaxConcurrentDownloads))
+
+    fun withWifiOnly(value: Boolean): DownloadPolicySettings =
+        copy(wifiOnly = value, wifiOnlyConfigured = true).normalized()
+
+    companion object {
+        const val MinConcurrentDownloads = 1
+        const val DefaultMaxConcurrentDownloads = 3
+        const val MaxConcurrentDownloads = 8
+    }
+}
+
+@Serializable
+enum class DownloadQuality {
+    Original,
+}
+
+@Serializable
+data class AudioProcessingSettings(
+    val gaplessEnabled: Boolean = true,
+    val crossfeedEnabled: Boolean = false,
+    val crossfeedAmount: Float = 0.35f,
+    val selectedOutputDeviceId: String? = null,
+    val exclusiveMode: Boolean = false,
+    val bitPerfectPreference: Boolean = false,
+) {
+    fun normalized(): AudioProcessingSettings =
+        copy(
+            crossfeedAmount = crossfeedAmount.coerceIn(0f, 1f),
+            exclusiveMode = exclusiveMode && !hasLocalDspEnabled,
+            bitPerfectPreference = bitPerfectPreference && !hasLocalDspEnabled,
+        )
+
+    val hasLocalDspEnabled: Boolean
+        get() = crossfeedEnabled
+}
+
+@Serializable
+data class AudioProcessingCapabilities(
+    val gapless: FeatureCapability = FeatureCapability.Supported,
+    val crossfeed: FeatureCapability = FeatureCapability.Unsupported("Crossfeed is not available on this output."),
+    val outputDeviceSelection: FeatureCapability = FeatureCapability.Unsupported("Output device selection is not available on this platform."),
+    val exclusiveMode: FeatureCapability = FeatureCapability.Unsupported("Exclusive mode is not available for this output."),
+    val bitPerfect: FeatureCapability = FeatureCapability.Unsupported("Bit-perfect playback is not available for this output."),
+)
+
+@Serializable
+data class AudioOutputDevice(
+    val id: String,
+    val name: String,
+    val default: Boolean = false,
+)
+
+@Serializable
+data class PlatformFeatureCapabilities(
+    val downloads: FeatureCapability = FeatureCapability.Supported,
+    val audioOutputs: FeatureCapability = FeatureCapability.Unsupported("Audio output selection is not available on this platform."),
+    val metadataExtraction: FeatureCapability = FeatureCapability.Supported,
+    val importExport: FeatureCapability = FeatureCapability.Supported,
+    val meteredNetworkAwareness: FeatureCapability = FeatureCapability.Unsupported("This platform cannot tell whether the current network is metered."),
+)
+
+@Serializable
+sealed interface FeatureCapability {
+    @Serializable
+    @SerialName("supported")
+    data object Supported : FeatureCapability
+
+    @Serializable
+    @SerialName("unsupported")
+    data class Unsupported(val reason: String) : FeatureCapability
 }
 
 @Serializable
@@ -579,6 +1128,42 @@ enum class ListenBrainzCredentialStorageStatus {
     PersistentBrowser,
     SessionOnly,
     Unavailable,
+}
+
+@Serializable
+data class LastFmSettings(
+    val enabled: Boolean = false,
+    val username: String? = null,
+    val apiKey: String? = null,
+    val submitNowPlaying: Boolean = true,
+    val submitScrobbles: Boolean = true,
+    val storageStatus: ListenBrainzCredentialStorageStatus = ListenBrainzCredentialStorageStatus.Unknown,
+    val connectedAtMs: Long? = null,
+    val lastValidatedAtMs: Long? = null,
+    val lastSubmittedAtMs: Long? = null,
+    val lastNowPlayingSubmittedAtMs: Long? = null,
+    val lastScrobbleSubmittedAtMs: Long? = null,
+    val lastScrobbleError: String? = null,
+    val lastError: String? = null,
+) {
+    val connected: Boolean
+        get() = enabled && !username.isNullOrBlank() && !apiKey.isNullOrBlank()
+
+    fun normalized(): LastFmSettings {
+        val normalizedUsername = username?.trim()?.takeIf { it.isNotBlank() }
+        val normalizedApiKey = apiKey?.trim()?.takeIf { it.isNotBlank() }
+        return copy(
+            enabled = enabled && normalizedUsername != null && normalizedApiKey != null,
+            username = normalizedUsername,
+            apiKey = normalizedApiKey,
+            lastScrobbleError = lastScrobbleError?.trim()?.takeIf { it.isNotBlank() }?.take(180),
+            lastError = lastError?.trim()?.takeIf { it.isNotBlank() }?.take(180),
+        )
+    }
+
+    companion object {
+        val Disconnected = LastFmSettings()
+    }
 }
 
 @Serializable
@@ -1289,7 +1874,7 @@ fun Playlist.isRemoteProviderPlaylist(): Boolean = remoteProviderPrefix() != nul
 
 /** Playlists whose track list can be edited in Phoebe (excluding Liked Songs). */
 fun Playlist.supportsTrackRemoval(): Boolean =
-    isLocalPlaylist() || (isRemoteProviderPlaylist() && !isLikedSongsPlaylist())
+    !isSmartPlaylist() && (isLocalPlaylist() || (isRemoteProviderPlaylist() && !isLikedSongsPlaylist()))
 
 fun Playlist.belongsToProvider(providerType: MediaProviderType): Boolean =
     id.startsWith("${providerType.catalogPrefix}:")
