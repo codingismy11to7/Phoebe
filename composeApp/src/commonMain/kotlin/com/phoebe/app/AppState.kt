@@ -2677,6 +2677,7 @@ class AppState(
         plexCountRefreshJob?.cancel()
         lightweightSyncJob?.cancel()
         dependencies.catalogRepository.clearActiveSyncProgress()
+        dependencies.catalogRepository.clearInMemoryCatalog()
         mostPlayedWarmSignature = null
         recentAlbumWarmSignature = null
         playedAlbumWarmSignature = null
