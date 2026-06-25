@@ -829,6 +829,10 @@ private class WebAudioPlayer(
         playWebAudio(playbackAudio) { message ->
             if (shouldIgnoreBrowserPlaybackFailure(playbackAudio, message)) return@playWebAudio
             if (!isPlayRequestCurrent(generation) || !playWhenReady) return@playWebAudio
+            if (message.isBrowserAutoplayBlockedFailure()) {
+                markPlaybackWaitingForUserGesture(generation)
+                return@playWebAudio
+            }
             if (audioUsesCors && currentUri?.isRemoteWebAudioUri() == true && retryWithoutCors(generation)) {
                 return@playWebAudio
             }
@@ -884,6 +888,15 @@ private fun String?.isUnsupportedSourceFailure(): Boolean {
     return "no supported source" in text ||
         "src_not_supported" in text ||
         ("not supported" in text && "source" in text)
+}
+
+private fun String?.isBrowserAutoplayBlockedFailure(): Boolean {
+    val text = this?.lowercase() ?: return false
+    return "notallowederror" in text ||
+        "user didn't interact" in text ||
+        "user did not interact" in text ||
+        "user must interact" in text ||
+        "not allowed by the user agent" in text
 }
 
 fun webAudioPlaybackDurationMs(

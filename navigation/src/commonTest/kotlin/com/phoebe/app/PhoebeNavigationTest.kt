@@ -117,6 +117,18 @@ class PhoebeNavigationTest {
     }
 
     @Test
+    fun recommendedRadioStationWebRouteRoundTrips() {
+        val route = PhoebeRoute.RadioStation("recommended:bbc-radio-6-music")
+        val routes = phoebeWebRoutesForPath("/radio/recommended%3Abbc-radio-6-music")
+
+        assertEquals(
+            listOf(PhoebeRoute.Browse(BrowseSection.Radio), route),
+            routes,
+        )
+        assertEquals("/radio/recommended%3Abbc-radio-6-music", route.toPhoebeWebPath())
+    }
+
+    @Test
     fun browseRootReplacementKeepsSingleRootRoute() {
         val navigator = PhoebeNavigator(PhoebeRoute.SignIn)
 
