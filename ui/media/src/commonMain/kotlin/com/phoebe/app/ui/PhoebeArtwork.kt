@@ -50,6 +50,8 @@ import io.ktor.client.call.body
 import io.ktor.client.request.get
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
@@ -190,10 +192,36 @@ private fun rememberRemoteImageState(
                 value = RemoteImageLoadState.Ready(it)
                 return@produceState
             }
-            RemoteArtworkCache.awaitLoadWithFallback(target, fallback, maxDecodeDimension)?.let {
-                value = RemoteImageLoadState.Ready(it)
+            
+            var loadedTarget = false
+            val dimensions = progressivePreviewDecodeDimensions(maxDecodeDimension) + maxDecodeDimension
+            var highestLoadedDim = 0
+            
+            kotlinx.coroutines.coroutineScope {
+                val jobs = mutableListOf<Job>()
+                dimensions.forEach { dim ->
+                    val job = launch {
+                        RemoteArtworkCache.awaitLoadWithFallback(target, fallback, dim)?.let { image ->
+                            if (dim > highestLoadedDim) {
+                                highestLoadedDim = dim
+                                if (dim == maxDecodeDimension) {
+                                    value = RemoteImageLoadState.Ready(image)
+                                    loadedTarget = true
+                                    jobs.forEach { it.cancel() }
+                                } else {
+                                    value = RemoteImageLoadState.Preview(image)
+                                }
+                            }
+                        }
+                    }
+                    jobs.add(job)
+                }
+            }
+            
+            if (loadedTarget) {
                 return@produceState
             }
+            
             val current = cachedStateForDisplay(target, maxDecodeDimension, fallback)
             value = if (current is RemoteImageLoadState.Preview) current else RemoteImageLoadState.Unavailable
             delay(RemoteArtworkRetryDelayMs)
@@ -205,7 +233,7 @@ internal fun cachedStateForDisplay(url: String, maxDecodeDimension: Int, fallbac
     RemoteArtworkCache.cachedRequested(url, maxDecodeDimension, fallbackUrl)?.let {
         return RemoteImageLoadState.Ready(it)
     }
-    progressivePreviewDecodeDimensions(maxDecodeDimension).forEach { previewDimension ->
+    progressivePreviewDecodeDimensions(maxDecodeDimension).asReversed().forEach { previewDimension ->
         RemoteArtworkCache.cachedRequested(url, previewDimension, fallbackUrl)?.let {
             return RemoteImageLoadState.Preview(it)
         }
