@@ -345,8 +345,14 @@ private fun PhoebeRootStateHolder(
 ) {
     val session by state.session.collectAsState()
     val mediaSources by state.mediaSources.collectAsState()
-    val browseFallbackRoutes = remember(session, mediaSources) {
-        listOf(state.initialNavigationRequest().toPhoebeRoute())
+    val initialNavigationRequest = remember(state, session, mediaSources) {
+        state.initialNavigationRequest()
+    }
+    val browseFallbackRoutes = remember(initialNavigationRequest) {
+        listOf(initialNavigationRequest.toPhoebeRoute())
+    }
+    val suppressedInitialNavigationRequest = remember(initialNavigationRequest, navigationPath) {
+        initialNavigationRequest.takeIf { navigationPath != null }
     }
     val initialRoutes = remember(navigationPath, browseFallbackRoutes) {
         navigationPath
@@ -417,14 +423,14 @@ private fun PhoebeRootStateHolder(
         }
     }
     val currentIndex = playerQueue.currentIndex.takeIf { it >= 0 } ?: 0
-    var suppressInitialNavigationRequest by remember(state) {
+    var suppressInitialNavigationRequest by remember(state, navigationPath) {
         mutableStateOf(navigationPath != null)
     }
-    LaunchedEffect(state, navigator) {
+    LaunchedEffect(state, navigator, suppressedInitialNavigationRequest) {
         state.navigationRequests.collect { request ->
             if (suppressInitialNavigationRequest) {
                 suppressInitialNavigationRequest = false
-                if (request == state.initialNavigationRequest()) return@collect
+                if (request == suppressedInitialNavigationRequest) return@collect
             }
             navigator.handle(request)
         }
@@ -437,10 +443,20 @@ private fun PhoebeRootStateHolder(
     val screen = (routeResolution as? PhoebeRouteResolution.Resolved)?.screen ?: AppScreen.Home
     val currentRoutes = navigator.routes
     val browseSection = currentRoutes.filterIsInstance<PhoebeRoute.Browse>().lastOrNull()?.section ?: BrowseSection.Home
+    val radioPlayingFromSignIn = currentTrack?.id?.startsWith("radio:") == true &&
+        currentRoutes.firstOrNull() == PhoebeRoute.SignIn
     var selectedPlaylistId by remember { mutableStateOf<String?>(null) }
     var replaceNextNavigationPath by remember { mutableStateOf(navigationPath != null) }
     var lastPublishedNavigationRoute by remember { mutableStateOf<PhoebeRoute?>(null) }
     var suppressNextRadioStationRouteEffect by remember { mutableStateOf(false) }
+    fun ensureRadioPlaybackBackStack() {
+        if (!radioPlayingFromSignIn) return
+        selectedPlaylistId = null
+        replaceNextNavigationPath = true
+        navigator.replaceAll(
+            listOf(PhoebeRoute.Browse(BrowseSection.Radio)),
+        )
+    }
     LaunchedEffect(currentRoutes, browseFallbackRoutes) {
         val guardedRoutes = currentRoutes.withUnavailableBrowseFallback(browseFallbackRoutes)
         if (currentRoutes != guardedRoutes) {
@@ -453,6 +469,12 @@ private fun PhoebeRootStateHolder(
         val path = navigationPath ?: return@LaunchedEffect
         val parsedRoutes = phoebeWebRoutesForPath(path)
             .withUnavailableBrowseFallback(browseFallbackRoutes)
+        if (currentTrack?.id?.startsWith("radio:") == true &&
+            parsedRoutes == listOf(PhoebeRoute.SignIn) &&
+            navigator.routes.firstOrNull() is PhoebeRoute.Browse
+        ) {
+            return@LaunchedEffect
+        }
         if (navigator.routes != parsedRoutes) {
             selectedPlaylistId = null
             replaceNextNavigationPath = true
@@ -823,6 +845,7 @@ private fun PhoebeRootStateHolder(
         requestMobilePlayback(tracks.shuffled(), 0, shuffleEnabled = true)
     }
     fun openMobilePlayer() {
+        ensureRadioPlaybackBackStack()
         navigator.openPlayer()
     }
     val mobilePlayerTrack = pendingMobilePlaybackPreview?.currentTrack ?: currentTrack
@@ -1739,11 +1762,12 @@ private fun PhoebeRootStateHolder(
                             val shouldExpand = when {
                                 velocityY < -350f -> true
                                 velocityY > 350f -> false
-                                current > 0.75f -> true
+                                current > 0.35f -> true
                                 else -> false
                             }
                             val initialFractionVelocity = (-velocityY / dragRangePx).coerceIn(-30f, 30f)
                             if (shouldExpand) {
+                                ensureRadioPlaybackBackStack()
                                 navigator.openPlayer()
                                 scope.launch {
                                     playerExpansionFraction.animateTo(

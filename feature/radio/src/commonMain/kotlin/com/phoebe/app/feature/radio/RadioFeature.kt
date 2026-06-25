@@ -366,7 +366,7 @@ fun RadioRoute(
                     RadioStationRow(
                         station = station,
                         starting = station.id in state.startingStationIds,
-                        onPlay = { actions.onStation(station) },
+                        onPlay = { actions.onPlay(station) },
                         onEdit = { editingStation = station },
                         onDelete = { actions.onDeleteManualStation(station) },
                     )
@@ -448,7 +448,7 @@ fun RadioRoute(
                 RadioStationRow(
                     station = station,
                     starting = station.id in state.startingStationIds,
-                    onPlay = { actions.onStation(station) },
+                    onPlay = { actions.onPlay(station) },
                     onEdit = null,
                     onDelete = null,
                 )
@@ -473,7 +473,7 @@ fun RadioRoute(
                         RadioStationRow(
                             station = station,
                             starting = station.id in state.startingStationIds,
-                            onPlay = { actions.onStation(station) },
+                            onPlay = { actions.onPlay(station) },
                             onEdit = null,
                             onDelete = null,
                         )
