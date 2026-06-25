@@ -550,6 +550,17 @@ abstract class SimpleAudioPlayer : AudioPlayer {
         stopProgressTicker()
     }
 
+    protected fun markPlaybackWaitingForUserGesture(generation: Int = playGeneration) {
+        if (!isPlayRequestCurrent(generation)) return
+        val current = mutableState.value
+        mutableState.value = current.copy(
+            isBuffering = false,
+            isPlaying = false,
+            playbackErrorMessage = null,
+        )
+        stopProgressTicker()
+    }
+
     protected fun surfacePlaybackNotice(generation: Int = playGeneration, message: String) {
         if (!isPlayRequestCurrent(generation)) return
         val current = mutableState.value

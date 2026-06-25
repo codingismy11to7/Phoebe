@@ -6,6 +6,7 @@ import com.phoebe.app.domain.Track
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class WebAudioPlayerLifecycleTest {
@@ -33,6 +34,64 @@ class WebAudioPlayerLifecycleTest {
                     "errors=${diagnostics.errors}",
             )
             assertTrue(diagnostics.errors.any { it.contains("Mock play rejected") })
+        } finally {
+            player.stopPlayback()
+            restoreMockWebAudioElement()
+        }
+    }
+
+    @Test
+    fun chromeAutoplayBlockKeepsTrackReadyForUserPlay() = runTest {
+        browserAutoplayBlockKeepsTrackReadyForUserPlay(mode = "autoplay-blocked-chrome-then-complete")
+    }
+
+    @Test
+    fun safariAutoplayBlockKeepsTrackReadyForUserPlay() = runTest {
+        browserAutoplayBlockKeepsTrackReadyForUserPlay(mode = "autoplay-blocked-safari-then-complete")
+    }
+
+    @Test
+    fun firefoxAutoplayBlockKeepsTrackReadyForUserPlay() = runTest {
+        browserAutoplayBlockKeepsTrackReadyForUserPlay(mode = "autoplay-blocked-firefox-then-complete")
+    }
+
+    private suspend fun browserAutoplayBlockKeepsTrackReadyForUserPlay(mode: String) {
+        installMockWebAudioElement(mode = mode, durationSeconds = 0.25)
+        val diagnostics = RecordingPlaybackDiagnostics()
+        val player = createWebAudioPlayerForTests(diagnostics)
+        try {
+            val track = playbackTrack(
+                id = "web-$mode",
+                streamUrl = "https://music.example.test/autoplay-blocked.mp3",
+                durationMs = 250L,
+            )
+
+            player.play(listOf(track), 0)
+
+            assertTrue(
+                waitUntil {
+                    val state = player.state.value
+                    state.currentTrack?.id == track.id &&
+                        !state.isBuffering &&
+                        !state.isPlaying &&
+                        state.playbackErrorSerial == 0
+                },
+                "Autoplay block should leave the track ready without surfacing a failure; " +
+                    "state=${player.state.value} errors=${diagnostics.errors}",
+            )
+            assertFalse(diagnostics.errors.any { it.contains("NotAllowedError") })
+
+            player.togglePlayPause()
+
+            assertTrue(
+                waitUntil {
+                    diagnostics.hasPlayingEvent &&
+                        player.state.value.isPlaying &&
+                        player.state.value.positionMs > 0L
+                },
+                "User play should resume after an autoplay block; state=${player.state.value} " +
+                    "progress=${diagnostics.progress} errors=${diagnostics.errors}",
+            )
         } finally {
             player.stopPlayback()
             restoreMockWebAudioElement()
@@ -450,6 +509,21 @@ class WebAudioPlayerLifecycleTest {
             const playCall = ++playCalls;
             if (mode === "reject") {
                 return Promise.reject(new Error("Mock play rejected"));
+            }
+            if (mode === "autoplay-blocked-chrome-then-complete" && playCall === 1) {
+                const error = new Error("play() failed because the user didn't interact with the document first.");
+                error.name = "NotAllowedError";
+                return Promise.reject(error);
+            }
+            if (mode === "autoplay-blocked-safari-then-complete" && playCall === 1) {
+                return Promise.reject(
+                    new Error("The play method is not allowed by the user agent or the platform in the current context, possibly because the user denied permission.")
+                );
+            }
+            if (mode === "autoplay-blocked-firefox-then-complete" && playCall === 1) {
+                return Promise.reject(
+                    new Error("Playback cannot begin. The user must interact with the document before this element can play.")
+                );
             }
             if (mode === "cors-reject-then-complete" && String(audio.crossOrigin || "").toLowerCase() === "anonymous") {
                 return Promise.reject(new Error("Mock CORS playback rejected"));
