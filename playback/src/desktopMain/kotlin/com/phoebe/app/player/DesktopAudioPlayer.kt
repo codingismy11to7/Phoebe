@@ -895,21 +895,18 @@ class DesktopAudioPlayer(
         mediaReady: AtomicBoolean,
         onStartupFailed: () -> Unit,
     ) {
-        Thread({
-            Thread.sleep(JavaFxMediaReadyTimeoutMs)
-            if (stop.get()) return@Thread
-            if (mediaReady.get() || !isPlayRequestCurrent(generation)) return@Thread
-            stop.set(true)
-            playbackExecutor.execute {
-                if (!isPlayRequestCurrent(generation)) return@execute
-                PhoebeLog.d("DesktopAudioPlayer") { "JavaFX media did not become ready in ${JavaFxMediaReadyTimeoutMs}ms" }
-                disposeJavaFxBlocking()
-                onStartupFailed()
+        CompletableFuture.delayedExecutor(JavaFxMediaReadyTimeoutMs, TimeUnit.MILLISECONDS)
+            .execute {
+                if (stop.get()) return@execute
+                if (mediaReady.get() || !isPlayRequestCurrent(generation)) return@execute
+                stop.set(true)
+                playbackExecutor.execute {
+                    if (!isPlayRequestCurrent(generation)) return@execute
+                    PhoebeLog.d("DesktopAudioPlayer") { "JavaFX media did not become ready in ${JavaFxMediaReadyTimeoutMs}ms" }
+                    disposeJavaFxBlocking()
+                    onStartupFailed()
+                }
             }
-        }, "Phoebe-javafx-startup-watchdog").apply {
-            isDaemon = true
-            start()
-        }
     }
 
     private fun startJavaFxPlayback(

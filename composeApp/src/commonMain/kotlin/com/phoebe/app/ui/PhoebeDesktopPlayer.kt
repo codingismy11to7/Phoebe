@@ -360,23 +360,13 @@ internal fun DesktopPlayer(
                                 var previousDisplayRoutes by remember { mutableStateOf(displayRoutes) }
                                 var retainedSharedTransition by remember { mutableStateOf<Pair<PhoebeRoute, PhoebeRoute>?>(null) }
                                 val routeTransition = remember(displayRoutes, previousDisplayRoutes) {
-                                    when {
-                                        displayRoutes.size > previousDisplayRoutes.size -> {
-                                            val from = previousDisplayRoutes.lastOrNull()
-                                            val to = displayRoutes.lastOrNull()
-                                            if (from != null && to != null) from to to else null
-                                        }
-                                        displayRoutes.size < previousDisplayRoutes.size -> {
-                                            val from = previousDisplayRoutes.lastOrNull()
-                                            val to = displayRoutes.lastOrNull()
-                                            if (from != null && to != null) from to to else null
-                                        }
-                                        else -> {
-                                            val from = displayRoutes.dropLast(1).lastOrNull()
-                                            val to = displayRoutes.lastOrNull()
-                                            if (from != null && to != null) from to to else null
-                                        }
+                                    val from = if (displayRoutes.size == previousDisplayRoutes.size) {
+                                        displayRoutes.dropLast(1).lastOrNull()
+                                    } else {
+                                        previousDisplayRoutes.lastOrNull()
                                     }
+                                    val to = displayRoutes.lastOrNull()
+                                    if (from != null && to != null) from to to else null
                                 }
                                 LaunchedEffect(routeTransition) {
                                     val transition = routeTransition ?: return@LaunchedEffect
