@@ -27,8 +27,6 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -41,20 +39,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.runtime.key
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -71,7 +64,6 @@ import com.phoebe.app.feature.playback.EqualizerDialog
 import com.phoebe.app.platform.isDesktopPlatform
 import com.phoebe.app.player.CastState
 import kotlin.math.abs
-import kotlin.math.roundToInt
 import androidx.compose.ui.unit.IntOffset
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -81,7 +73,10 @@ private const val MobilePlayerContinuousMotionDelayMs = 240L
 private val MobilePlayerMetadataReserveWithAlbum = 104.dp
 private val MobilePlayerMetadataReserveWithoutAlbum = 84.dp
 private val MobilePlayerRemoteTargetReserve = 18.dp
-private val MobilePlayerReflectionOverlap = 112.dp
+private val MobilePlayerExpandedTopGap = 8.dp
+private val MobilePlayerExpandedArtworkBodyGap = 8.dp
+private val MobilePlayerExpandedProgressLineHeight = 72.dp
+private val MobilePlayerExpandedControlsGap = 10.dp
 private val CollapsedMobilePlayerMetadataHeight = 34.dp
 
 @Composable
@@ -105,6 +100,78 @@ private object RetainedMobilePlayerUpNextSheetStates {
 
 private class MobilePlayerUpNextSheetState(initialProgress: Float) {
     var progress by mutableFloatStateOf(initialProgress.coerceIn(0f, 1f))
+}
+
+@Composable
+private fun MobileExpandedSheetChrome(
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .padding(horizontal = 16.dp),
+        contentAlignment = Alignment.TopCenter,
+    ) {
+        Box(
+            modifier = Modifier
+                .padding(top = 8.dp)
+                .width(38.dp)
+                .height(4.dp)
+                .clip(RoundedCornerShape(999.dp))
+                .background(Color.White.copy(alpha = 0.62f)),
+        )
+    }
+}
+
+@Composable
+private fun MobileExpandedUtilityControls(
+    castState: CastState,
+    equalizerActive: Boolean,
+    visualizerPreset: NowPlayingVisualizerPreset,
+    onCast: () -> Unit,
+    onEqualizer: () -> Unit,
+    onLyrics: () -> Unit,
+    onVisualizerPreset: (NowPlayingVisualizerPreset) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        MobileUtilityControl {
+            CastIcon(
+                active = castState.isConnected,
+                loading = castState.isBuffering,
+                enabled = castState.isAvailable || castState.isConnected,
+                onClick = onCast,
+            )
+        }
+        MobileUtilityControl {
+            TransportIcon(PhoebeIcon.Equalizer, "Equalizer", onEqualizer, active = equalizerActive)
+        }
+        MobileUtilityControl {
+            TransportIcon(PhoebeIcon.Lyrics, "Lyrics", onLyrics)
+        }
+        MobileUtilityControl {
+            VisualizerPresetButton(
+                selected = visualizerPreset,
+                onSelected = onVisualizerPreset,
+            )
+        }
+    }
+}
+
+@Composable
+private fun MobileUtilityControl(
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    Box(
+        modifier = modifier.width(48.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        content()
+    }
 }
 
 @Composable
@@ -235,12 +302,19 @@ fun MobilePlayer(
     val canvasBackground = PhoebeUi.canvasBackground
     val borderColor = PhoebeUi.border
     val collapsedChromeAlpha = (1f - clampedExpansionFraction * 3f).coerceIn(0f, 1f)
+    val expandedTopInset = if (isDesktopPlatform()) {
+        0.dp
+    } else {
+        windowTopPadding() + MobilePlayerExpandedTopGap
+    }
+    val currentTopInset = lerp(0.dp, expandedTopInset, clampedExpansionFraction)
 
-    val cornerRadius = lerp(14.dp, 0.dp, clampedExpansionFraction)
+    val cornerRadius = lerp(14.dp, 26.dp, clampedExpansionFraction)
     val containerShape = RoundedCornerShape(topStart = cornerRadius, topEnd = cornerRadius)
 
     BoxWithConstraints(
         modifier = modifier
+            .padding(top = currentTopInset)
             .playerDragGestures(
                 expansionFraction = clampedExpansionFraction,
                 onDragStart = onDragStart,
@@ -281,7 +355,7 @@ fun MobilePlayer(
         val screenHeight = maxHeight
 
         val collapsedPlayButtonSize = 40.dp
-        val expandedPlayButtonSize = 72.dp
+        val expandedPlayButtonSize = 64.dp
 
         val baseMetadataReserve = if (track != null && track.album.isNotBlank()) {
             MobilePlayerMetadataReserveWithAlbum
@@ -292,20 +366,26 @@ fun MobilePlayer(
             (if (remotePlaybackTarget != null) MobilePlayerRemoteTargetReserve else 0.dp)
 
         val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-        val collapsedSheetHeight = 88.dp + navBarBottom
+        val collapsedSheetHeight = 76.dp + navBarBottom
 
-        // Combined minimum height of bottom elements: Spacers (20.dp + 16.dp + 12.dp) + ProgressLine (56.dp) + Collapsed Sheet Base (88.dp)
         val bottomElementsMinHeight = 192.dp
         val fullArtworkSize = minOf(
-            screenWidth - 40.dp,
-            (screenHeight - 56.dp - 24.dp - metadataReserve - (bottomElementsMinHeight + expandedPlayButtonSize + navBarBottom)).coerceAtLeast(180.dp),
+            screenWidth,
+            (
+                screenHeight -
+                    56.dp -
+                    24.dp -
+                    metadataReserve -
+                    bottomElementsMinHeight -
+                    expandedPlayButtonSize -
+                    navBarBottom
+            ).coerceAtLeast(180.dp),
         )
 
         val currentArtworkSize = lerp(44.dp, fullArtworkSize, clampedExpansionFraction)
-        val targetArtworkX = (screenWidth - fullArtworkSize) / 2
+        val targetArtworkX = 0.dp
         val currentArtworkX = lerp(12.dp, targetArtworkX, clampedExpansionFraction)
-        val statusBarTopPadding = if (isDesktopPlatform()) 0.dp else desktopWindowTopPadding()
-        val currentArtworkY = lerp(14.dp, 80.dp + statusBarTopPadding, clampedExpansionFraction)
+        val currentArtworkY = lerp(14.dp, 0.dp, clampedExpansionFraction)
 
         val miniPlayerAlpha = collapsedChromeAlpha
         val fullPlayerAlpha = ((clampedExpansionFraction - 0.2f) * 1.25f).coerceIn(0f, 1f)
@@ -320,15 +400,16 @@ fun MobilePlayer(
         }
         val swipeThresholdPx = with(density) { 56.dp.toPx() }
 
-        val useBlurredArtworkChrome = track != null && visualizerPreset == NowPlayingVisualizerPreset.Artwork && blurredArtworkAppearance
-        val bottomCorner = lerp(10.dp, 0.dp, clampedExpansionFraction)
         val artworkContentShape = if (visualizerPreset == NowPlayingVisualizerPreset.Artwork && !blurredArtworkAppearance) {
             RoundedCornerShape(10.dp)
         } else {
-            RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp, bottomStart = bottomCorner, bottomEnd = bottomCorner)
+            RoundedCornerShape(
+                topStart = lerp(10.dp, cornerRadius, clampedExpansionFraction),
+                topEnd = lerp(10.dp, cornerRadius, clampedExpansionFraction),
+                bottomStart = lerp(10.dp, cornerRadius, clampedExpansionFraction),
+                bottomEnd = lerp(10.dp, cornerRadius, clampedExpansionFraction),
+            )
         }
-        val metadataOverlap = if (useBlurredArtworkChrome) MobilePlayerReflectionOverlap else 0.dp
-
         fun previewDirectionFor(offsetPx: Float): Int = when {
             offsetPx < 0f && nextTrack != null -> -1
             offsetPx > 0f && previousTrack != null -> 1
@@ -466,218 +547,56 @@ fun MobilePlayer(
             }
         }
 
-        if (useBlurredArtworkChrome) {
-            val scale = currentArtworkSize.value / fullArtworkSize.value
-            val currentMetadataOverlap = lerp(0.dp, metadataOverlap, clampedExpansionFraction)
-            val currentReflectionHeight = (metadataReserve + metadataOverlap) * scale
-            val reflectionY = currentArtworkY + currentArtworkSize - currentMetadataOverlap
-            val reflectionDismissAlpha = ((clampedExpansionFraction - 0.5f) / 0.5f).coerceIn(0f, 1f)
-            val reflectionAlpha = fullPlayerAlpha * reflectionDismissAlpha
-
-            if (currentReflectionHeight > 0.dp && reflectionAlpha > 0f) {
-                val artworkSizePx = with(density) { currentArtworkSize.toPx() }
-                Box(
-                    modifier = Modifier
-                        .offset(x = currentArtworkX, y = reflectionY)
-                        .width(currentArtworkSize)
-                        .height(currentReflectionHeight)
-                        .graphicsLayer { alpha = reflectionAlpha }
-                        .clipToBounds()
-                ) {
-                    val reflectionsToRender = remember(track, nextTrack, previousTrack, horizontalSwipePreviewDirection) {
-                        buildList {
-                            if (previousTrack != null && horizontalSwipePreviewDirection > 0) {
-                                add(previousTrack to -1)
-                            }
-                            add(track to 0)
-                            if (nextTrack != null && horizontalSwipePreviewDirection < 0) {
-                                add(nextTrack to 1)
-                            }
-                        }
-                    }
-
-                    for ((t, position) in reflectionsToRender) {
-                        key(t.id) {
-                            Box(
-                                modifier = Modifier
-                                    .width(currentArtworkSize)
-                                    .offset {
-                                        val baseOffset = when (position) {
-                                            -1 -> -artworkSizePx
-                                            1 -> artworkSizePx
-                                            else -> 0f
-                                        }
-                                        IntOffset((baseOffset + currentSwipeOffset).roundToInt(), 0)
-                                    }
-                                    .graphicsLayer {
-                                        if (position == 0) {
-                                            val dragProgress = (abs(currentSwipeOffset) / artworkSizePx).coerceIn(0f, 1f)
-                                            val s = 1f - dragProgress * 0.03f
-                                            scaleX = s
-                                            scaleY = s
-                                        }
-                                    }
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(width = fullArtworkSize, height = metadataReserve + metadataOverlap)
-                                        .graphicsLayer {
-                                            scaleX = scale
-                                            scaleY = scale
-                                            transformOrigin = TransformOrigin(0.5f, 0f)
-                                        }
-                                ) {
-                                    MobileArtworkReflection(
-                                        track = t,
-                                        artworkSize = fullArtworkSize,
-                                        clipHeight = metadataReserve + metadataOverlap,
-                                        blendOverlap = metadataOverlap,
-                                        rotationY = 0f,
-                                        backColor = PhoebeUi.panel,
-                                        modifier = Modifier.matchParentSize(),
-                                    )
-                                    MobileArtworkMetadataScrim(
-                                        blendOverlap = metadataOverlap,
-                                        modifier = Modifier.matchParentSize(),
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
         if (fullPlayerAlpha > 0f) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer { alpha = fullPlayerAlpha }
             ) {
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .then(if (isDesktopPlatform()) Modifier else Modifier.mobileWindowTopPadding())
-                        .height(56.dp)
-                        .padding(horizontal = 20.dp)
-                        .graphicsLayer { alpha = fullPlayerElementsAlpha },
-                    contentAlignment = Alignment.CenterStart,
-                ) {
+                if (track != null) {
+                    Spacer(Modifier.height(fullArtworkSize + metadataReserve + MobilePlayerExpandedArtworkBodyGap))
+                } else {
+                    Spacer(Modifier.height(28.dp))
                     Box(
-                        modifier = Modifier
-                            .align(Alignment.CenterStart)
-                            .size(44.dp)
-                            .clickable(onClick = { onBack() })
-                            .semantics { contentDescription = "Back" },
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp)
+                            .weight(1f, fill = false)
+                            .aspectRatio(1f),
                         contentAlignment = Alignment.Center,
                     ) {
-                        PhoebeIconView(PhoebeIcon.ChevronDown, tint = PhoebeUi.primaryText, modifier = Modifier.size(24.dp))
+                        EmptyNowPlayingArtworkSlot(Modifier.fillMaxSize(), glyphSp = 64.sp)
                     }
-
-                    Row(
-                        modifier = Modifier.align(Alignment.Center),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        VisualizerPresetButton(
-                            selected = visualizerPreset,
-                            onSelected = onVisualizerPreset,
+                    Spacer(Modifier.height(20.dp))
+                    Column(Modifier.padding(horizontal = 20.dp)) {
+                        Text("Nothing playing", color = PhoebeUi.primaryText, fontSize = 22.sp, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            "Choose a song from your library or search.",
+                            color = PhoebeUi.secondaryText,
+                            fontSize = 15.sp,
+                            lineHeight = 21.sp,
                         )
-                        SectionLabel("Now Playing", PhoebeUi.secondaryText)
-                        Spacer(Modifier.width(44.dp))
                     }
-
-                    Row(
-                        modifier = Modifier.align(Alignment.CenterEnd),
-                        horizontalArrangement = Arrangement.End,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        TransportIcon(PhoebeIcon.Lyrics, "Lyrics", onLyrics)
-                        TransportIcon(PhoebeIcon.Equalizer, "Equalizer", { equalizerOpen = true }, active = equalizerProfile.enabled)
-                        if (castState.isConnected) {
-                            Spacer(Modifier.size(40.dp))
-                        } else if (!isDesktopPlatform() || castState.isAvailable) {
-                            CastIcon(
-                                active = castState.isConnected,
-                                loading = castState.isBuffering,
-                                enabled = castState.isAvailable || castState.isConnected,
-                                onClick = onCast,
-                            )
-                        }
-                    }
+                    Spacer(Modifier.weight(1f).heightIn(min = 20.dp))
                 }
-
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp)
-                ) {
-                    Spacer(Modifier.height(24.dp))
-                    if (track != null) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(fullArtworkSize + metadataReserve)
-                        ) {
-                            val metadataOverlap = if (visualizerPreset == NowPlayingVisualizerPreset.Artwork && blurredArtworkAppearance) {
-                                MobilePlayerReflectionOverlap
-                            } else {
-                                0.dp
-                            }
-                            val metadataUsesArtworkChrome = visualizerPreset == NowPlayingVisualizerPreset.Artwork && blurredArtworkAppearance
-                            val metadataTitleColor = if (metadataUsesArtworkChrome) Color.White else PhoebeUi.primaryText
-                            val metadataArtistColor = if (metadataUsesArtworkChrome) Color.White.copy(alpha = 0.82f) else PhoebeUi.secondaryText
-                            val metadataAlbumColor = if (metadataUsesArtworkChrome) Color.White.copy(alpha = 0.65f) else PhoebeUi.mutedText
-
-                            Box(
-                                modifier = Modifier
-                                    .width(fullArtworkSize)
-                                    .height(metadataReserve + metadataOverlap)
-                                    .align(Alignment.BottomCenter)
-                                    .graphicsLayer { alpha = fullPlayerElementsAlpha }
-                            ) {
-                                if (visualizerPreset != NowPlayingVisualizerPreset.Artwork) {
-                                    Box(
-                                        modifier = Modifier
-                                            .matchParentSize()
-                                            .background(PhoebeUi.panel.copy(alpha = 0.85f))
-                                    )
-                                }
-                            }
-                        }
-                    } else {
-                        Box(Modifier.fillMaxWidth().weight(1f, fill = false).aspectRatio(1f), contentAlignment = Alignment.Center) {
-                            EmptyNowPlayingArtworkSlot(Modifier.fillMaxSize(), glyphSp = 64.sp)
-                        }
-                        Spacer(Modifier.height(20.dp))
-                        Column {
-                            Text("Nothing playing", color = PhoebeUi.primaryText, fontSize = 22.sp, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            Text(
-                                "Choose a song from your library or search.",
-                                color = PhoebeUi.secondaryText,
-                                fontSize = 15.sp,
-                                lineHeight = 21.sp,
-                            )
-                        }
-                    }
-                }
-
-                Spacer(Modifier.weight(1f).heightIn(min = 20.dp))
                 ProgressLine(
                     positionMs = positionMs,
                     bufferedPositionMs = timelineBufferedPositionMs,
                     durationMs = track?.durationMs ?: 0L,
                     waveformSeed = track?.let(::trackWaveformSeed) ?: "",
-                    barHeight = 56.dp,
+                    barHeight = 44.dp,
                     modifier = Modifier
                         .fillMaxWidth()
+                        .height(MobilePlayerExpandedProgressLineHeight)
                         .padding(horizontal = 20.dp)
                         .graphicsLayer { alpha = fullPlayerElementsAlpha },
                     onSeek = if (track != null) onSeek else null,
                 )
-                Spacer(Modifier.weight(1f).heightIn(min = 16.dp))
+                Spacer(Modifier.height(MobilePlayerExpandedControlsGap))
                 Row(
                     Modifier
                         .fillMaxWidth()
+                        .height(expandedPlayButtonSize)
                         .padding(horizontal = 20.dp)
                         .graphicsLayer { alpha = fullPlayerElementsAlpha },
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -689,7 +608,21 @@ fun MobilePlayer(
                     TransportIcon(PhoebeIcon.Next, "Next Track", onNext, iconSize = 16.dp)
                     RepeatIcon(mode = repeat, onClick = onRepeat)
                 }
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(MobilePlayerExpandedControlsGap))
+                MobileExpandedUtilityControls(
+                    castState = castState,
+                    equalizerActive = equalizerProfile.enabled,
+                    visualizerPreset = visualizerPreset,
+                    onCast = onCast,
+                    onEqualizer = { equalizerOpen = true },
+                    onLyrics = onLyrics,
+                    onVisualizerPreset = onVisualizerPreset,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .graphicsLayer { alpha = fullPlayerElementsAlpha },
+                )
+                Spacer(Modifier.weight(1f).heightIn(min = 8.dp))
                 Spacer(modifier = Modifier.height(collapsedSheetHeight))
             }
         }
@@ -710,21 +643,12 @@ fun MobilePlayer(
                     swipePreviewDirection = horizontalSwipePreviewDirection,
                     modifier = Modifier.fillMaxSize(),
                 ) { t ->
-                    var artworkFlipRotation by remember(t.id) { mutableFloatStateOf(0f) }
                     if (visualizerPreset == NowPlayingVisualizerPreset.Artwork) {
-                        val artworkFadeHeight = if (artworkFlipRotation > 90f) {
-                            0.dp
-                        } else {
-                            lerp(0.dp, metadataOverlap, clampedExpansionFraction)
-                        }
                         FlippableSongArtwork(
                             track = t,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .mobileArtworkBottomFade(artworkFadeHeight),
+                            modifier = Modifier.fillMaxSize(),
                             maxDecodeDimension = HeroArtworkMaxDecodeDimension,
                             shape = artworkContentShape,
-                            onFlipRotationChange = { artworkFlipRotation = it },
                         ) {
                             val isRadio = t.id.startsWith("radio:")
                             val showFeedbackActions = isRadio || (likeActions.likesEnabled && t.canTogglePlexLike()) || (listenBrainzFeedbackTarget.available && listenBrainzFeedbackTarget.trackId == t.id)
@@ -770,28 +694,36 @@ fun MobilePlayer(
                 }
             }
 
-            val metadataUsesArtworkChrome = visualizerPreset == NowPlayingVisualizerPreset.Artwork && blurredArtworkAppearance
-            val metadataTitleColor = if (metadataUsesArtworkChrome) Color.White else PhoebeUi.primaryText
-            val metadataArtistColor = if (metadataUsesArtworkChrome) Color.White.copy(alpha = 0.82f) else PhoebeUi.secondaryText
+            if (fullPlayerElementsAlpha > 0f) {
+                MobileExpandedSheetChrome(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp)
+                        .graphicsLayer { alpha = fullPlayerElementsAlpha },
+                )
+            }
+
+            val metadataTitleColor = PhoebeUi.primaryText
+            val metadataArtistColor = PhoebeUi.secondaryText
 
             val titleColor = androidx.compose.ui.graphics.lerp(PhoebeUi.primaryText, metadataTitleColor, clampedExpansionFraction)
             val artistColor = androidx.compose.ui.graphics.lerp(PhoebeUi.secondaryText, metadataArtistColor, clampedExpansionFraction)
 
-            val targetTextX = targetArtworkX + 16.dp
+            val targetTextX = 20.dp
             val currentTextX = lerp(68.dp, targetTextX, clampedExpansionFraction)
             val collapsedTextY = (MobileMiniPlayerChromeHeight - CollapsedMobilePlayerMetadataHeight) / 2f
-            val currentTextY = lerp(collapsedTextY, 80.dp + statusBarTopPadding + fullArtworkSize + 12.dp, clampedExpansionFraction)
+            val currentTextY = lerp(collapsedTextY, fullArtworkSize + 22.dp, clampedExpansionFraction)
             val collapsedTextWidth = if (castState.isConnected) {
                 (screenWidth - 176.dp).coerceAtLeast(96.dp)
             } else {
                 screenWidth - 128.dp
             }
-            val currentTextWidth = lerp(collapsedTextWidth, fullArtworkSize - 32.dp, clampedExpansionFraction)
+            val currentTextWidth = lerp(collapsedTextWidth, screenWidth - 84.dp, clampedExpansionFraction)
 
-            val titleFontSize = (14f + (20f - 14f) * clampedExpansionFraction).sp
-            val artistFontSize = (12f + (14f - 12f) * clampedExpansionFraction).sp
-            val titleLineHeight = (18f + (24f - 18f) * clampedExpansionFraction).sp
-            val artistLineHeight = (16f + (18f - 16f) * clampedExpansionFraction).sp
+            val titleFontSize = (14f + (26f - 14f) * clampedExpansionFraction).sp
+            val artistFontSize = (12f + (15f - 12f) * clampedExpansionFraction).sp
+            val titleLineHeight = (18f + (31f - 18f) * clampedExpansionFraction).sp
+            val artistLineHeight = (16f + (20f - 16f) * clampedExpansionFraction).sp
             val metadataTextStable = clampedExpansionFraction < 0.08f || clampedExpansionFraction > 0.96f
             val titleFontWeight = if (clampedExpansionFraction > 0.96f) FontWeight.Black else FontWeight.Bold
 
@@ -832,7 +764,7 @@ fun MobilePlayer(
                 )
                 if (clampedExpansionFraction > 0.5f) {
                     val fadeAlpha = ((clampedExpansionFraction - 0.5f) / 0.5f).coerceIn(0f, 1f)
-                    val metadataAlbumColor = if (metadataUsesArtworkChrome) Color.White.copy(alpha = 0.65f) else PhoebeUi.mutedText
+                    val metadataAlbumColor = PhoebeUi.mutedText
                     if (track.album.isNotBlank()) {
                         AutoScrollingText(
                             text = track.album,
@@ -858,6 +790,16 @@ fun MobilePlayer(
                     }
                 }
             }
+
+            if (fullPlayerElementsAlpha > 0f) {
+                Box(
+                    modifier = Modifier
+                        .offset(x = screenWidth - 64.dp, y = fullArtworkSize + 20.dp)
+                        .graphicsLayer { alpha = fullPlayerElementsAlpha },
+                ) {
+                    TransportIcon(PhoebeIcon.More, "More options", { onOpenSongDetail(track) })
+                }
+            }
         }
 
         if (track != null && clampedExpansionFraction < 0.1f) {
@@ -870,28 +812,28 @@ fun MobilePlayer(
             )
         }
 
-        if (track != null || fullPlayerAlpha > 0f) {
+        if (track != null) {
             val playButtonSize = lerp(collapsedPlayButtonSize, expandedPlayButtonSize, clampedExpansionFraction)
             val collapsedPlayButtonX = screenWidth - 12.dp - collapsedPlayButtonSize
             val collapsedPlayButtonY = (MobileMiniPlayerChromeHeight - collapsedPlayButtonSize) / 2f
             val expandedPlayButtonX = (screenWidth - expandedPlayButtonSize) / 2f
-            val expandedPlayButtonY = screenHeight - collapsedSheetHeight - 12.dp - expandedPlayButtonSize
+            val expandedPlayButtonY = fullArtworkSize +
+                metadataReserve +
+                MobilePlayerExpandedArtworkBodyGap +
+                MobilePlayerExpandedProgressLineHeight +
+                MobilePlayerExpandedControlsGap
             val collapsedCastButtonX = collapsedPlayButtonX - 50.dp
             val collapsedCastButtonY = collapsedPlayButtonY
             val expandedCastButtonX = screenWidth - 20.dp - 40.dp
-            val expandedCastButtonY = statusBarTopPadding + 8.dp
+            val expandedCastButtonY = 8.dp
             val swipeProgress = (abs(currentSwipeOffset) / swipeThresholdPx).coerceIn(0f, 1f)
             val swipeScale = if (clampedExpansionFraction < 0.1f) 1f - swipeProgress * 0.025f else 1f
-            val playButtonAlpha = when {
-                track == null -> fullPlayerElementsAlpha
-                clampedExpansionFraction < 0.1f -> miniPlayerAlpha * (1f - swipeProgress * 0.14f)
-                else -> 1f
+            val playButtonAlpha = if (clampedExpansionFraction < 0.1f) {
+                miniPlayerAlpha * (1f - swipeProgress * 0.14f)
+            } else {
+                1f
             }
-            val castButtonAlpha = when {
-                track == null -> fullPlayerElementsAlpha
-                clampedExpansionFraction < 0.1f -> miniPlayerAlpha * (1f - swipeProgress * 0.14f)
-                else -> 1f
-            }
+            val castButtonAlpha = playButtonAlpha
 
             if (castState.isConnected) {
                 CastIcon(
@@ -935,7 +877,7 @@ fun MobilePlayer(
                         scaleY = swipeScale
                     }
                     .then(if (clampedExpansionFraction < 0.1f) horizontalDragModifier else Modifier),
-                enabled = track != null,
+                enabled = true,
             )
         }
 

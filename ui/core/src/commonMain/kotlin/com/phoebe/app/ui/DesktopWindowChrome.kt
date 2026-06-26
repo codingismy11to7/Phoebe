@@ -17,6 +17,11 @@ private val DesktopMacTitleBarClearance = 54.dp
 
 @Composable
 fun desktopWindowTopPadding(): Dp {
+    return windowTopPadding()
+}
+
+@Composable
+fun windowTopPadding(): Dp {
     val density = LocalDensity.current
     if (!isDesktopPlatform()) {
         return with(density) { WindowInsets.statusBars.getTop(density).toDp() }
@@ -32,7 +37,7 @@ fun desktopWindowTopPadding(): Dp {
 }
 
 @Composable
-fun Modifier.mobileWindowTopPadding(): Modifier = padding(top = desktopWindowTopPadding())
+fun Modifier.mobileWindowTopPadding(): Modifier = padding(top = windowTopPadding())
 
 /** Top inset for scrollable mobile-style content; desktop compact shell already handles window chrome. */
 @Composable
@@ -40,5 +45,5 @@ fun mobileContentTopPadding(base: Dp = 0.dp): Dp =
     if (isDesktopPlatform()) {
         base
     } else {
-        base + desktopWindowTopPadding()
+        base + windowTopPadding()
     }

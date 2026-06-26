@@ -1526,7 +1526,7 @@ private fun PhoebeRootStateHolder(
                         onOpenSongDetail = { navigator.open(it.route()) },
                         onCast = state::showCastPicker,
                         onLyrics = {
-                            currentTrack?.let { navigator.open(PhoebeRoute.Lyrics(it.id)) }
+                            if (currentTrack != null) navigator.open(PhoebeRoute.Lyrics())
                         },
                         onBack = collapseMobilePlayer,
                         onSwipeDismiss = collapseMobilePlayer,
@@ -1748,6 +1748,16 @@ private fun PhoebeRootStateHolder(
                     }
 
                     if (currentTrack != null) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer {
+                                    alpha = 0.86f * playerExpansionFraction.value
+                                }
+                                .background(Color.Black)
+                                .zIndex(3f)
+                        )
+
                         val scope = rememberCoroutineScope()
                         val onDragStart = {
                             scope.launch { playerExpansionFraction.stop() }
@@ -1836,7 +1846,7 @@ private fun PhoebeRootStateHolder(
                             onOpenSongDetail = { navigator.open(it.route()) },
                             onCast = state::showCastPicker,
                             onLyrics = {
-                                currentTrack.let { navigator.open(PhoebeRoute.Lyrics(it.id)) }
+                                navigator.open(PhoebeRoute.Lyrics())
                             },
                             onBack = collapseMobilePlayer,
                             onSwipeDismiss = collapseMobilePlayer,

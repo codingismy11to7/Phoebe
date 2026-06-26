@@ -1,5 +1,7 @@
 package com.phoebe.app.ui
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
@@ -7,6 +9,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.phoebe.app.domain.Track
@@ -19,6 +22,7 @@ fun DownloadActionButton(
     modifier: Modifier = Modifier,
     onCancel: (() -> Unit)? = null,
     onDelete: (() -> Unit)? = null,
+    iconOnly: Boolean = false,
     onClick: () -> Unit,
 ) {
     val downloads = LocalDownloadStatus.current
@@ -66,34 +70,59 @@ fun DownloadActionButton(
         isActive || allComplete || allDownloadableComplete || hasFailures -> PhoebeUi.accentLight
         else -> PhoebeUi.mutedText
     }
-    LibraryToolbarButton(
-        icon = if (allComplete || allDownloadableComplete) PhoebeIcon.Check else PhoebeIcon.Download,
-        label = labelText,
-        value = statusLabel,
-        iconTint = iconColor,
-        modifier = modifier,
-        onClick = {
+    val handleClick = {
+        if (isActive) {
+            confirmCancel = true
+        } else if (allComplete || allDownloadableComplete) {
+            confirmDelete = true
+        } else {
+            onClick()
+        }
+    }
+    if (iconOnly) {
+        Box(
+            modifier
+                .size(34.dp)
+                .clickable(onClick = handleClick),
+            contentAlignment = Alignment.Center,
+        ) {
             if (isActive) {
-                confirmCancel = true
-            } else if (allComplete || allDownloadableComplete) {
-                confirmDelete = true
-            } else {
-                onClick()
-            }
-        },
-        leadingContent = if (isActive) {
-            {
                 CircularProgressIndicator(
                     progress = { progress ?: 0f },
-                    modifier = Modifier.size(13.dp),
+                    modifier = Modifier.size(15.dp),
                     color = PhoebeUi.accentLight,
                     strokeWidth = 2.dp,
                 )
+            } else {
+                PhoebeIconView(
+                    if (allComplete || allDownloadableComplete) PhoebeIcon.Check else PhoebeIcon.Download,
+                    tint = iconColor,
+                    modifier = Modifier.size(17.dp),
+                )
             }
-        } else {
-            null
-        },
-    )
+        }
+    } else {
+        LibraryToolbarButton(
+            icon = if (allComplete || allDownloadableComplete) PhoebeIcon.Check else PhoebeIcon.Download,
+            label = labelText,
+            value = statusLabel,
+            iconTint = iconColor,
+            modifier = modifier,
+            onClick = handleClick,
+            leadingContent = if (isActive) {
+                {
+                    CircularProgressIndicator(
+                        progress = { progress ?: 0f },
+                        modifier = Modifier.size(13.dp),
+                        color = PhoebeUi.accentLight,
+                        strokeWidth = 2.dp,
+                    )
+                }
+            } else {
+                null
+            },
+        )
+    }
     if (confirmCancel) {
         val noun = if (total == 1) "song" else "songs"
         val bodyTarget = if (total == 1) "this song" else "these $total $noun"
