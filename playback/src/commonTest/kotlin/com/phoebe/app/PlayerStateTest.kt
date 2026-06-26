@@ -70,6 +70,57 @@ class PlayerStateTest {
     }
 
     @Test
+    fun stalledPlatformStartupFailsInsteadOfBufferingForever() {
+        val player = TimeoutTestPlayer()
+        val tracks = listOf(
+            Track("t1", "One", "Artist", "Album", 60_000, "http://a", ""),
+        )
+
+        player.play(tracks, 0)
+
+        assertTrue(player.state.value.isBuffering)
+        assertTrue(waitUntil(timeoutMs = 1_000) { !player.state.value.isBuffering })
+        assertFalse(player.state.value.isPlaying)
+        assertEquals(1, player.state.value.playbackErrorSerial)
+        assertEquals("Playback took too long to start.", player.state.value.playbackErrorMessage)
+    }
+
+    @Test
+    fun startupWatchdogIgnoresSupersededPlayRequests() {
+        val player = TimeoutTestPlayer()
+        val tracks = listOf(
+            Track("t1", "One", "Artist", "Album", 60_000, "http://a", ""),
+            Track("t2", "Two", "Artist", "Album", 60_000, "http://b", ""),
+        )
+
+        player.play(tracks, 0)
+        player.play(tracks, 1)
+        player.finishPendingLoad()
+
+        Thread.sleep(player.testStartupTimeoutMs + 75L)
+
+        assertEquals(tracks[1], player.state.value.currentTrack)
+        assertTrue(player.state.value.isPlaying)
+        assertFalse(player.state.value.isBuffering)
+        assertEquals(0, player.state.value.playbackErrorSerial)
+    }
+
+    @Test
+    fun startupWatchdogStopsWhenPlaybackStops() {
+        val player = TimeoutTestPlayer()
+        val tracks = listOf(
+            Track("t1", "One", "Artist", "Album", 60_000, "http://a", ""),
+        )
+
+        player.play(tracks, 0)
+        player.stopPlayback()
+        Thread.sleep(player.testStartupTimeoutMs + 75L)
+
+        assertFalse(player.state.value.isBuffering)
+        assertEquals(0, player.state.value.playbackErrorSerial)
+    }
+
+    @Test
     fun clickingCurrentBufferingStreamTrackReassertsPlaybackIntent() {
         val player = SlowTestPlayer()
         val tracks = listOf(
@@ -771,7 +822,7 @@ private class SuspendTrackingTestPlayer : SimpleAudioPlayer() {
     }
 }
 
-private class SlowTestPlayer : SimpleAudioPlayer() {
+private open class SlowTestPlayer : SimpleAudioPlayer() {
     private val pendingLoads = mutableSetOf<Int>()
     var resumeCalls = 0
 
@@ -802,6 +853,22 @@ private class SlowTestPlayer : SimpleAudioPlayer() {
     fun platformPlayWhenReady(playWhenReady: Boolean) {
         adoptPlatformPlayIntent(playWhenReady)
     }
+}
+
+private class TimeoutTestPlayer : SlowTestPlayer() {
+    val testStartupTimeoutMs = 50L
+
+    override val playbackStartupTimeoutMs: Long
+        get() = testStartupTimeoutMs
+}
+
+private fun waitUntil(timeoutMs: Long, condition: () -> Boolean): Boolean {
+    val deadline = System.nanoTime() + timeoutMs * 1_000_000L
+    while (System.nanoTime() < deadline) {
+        if (condition()) return true
+        Thread.sleep(10L)
+    }
+    return condition()
 }
 
 private class QueueAwareTestPlayer : SimpleAudioPlayer() {

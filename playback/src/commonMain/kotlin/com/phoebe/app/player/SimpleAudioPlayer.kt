@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
 internal const val PlaybackReadyBufferedAheadMs = 2_000L
+internal const val PlaybackStartupTimeoutMs = 30_000L
 
 internal fun hasPlaybackReadyBuffer(
     positionMs: Long,
@@ -35,6 +36,7 @@ abstract class SimpleAudioPlayer : AudioPlayer {
     private val audioAnalysisAccumulator = AudioAnalysisAccumulator()
     private val scope = CoroutineScope(Dispatchers.Default)
     private var progressJob: Job? = null
+    private var playbackStartupJob: Job? = null
     private var preferUnityOutputVolume = false
     private var systemVolumeScale = 1f
     private var playGeneration = 0
@@ -114,6 +116,7 @@ abstract class SimpleAudioPlayer : AudioPlayer {
         )
         setOutputVolume(effectiveOutputVolume())
         if (track != null) {
+            startPlaybackStartupWatchdog(generation)
             if (sameQueue) {
                 skipToInQueueOnPlatform(queue, index, track, generation)
             } else {
@@ -229,6 +232,7 @@ abstract class SimpleAudioPlayer : AudioPlayer {
         clearCrossfadeRequestState()
         resetAudioAnalysis()
         stopProgressTicker()
+        stopPlaybackStartupWatchdog()
         stopCurrentPlaybackImmediately()
         val volume = mutableState.value.volume
         mutableState.value = PlayerState(volume = volume)
@@ -512,6 +516,7 @@ abstract class SimpleAudioPlayer : AudioPlayer {
 
     protected fun markPlaybackReady(isPlaying: Boolean = true, generation: Int = playGeneration) {
         if (!isPlayRequestCurrent(generation)) return
+        stopPlaybackStartupWatchdog()
         val current = mutableState.value
         val effectivePlaying = isPlaying && playWhenReady
         mutableState.value = current.copy(
@@ -540,6 +545,7 @@ abstract class SimpleAudioPlayer : AudioPlayer {
 
     protected fun markPlaybackFailed(generation: Int = playGeneration, message: String? = null) {
         if (!isPlayRequestCurrent(generation)) return
+        stopPlaybackStartupWatchdog()
         val current = mutableState.value
         mutableState.value = current.copy(
             isBuffering = false,
@@ -552,6 +558,7 @@ abstract class SimpleAudioPlayer : AudioPlayer {
 
     protected fun markPlaybackWaitingForUserGesture(generation: Int = playGeneration) {
         if (!isPlayRequestCurrent(generation)) return
+        stopPlaybackStartupWatchdog()
         val current = mutableState.value
         mutableState.value = current.copy(
             isBuffering = false,
@@ -664,6 +671,25 @@ abstract class SimpleAudioPlayer : AudioPlayer {
         progressJob?.cancel()
         progressJob = null
     }
+
+    private fun startPlaybackStartupWatchdog(generation: Int) {
+        playbackStartupJob?.cancel()
+        playbackStartupJob = scope.launch {
+            delay(playbackStartupTimeoutMs)
+            val current = mutableState.value
+            if (isPlayRequestCurrent(generation) && current.isBuffering) {
+                markPlaybackFailed(generation = generation, message = "Playback took too long to start.")
+            }
+        }
+    }
+
+    private fun stopPlaybackStartupWatchdog() {
+        playbackStartupJob?.cancel()
+        playbackStartupJob = null
+    }
+
+    protected open val playbackStartupTimeoutMs: Long
+        get() = PlaybackStartupTimeoutMs
 
     private fun maybeStartCrossfade(generation: Int) {
         val duration = crossfadeDurationMs
