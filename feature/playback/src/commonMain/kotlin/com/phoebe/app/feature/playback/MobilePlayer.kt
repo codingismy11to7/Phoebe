@@ -279,6 +279,9 @@ fun MobilePlayer(
         val screenWidth = maxWidth
         val screenHeight = maxHeight
 
+        val collapsedPlayButtonSize = 40.dp
+        val expandedPlayButtonSize = 72.dp
+
         val baseMetadataReserve = if (track != null && track.album.isNotBlank()) {
             MobilePlayerMetadataReserveWithAlbum
         } else {
@@ -286,9 +289,15 @@ fun MobilePlayer(
         }
         val metadataReserve = baseMetadataReserve +
             (if (remotePlaybackTarget != null) MobilePlayerRemoteTargetReserve else 0.dp)
+
+        val navBarBottom = with(density) {
+            WindowInsets.navigationBars.getBottom(this).toDp()
+        }
+        val collapsedSheetHeight = 88.dp + navBarBottom
+
         val fullArtworkSize = minOf(
             screenWidth - 40.dp,
-            (screenHeight - 56.dp - 24.dp - metadataReserve - 146.dp - 72.dp).coerceAtLeast(180.dp),
+            (screenHeight - 56.dp - 24.dp - metadataReserve - (192.dp + expandedPlayButtonSize + navBarBottom)).coerceAtLeast(180.dp),
         )
 
         val currentArtworkSize = lerp(44.dp, fullArtworkSize, clampedExpansionFraction)
@@ -302,10 +311,6 @@ fun MobilePlayer(
         val fullPlayerAlpha = ((clampedExpansionFraction - 0.2f) * 1.25f).coerceIn(0f, 1f)
         val overlayActionsAlpha = ((clampedExpansionFraction - 0.7f) / 0.2f).coerceIn(0f, 1f)
         val fullPlayerElementsAlpha = ((clampedExpansionFraction - 0.8f) / 0.2f).coerceIn(0f, 1f)
-        val collapsedSheetHeight = with(density) {
-            val navBarBottom = WindowInsets.navigationBars.getBottom(this).toDp()
-            88.dp + navBarBottom
-        }
 
         val nextTrack = upNext.firstOrNull()
         val currentSwipeOffset = when {
@@ -679,7 +684,7 @@ fun MobilePlayer(
                 ) {
                     ShuffleIcon(active = shuffle, onClick = onShuffle)
                     TransportIcon(PhoebeIcon.Previous, "Previous Track", onPrevious, iconSize = 16.dp)
-                    Spacer(Modifier.size(72.dp))
+                    Spacer(Modifier.size(expandedPlayButtonSize))
                     TransportIcon(PhoebeIcon.Next, "Next Track", onNext, iconSize = 16.dp)
                     RepeatIcon(mode = repeat, onClick = onRepeat)
                 }
@@ -864,8 +869,6 @@ fun MobilePlayer(
         }
 
         if (track != null || fullPlayerAlpha > 0f) {
-            val collapsedPlayButtonSize = 40.dp
-            val expandedPlayButtonSize = 72.dp
             val playButtonSize = lerp(collapsedPlayButtonSize, expandedPlayButtonSize, clampedExpansionFraction)
             val collapsedPlayButtonX = screenWidth - 12.dp - collapsedPlayButtonSize
             val collapsedPlayButtonY = (MobileMiniPlayerChromeHeight - collapsedPlayButtonSize) / 2f
