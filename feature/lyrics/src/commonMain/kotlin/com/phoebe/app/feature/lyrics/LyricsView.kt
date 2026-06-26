@@ -54,6 +54,7 @@ import com.phoebe.app.ui.PhoebeIcon
 import com.phoebe.app.ui.PhoebeIconView
 import com.phoebe.app.ui.PhoebeUi
 import com.phoebe.app.ui.SectionLabel
+import com.phoebe.app.ui.mobileContentTopPadding
 
 private const val LyricsAutoScrollPauseMs = 5_000L
 
@@ -73,7 +74,7 @@ fun LyricsView(
             .background(PhoebeUi.shellTop)
             .padding(
                 start = 24.dp,
-                top = 22.dp + WindowInsets.statusBars.asPaddingValues().calculateTopPadding(),
+                top = mobileContentTopPadding(22.dp),
                 end = 24.dp,
                 bottom = 22.dp,
             ),

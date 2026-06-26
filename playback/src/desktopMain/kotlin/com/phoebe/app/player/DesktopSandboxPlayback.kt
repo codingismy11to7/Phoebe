@@ -23,6 +23,7 @@ internal object DesktopSandboxPlayback {
             }
         }
         return DesktopPlaybackStartupPolicy.sampledPlaybackExtensionFromSuffix(extension)
+            ?: desktopMp3ExtensionFromSuffix(extension)
     }
 
     fun streamingSampledExtensionFromSuffix(extension: String): String? {
@@ -33,6 +34,7 @@ internal object DesktopSandboxPlayback {
             }
         }
         return DesktopPlaybackStartupPolicy.streamingSampledExtensionFromSuffix(extension)
+            ?: desktopMp3ExtensionFromSuffix(extension)
     }
 
     /**
@@ -81,5 +83,10 @@ internal object DesktopSandboxPlayback {
             return track.streamUrl
         }
         return track.flatpakSandboxTranscodeUrl() ?: track.streamUrl
+    }
+
+    private fun desktopMp3ExtensionFromSuffix(extension: String): String? = when (extension.lowercase()) {
+        "mp3", "mpeg", "mpga" -> "mp3"
+        else -> null
     }
 }

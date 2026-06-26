@@ -51,6 +51,7 @@ import com.phoebe.app.ui.DetailBackButton
 import com.phoebe.app.ui.PhoebeIcon
 import com.phoebe.app.ui.PhoebeIconView
 import com.phoebe.app.ui.PhoebeUi
+import com.phoebe.app.ui.mobileContentTopPadding
 
 @Composable
 fun CollectionsScreen(
@@ -89,7 +90,7 @@ fun CollectionsScreen(
     Column(
         modifier
             .fillMaxSize()
-            .padding(start = 28.dp, end = 28.dp, top = 24.dp + WindowInsets.statusBars.asPaddingValues().calculateTopPadding(), bottom = 24.dp + bottomContentPadding),
+            .padding(start = 28.dp, end = 28.dp, top = mobileContentTopPadding(24.dp), bottom = 24.dp + bottomContentPadding),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         CollectionsHeader(
@@ -184,7 +185,7 @@ fun CollectionItemsScreen(
     Column(
         modifier
             .fillMaxSize()
-            .padding(start = 28.dp, end = 28.dp, top = 24.dp + WindowInsets.statusBars.asPaddingValues().calculateTopPadding(), bottom = 24.dp + bottomContentPadding),
+            .padding(start = 28.dp, end = 28.dp, top = mobileContentTopPadding(24.dp), bottom = 24.dp + bottomContentPadding),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         CollectionsHeader(

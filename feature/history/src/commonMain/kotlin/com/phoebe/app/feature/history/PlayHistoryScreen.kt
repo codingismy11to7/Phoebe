@@ -55,6 +55,7 @@ import com.phoebe.app.feature.library.SongsTableHeader
 import com.phoebe.app.ui.PhoebeIcon
 import com.phoebe.app.ui.PhoebeIconView
 import com.phoebe.app.ui.PhoebeUi
+import com.phoebe.app.ui.mobileContentTopPadding
 
 @Immutable
 data class HistoryNowPlayingState(
@@ -99,7 +100,7 @@ fun PlayHistoryScreen(
             .padding(
                 start = 16.dp,
                 end = 16.dp,
-                top = 12.dp + WindowInsets.statusBars.asPaddingValues().calculateTopPadding(),
+                top = mobileContentTopPadding(12.dp),
                 bottom = 12.dp + bottomContentPadding
             ),
         verticalArrangement = Arrangement.spacedBy(14.dp),

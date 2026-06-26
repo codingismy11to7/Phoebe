@@ -1141,10 +1141,12 @@ private fun PhoebeRootStateHolder(
             val wideDesktop = maxWidth >= 1280.dp
             CompositionLocalProvider(LocalPlaylistDragEnabled provides !compact) {
             val mergesTitleBar = LocalDesktopMergesTitleBar.current
+            val compactDesktopTopPadding = if (compact && isDesktopPlatform()) desktopWindowTopPadding() else 0.dp
             val shellModifier = if (compact) {
                 Modifier
                     .fillMaxSize()
                     .background(PhoebeUi.shellTop)
+                    .padding(top = compactDesktopTopPadding)
             } else {
                 val shellInsets = if (mergesTitleBar) {
                     WindowInsets.safeDrawing.only(
@@ -1214,7 +1216,7 @@ private fun PhoebeRootStateHolder(
                 PhoebeNavDisplay(
                     backStack = renderableMobileContentRoutes,
                     modifier = Modifier.fillMaxSize(),
-                    animateTransitions = supportsPredictiveBack(),
+                    animateTransitions = true,
                     opaqueSceneBackgrounds = true,
                     onBack = {
                         when (navigator.currentRoute) {

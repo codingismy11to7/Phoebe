@@ -261,7 +261,7 @@ fun FavoriteArtistsMobileView(
             .padding(
                 start = 16.dp,
                 end = 16.dp,
-                top = 18.dp + WindowInsets.statusBars.asPaddingValues().calculateTopPadding(),
+                top = mobileContentTopPadding(18.dp),
                 bottom = 18.dp + chromePadding.bottom
             ),
     ) {
@@ -317,7 +317,7 @@ fun FavoriteAlbumsMobileView(
             .padding(
                 start = 16.dp,
                 end = 16.dp,
-                top = 18.dp + WindowInsets.statusBars.asPaddingValues().calculateTopPadding(),
+                top = mobileContentTopPadding(18.dp),
                 bottom = 18.dp + chromePadding.bottom
             ),
     ) {
@@ -1241,7 +1241,7 @@ fun FavoritePlaylistsMobileView(
             .padding(
                 start = 16.dp,
                 end = 16.dp,
-                top = 18.dp + WindowInsets.statusBars.asPaddingValues().calculateTopPadding(),
+                top = mobileContentTopPadding(18.dp),
                 bottom = 18.dp + chromePadding.bottom
             ),
     ) {

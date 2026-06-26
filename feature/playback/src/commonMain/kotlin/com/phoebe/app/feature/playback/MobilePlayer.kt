@@ -304,9 +304,7 @@ fun MobilePlayer(
         val currentArtworkSize = lerp(44.dp, fullArtworkSize, clampedExpansionFraction)
         val targetArtworkX = (screenWidth - fullArtworkSize) / 2
         val currentArtworkX = lerp(12.dp, targetArtworkX, clampedExpansionFraction)
-        val statusBarTopPadding = with(density) {
-            WindowInsets.statusBars.getTop(this).toDp()
-        }
+        val statusBarTopPadding = if (isDesktopPlatform()) 0.dp else desktopWindowTopPadding()
         val currentArtworkY = lerp(14.dp, 80.dp + statusBarTopPadding, clampedExpansionFraction)
 
         val miniPlayerAlpha = collapsedChromeAlpha
@@ -526,12 +524,13 @@ fun MobilePlayer(
                                         .graphicsLayer {
                                             scaleX = scale
                                             scaleY = scale
-                                            transformOrigin = TransformOrigin(0f, 0f)
+                                            transformOrigin = TransformOrigin(0.5f, 0f)
                                         }
                                 ) {
                                     MobileArtworkReflection(
                                         track = t,
                                         artworkSize = fullArtworkSize,
+                                        clipHeight = metadataReserve + metadataOverlap,
                                         blendOverlap = metadataOverlap,
                                         rotationY = 0f,
                                         backColor = PhoebeUi.panel,
@@ -558,7 +557,7 @@ fun MobilePlayer(
                 Box(
                     Modifier
                         .fillMaxWidth()
-                        .statusBarsPadding()
+                        .then(if (isDesktopPlatform()) Modifier else Modifier.mobileWindowTopPadding())
                         .height(56.dp)
                         .padding(horizontal = 20.dp)
                         .graphicsLayer { alpha = fullPlayerElementsAlpha },

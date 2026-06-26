@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -96,6 +98,9 @@ import com.phoebe.app.feature.settings.SettingsRouteState
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.delay
+
+private const val DesktopSharedTransitionRetainMs = 400L
 
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
@@ -352,10 +357,48 @@ internal fun DesktopPlayer(
                         Row(Modifier.weight(1f).fillMaxWidth()) {
                             SharedTransitionLayout(Modifier.weight(1f).fillMaxHeight()) {
                                 val sharedTransitionScope = this
-                                val previousRoute = displayRoutes.dropLast(1).lastOrNull()
-                                val targetRoute = displayRoutes.lastOrNull()
+                                var previousDisplayRoutes by remember { mutableStateOf(displayRoutes) }
+                                var retainedSharedTransition by remember { mutableStateOf<Pair<PhoebeRoute, PhoebeRoute>?>(null) }
+                                val routeTransition = remember(displayRoutes, previousDisplayRoutes) {
+                                    when {
+                                        displayRoutes.size > previousDisplayRoutes.size -> {
+                                            val from = previousDisplayRoutes.lastOrNull()
+                                            val to = displayRoutes.lastOrNull()
+                                            if (from != null && to != null) from to to else null
+                                        }
+                                        displayRoutes.size < previousDisplayRoutes.size -> {
+                                            val from = previousDisplayRoutes.lastOrNull()
+                                            val to = displayRoutes.lastOrNull()
+                                            if (from != null && to != null) from to to else null
+                                        }
+                                        else -> {
+                                            val from = displayRoutes.dropLast(1).lastOrNull()
+                                            val to = displayRoutes.lastOrNull()
+                                            if (from != null && to != null) from to to else null
+                                        }
+                                    }
+                                }
+                                LaunchedEffect(routeTransition) {
+                                    val transition = routeTransition ?: return@LaunchedEffect
+                                    if (shouldUseDesktopSharedElements(transition.first, transition.second)) {
+                                        retainedSharedTransition = transition
+                                    }
+                                }
+                                LaunchedEffect(retainedSharedTransition) {
+                                    val transition = retainedSharedTransition ?: return@LaunchedEffect
+                                    delay(DesktopSharedTransitionRetainMs)
+                                    if (retainedSharedTransition == transition) {
+                                        retainedSharedTransition = null
+                                    }
+                                }
+                                SideEffect {
+                                    previousDisplayRoutes = displayRoutes
+                                }
+                                val activeSharedTransition = routeTransition ?: retainedSharedTransition
                                 val sharedElementsEnabled = LocalSharedElementTransitionsEnabled.current &&
-                                    shouldUseDesktopSharedElements(previousRoute, targetRoute)
+                                    activeSharedTransition?.let { (from, to) ->
+                                        shouldUseDesktopSharedElements(from, to)
+                                    } == true
                                 CompositionLocalProvider(
                                     LocalSharedTransitionScope provides sharedTransitionScope,
                                     LocalSharedElementTransitionsEnabled provides sharedElementsEnabled,
@@ -363,6 +406,8 @@ internal fun DesktopPlayer(
                                     PhoebeNavDisplay(
                                         backStack = displayRoutes,
                                         modifier = Modifier.fillMaxSize(),
+                                        animateTransitions = sharedElementsEnabled,
+                                        opaqueSceneBackgrounds = true,
                                         onBack = onPopDetail,
                                     ) { targetRoute ->
                                         val targetResolution = resolvePhoebeRoute(targetRoute, catalog, track)
