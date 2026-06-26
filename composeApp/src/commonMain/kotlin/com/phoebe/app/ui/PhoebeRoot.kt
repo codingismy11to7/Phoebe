@@ -1748,15 +1748,15 @@ private fun PhoebeRootStateHolder(
                     }
 
                     if (currentTrack != null) {
-                        val contentDimAlpha = 0.86f * playerExpansionFraction.value
-                        if (contentDimAlpha > 0.01f) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(Color.Black.copy(alpha = contentDimAlpha))
-                                    .zIndex(3f)
-                            )
-                        }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer {
+                                    alpha = 0.86f * playerExpansionFraction.value
+                                }
+                                .background(Color.Black)
+                                .zIndex(3f)
+                        )
 
                         val scope = rememberCoroutineScope()
                         val onDragStart = {

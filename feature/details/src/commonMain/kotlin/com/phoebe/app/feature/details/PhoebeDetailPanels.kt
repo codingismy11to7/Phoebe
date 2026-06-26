@@ -225,6 +225,7 @@ fun SongDetailPanel(
     val playHistory = LocalPlayHistory.current
     val lastPlayed = playHistory.byTrack[track.id]
     val mobileChromeBottom = LocalMobileChromePadding.current.bottom
+    val metadataEditorActions = LocalMetadataEditorActions.current
     BoxWithConstraints(modifier.fillMaxSize()) {
         val compact = maxWidth < 520.dp
         val horizontalPadding = if (compact) 20.dp else 28.dp
@@ -246,7 +247,10 @@ fun SongDetailPanel(
         ) {
             item("intro") {
                 if (compact) {
-                    SongDetailMobileTopBar(onBack = onBack)
+                    SongDetailMobileTopBar(
+                        onBack = onBack,
+                        onMoreClick = { metadataEditorActions.onRequestEdit(track) },
+                    )
                 } else {
                     DetailSectionIntro(
                         onBack = onBack,
@@ -274,7 +278,10 @@ fun SongDetailPanel(
 }
 
 @Composable
-private fun SongDetailMobileTopBar(onBack: () -> Unit) {
+private fun SongDetailMobileTopBar(
+    onBack: () -> Unit,
+    onMoreClick: () -> Unit,
+) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -303,7 +310,8 @@ private fun SongDetailMobileTopBar(onBack: () -> Unit) {
             Modifier
                 .size(44.dp)
                 .offset(x = 10.dp)
-                .clip(CircleShape),
+                .clip(CircleShape)
+                .clickable(onClick = onMoreClick),
             contentAlignment = Alignment.Center,
         ) {
             PhoebeIconView(PhoebeIcon.More, tint = PhoebeUi.secondaryText, modifier = Modifier.size(21.dp))

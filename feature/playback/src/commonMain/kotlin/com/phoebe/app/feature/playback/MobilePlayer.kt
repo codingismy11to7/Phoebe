@@ -305,7 +305,7 @@ fun MobilePlayer(
     val expandedTopInset = if (isDesktopPlatform()) {
         0.dp
     } else {
-        desktopWindowTopPadding() + MobilePlayerExpandedTopGap
+        windowTopPadding() + MobilePlayerExpandedTopGap
     }
     val currentTopInset = lerp(0.dp, expandedTopInset, clampedExpansionFraction)
 
@@ -368,7 +368,19 @@ fun MobilePlayer(
         val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
         val collapsedSheetHeight = 76.dp + navBarBottom
 
-        val fullArtworkSize = screenWidth
+        val bottomElementsMinHeight = 192.dp
+        val fullArtworkSize = minOf(
+            screenWidth,
+            (
+                screenHeight -
+                    56.dp -
+                    24.dp -
+                    metadataReserve -
+                    bottomElementsMinHeight -
+                    expandedPlayButtonSize -
+                    navBarBottom
+            ).coerceAtLeast(180.dp),
+        )
 
         val currentArtworkSize = lerp(44.dp, fullArtworkSize, clampedExpansionFraction)
         val targetArtworkX = 0.dp
@@ -388,15 +400,14 @@ fun MobilePlayer(
         }
         val swipeThresholdPx = with(density) { 56.dp.toPx() }
 
-        val bottomCorner = lerp(10.dp, 0.dp, clampedExpansionFraction)
         val artworkContentShape = if (visualizerPreset == NowPlayingVisualizerPreset.Artwork && !blurredArtworkAppearance) {
             RoundedCornerShape(10.dp)
         } else {
             RoundedCornerShape(
                 topStart = lerp(10.dp, cornerRadius, clampedExpansionFraction),
                 topEnd = lerp(10.dp, cornerRadius, clampedExpansionFraction),
-                bottomStart = bottomCorner,
-                bottomEnd = bottomCorner,
+                bottomStart = lerp(10.dp, cornerRadius, clampedExpansionFraction),
+                bottomEnd = lerp(10.dp, cornerRadius, clampedExpansionFraction),
             )
         }
         fun previewDirectionFor(offsetPx: Float): Int = when {
