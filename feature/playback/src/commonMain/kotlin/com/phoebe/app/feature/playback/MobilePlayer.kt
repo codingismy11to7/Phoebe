@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -279,6 +280,9 @@ fun MobilePlayer(
         val screenWidth = maxWidth
         val screenHeight = maxHeight
 
+        val collapsedPlayButtonSize = 40.dp
+        val expandedPlayButtonSize = 72.dp
+
         val baseMetadataReserve = if (track != null && track.album.isNotBlank()) {
             MobilePlayerMetadataReserveWithAlbum
         } else {
@@ -286,9 +290,15 @@ fun MobilePlayer(
         }
         val metadataReserve = baseMetadataReserve +
             (if (remotePlaybackTarget != null) MobilePlayerRemoteTargetReserve else 0.dp)
+
+        val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+        val collapsedSheetHeight = 88.dp + navBarBottom
+
+        // Combined minimum height of bottom elements: Spacers (20.dp + 16.dp + 12.dp) + ProgressLine (56.dp) + Collapsed Sheet Base (88.dp)
+        val bottomElementsMinHeight = 192.dp
         val fullArtworkSize = minOf(
             screenWidth - 40.dp,
-            (screenHeight - 56.dp - 24.dp - metadataReserve - 146.dp - 72.dp).coerceAtLeast(180.dp),
+            (screenHeight - 56.dp - 24.dp - metadataReserve - (bottomElementsMinHeight + expandedPlayButtonSize + navBarBottom)).coerceAtLeast(180.dp),
         )
 
         val currentArtworkSize = lerp(44.dp, fullArtworkSize, clampedExpansionFraction)
@@ -302,10 +312,6 @@ fun MobilePlayer(
         val fullPlayerAlpha = ((clampedExpansionFraction - 0.2f) * 1.25f).coerceIn(0f, 1f)
         val overlayActionsAlpha = ((clampedExpansionFraction - 0.7f) / 0.2f).coerceIn(0f, 1f)
         val fullPlayerElementsAlpha = ((clampedExpansionFraction - 0.8f) / 0.2f).coerceIn(0f, 1f)
-        val collapsedSheetHeight = with(density) {
-            val navBarBottom = WindowInsets.navigationBars.getBottom(this).toDp()
-            88.dp + navBarBottom
-        }
 
         val nextTrack = upNext.firstOrNull()
         val currentSwipeOffset = when {
@@ -679,7 +685,7 @@ fun MobilePlayer(
                 ) {
                     ShuffleIcon(active = shuffle, onClick = onShuffle)
                     TransportIcon(PhoebeIcon.Previous, "Previous Track", onPrevious, iconSize = 16.dp)
-                    Spacer(Modifier.size(72.dp))
+                    Spacer(Modifier.size(expandedPlayButtonSize))
                     TransportIcon(PhoebeIcon.Next, "Next Track", onNext, iconSize = 16.dp)
                     RepeatIcon(mode = repeat, onClick = onRepeat)
                 }
@@ -864,8 +870,6 @@ fun MobilePlayer(
         }
 
         if (track != null || fullPlayerAlpha > 0f) {
-            val collapsedPlayButtonSize = 40.dp
-            val expandedPlayButtonSize = 72.dp
             val playButtonSize = lerp(collapsedPlayButtonSize, expandedPlayButtonSize, clampedExpansionFraction)
             val collapsedPlayButtonX = screenWidth - 12.dp - collapsedPlayButtonSize
             val collapsedPlayButtonY = (MobileMiniPlayerChromeHeight - collapsedPlayButtonSize) / 2f
@@ -936,8 +940,7 @@ fun MobilePlayer(
 
             if (fullPlayerAlpha > 0f) {
                 val collapsedSheetHeightPx = with(density) {
-                    val navBarBottom = WindowInsets.navigationBars.getBottom(this).toDp()
-                    (88.dp + navBarBottom).toPx()
+                    collapsedSheetHeight.toPx()
                 }
                 val expandedSheetHeightPx = with(density) {
                     val controlsPx = 146.dp.toPx()
