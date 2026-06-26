@@ -389,6 +389,10 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Fetch test audio fixtures
+        shell: bash
+        run: ./scripts/fetch-test-audio.sh
+
       - name: Validate macOS signing secrets
         shell: bash
         run: |
@@ -489,6 +493,38 @@ jobs:
               --wait
             xcrun stapler staple "${artifact}"
           done
+
+      - name: Smoke test notarized macOS DMG playback
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p smoke-logs
+          dmg="$(find composeApp/build -name '*.dmg' -print -quit)"
+          if [[ -z "${dmg}" ]]; then
+            echo "::error::Could not find macOS DMG artifact"
+            exit 1
+          fi
+          fixture="${PWD}/composeApp/src/commonTest/resources/test-audio/wikimedia-example.mp3"
+          if [[ ! -f "${fixture}" ]]; then
+            echo "::error::Missing playback smoke fixture: ${fixture}"
+            exit 1
+          fi
+          mount_dir="$(mktemp -d)"
+          cleanup() {
+            hdiutil detach "${mount_dir}" -quiet || true
+            rmdir "${mount_dir}" || true
+          }
+          trap cleanup EXIT
+          hdiutil attach "${dmg}" -mountpoint "${mount_dir}" -nobrowse -quiet
+          app_path="$(find "${mount_dir}" -maxdepth 2 -name 'Phoebe.app' -print -quit)"
+          if [[ -z "${app_path}" ]]; then
+            echo "::error::Could not find Phoebe.app in mounted DMG"
+            exit 1
+          fi
+          "${app_path}/Contents/MacOS/Phoebe" \
+            "--phoebe-playback-smoke=${fixture}" \
+            --phoebe-playback-smoke-timeout-ms=20000 \
+            2>&1 | tee smoke-logs/macos-dmg-playback.log
 
       - name: Collect macOS release artifacts
         shell: bash

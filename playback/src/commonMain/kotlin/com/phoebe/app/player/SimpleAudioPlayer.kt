@@ -13,9 +13,11 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 internal const val PlaybackReadyBufferedAheadMs = 2_000L
+internal const val PlaybackStartupTimeoutMs = 30_000L
 
 internal fun hasPlaybackReadyBuffer(
     positionMs: Long,
@@ -27,14 +29,16 @@ internal fun hasPlaybackReadyBuffer(
     return bufferedPositionMs - positionMs >= PlaybackReadyBufferedAheadMs
 }
 
-abstract class SimpleAudioPlayer : AudioPlayer {
+abstract class SimpleAudioPlayer(
+    private val scope: CoroutineScope = CoroutineScope(Dispatchers.Default),
+) : AudioPlayer {
     private val mutableState = MutableStateFlow(PlayerState())
     override val state: StateFlow<PlayerState> = mutableState
     private val mutableAudioAnalysis = MutableStateFlow(AudioAnalysisFrame.Empty)
     override val audioAnalysis: StateFlow<AudioAnalysisFrame> = mutableAudioAnalysis
     private val audioAnalysisAccumulator = AudioAnalysisAccumulator()
-    private val scope = CoroutineScope(Dispatchers.Default)
     private var progressJob: Job? = null
+    private var playbackStartupJob: Job? = null
     private var preferUnityOutputVolume = false
     private var systemVolumeScale = 1f
     private var playGeneration = 0
@@ -114,6 +118,7 @@ abstract class SimpleAudioPlayer : AudioPlayer {
         )
         setOutputVolume(effectiveOutputVolume())
         if (track != null) {
+            startPlaybackStartupWatchdog(generation)
             if (sameQueue) {
                 skipToInQueueOnPlatform(queue, index, track, generation)
             } else {
@@ -229,6 +234,7 @@ abstract class SimpleAudioPlayer : AudioPlayer {
         clearCrossfadeRequestState()
         resetAudioAnalysis()
         stopProgressTicker()
+        stopPlaybackStartupWatchdog()
         stopCurrentPlaybackImmediately()
         val volume = mutableState.value.volume
         mutableState.value = PlayerState(volume = volume)
@@ -512,6 +518,7 @@ abstract class SimpleAudioPlayer : AudioPlayer {
 
     protected fun markPlaybackReady(isPlaying: Boolean = true, generation: Int = playGeneration) {
         if (!isPlayRequestCurrent(generation)) return
+        stopPlaybackStartupWatchdog()
         val current = mutableState.value
         val effectivePlaying = isPlaying && playWhenReady
         mutableState.value = current.copy(
@@ -540,6 +547,7 @@ abstract class SimpleAudioPlayer : AudioPlayer {
 
     protected fun markPlaybackFailed(generation: Int = playGeneration, message: String? = null) {
         if (!isPlayRequestCurrent(generation)) return
+        stopPlaybackStartupWatchdog()
         val current = mutableState.value
         mutableState.value = current.copy(
             isBuffering = false,
@@ -552,6 +560,7 @@ abstract class SimpleAudioPlayer : AudioPlayer {
 
     protected fun markPlaybackWaitingForUserGesture(generation: Int = playGeneration) {
         if (!isPlayRequestCurrent(generation)) return
+        stopPlaybackStartupWatchdog()
         val current = mutableState.value
         mutableState.value = current.copy(
             isBuffering = false,
@@ -664,6 +673,43 @@ abstract class SimpleAudioPlayer : AudioPlayer {
         progressJob?.cancel()
         progressJob = null
     }
+
+    private fun startPlaybackStartupWatchdog(generation: Int) {
+        playbackStartupJob?.cancel()
+        playbackStartupJob = scope.launch {
+            delay(playbackStartupTimeoutMs)
+            markPlaybackStartupTimedOut(generation)
+        }
+    }
+
+    private fun stopPlaybackStartupWatchdog() {
+        playbackStartupJob?.cancel()
+        playbackStartupJob = null
+    }
+
+    private fun markPlaybackStartupTimedOut(generation: Int) {
+        if (!isPlayRequestCurrent(generation)) return
+        stopPlaybackStartupWatchdog()
+        val previousErrorSerial = mutableState.value.playbackErrorSerial
+        mutableState.update { current ->
+            if (!isPlayRequestCurrent(generation) || !current.isBuffering) {
+                current
+            } else {
+                current.copy(
+                    isBuffering = false,
+                    isPlaying = false,
+                    playbackErrorSerial = current.playbackErrorSerial + 1,
+                    playbackErrorMessage = "Playback took too long to start.",
+                )
+            }
+        }
+        if (mutableState.value.playbackErrorSerial != previousErrorSerial) {
+            stopProgressTicker()
+        }
+    }
+
+    protected open val playbackStartupTimeoutMs: Long
+        get() = PlaybackStartupTimeoutMs
 
     private fun maybeStartCrossfade(generation: Int) {
         val duration = crossfadeDurationMs

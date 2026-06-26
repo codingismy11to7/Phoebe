@@ -63,7 +63,7 @@ private class DesktopUpdateInstaller : PlatformUpdateInstaller {
                     exitProcess(0)
                 } else {
                     ProcessBuilder("open", downloaded.absolutePath).start()
-                    UpdateInstallResult.RequiresUserAction("Phoebe opened the update disk image.")
+                    exitProcess(0)
                 }
             }
             UpdatePlatform.LinuxFlatpak -> {

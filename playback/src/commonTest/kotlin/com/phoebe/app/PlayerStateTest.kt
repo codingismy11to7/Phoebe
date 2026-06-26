@@ -3,11 +3,18 @@ package com.phoebe.app
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.player.SimpleAudioPlayer
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class PlayerStateTest {
     @Test
     fun playAndToggleUpdatesSharedState() {
@@ -67,6 +74,60 @@ class PlayerStateTest {
         player.finishPendingLoad()
 
         assertFalse(player.state.value.isPlaying)
+    }
+
+    @Test
+    fun stalledPlatformStartupFailsInsteadOfBufferingForever() = runTest {
+        val player = TimeoutTestPlayer(this)
+        val tracks = listOf(
+            Track("t1", "One", "Artist", "Album", 60_000, "http://a", ""),
+        )
+
+        player.play(tracks, 0)
+
+        assertTrue(player.state.value.isBuffering)
+        advanceTimeBy(player.testStartupTimeoutMs + 1L)
+        runCurrent()
+        assertFalse(player.state.value.isPlaying)
+        assertEquals(1, player.state.value.playbackErrorSerial)
+        assertEquals("Playback took too long to start.", player.state.value.playbackErrorMessage)
+    }
+
+    @Test
+    fun startupWatchdogIgnoresSupersededPlayRequests() = runTest {
+        val player = TimeoutTestPlayer(this)
+        val tracks = listOf(
+            Track("t1", "One", "Artist", "Album", 60_000, "http://a", ""),
+            Track("t2", "Two", "Artist", "Album", 60_000, "http://b", ""),
+        )
+
+        player.play(tracks, 0)
+        player.play(tracks, 1)
+        player.finishPendingLoad()
+
+        advanceTimeBy(player.testStartupTimeoutMs + 1L)
+        runCurrent()
+
+        assertEquals(tracks[1], player.state.value.currentTrack)
+        assertTrue(player.state.value.isPlaying)
+        assertFalse(player.state.value.isBuffering)
+        assertEquals(0, player.state.value.playbackErrorSerial)
+    }
+
+    @Test
+    fun startupWatchdogStopsWhenPlaybackStops() = runTest {
+        val player = TimeoutTestPlayer(this)
+        val tracks = listOf(
+            Track("t1", "One", "Artist", "Album", 60_000, "http://a", ""),
+        )
+
+        player.play(tracks, 0)
+        player.stopPlayback()
+        advanceTimeBy(player.testStartupTimeoutMs + 1L)
+        runCurrent()
+
+        assertFalse(player.state.value.isBuffering)
+        assertEquals(0, player.state.value.playbackErrorSerial)
     }
 
     @Test
@@ -771,7 +832,9 @@ private class SuspendTrackingTestPlayer : SimpleAudioPlayer() {
     }
 }
 
-private class SlowTestPlayer : SimpleAudioPlayer() {
+private open class SlowTestPlayer(
+    scope: CoroutineScope = CoroutineScope(Dispatchers.Default),
+) : SimpleAudioPlayer(scope) {
     private val pendingLoads = mutableSetOf<Int>()
     var resumeCalls = 0
 
@@ -802,6 +865,13 @@ private class SlowTestPlayer : SimpleAudioPlayer() {
     fun platformPlayWhenReady(playWhenReady: Boolean) {
         adoptPlatformPlayIntent(playWhenReady)
     }
+}
+
+private class TimeoutTestPlayer(scope: CoroutineScope) : SlowTestPlayer(scope) {
+    val testStartupTimeoutMs = 50L
+
+    override val playbackStartupTimeoutMs: Long
+        get() = testStartupTimeoutMs
 }
 
 private class QueueAwareTestPlayer : SimpleAudioPlayer() {
