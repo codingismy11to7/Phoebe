@@ -18,12 +18,18 @@ val phoebeVersionCode = providers.gradleProperty("phoebe.versionCode")
 val phoebeJpackagePackageVersion = phoebeVersionName.map { version ->
     val parts = version.split(".")
     val major = parts.firstOrNull()?.toIntOrNull()
-    if (major != null && parts.size == 3) {
-        // Early native packages need a positive, monotonic jpackage version while
-        // the public app version remains semver.
-        "${major + 1}.${parts[1]}.${parts[2]}"
+    if (major != null && major <= 250 && parts.size == 3) {
+        val minor = parts[1].toIntOrNull()
+        val patch = parts[2].toIntOrNull()
+        if (minor != null && minor <= 255 && patch != null && patch <= 65535) {
+            "${major + 1}.$minor.$patch"
+        } else {
+            val code = phoebeVersionCode.get()
+            "100.0.$code"
+        }
     } else {
-        version
+        val code = phoebeVersionCode.get()
+        "100.0.$code"
     }
 }
 
