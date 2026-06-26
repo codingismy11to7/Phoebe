@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -290,14 +291,14 @@ fun MobilePlayer(
         val metadataReserve = baseMetadataReserve +
             (if (remotePlaybackTarget != null) MobilePlayerRemoteTargetReserve else 0.dp)
 
-        val navBarBottom = with(density) {
-            WindowInsets.navigationBars.getBottom(this).toDp()
-        }
+        val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
         val collapsedSheetHeight = 88.dp + navBarBottom
 
+        // Combined minimum height of bottom elements: Spacers (20.dp + 16.dp + 12.dp) + ProgressLine (56.dp) + Collapsed Sheet Base (88.dp)
+        val bottomElementsMinHeight = 192.dp
         val fullArtworkSize = minOf(
             screenWidth - 40.dp,
-            (screenHeight - 56.dp - 24.dp - metadataReserve - (192.dp + expandedPlayButtonSize + navBarBottom)).coerceAtLeast(180.dp),
+            (screenHeight - 56.dp - 24.dp - metadataReserve - (bottomElementsMinHeight + expandedPlayButtonSize + navBarBottom)).coerceAtLeast(180.dp),
         )
 
         val currentArtworkSize = lerp(44.dp, fullArtworkSize, clampedExpansionFraction)
@@ -939,8 +940,7 @@ fun MobilePlayer(
 
             if (fullPlayerAlpha > 0f) {
                 val collapsedSheetHeightPx = with(density) {
-                    val navBarBottom = WindowInsets.navigationBars.getBottom(this).toDp()
-                    (88.dp + navBarBottom).toPx()
+                    collapsedSheetHeight.toPx()
                 }
                 val expandedSheetHeightPx = with(density) {
                     val controlsPx = 146.dp.toPx()
