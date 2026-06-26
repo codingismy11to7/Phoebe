@@ -372,10 +372,14 @@ class DesktopAudioPlayer(
                 if (!isPlayRequestCurrent(generation)) return@execute
                 val playbackUri = file?.toURI()?.toString() ?: activeUri
                 fullyBufferedPlayback = file != null
-                val javaFxStarted = if (file == null && isRemoteUri(playbackUri)) {
-                    playJavaFxSync(playbackUri, generation)
+                val javaFxStarted = if (!JavaFxRuntime.hasFailed) {
+                    if (file == null && isRemoteUri(playbackUri)) {
+                        playJavaFxSync(playbackUri, generation)
+                    } else {
+                        playJavaFxWithRetries(playbackUri, generation)
+                    }
                 } else {
-                    playJavaFxWithRetries(playbackUri, generation)
+                    false
                 }
                 if (!javaFxStarted) {
                     if (file != null && trySampledFallbackAfterJavaFxFailure(file, generation)) {
@@ -1732,82 +1736,88 @@ class DesktopAudioPlayer(
     private fun playJavaFxSync(uri: String, generation: Int): Boolean {
         val latch = CountDownLatch(1)
         val failed = AtomicBoolean(false)
-        JavaFxRuntime.runLater {
-            runCatching {
-                diagnostics.engineSelected(PlaybackEnginePath.JavaFxMediaPlayer)
-                val media = Media(uri)
-                val mediaPlayer = MediaPlayer(media)
-                mediaPlayer.volume = effectiveOutputVolume().toDouble().coerceIn(0.0, 1.0)
-                applyJavaFxEqualizer(mediaPlayer, equalizerProfile)
-                mediaPlayer.audioSpectrumInterval = 0.05
-                mediaPlayer.audioSpectrumNumBands = 128
-                mediaPlayer.audioSpectrumThreshold = -80
-                mediaPlayer.audioSpectrumListener = AudioSpectrumListener { _, _, magnitudes, _ ->
-                    publishAudioAnalysisMagnitudesDb(magnitudes, AudioAnalysisSource.Spectrum)
-                    val maxMagnitude = magnitudes.maxOrNull() ?: return@AudioSpectrumListener
-                    val rms = Math.pow(10.0, maxMagnitude.toDouble() / 20.0)
-                    if (rms.isFinite() && rms > 0.0) {
-                        diagnostics.decodedAudioEnergy(PlaybackEnginePath.JavaFxMediaPlayer, rms)
+        val handleFailure = { error: Throwable ->
+            failed.set(true)
+            logPlaybackFailure(error)
+            diagnostics.playbackError(PlaybackEnginePath.JavaFxMediaPlayer, error.message)
+            if (latch.count > 0L) latch.countDown()
+        }
+        JavaFxRuntime.runLater(
+            block = {
+                runCatching {
+                    diagnostics.engineSelected(PlaybackEnginePath.JavaFxMediaPlayer)
+                    val media = Media(uri)
+                    val mediaPlayer = MediaPlayer(media)
+                    mediaPlayer.volume = effectiveOutputVolume().toDouble().coerceIn(0.0, 1.0)
+                    applyJavaFxEqualizer(mediaPlayer, equalizerProfile)
+                    mediaPlayer.audioSpectrumInterval = 0.05
+                    mediaPlayer.audioSpectrumNumBands = 128
+                    mediaPlayer.audioSpectrumThreshold = -80
+                    mediaPlayer.audioSpectrumListener = AudioSpectrumListener { _, _, magnitudes, _ ->
+                        publishAudioAnalysisMagnitudesDb(magnitudes, AudioAnalysisSource.Spectrum)
+                        val maxMagnitude = magnitudes.maxOrNull() ?: return@AudioSpectrumListener
+                        val rms = Math.pow(10.0, maxMagnitude.toDouble() / 20.0)
+                        if (rms.isFinite() && rms > 0.0) {
+                            diagnostics.decodedAudioEnergy(PlaybackEnginePath.JavaFxMediaPlayer, rms)
+                        }
                     }
-                }
-                mediaPlayer.setOnError {
-                    failed.set(true)
-                    PhoebeLog.d("DesktopAudioPlayer") {
-                        "playback error: ${mediaPlayer.error?.message ?: mediaPlayer.error?.type}"
+                    mediaPlayer.setOnError {
+                        failed.set(true)
+                        PhoebeLog.d("DesktopAudioPlayer") {
+                            "playback error: ${mediaPlayer.error?.message ?: mediaPlayer.error?.type}"
+                        }
+                        diagnostics.playbackError(PlaybackEnginePath.JavaFxMediaPlayer, mediaPlayer.error?.message)
+                        if (latch.count > 0L) latch.countDown()
                     }
-                    diagnostics.playbackError(PlaybackEnginePath.JavaFxMediaPlayer, mediaPlayer.error?.message)
-                    if (latch.count > 0L) latch.countDown()
-                }
-                mediaPlayer.setOnEndOfMedia {
-                    if (isPlayRequestCurrent(generation)) {
-                        next()
+                    mediaPlayer.setOnEndOfMedia {
+                        if (isPlayRequestCurrent(generation)) {
+                            next()
+                        }
                     }
-                }
-                media.setOnError {
-                    failed.set(true)
-                    PhoebeLog.d("DesktopAudioPlayer") { "media error: ${media.error?.message}" }
-                    diagnostics.playbackError(PlaybackEnginePath.JavaFxMediaPlayer, media.error?.message)
-                    if (latch.count > 0L) latch.countDown()
-                }
-                mediaPlayer.setOnPlaying {
-                    syncJavaFxPlayback(mediaPlayer, generation, isBuffering = false)
-                    if (latch.count > 0L) latch.countDown()
-                }
-                mediaPlayer.setOnStalled {
-                    syncJavaFxPlayback(mediaPlayer, generation, isBuffering = true)
-                }
-                mediaPlayer.setOnReady {
-                    syncJavaFxPlayback(mediaPlayer, generation, isBuffering = false)
-                    mediaPlayer.bufferProgressTimeProperty().addListener { _, _, _ ->
+                    media.setOnError {
+                        failed.set(true)
+                        PhoebeLog.d("DesktopAudioPlayer") { "media error: ${media.error?.message}" }
+                        diagnostics.playbackError(PlaybackEnginePath.JavaFxMediaPlayer, media.error?.message)
+                        if (latch.count > 0L) latch.countDown()
+                    }
+                    mediaPlayer.setOnPlaying {
                         syncJavaFxPlayback(mediaPlayer, generation, isBuffering = false)
+                        if (latch.count > 0L) latch.countDown()
                     }
-                    mediaPlayer.currentTimeProperty().addListener { _, _, _ ->
+                    mediaPlayer.setOnStalled {
+                        syncJavaFxPlayback(mediaPlayer, generation, isBuffering = true)
+                    }
+                    mediaPlayer.setOnReady {
                         syncJavaFxPlayback(mediaPlayer, generation, isBuffering = false)
+                        mediaPlayer.bufferProgressTimeProperty().addListener { _, _, _ ->
+                            syncJavaFxPlayback(mediaPlayer, generation, isBuffering = false)
+                        }
+                        mediaPlayer.currentTimeProperty().addListener { _, _, _ ->
+                            syncJavaFxPlayback(mediaPlayer, generation, isBuffering = false)
+                        }
+                        if (playWhenReady && isPlayRequestCurrent(generation)) {
+                            mediaPlayer.play()
+                        }
                     }
+                    player = mediaPlayer
+                    startJavaFxProgressProbe(mediaPlayer, generation)
                     if (playWhenReady && isPlayRequestCurrent(generation)) {
                         mediaPlayer.play()
                     }
-                }
-                player = mediaPlayer
-                startJavaFxProgressProbe(mediaPlayer, generation)
-                if (playWhenReady && isPlayRequestCurrent(generation)) {
-                    mediaPlayer.play()
-                }
-            }.onFailure { error ->
-                failed.set(true)
-                logPlaybackFailure(error)
-                diagnostics.playbackError(PlaybackEnginePath.JavaFxMediaPlayer, error.message)
-                if (latch.count > 0L) latch.countDown()
-            }
-        }
+                }.onFailure(handleFailure)
+            },
+            onError = handleFailure
+        )
         val signaled = latch.await(JavaFxStartupTimeoutSeconds, TimeUnit.SECONDS)
         return signaled && !failed.get() && isPlayRequestCurrent(generation)
     }
 
     private fun playJavaFxWithRetries(uri: String, generation: Int): Boolean {
+        if (JavaFxRuntime.hasFailed) return false
         var attempt = 0
         while (isPlayRequestCurrent(generation)) {
             if (playJavaFxSync(uri, generation)) return true
+            if (JavaFxRuntime.hasFailed) return false
             if (!isRemoteUri(uri) || attempt >= MaxStreamRetryCount) return false
             disposeJavaFxBlocking()
             attempt++
@@ -2294,14 +2304,25 @@ private object JavaFxRuntime {
         start()
     }
 
+    val hasFailed: Boolean
+        get() = ready.isCompletedExceptionally
+
     fun runLater(block: () -> Unit) {
+        runLater(block, null)
+    }
+
+    fun runLater(block: () -> Unit, onError: ((Throwable) -> Unit)?) {
         start()
         ready.whenComplete { _, error ->
             if (error != null) {
-                PhoebeLog.d("DesktopAudioPlayer") { "playback error: ${error.message ?: error::class.simpleName.orEmpty()}" }
+                onError?.invoke(error) ?: PhoebeLog.d("DesktopAudioPlayer") { "JavaFxRuntime startup error: ${error.message ?: error::class.simpleName.orEmpty()}" }
                 return@whenComplete
             }
-            Platform.runLater(block)
+            try {
+                Platform.runLater(block)
+            } catch (t: Throwable) {
+                onError?.invoke(t) ?: PhoebeLog.d("DesktopAudioPlayer") { "Platform.runLater failed: ${t.message ?: t::class.simpleName.orEmpty()}" }
+            }
         }
     }
 

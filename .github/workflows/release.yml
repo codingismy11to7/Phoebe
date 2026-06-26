@@ -2,13 +2,13 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'release/*.*.*'
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       version:
-        description: Semver version to release, for example 1.2.3
-        required: true
+        description: Optional custom version (e.g. 1.2.3). If omitted, uses auto-increment and timestamp.
+        required: false
         type: string
 
 concurrency:
@@ -25,7 +25,7 @@ env:
 
 jobs:
   version:
-    name: Validate version
+    name: Validate and bump version
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -36,56 +36,63 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
 
-      - name: Validate release version
+      - name: Validate and bump version
         id: version
         shell: bash
         run: |
           version="$(grep '^phoebe.versionName=' gradle.properties | cut -d'=' -f2- | tr -d '[:space:]')"
           configured_version_code="$(grep '^phoebe.versionCode=' gradle.properties | cut -d'=' -f2- | tr -d '[:space:]' || true)"
+          
           if [[ -z "${version}" ]]; then
             echo "::error::gradle.properties must define phoebe.versionName"
             exit 1
           fi
-
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            if [[ "${{ inputs.version }}" != "${version}" ]]; then
-              echo "::error::workflow_dispatch version '${{ inputs.version }}' must match gradle.properties phoebe.versionName '${version}'"
-              exit 1
-            fi
-            tag_name="release/${version}"
-          else
-            tag_name="${GITHUB_REF_NAME}"
-            expected_tag_name="release/${version}"
-            if [[ "${tag_name}" != "${expected_tag_name}" ]]; then
-              echo "::error::release tag '${tag_name}' must match gradle.properties version '${expected_tag_name}'"
-              exit 1
-            fi
-          fi
-
-          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Release version must be plain semver, like release/1.2.3"
+          if [[ -z "${configured_version_code}" ]]; then
+            echo "::error::gradle.properties must define phoebe.versionCode"
             exit 1
           fi
 
-          IFS='.' read -r major minor patch <<< "${version}"
-          if (( major > 2100 || minor > 999 || patch > 999 )); then
-            echo "::error::Version is too large to derive a safe Android versionCode"
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && -n "${{ inputs.version }}" ]]; then
+            new_version_name="${{ inputs.version }}"
+            new_version_code=$((configured_version_code + 1))
+          else
+            new_version_code=$((configured_version_code + 1))
+            new_version_name=$(date -u +"%Y.%m%d.%H%M")
+          fi
+
+          if [[ ! "${new_version_name}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Release version name must be plain semver (like 1.2.3 or YYYY.MMDD.HHMM)"
             exit 1
           fi
 
-          if [[ -n "${configured_version_code}" ]]; then
-            if [[ ! "${configured_version_code}" =~ ^[0-9]+$ ]]; then
-              echo "::error::phoebe.versionCode must be a positive integer"
-              exit 1
-            fi
-            version_code="${configured_version_code}"
-          else
-            version_code=$((major * 1000000 + minor * 1000 + patch))
+          echo "Bumping version code from ${configured_version_code} to ${new_version_code}"
+          echo "Bumping version name from ${version} to ${new_version_name}"
+
+          perl -pi -e "s/^phoebe.versionCode=.*/phoebe.versionCode=${new_version_code}/" gradle.properties
+          perl -pi -e "s/^phoebe.versionName=.*/phoebe.versionName=${new_version_name}/" gradle.properties
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          git add gradle.properties
+          git commit -m "Bump version to ${new_version_name} (code: ${new_version_code}) [skip ci]"
+          
+          if ! git push origin HEAD:main; then
+            echo "::error::Failed to push version bump to main branch. This usually happens because of branch protection rules on 'main'. Please configure branch protection bypass or use a PAT."
+            exit 1
           fi
+
+          tag_name="release/${new_version_name}"
+          git tag "${tag_name}"
+          git push origin "${tag_name}"
+
           {
-            echo "version=${version}"
-            echo "version_code=${version_code}"
+            echo "version=${new_version_name}"
+            echo "version_code=${new_version_code}"
             echo "tag_name=${tag_name}"
           } >> "${GITHUB_OUTPUT}"
 
@@ -103,6 +110,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.tag_name }}
 
       - name: Set up JDK
         uses: actions/setup-java@v4
@@ -177,6 +186,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.tag_name }}
 
       - name: Install packaging tools
         run: |
@@ -262,6 +273,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.tag_name }}
 
       - name: Set up JDK
         uses: actions/setup-java@v4
@@ -379,6 +392,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.tag_name }}
 
       - name: Set up JDK
         uses: actions/setup-java@v4
@@ -563,6 +578,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.tag_name }}
 
       - name: Select Xcode 26
         uses: maxim-lobanov/setup-xcode@v1
@@ -799,6 +816,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.tag_name }}
 
       - name: Set up JDK
         uses: actions/setup-java@v4
