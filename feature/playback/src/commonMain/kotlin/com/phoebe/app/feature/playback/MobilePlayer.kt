@@ -302,7 +302,8 @@ fun MobilePlayer(
         )
 
         val currentArtworkSize = lerp(44.dp, fullArtworkSize, clampedExpansionFraction)
-        val currentArtworkX = lerp(12.dp, 20.dp, clampedExpansionFraction)
+        val targetArtworkX = (screenWidth - fullArtworkSize) / 2
+        val currentArtworkX = lerp(12.dp, targetArtworkX, clampedExpansionFraction)
         val statusBarTopPadding = with(density) {
             WindowInsets.statusBars.getTop(this).toDp()
         }
@@ -632,7 +633,7 @@ fun MobilePlayer(
                                 modifier = Modifier
                                     .width(fullArtworkSize)
                                     .height(metadataReserve + metadataOverlap)
-                                    .align(Alignment.BottomStart)
+                                    .align(Alignment.BottomCenter)
                                     .graphicsLayer { alpha = fullPlayerElementsAlpha }
                             ) {
                                 if (visualizerPreset != NowPlayingVisualizerPreset.Artwork) {
@@ -777,7 +778,8 @@ fun MobilePlayer(
             val titleColor = androidx.compose.ui.graphics.lerp(PhoebeUi.primaryText, metadataTitleColor, clampedExpansionFraction)
             val artistColor = androidx.compose.ui.graphics.lerp(PhoebeUi.secondaryText, metadataArtistColor, clampedExpansionFraction)
 
-            val currentTextX = lerp(68.dp, 36.dp, clampedExpansionFraction)
+            val targetTextX = targetArtworkX + 16.dp
+            val currentTextX = lerp(68.dp, targetTextX, clampedExpansionFraction)
             val collapsedTextY = (MobileMiniPlayerChromeHeight - CollapsedMobilePlayerMetadataHeight) / 2f
             val currentTextY = lerp(collapsedTextY, 80.dp + statusBarTopPadding + fullArtworkSize + 12.dp, clampedExpansionFraction)
             val collapsedTextWidth = if (castState.isConnected) {
