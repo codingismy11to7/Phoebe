@@ -28,9 +28,13 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.phoebe.app.data.ListenBrainzFeedbackScore
+import kotlin.math.roundToInt
 import com.phoebe.app.data.ListenBrainzFeedbackTarget
 import com.phoebe.app.domain.Track
 import com.phoebe.app.platform.prefersReducedArtworkEffects
@@ -81,6 +85,7 @@ fun Modifier.playerDragGestures(
 fun MobileArtworkReflection(
     track: Track,
     artworkSize: Dp,
+    clipHeight: Dp,
     blendOverlap: Dp,
     rotationY: Float,
     backColor: Color,
@@ -90,6 +95,7 @@ fun MobileArtworkReflection(
         MobileArtworkReflectionLayer(
             track = track,
             artworkSize = artworkSize,
+            clipHeight = clipHeight,
             blendOverlap = blendOverlap,
             rotationY = rotationY,
             backColor = backColor,
@@ -159,11 +165,15 @@ fun MobileArtworkMetadataScrim(
 private fun BoxScope.MobileArtworkReflectionLayer(
     track: Track,
     artworkSize: Dp,
+    clipHeight: Dp,
     blendOverlap: Dp,
     rotationY: Float,
     backColor: Color,
 ) {
     val density = LocalDensity.current
+    val artworkSizePx = with(density) { artworkSize.toPx() }
+    val clipHeightPx = with(density) { clipHeight.toPx() }
+    val verticalOffsetPx = (artworkSizePx - clipHeightPx).coerceAtLeast(0f)
     Box(
         modifier = Modifier
             .matchParentSize()
@@ -206,9 +216,11 @@ private fun BoxScope.MobileArtworkReflectionLayer(
         val reflectionModifier = Modifier
             .size(artworkSize)
             .align(Alignment.TopCenter)
+            .offset { IntOffset(0, -verticalOffsetPx.roundToInt()) }
             .graphicsLayer {
                 this.rotationY = rotationY
                 scaleY = -1f
+                transformOrigin = TransformOrigin(0.5f, 0f)
                 cameraDistance = 12f * density.density
             }
 

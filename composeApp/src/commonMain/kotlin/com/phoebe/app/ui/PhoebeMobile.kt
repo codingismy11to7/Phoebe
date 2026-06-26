@@ -699,7 +699,7 @@ internal fun MobileBrowseShell(
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
                 .background(PhoebeUi.shellTop)
-                .statusBarsPadding()
+                .then(if (isDesktopPlatform()) Modifier else Modifier.mobileWindowTopPadding())
                 .zIndex(2f),
         ) {
             MobileScreenToolbar(

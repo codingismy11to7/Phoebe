@@ -239,7 +239,7 @@ fun SongDetailPanel(
                 .fillMaxSize()
                 .padding(horizontal = horizontalPadding),
             contentPadding = PaddingValues(
-                top = 24.dp + WindowInsets.statusBars.asPaddingValues().calculateTopPadding(),
+                top = mobileContentTopPadding(24.dp),
                 bottom = bottomContentPadding
             ),
             verticalArrangement = Arrangement.spacedBy(18.dp),
@@ -874,7 +874,7 @@ fun ArtistDetailPanel(
         state = listState,
         modifier = Modifier.fillMaxSize().padding(start = edgePadding, end = edgePadding),
         contentPadding = PaddingValues(
-            top = topPadding + WindowInsets.statusBars.asPaddingValues().calculateTopPadding(),
+            top = mobileContentTopPadding(topPadding),
             bottom = bottomContentPadding
         ),
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -1698,7 +1698,7 @@ fun AlbumDetailPanel(
         state = listState,
         modifier = Modifier.fillMaxSize().padding(start = edgePadding, end = edgePadding),
         contentPadding = PaddingValues(
-            top = topPadding + WindowInsets.statusBars.asPaddingValues().calculateTopPadding(),
+            top = mobileContentTopPadding(topPadding),
             bottom = bottomContentPadding
         ),
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -2073,7 +2073,7 @@ fun PlaylistDetailPanel(
                     .padding(start = 20.dp, end = 20.dp)
                     .then(if (reorderEnabled) reorderState.listModifier() else Modifier),
                 contentPadding = PaddingValues(
-                    top = 16.dp + WindowInsets.statusBars.asPaddingValues().calculateTopPadding(),
+                    top = mobileContentTopPadding(16.dp),
                     bottom = bottomContentPadding
                 ),
                 verticalArrangement = Arrangement.spacedBy(10.dp),

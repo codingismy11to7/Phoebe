@@ -183,11 +183,16 @@ class DesktopPlaybackStartupPolicyTest {
     }
 
     @Test
-    fun nonSandboxMp3StillAvoidsJavaSoundStartupPaths() {
+    fun desktopMp3UsesJavaSoundInsteadOfWaitingOnJavaFx() {
         DesktopSandboxPlayback.flatpakSandboxOverride = { false }
         try {
-            assertEquals(null, DesktopSandboxPlayback.sampledPlaybackExtensionFromSuffix("mp3"))
-            assertEquals(null, DesktopSandboxPlayback.streamingSampledExtensionFromSuffix("mp3"))
+            assertEquals("mp3", DesktopSandboxPlayback.sampledPlaybackExtensionFromSuffix("mp3"))
+            assertEquals("mp3", DesktopSandboxPlayback.streamingSampledExtensionFromSuffix("mp3"))
+            assertTrue(
+                DesktopSandboxPlayback.shouldStreamRemoteSampledPlayback(
+                    "https://music.example.test/library/track.mp3?token=abc",
+                ),
+            )
         } finally {
             DesktopSandboxPlayback.flatpakSandboxOverride = null
         }
