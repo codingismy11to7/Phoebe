@@ -91,6 +91,7 @@ import io.ktor.client.call.body
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.statement.bodyAsChannel
+import io.ktor.http.Url
 import io.ktor.http.contentLength
 import io.ktor.utils.io.readAvailable
 import kotlinx.coroutines.Deferred
@@ -479,6 +480,7 @@ class CatalogRepository(
     val tracksLoading: StateFlow<Set<String>> = mutableTracksLoading
     private val localFileMetadataCache = LocalFileMetadataCache(database)
     private val syncedTrackIdsDuringRefresh = mutableSetOf<String>()
+    private val fetchedAlbumDetailsIds = mutableSetOf<String>()
 
     fun clearInMemoryCatalog() {
         mutableCatalog.value = CatalogSnapshot()
@@ -488,6 +490,7 @@ class CatalogRepository(
         publishCatalogSyncState(CatalogSyncState(), force = true)
         mutableTracksLoading.value = emptySet()
         syncedTrackIdsDuringRefresh.clear()
+        fetchedAlbumDetailsIds.clear()
         pendingPlaylistFavoriteOverrides.value = emptyMap()
     }
 
@@ -2495,6 +2498,10 @@ class CatalogRepository(
                 } else {
                     album.favorite || previousAlbums[album.id]?.favorite == true
                 },
+                albumArtist = album.albumArtist ?: previousAlbums[album.id]?.albumArtist,
+                description = album.description ?: previousAlbums[album.id]?.description,
+                recordLabel = album.recordLabel ?: previousAlbums[album.id]?.recordLabel,
+                releaseDate = album.releaseDate ?: previousAlbums[album.id]?.releaseDate,
             )
         }
         val previousArtists = previous.artists.associateBy { it.id }
@@ -3241,11 +3248,69 @@ class CatalogRepository(
         }
     }
 
+    suspend fun ensureAlbumDetails(session: PlexSession?, album: Album) {
+        val server = session?.selectedServer ?: return
+        val token = session.serverAuthToken() ?: return
+        if (!session.isPlex()) return
+
+        val rating = plexRatingKey(album.id) ?: return
+
+        var shouldFetch = false
+        catalogMergeMutex.withLock {
+            val currentAlbum = mutableCatalog.value.albums.firstOrNull { it.id == album.id } ?: album
+            val needsAlbumDetails =
+                currentAlbum.description.isNullOrBlank() ||
+                    currentAlbum.mood.isNullOrBlank() ||
+                    currentAlbum.style.isNullOrBlank() ||
+                    currentAlbum.recordLabel.isNullOrBlank()
+            if (!fetchedAlbumDetailsIds.contains(album.id) && needsAlbumDetails) {
+                fetchedAlbumDetailsIds.add(album.id)
+                shouldFetch = true
+            }
+        }
+        if (!shouldFetch) return
+
+        val details = try {
+            plexClient.albumDetails(server, rating, token)
+        } catch (error: Throwable) {
+            catalogMergeMutex.withLock {
+                fetchedAlbumDetailsIds.remove(album.id)
+            }
+            if (error is CancellationException) throw error
+            return
+        } ?: return
+
+        catalogMergeMutex.withLock {
+            val current = mutableCatalog.value
+            val existingAlbumIndex = current.albums.indexOfFirst { it.id == album.id }
+            if (existingAlbumIndex >= 0) {
+                val prefixedDetail = current.albums[existingAlbumIndex].mergeAlbumDetails(details, album.id)
+                val updatedAlbums = current.albums.toMutableList().apply {
+                    this[existingAlbumIndex] = prefixedDetail
+                }
+                mutableCatalog.value = current.copy(
+                    albums = updatedAlbums
+                )
+            }
+        }
+
+        runCatalogDbWrite {
+            database.catalogQueries.updateAlbumMetadata(
+                mood = details.mood,
+                style = details.style,
+                description = details.description,
+                recordLabel = details.recordLabel,
+                releaseDate = details.releaseDate,
+                id = album.id,
+            )
+        }
+    }
+
     suspend fun tracksForAlbum(session: PlexSession?, album: Album): List<Track> {
         val existing = mutableCatalog.value.tracksByParent[album.id]
-        if (!existing.isNullOrEmpty()) return existing
+        if (!existing.isNullOrEmpty() && existing.canUseCachedTracksForSession(session)) return existing
         readTracksForParentFromDatabase(album.id)?.let { cached ->
-            if (cached.isNotEmpty()) {
+            if (cached.isNotEmpty() && cached.canUseCachedTracksForSession(session)) {
                 publish(
                     mutableCatalog.value.copy(
                         tracksByParent = mutableCatalog.value.tracksByParent + (album.id to cached),
@@ -3285,20 +3350,65 @@ class CatalogRepository(
         }
         val rating = plexRatingKey(album.id) ?: return mutableCatalog.value.tracksByParent[album.id].orEmpty()
         val server = session?.selectedServer ?: return emptyList()
-        session.selectedLibrary ?: return emptyList()
+        val token = session.serverAuthToken() ?: return emptyList()
         pushTracksLoading(album.id)
         return try {
-            val tracks = plexClient.children(server, rating, session.serverAuthToken()!!)
-                .map { it.withPlexPrefix() }
-                .let { preserveTrackDateAdded(mutableCatalog.value.tracksByParent[album.id].orEmpty(), it) }
-            publish(
-                mutableCatalog.value.copy(
-                    tracksByParent = mutableCatalog.value.tracksByParent + (album.id to tracks),
-                ),
-                persist = false,
-            )
-            persistCurrentTrackParentsWithoutClearingCatalog()
-            mutableCatalog.value.tracksByParent[album.id].orEmpty()
+            coroutineScope {
+                val tracksDeferred = async {
+                    plexClient.children(server, rating, token)
+                        .map { it.withPlexPrefix() }
+                }
+                val detailsDeferred = async {
+                    try {
+                        plexClient.albumDetails(server, rating, token)
+                    } catch (error: Throwable) {
+                        if (error is CancellationException) throw error
+                        null
+                    }
+                }
+
+                val tracks = tracksDeferred.await()
+                val details = detailsDeferred.await()
+
+                val tracksResolved = preserveTrackDateAdded(mutableCatalog.value.tracksByParent[album.id].orEmpty(), tracks)
+
+                catalogMergeMutex.withLock {
+                    if (details != null) {
+                        fetchedAlbumDetailsIds.add(album.id)
+                    }
+                    val current = mutableCatalog.value
+                    val existingAlbumIndex = current.albums.indexOfFirst { it.id == album.id }
+                    val updatedAlbums = if (details != null && existingAlbumIndex >= 0) {
+                        val prefixedDetail = current.albums[existingAlbumIndex].mergeAlbumDetails(details, album.id)
+                        current.albums.toMutableList().apply {
+                            this[existingAlbumIndex] = prefixedDetail
+                        }
+                    } else {
+                        current.albums
+                    }
+
+                    mutableCatalog.value = current.copy(
+                        tracksByParent = current.tracksByParent + (album.id to tracksResolved),
+                        albums = updatedAlbums,
+                    )
+                }
+
+                if (details != null) {
+                    runCatalogDbWrite {
+                        database.catalogQueries.updateAlbumMetadata(
+                            mood = details.mood,
+                            style = details.style,
+                            description = details.description,
+                            recordLabel = details.recordLabel,
+                            releaseDate = details.releaseDate,
+                            id = album.id,
+                        )
+                    }
+                }
+
+                persistCurrentTrackParentsWithoutClearingCatalog()
+                mutableCatalog.value.tracksByParent[album.id].orEmpty()
+            }
         } finally {
             popTracksLoading(album.id)
         }
@@ -7051,10 +7161,11 @@ class CatalogRepository(
                 )
             }
             snapshot.albums.forEachIndexed { index, album ->
-                database.catalogQueries.upsertAlbum(
+                database.catalogQueries.upsertAlbumFull(
                     id = album.id,
                     title = album.title,
                     artist = album.artist,
+                    albumArtist = album.albumArtist,
                     year = album.year?.toLong(),
                     thumbUrl = album.thumbUrl,
                     sortKey = index.toLong(),
@@ -7064,6 +7175,9 @@ class CatalogRepository(
                     style = album.style,
                     rating = album.rating?.toDouble(),
                     favorite = album.favorite.toDb(),
+                    description = album.description,
+                    recordLabel = album.recordLabel,
+                    releaseDate = album.releaseDate,
                 )
             }
             snapshot.playlists.forEachIndexed { index, playlist ->
@@ -7631,10 +7745,11 @@ class CatalogRepository(
                 )
             }
             snapshot.albums.forEachIndexed { index, album ->
-                database.catalogQueries.upsertAlbum(
+                database.catalogQueries.upsertAlbumFull(
                     id = album.id,
                     title = album.title,
                     artist = album.artist,
+                    albumArtist = album.albumArtist,
                     year = album.year?.toLong(),
                     thumbUrl = album.thumbUrl,
                     sortKey = index.toLong(),
@@ -7644,6 +7759,9 @@ class CatalogRepository(
                     style = album.style,
                     rating = album.rating?.toDouble(),
                     favorite = album.favorite.toDb(),
+                    description = album.description,
+                    recordLabel = album.recordLabel,
+                    releaseDate = album.releaseDate,
                 )
             }
             snapshot.playlists.forEachIndexed { index, playlist ->
@@ -7764,6 +7882,10 @@ class CatalogRepository(
                 style = it.style,
                 rating = it.rating?.toFloat(),
                 favorite = it.favorite.toBool(),
+                albumArtist = it.albumArtist,
+                description = it.description,
+                recordLabel = it.recordLabel,
+                releaseDate = it.releaseDate,
             )
         }
         val playlists = database.catalogQueries.selectPlaylists().awaitAsList().map {
@@ -8013,8 +8135,17 @@ class CatalogRepository(
 
     private fun Track.shouldPreserveAcrossPlexRefresh(currentToken: String?): Boolean {
         if (isLocalMediaPlayback() || (isRemoteLibraryTrack() && !isPlexLibraryTrack()) || !isPlexLibraryTrack()) return true
-        return currentToken != null && streamUrl.contains(currentToken)
+        return currentToken != null && streamUrl.plexTokenQueryValue() == currentToken
     }
+
+    private fun List<Track>.canUseCachedTracksForSession(session: PlexSession?): Boolean {
+        if (!session.isPlex()) return true
+        val currentToken = session.serverAuthToken()
+        return all { it.shouldPreserveAcrossPlexRefresh(currentToken) }
+    }
+
+    private fun String.plexTokenQueryValue(): String? =
+        runCatching { Url(this).parameters["X-Plex-Token"] }.getOrNull()
 
     private companion object {
         const val LegacyCatalogFile = "catalog.json"
@@ -8105,6 +8236,25 @@ private fun Float?.normalizedRating(): Float? =
     this?.coerceIn(0f, 5f)
         ?.let { kotlin.math.round(it * 2f) / 2f }
         ?.takeIf { it > 0f }
+
+private fun Album.mergeAlbumDetails(details: Album, id: String): Album =
+    copy(
+        id = id,
+        title = details.title.takeIf { it.isNotBlank() } ?: title,
+        artist = details.artist.takeIf { it.isNotBlank() && it != "Unknown artist" } ?: artist,
+        year = details.year ?: year,
+        thumbUrl = details.thumbUrl?.takeIf { it.isNotBlank() } ?: thumbUrl,
+        dateAddedMs = details.dateAddedMs ?: dateAddedMs,
+        genre = details.genre?.takeIf { it.isNotBlank() } ?: genre,
+        mood = details.mood?.takeIf { it.isNotBlank() } ?: mood,
+        style = details.style?.takeIf { it.isNotBlank() } ?: style,
+        rating = details.rating ?: rating,
+        favorite = details.favorite,
+        albumArtist = details.albumArtist?.takeIf { it.isNotBlank() } ?: albumArtist,
+        description = details.description?.takeIf { it.isNotBlank() } ?: description,
+        recordLabel = details.recordLabel?.takeIf { it.isNotBlank() } ?: recordLabel,
+        releaseDate = details.releaseDate?.takeIf { it.isNotBlank() } ?: releaseDate,
+    )
 
 private fun CatalogSnapshot.withoutLocalFolderCatalog(): CatalogSnapshot =
     copy(

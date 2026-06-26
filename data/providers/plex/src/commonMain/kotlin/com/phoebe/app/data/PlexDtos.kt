@@ -88,12 +88,15 @@ data class PlexDirectoryDto(
     val addedAt: Long? = null,
     @SerialName("parentTitle") val parentTitle: String? = null,
     val year: Int? = null,
+    @SerialName("originallyAvailableAt") val originallyAvailableAt: String? = null,
     val userRating: Double? = null,
     @SerialName("Genre") val genreTags: List<PlexGenreTagDto>? = null,
     @SerialName("Mood") val moodTags: List<PlexGenreTagDto>? = null,
     @SerialName("Style") val styleTags: List<PlexGenreTagDto>? = null,
     @SerialName("Collection") val collectionTags: List<PlexGenreTagDto>? = null,
     @SerialName("Stations") val stations: List<PlexStationDto> = emptyList(),
+    val summary: String? = null,
+    val studio: String? = null,
 )
 
 @Serializable
@@ -132,6 +135,7 @@ data class PlexMetadataDto(
     @SerialName("parentThumb") val parentThumb: String? = null,
     @SerialName("grandparentThumb") val grandparentThumb: String? = null,
     val year: Int? = null,
+    @SerialName("originallyAvailableAt") val originallyAvailableAt: String? = null,
     @SerialName("parentYear") val parentYear: Int? = null,
     val duration: Long? = null,
     val leafCount: Int? = null,
@@ -146,6 +150,8 @@ data class PlexMetadataDto(
     @SerialName("Collection") val collectionTags: List<PlexGenreTagDto>? = null,
     @SerialName("Stations") val stations: List<PlexStationDto> = emptyList(),
     @SerialName("Media") val media: List<PlexMediaDto> = emptyList(),
+    val summary: String? = null,
+    val studio: String? = null,
 )
 
 @Serializable

@@ -16,8 +16,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -180,11 +182,13 @@ private fun rememberRemoteImageState(
     val fallbackSource = fallbackUrl?.takeIf { it.isNotBlank() }
     val target = primary ?: fallbackSource ?: return RemoteImageLoadState.Unavailable
     val fallback = fallbackSource?.takeIf { it != target }
+    val retryEpoch = RemoteArtworkCache.retryEpoch
     return produceState(
         initialValue = cachedStateForDisplay(target, maxDecodeDimension, fallback),
         target,
         fallback,
         maxDecodeDimension,
+        retryEpoch,
     ) {
         value = cachedStateForDisplay(target, maxDecodeDimension, fallback)
         while (true) {
@@ -284,6 +288,8 @@ object RemoteArtworkCache {
     private var maxEntries = DefaultMaxEntries
     private var maxEstimatedBytes = platformMaxEstimatedBytes
     private var estimatedBytes = 0L
+    internal var retryEpoch by mutableLongStateOf(0L)
+        private set
 
     fun cached(url: String, maxDecodeDimension: Int = ListArtworkMaxDecodeDimension): ImageBitmap? =
         withCacheLock {
@@ -345,6 +351,13 @@ object RemoteArtworkCache {
             estimatedBytes = 0L
             inFlight.clear()
         }
+    }
+
+    fun retryFailedLoadsNow() {
+        withCacheLock {
+            recentFailures.clear()
+        }
+        retryEpoch += 1
     }
 
     suspend fun awaitLoad(url: String, maxDecodeDimension: Int = ListArtworkMaxDecodeDimension): ImageBitmap? {
@@ -523,6 +536,7 @@ object RemoteArtworkCache {
             maxEstimatedBytes = platformMaxEstimatedBytes
             inFlight.clear()
         }
+        retryEpoch = 0L
     }
 
     internal fun markFailedForTest(url: String, maxDecodeDimension: Int = ListArtworkMaxDecodeDimension) {

@@ -25,6 +25,9 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -148,10 +151,13 @@ import com.phoebe.app.data.sortTracksForLibrary
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.ArtistRadioAvailability
+import com.phoebe.app.domain.CatalogSnapshot
+import com.phoebe.app.domain.CollectionEntry
+import com.phoebe.app.domain.CollectionFacet
+import com.phoebe.app.domain.CollectionTarget
 import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.LibrarySortBy
 import com.phoebe.app.domain.LibraryUiPreferences
-import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.DownloadState
 import com.phoebe.app.domain.LocalFolderMediaSourceConfig
 import com.phoebe.app.domain.MediaSourcesState
@@ -772,6 +778,7 @@ fun ArtistDetailPanel(
     onProbeArtistRadio: (Artist) -> Unit = {},
     onPlayArtistRadio: (Artist) -> Unit,
     onArtist: (Artist) -> Unit,
+    onCollectionItems: (CollectionEntry, String) -> Unit = { _, _ -> },
     onLibraryColumns: (LibraryColumnVisibility) -> Unit,
 ) {
     val albums = remember(catalog.albums, artist.title) { catalogAlbumsForArtist(catalog, artist.title) }
@@ -783,7 +790,8 @@ fun ArtistDetailPanel(
     val popularTracks = remember(catalog.popularTracksByArtist, tracks, playHistory.playCountByTrack, playHistory.byTrack, artist.id) {
         catalog.popularTracksByArtist[artist.id]
             ?.takeIf { it.isNotEmpty() }
-            ?: popularTracksFromPlayHistory(tracks, playHistory)
+            ?.take(10)
+            ?: popularTracksFromPlayHistory(tracks, playHistory, limit = 10)
     }
     val albumWord = if (albums.size == 1) "album" else "albums"
     val songWord = if (tracks.size == 1) "song" else "songs"
@@ -887,22 +895,13 @@ fun ArtistDetailPanel(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.sharedBoundsTransition("artist:${artist.id}:title"),
                 )
-                Text("${albums.size} $albumWord · ${tracks.size} $songWord", color = PhoebeUi.secondaryText, fontSize = 14.sp)
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("${albums.size} $albumWord · ${tracks.size} $songWord", color = PhoebeUi.secondaryText, fontSize = 14.sp)
                     LikeButton(
                         liked = favoriteActions.isFavorite(artist),
                         enabled = true,
                         onClick = { favoriteActions.onToggleArtist(artist) },
                     )
-                    if (ratingActions.ratingsEnabled && (artist.id.startsWith("plex:") || artist.id.startsWith("jellyfin:"))) {
-                        RatingStars(
-                            rating = ratingActions.ratingFor(artist),
-                            enabled = true,
-                            onRating = { ratingActions.onRateArtist(artist, it) },
-                            starSize = 16.dp,
-                            showClear = true,
-                        )
-                    }
                 }
                 if (!useTable) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1134,7 +1133,168 @@ fun ArtistDetailPanel(
                 )
             }
         }
+        if (!artist.genre.isNullOrBlank() || !artist.mood.isNullOrBlank() || !artist.style.isNullOrBlank() || !artist.biography.isNullOrBlank()) {
+            item(contentType = "artist-about") {
+                AboutArtistPanel(
+                    artist = artist,
+                    onCollectionItems = onCollectionItems,
+                )
+            }
+        }
     }
+        }
+    }
+}
+
+@Composable
+private fun AboutSectionItem(
+    label: String,
+    content: @Composable () -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(label, color = PhoebeUi.mutedText, fontSize = 15.sp)
+        content()
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun AboutClickableList(
+    items: List<String>,
+    onItemClick: (String) -> Unit
+) {
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        items.forEachIndexed { index, item ->
+            Text(
+                text = item,
+                color = PhoebeUi.accentLight,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.clickable { onItemClick(item) }
+            )
+            if (index < items.lastIndex) {
+                Text("•", color = PhoebeUi.mutedText, fontSize = 15.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun AboutPlainValue(value: String) {
+    Text(
+        value,
+        color = PhoebeUi.primaryText,
+        fontSize = 15.sp,
+        fontWeight = FontWeight.Medium,
+    )
+}
+
+private fun aboutTagItems(value: String): List<String> =
+    value.split(",").map { it.trim() }.filter { it.isNotBlank() }
+
+@Composable
+private fun ExpandableText(
+    text: String,
+    modifier: Modifier = Modifier,
+    minLines: Int = 5,
+) {
+    var expanded by remember(text) { mutableStateOf(false) }
+    var hasOverflow by remember(text) { mutableStateOf(false) }
+
+    Column(modifier = modifier.animateContentSize()) {
+        Text(
+            text = text,
+            color = PhoebeUi.primaryText,
+            fontSize = 15.sp,
+            lineHeight = 22.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = if (expanded) Int.MAX_VALUE else minLines,
+            overflow = TextOverflow.Ellipsis,
+            onTextLayout = { textLayoutResult ->
+                if (!expanded) {
+                    hasOverflow = textLayoutResult.hasVisualOverflow
+                }
+            }
+        )
+        if (hasOverflow || expanded) {
+            Text(
+                text = if (expanded) "Show less" else "Show more",
+                color = PhoebeUi.accentLight,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier
+                    .align(Alignment.End)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = { expanded = !expanded }
+                    )
+                    .padding(top = 4.dp, bottom = 4.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun AboutArtistPanel(
+    artist: Artist,
+    onCollectionItems: (CollectionEntry, String) -> Unit,
+) {
+    val ratingActions = LocalRatingActions.current
+    Column(Modifier.fillMaxWidth().padding(vertical = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Text("About", color = PhoebeUi.primaryText, fontSize = 22.sp, fontWeight = FontWeight.Normal)
+        
+        if (ratingActions.ratingsEnabled && (artist.id.startsWith("plex:") || artist.id.startsWith("jellyfin:"))) {
+            AboutSectionItem("Rating") {
+                RatingStars(
+                    rating = ratingActions.ratingFor(artist),
+                    enabled = true,
+                    onRating = { ratingActions.onRateArtist(artist, it) },
+                    starSize = 24.dp,
+                    showClear = true,
+                )
+            }
+        }
+
+        artist.genre?.let { genre ->
+            if (genre.isNotBlank()) {
+                AboutSectionItem("Genres") {
+                    AboutClickableList(aboutTagItems(genre)) { g ->
+                        onCollectionItems(CollectionEntry(CollectionTarget.Artists, CollectionFacet.Genre), g)
+                    }
+                }
+            }
+        }
+
+        artist.mood?.let { mood ->
+            if (mood.isNotBlank()) {
+                AboutSectionItem("Moods") {
+                    AboutClickableList(aboutTagItems(mood)) { m ->
+                        onCollectionItems(CollectionEntry(CollectionTarget.Artists, CollectionFacet.Mood), m)
+                    }
+                }
+            }
+        }
+
+        artist.style?.let { style ->
+            if (style.isNotBlank()) {
+                AboutSectionItem("Styles") {
+                    AboutClickableList(aboutTagItems(style)) { s ->
+                        onCollectionItems(CollectionEntry(CollectionTarget.Artists, CollectionFacet.Style), s)
+                    }
+                }
+            }
+        }
+        
+        artist.biography?.let { bio ->
+            if (bio.isNotBlank()) {
+                AboutSectionItem("Biography") {
+                    ExpandableText(bio)
+                }
+            }
         }
     }
 }
@@ -1142,7 +1302,7 @@ fun ArtistDetailPanel(
 private fun popularTracksFromPlayHistory(
     tracks: List<Track>,
     history: PlayHistorySnapshot,
-    limit: Int = 6,
+    limit: Int = 10,
 ): List<Track> =
     tracks.asSequence()
         .mapNotNull { track ->
@@ -1491,16 +1651,20 @@ fun AlbumDetailPanel(
     onDownload: (Track) -> Unit,
     onDownloadAlbum: (Album) -> Unit,
     onArtist: (Artist) -> Unit,
+    onCollectionItems: (CollectionEntry, String) -> Unit = { _, _ -> },
     onLibraryColumns: (LibraryColumnVisibility) -> Unit,
 ) {
-    val tracks = remember(catalog.tracksByParent, album.id) {
-        catalog.tracksByParent[album.id].orEmpty()
+    val resolvedAlbum = remember(catalog.albums, album.id) {
+        catalog.albums.firstOrNull { it.id == album.id } ?: album
     }
-    val artist = remember(catalog.artists, album.id, album.artist) {
-        catalogArtistForAlbum(catalog, album)
+    val tracks = remember(catalog.tracksByParent, resolvedAlbum.id) {
+        catalog.tracksByParent[resolvedAlbum.id].orEmpty()
+    }
+    val artist = remember(catalog.artists, resolvedAlbum.id, resolvedAlbum.artist) {
+        catalogArtistForAlbum(catalog, resolvedAlbum)
     }
 
-    var sortBy by remember(album.id) { mutableStateOf(LibrarySortBy.AlbumOrder) }
+    var sortBy by remember(resolvedAlbum.id) { mutableStateOf(LibrarySortBy.AlbumOrder) }
 
     val sortedTracks = remember(tracks, sortBy) {
         sortTracksForLibrary(tracks, sortBy, ascending = true)
@@ -1529,7 +1693,7 @@ fun AlbumDetailPanel(
         } else {
             if (mobileBottomPadding > 144.dp) mobileBottomPadding else 144.dp
         }
-        val listState = RetainedLazyListStates.remember("album-detail:${album.id}")
+        val listState = RetainedLazyListStates.remember("album-detail:${resolvedAlbum.id}")
     LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize().padding(start = edgePadding, end = edgePadding),
@@ -1549,12 +1713,12 @@ fun AlbumDetailPanel(
                 if (useTable) {
                     Row(horizontalArrangement = Arrangement.spacedBy(22.dp), verticalAlignment = Alignment.CenterVertically) {
                         ArtworkImage(
-                            album.title,
-                            album.thumbUrl,
-                            Modifier.size(160.dp).sharedArtworkTransition("album:${album.id}"),
+                            resolvedAlbum.title,
+                            resolvedAlbum.thumbUrl,
+                            Modifier.size(160.dp).sharedArtworkTransition("album:${resolvedAlbum.id}"),
                             elevated = true,
                         )
-                        AlbumDetailHeaderText(album, tracks, artist, onDownloadAlbum, onArtist, showDownload = false)
+                        AlbumDetailHeaderText(resolvedAlbum, tracks, artist, onDownloadAlbum, onArtist, showDownload = false)
                     }
                 } else {
                     Column(
@@ -1562,12 +1726,12 @@ fun AlbumDetailPanel(
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         ArtworkImage(
-                            album.title,
-                            album.thumbUrl,
-                            Modifier.size(168.dp).sharedArtworkTransition("album:${album.id}"),
+                            resolvedAlbum.title,
+                            resolvedAlbum.thumbUrl,
+                            Modifier.size(168.dp).sharedArtworkTransition("album:${resolvedAlbum.id}"),
                             elevated = false,
                         )
-                        AlbumDetailHeaderText(album, tracks, artist, onDownloadAlbum, onArtist, compact = true)
+                        AlbumDetailHeaderText(resolvedAlbum, tracks, artist, onDownloadAlbum, onArtist, compact = true)
                     }
                 }
                 DetailSectionHeader(
@@ -1590,7 +1754,7 @@ fun AlbumDetailPanel(
                     actions = {
                         if (useTable) {
                             DownloadActionButton("Download Album", tracks) {
-                                onDownloadAlbum(album)
+                                onDownloadAlbum(resolvedAlbum)
                             }
                         }
                     },
@@ -1599,7 +1763,7 @@ fun AlbumDetailPanel(
         }
         item(contentType = "album-track-toolbar") {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (album.id in LocalTracksLoading.current && searchQuery.isBlank()) {
+                if (resolvedAlbum.id in LocalTracksLoading.current && searchQuery.isBlank()) {
                     CatalogLoadingStrip()
                 }
             }
@@ -1608,8 +1772,8 @@ fun AlbumDetailPanel(
             item(contentType = "album-empty") {
                 Text(
                     when {
-                        searchQuery.isNotBlank() -> "No tracks on ${album.title} match \"$searchQuery\"."
-                        album.id in LocalTracksLoading.current -> "Fetching songs…"
+                        searchQuery.isNotBlank() -> "No tracks on ${resolvedAlbum.title} match \"$searchQuery\"."
+                        resolvedAlbum.id in LocalTracksLoading.current -> "Fetching songs…"
                         else -> "No tracks loaded yet."
                     },
                     color = PhoebeUi.mutedText,
@@ -1646,7 +1810,90 @@ fun AlbumDetailPanel(
                 )
             }
         }
+        if (resolvedAlbum.rating != null || !resolvedAlbum.genre.isNullOrBlank() || !resolvedAlbum.mood.isNullOrBlank() || !resolvedAlbum.style.isNullOrBlank() || !resolvedAlbum.description.isNullOrBlank() || !resolvedAlbum.recordLabel.isNullOrBlank()) {
+            item(contentType = "album-about") {
+                AboutAlbumPanel(
+                    album = resolvedAlbum,
+                    onCollectionItems = onCollectionItems,
+                )
+            }
+        }
     }
+    }
+}
+
+@Composable
+private fun AboutAlbumPanel(
+    album: Album,
+    onCollectionItems: (CollectionEntry, String) -> Unit,
+) {
+    val ratingActions = LocalRatingActions.current
+    Column(Modifier.fillMaxWidth().padding(vertical = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Text("About", color = PhoebeUi.primaryText, fontSize = 22.sp, fontWeight = FontWeight.Normal)
+        
+        if (ratingActions.ratingsEnabled && (album.id.startsWith("plex:") || album.id.startsWith("jellyfin:"))) {
+            AboutSectionItem("Rating") {
+                RatingStars(
+                    rating = ratingActions.ratingFor(album),
+                    enabled = true,
+                    onRating = { ratingActions.onRateAlbum(album, it) },
+                    starSize = 24.dp,
+                    showClear = true,
+                )
+            }
+        }
+        
+        album.genre?.let { genre ->
+            if (genre.isNotBlank()) {
+                AboutSectionItem("Genres") {
+                    AboutClickableList(aboutTagItems(genre)) { g ->
+                        onCollectionItems(CollectionEntry(CollectionTarget.Albums, CollectionFacet.Genre), g)
+                    }
+                }
+            }
+        }
+        
+        album.description?.let { desc ->
+            if (desc.isNotBlank()) {
+                AboutSectionItem("Description") {
+                    ExpandableText(desc)
+                }
+            }
+        }
+
+        album.recordLabel?.let { label ->
+            if (label.isNotBlank()) {
+                AboutSectionItem("Record label") {
+                    AboutPlainValue(label)
+                }
+            }
+        }
+        
+        album.year?.let { year ->
+            AboutSectionItem("Year") {
+                AboutPlainValue(year.toString())
+            }
+        }
+        
+        album.mood?.let { mood ->
+            if (mood.isNotBlank()) {
+                AboutSectionItem("Moods") {
+                    AboutClickableList(aboutTagItems(mood)) { m ->
+                        onCollectionItems(CollectionEntry(CollectionTarget.Albums, CollectionFacet.Mood), m)
+                    }
+                }
+            }
+        }
+        
+        album.style?.let { style ->
+            if (style.isNotBlank()) {
+                AboutSectionItem("Styles") {
+                    AboutClickableList(aboutTagItems(style)) { s ->
+                        onCollectionItems(CollectionEntry(CollectionTarget.Albums, CollectionFacet.Style), s)
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1686,24 +1933,15 @@ private fun AlbumDetailHeaderText(
                     artist?.let(onArtist)
                 },
         )
-        album.year?.let { y ->
-            Text("$y", color = PhoebeUi.mutedText, fontSize = 13.sp)
-        }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            album.year?.let { y ->
+                Text("$y", color = PhoebeUi.mutedText, fontSize = 13.sp)
+            }
             LikeButton(
                 liked = favoriteActions.isFavorite(album),
                 enabled = true,
                 onClick = { favoriteActions.onToggleAlbum(album) },
             )
-            if (ratingActions.ratingsEnabled && (album.id.startsWith("plex:") || album.id.startsWith("jellyfin:"))) {
-                RatingStars(
-                    rating = ratingActions.ratingFor(album),
-                    enabled = true,
-                    onRating = { ratingActions.onRateAlbum(album, it) },
-                    starSize = 16.dp,
-                    showClear = true,
-                )
-            }
         }
         if (showDownload) {
             DownloadActionButton(

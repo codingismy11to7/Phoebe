@@ -46,6 +46,7 @@ import com.phoebe.app.domain.CollectionEntry
 import com.phoebe.app.domain.CollectionFacet
 import com.phoebe.app.domain.CollectionTarget
 import com.phoebe.app.domain.LibrarySortBy
+import com.phoebe.app.ui.ArtworkImage
 import com.phoebe.app.ui.DetailBackButton
 import com.phoebe.app.ui.PhoebeIcon
 import com.phoebe.app.ui.PhoebeIconView
@@ -153,12 +154,13 @@ fun CollectionItemsScreen(
                 it.value.equals(value, ignoreCase = true)
         }
     }
-    val loading = remember(catalog.collectionValues, catalog.collectionValueLoads, collectionValue, entry, value) {
+    val loading = remember(catalog.collectionValues, catalog.collectionValueLoads, collectionValue, items, entry, value) {
         when {
+            items.isNotEmpty() -> false
             collectionValue?.itemsLoaded == true -> false
             collectionValue != null -> true
             !catalog.collectionValuesFetchSettled(entry) -> true
-            else -> true
+            else -> false
         }
     }
     var sortBy by rememberSaveable(entry.target.name, entry.facet.name, value) {
@@ -457,6 +459,8 @@ private fun CollectionItemsList(
                         title = artist.title,
                         subtitle = item.subtitle,
                         seed = artist.title,
+                        thumbUrl = item.thumbUrl,
+                        artworkRadius = 999.dp,
                         onClick = { onArtist(artist) },
                     )
                 }
@@ -466,6 +470,8 @@ private fun CollectionItemsList(
                         title = album.title,
                         subtitle = item.subtitle,
                         seed = album.title,
+                        thumbUrl = item.thumbUrl,
+                        artworkRadius = 10.dp,
                         onClick = { onAlbum(album) },
                     )
                 }
@@ -479,6 +485,8 @@ private fun CollectionItemRow(
     title: String,
     subtitle: String,
     seed: String,
+    thumbUrl: String?,
+    artworkRadius: Dp,
     onClick: () -> Unit,
 ) {
     Row(
@@ -491,7 +499,12 @@ private fun CollectionItemRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        CollectionArtworkTile(seed, Modifier.size(46.dp))
+        CollectionArtworkTile(
+            seed = seed,
+            thumbUrl = thumbUrl,
+            radius = artworkRadius,
+            modifier = Modifier.size(46.dp),
+        )
         Column(Modifier.weight(1f)) {
             Text(
                 title,
@@ -515,11 +528,31 @@ private fun CollectionItemRow(
 
 @Composable
 private fun CollectionArtworkTile(seed: String, modifier: Modifier = Modifier) {
+    CollectionArtworkTile(seed = seed, thumbUrl = null, radius = 10.dp, modifier = modifier)
+}
+
+@Composable
+private fun CollectionArtworkTile(
+    seed: String,
+    thumbUrl: String?,
+    radius: Dp,
+    modifier: Modifier = Modifier,
+) {
+    if (!thumbUrl.isNullOrBlank()) {
+        ArtworkImage(
+            seed = seed,
+            thumbUrl = thumbUrl,
+            modifier = modifier,
+            radius = radius,
+            elevated = false,
+        )
+        return
+    }
     Box(
         modifier
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(radius))
             .background(PhoebeUi.subtleFill)
-            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(10.dp)),
+            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(radius)),
         contentAlignment = Alignment.Center,
     ) {
         Text(

@@ -6,6 +6,7 @@ import com.phoebe.app.data.MediaSourcesRepository
 import com.phoebe.app.data.PlexClient
 import com.phoebe.app.data.JellyfinClient
 import com.phoebe.app.domain.CatalogSnapshot
+import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.CatalogSyncPhase
 import com.phoebe.app.domain.CollectionEntry
 import com.phoebe.app.domain.CollectionFacet
@@ -80,6 +81,239 @@ class CatalogRepositoryRefreshDesktopTest {
         assertFalse(repo.catalogRefreshing.value)
         assertEquals(0, repo.catalog.value.artists.size)
         assertEquals(0, repo.catalog.value.albums.size)
+    }
+
+    @Test
+    fun ensureAlbumDetailsFetchesAndSavesMetadata() = runTest {
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/library/metadata/123" -> respondJson(albumDetailsJson())
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val http = testHttpClient(engine)
+        val media = MediaSourcesRepository(db, PlatformStorage())
+        val repo = testCatalogRepository(
+            plexClient = PlexClient(http),
+            database = db,
+            storage = PlatformStorage(),
+            httpClient = http,
+            mediaSourcesRepository = media,
+        )
+
+        val initialAlbum = Album(
+            id = "plex:123",
+            title = "Test Album",
+            artist = "Test Artist",
+            year = 2026,
+            thumbUrl = null,
+        )
+        db.transaction {
+            db.catalogQueries.upsertAlbum(
+                id = initialAlbum.id,
+                title = initialAlbum.title,
+                artist = initialAlbum.artist,
+                year = initialAlbum.year?.toLong(),
+                thumbUrl = initialAlbum.thumbUrl,
+                sortKey = 0L,
+                dateAddedMs = null,
+                genre = null,
+                mood = null,
+                style = null,
+                rating = null,
+                favorite = 0L,
+            )
+        }
+        repo.restoreCachedCatalog()
+
+        val cachedBefore = repo.catalog.value.albums.first { it.id == "plex:123" }
+        assertEquals(null, cachedBefore.mood)
+        assertEquals(null, cachedBefore.style)
+        assertEquals(null, cachedBefore.description)
+
+        repo.ensureAlbumDetails(testSession(), initialAlbum)
+
+        val cachedAfter = repo.catalog.value.albums.first { it.id == "plex:123" }
+        assertEquals("Energetic", cachedAfter.mood)
+        assertEquals("Synthpop", cachedAfter.style)
+        assertEquals("A great test album.", cachedAfter.description)
+        assertEquals("Test Studio", cachedAfter.recordLabel)
+
+        val otherRepo = testCatalogRepository(
+            plexClient = PlexClient(http),
+            database = db,
+            storage = PlatformStorage(),
+            httpClient = http,
+            mediaSourcesRepository = media,
+        )
+        otherRepo.restoreCachedCatalog()
+        val dbLoaded = otherRepo.catalog.value.albums.first { it.id == "plex:123" }
+        assertEquals("Energetic", dbLoaded.mood)
+        assertEquals("Synthpop", dbLoaded.style)
+        assertEquals("A great test album.", dbLoaded.description)
+        assertEquals("Test Studio", dbLoaded.recordLabel)
+    }
+
+    @Test
+    fun ensureAlbumDetailsFetchesMoodAndStyleWhenDescriptionAlreadyCached() = runTest {
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        var metadataRequests = 0
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/library/metadata/123" -> {
+                    metadataRequests += 1
+                    respondJson(albumDetailsJson())
+                }
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val http = testHttpClient(engine)
+        val media = MediaSourcesRepository(db, PlatformStorage())
+        val repo = testCatalogRepository(
+            plexClient = PlexClient(http),
+            database = db,
+            storage = PlatformStorage(),
+            httpClient = http,
+            mediaSourcesRepository = media,
+        )
+        val initialAlbum = Album(
+            id = "plex:123",
+            title = "Test Album",
+            artist = "Test Artist",
+            year = 2026,
+            description = "Cached description.",
+            recordLabel = "Cached Studio",
+        )
+        db.catalogQueries.upsertAlbumFull(
+            id = initialAlbum.id,
+            title = initialAlbum.title,
+            artist = initialAlbum.artist,
+            albumArtist = null,
+            year = initialAlbum.year?.toLong(),
+            thumbUrl = null,
+            sortKey = 0L,
+            dateAddedMs = null,
+            genre = null,
+            mood = null,
+            style = null,
+            rating = null,
+            favorite = 0L,
+            description = initialAlbum.description,
+            recordLabel = initialAlbum.recordLabel,
+            releaseDate = null,
+        )
+        repo.restoreCachedCatalog()
+
+        repo.ensureAlbumDetails(testSession(), initialAlbum)
+
+        val cachedAfter = repo.catalog.value.albums.first { it.id == "plex:123" }
+        assertEquals(1, metadataRequests)
+        assertEquals("Energetic", cachedAfter.mood)
+        assertEquals("Synthpop", cachedAfter.style)
+        assertEquals("A great test album.", cachedAfter.description)
+        assertEquals("Test Studio", cachedAfter.recordLabel)
+    }
+
+    @Test
+    fun ensureAlbumDetailsRetriesAfterTransientFailure() = runTest {
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        var metadataRequests = 0
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/library/metadata/123" -> {
+                    metadataRequests += 1
+                    if (metadataRequests == 1) error("transient failure")
+                    respondJson(albumDetailsJson())
+                }
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val http = testHttpClient(engine)
+        val media = MediaSourcesRepository(db, PlatformStorage())
+        val repo = testCatalogRepository(
+            plexClient = PlexClient(http),
+            database = db,
+            storage = PlatformStorage(),
+            httpClient = http,
+            mediaSourcesRepository = media,
+        )
+        val initialAlbum = Album(
+            id = "plex:123",
+            title = "Test Album",
+            artist = "Test Artist",
+            year = 2026,
+        )
+        db.catalogQueries.upsertAlbumFull(
+            id = initialAlbum.id,
+            title = initialAlbum.title,
+            artist = initialAlbum.artist,
+            albumArtist = null,
+            year = initialAlbum.year?.toLong(),
+            thumbUrl = null,
+            sortKey = 0L,
+            dateAddedMs = null,
+            genre = null,
+            mood = null,
+            style = null,
+            rating = null,
+            favorite = 0L,
+            description = null,
+            recordLabel = null,
+            releaseDate = null,
+        )
+        repo.restoreCachedCatalog()
+
+        repo.ensureAlbumDetails(testSession(), initialAlbum)
+        assertEquals(1, metadataRequests)
+        assertEquals(null, repo.catalog.value.albums.first { it.id == "plex:123" }.mood)
+
+        repo.ensureAlbumDetails(testSession(), initialAlbum)
+
+        val cachedAfter = repo.catalog.value.albums.first { it.id == "plex:123" }
+        assertEquals(2, metadataRequests)
+        assertEquals("Energetic", cachedAfter.mood)
+        assertEquals("Synthpop", cachedAfter.style)
+    }
+
+    @Test
+    fun tracksForAlbumMarksSuccessfulAlbumDetailsFetch() = runTest {
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        var metadataRequests = 0
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/library/metadata/a1/children" -> respondJson(albumTracksJson())
+                "/library/metadata/a1" -> {
+                    metadataRequests += 1
+                    respondJson(albumDetailsWithoutOptionalMetadataJson())
+                }
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val http = testHttpClient(engine)
+        val media = MediaSourcesRepository(db, PlatformStorage())
+        val repo = testCatalogRepository(
+            plexClient = PlexClient(http),
+            database = db,
+            storage = PlatformStorage(),
+            httpClient = http,
+            mediaSourcesRepository = media,
+        )
+        val album = Album(
+            id = "plex:a1",
+            title = "Album One",
+            artist = "Artist One",
+            year = 2026,
+        )
+
+        assertEquals(listOf("plex:t1"), repo.tracksForAlbum(testSession(), album).map { it.id })
+        repo.ensureAlbumDetails(testSession(), album)
+
+        assertEquals(1, metadataRequests)
     }
 
     @Test
@@ -610,6 +844,67 @@ class CatalogRepositoryRefreshDesktopTest {
         assertEquals(listOf("plex:t1"), restored.catalog.value.tracksByParent["plex:a1"].orEmpty().map { it.id })
         assertEquals(listOf("plex:t1"), restored.tracksForAlbum(testSession(), restoredAlbum).map { it.id })
         assertEquals("a1", restored.tracksForAlbum(testSession(), restoredAlbum).single().parentAlbumId)
+    }
+
+    @Test
+    fun tracksForAlbumRefetchesCachedPlexTracksWhenTokenChanged() = runTest {
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        db.transaction {
+            db.catalogQueries.upsertAlbum("plex:a1", "Album One", "Artist One", null, null, 0, null, null, null, null, null, 0)
+            db.catalogQueries.upsertTrack(
+                id = "plex:t1",
+                title = "Cached Song",
+                artist = "Artist One",
+                album = "Album One",
+                durationMs = 1000,
+                streamUrl = "https://plex.example:32400/library/parts/t1/file.mp3?X-Plex-Token=old-token",
+                downloadUrl = "https://plex.example:32400/library/parts/t1/file.mp3?X-Plex-Token=old-token&download=1",
+                thumbUrl = "https://plex.example:32400/library/metadata/a1/thumb?X-Plex-Token=old-token",
+                localArtworkUri = null,
+                localUri = null,
+                year = null,
+                genre = null,
+                mood = null,
+                style = null,
+                filepath = null,
+                audioCodec = null,
+                bitrateKbps = null,
+                dateAddedMs = null,
+                rating = null,
+                parentAlbumId = "a1",
+            )
+            db.catalogQueries.upsertTrackParent("plex:a1", "plex:t1", 0, null)
+        }
+        var childrenRequests = 0
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/library/metadata/a1/children" -> {
+                    childrenRequests += 1
+                    respondJson(trackPageWithArtworkJson())
+                }
+                "/library/metadata/a1" -> respond("", HttpStatusCode.NotFound)
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val http = testHttpClient(engine)
+        val media = MediaSourcesRepository(db, PlatformStorage())
+        val repo = testCatalogRepository(
+            plexClient = PlexClient(http),
+            database = db,
+            storage = PlatformStorage(),
+            httpClient = http,
+            mediaSourcesRepository = media,
+        )
+        repo.restoreCachedCatalog()
+
+        val album = repo.catalog.value.albums.single { it.id == "plex:a1" }
+        val tracks = repo.tracksForAlbum(testSession(), album)
+
+        assertEquals(1, childrenRequests)
+        assertEquals(listOf("plex:t1"), tracks.map { it.id })
+        assertTrue(tracks.single().streamUrl.contains("X-Plex-Token=token"))
+        assertTrue(tracks.single().thumbUrl.orEmpty().contains("X-Plex-Token=token"))
     }
 
     @Test
@@ -1818,6 +2113,27 @@ class CatalogRepositoryRefreshDesktopTest {
         }
     """.trimIndent()
 
+    private fun trackPageWithArtworkJson(): String = """
+        {
+          "MediaContainer": {
+            "Metadata": [
+              {
+                "ratingKey": "t1",
+                "parentRatingKey": "a1",
+                "title": "Fresh Song",
+                "grandparentTitle": "Artist One",
+                "parentTitle": "Album One",
+                "duration": 1000,
+                "parentThumb": "/library/metadata/a1/thumb",
+                "Media": [
+                  { "Part": [ { "key": "/library/parts/t1/file.mp3", "file": "file.mp3" } ] }
+                ]
+              }
+            ]
+          }
+        }
+    """.trimIndent()
+
     private fun playlistTracksJson(): String = """
         {
           "MediaContainer": {
@@ -1922,6 +2238,41 @@ class CatalogRepositoryRefreshDesktopTest {
             "leafCountAdded": 1,
             "Metadata": [
               { "ratingKey": "p1", "title": "Playlist One", "leafCount": $leafCount, "key": "/playlists/p1/items" }
+            ]
+          }
+        }
+    """.trimIndent()
+
+    private fun albumDetailsJson(): String = """
+        {
+          "MediaContainer": {
+            "Metadata": [
+              {
+                "ratingKey": "123",
+                "title": "Test Album",
+                "parentTitle": "Test Artist",
+                "type": "album",
+                "summary": "A great test album.",
+                "studio": "Test Studio",
+                "originallyAvailableAt": "2026-06-25",
+                "Mood": [ { "tag": "Energetic" } ],
+                "Style": [ { "tag": "Synthpop" } ]
+              }
+            ]
+          }
+        }
+    """.trimIndent()
+
+    private fun albumDetailsWithoutOptionalMetadataJson(): String = """
+        {
+          "MediaContainer": {
+            "Metadata": [
+              {
+                "ratingKey": "a1",
+                "title": "Album One",
+                "parentTitle": "Artist One",
+                "type": "album"
+              }
             ]
           }
         }

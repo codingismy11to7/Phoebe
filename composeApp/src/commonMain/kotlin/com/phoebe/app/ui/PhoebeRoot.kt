@@ -1313,6 +1313,7 @@ private fun PhoebeRootStateHolder(
                             onPlayArtistRadio = state::playArtistRadio,
                             onArtist = { navigator.open(it.route()) },
                             onLibraryColumns = state::setLibraryColumns,
+                            onCollectionItems = openCollectionValue,
                         ),
                         modifier = Modifier.fillMaxSize(),
                     )
@@ -1332,6 +1333,7 @@ private fun PhoebeRootStateHolder(
                             onDownloadAlbum = state::download,
                             onArtist = { navigator.open(it.route()) },
                             onLibraryColumns = state::setLibraryColumns,
+                            onCollectionItems = openCollectionValue,
                         ),
                         modifier = Modifier.fillMaxSize(),
                     )

@@ -5,6 +5,11 @@ import com.phoebe.app.platform.PhoebeAppLifecycle
 import com.phoebe.app.ui.RemoteArtworkCache
 
 actual fun bindPlatformAppLifecycle(state: AppState) {
+    PhoebeAppLifecycle.setUiVisibilityListener { visible ->
+        if (visible) {
+            RemoteArtworkCache.retryFailedLoadsNow()
+        }
+    }
     PhoebeAppLifecycle.setMemoryPressureListener { level ->
         when (level) {
             MemoryPressureLevel.UiHidden -> RemoteArtworkCache.trimForMemoryPressure(aggressive = false)
