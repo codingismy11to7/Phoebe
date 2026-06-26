@@ -13,6 +13,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 internal const val PlaybackReadyBufferedAheadMs = 2_000L
@@ -28,13 +29,14 @@ internal fun hasPlaybackReadyBuffer(
     return bufferedPositionMs - positionMs >= PlaybackReadyBufferedAheadMs
 }
 
-abstract class SimpleAudioPlayer : AudioPlayer {
+abstract class SimpleAudioPlayer(
+    private val scope: CoroutineScope = CoroutineScope(Dispatchers.Default),
+) : AudioPlayer {
     private val mutableState = MutableStateFlow(PlayerState())
     override val state: StateFlow<PlayerState> = mutableState
     private val mutableAudioAnalysis = MutableStateFlow(AudioAnalysisFrame.Empty)
     override val audioAnalysis: StateFlow<AudioAnalysisFrame> = mutableAudioAnalysis
     private val audioAnalysisAccumulator = AudioAnalysisAccumulator()
-    private val scope = CoroutineScope(Dispatchers.Default)
     private var progressJob: Job? = null
     private var playbackStartupJob: Job? = null
     private var preferUnityOutputVolume = false
@@ -676,16 +678,34 @@ abstract class SimpleAudioPlayer : AudioPlayer {
         playbackStartupJob?.cancel()
         playbackStartupJob = scope.launch {
             delay(playbackStartupTimeoutMs)
-            val current = mutableState.value
-            if (isPlayRequestCurrent(generation) && current.isBuffering) {
-                markPlaybackFailed(generation = generation, message = "Playback took too long to start.")
-            }
+            markPlaybackStartupTimedOut(generation)
         }
     }
 
     private fun stopPlaybackStartupWatchdog() {
         playbackStartupJob?.cancel()
         playbackStartupJob = null
+    }
+
+    private fun markPlaybackStartupTimedOut(generation: Int) {
+        if (!isPlayRequestCurrent(generation)) return
+        stopPlaybackStartupWatchdog()
+        val previousErrorSerial = mutableState.value.playbackErrorSerial
+        mutableState.update { current ->
+            if (!isPlayRequestCurrent(generation) || !current.isBuffering) {
+                current
+            } else {
+                current.copy(
+                    isBuffering = false,
+                    isPlaying = false,
+                    playbackErrorSerial = current.playbackErrorSerial + 1,
+                    playbackErrorMessage = "Playback took too long to start.",
+                )
+            }
+        }
+        if (mutableState.value.playbackErrorSerial != previousErrorSerial) {
+            stopProgressTicker()
+        }
     }
 
     protected open val playbackStartupTimeoutMs: Long
