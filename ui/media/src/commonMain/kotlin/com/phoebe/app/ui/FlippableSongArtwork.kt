@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -38,6 +39,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
@@ -167,18 +169,31 @@ fun SongDetailMetadataRows(
     val downloadedFile = downloads.itemFor(track)
         ?.takeIf { it.state == DownloadState.Complete && !it.localUri.isNullOrBlank() }
         ?.localUri
-    DetailMetaRow("Artist", track.artist, labelWidth, labelFontSize, valueFontSize)
-    DetailMetaRow("Album", track.album, labelWidth, labelFontSize, valueFontSize)
-    DetailMetaRow("Duration", formatDuration(track.durationMs), labelWidth, labelFontSize, valueFontSize)
-    DetailMetaRow("Year", track.year?.toString() ?: "Unknown", labelWidth, labelFontSize, valueFontSize)
-    DetailMetaRow("Genre", track.genre ?: "Unknown", labelWidth, labelFontSize, valueFontSize)
-    DetailMetaRow("Date Added", track.dateAddedMs?.let { formatLastPlayed(it, nowMs) } ?: "Unknown", labelWidth, labelFontSize, valueFontSize)
-    DetailMetaRow("Last Played", lastPlayed?.let { formatLastPlayed(it, nowMs) } ?: "Never", labelWidth, labelFontSize, valueFontSize)
-    DetailMetaRow("Plays", playCount.toString(), labelWidth, labelFontSize, valueFontSize)
-    track.audioCodec?.let { DetailMetaRow("Codec", it.uppercase(), labelWidth, labelFontSize, valueFontSize) }
-    track.bitrateKbps?.let { DetailMetaRow("Bitrate", "$it kbps", labelWidth, labelFontSize, valueFontSize) }
-    downloadedFile?.let { DetailMetaRow("Downloaded File", displayFileUri(it), labelWidth, labelFontSize, valueFontSize) }
-    track.filepath?.let { DetailMetaRow("File", it, labelWidth, labelFontSize, valueFontSize) }
+    val rows = buildList {
+        add("Artist" to track.artist)
+        add("Album" to track.album)
+        add("Duration" to formatDuration(track.durationMs))
+        add("Year" to (track.year?.toString() ?: "Unknown"))
+        add("Genre" to (track.genre ?: "Unknown"))
+        add("Date Added" to (track.dateAddedMs?.let { formatLastPlayed(it, nowMs) } ?: "Unknown"))
+        add("Last Played" to (lastPlayed?.let { formatLastPlayed(it, nowMs) } ?: "Never"))
+        add("Plays" to playCount.toString())
+        track.audioCodec?.let { add("Codec" to it.uppercase()) }
+        track.bitrateKbps?.let { add("Bitrate" to "$it kbps") }
+        downloadedFile?.let { add("Downloaded File" to displayFileUri(it)) }
+        track.filepath?.let { add("File" to it) }
+    }
+    rows.forEachIndexed { index, (label, value) ->
+        DetailMetaRow(label, value, labelWidth, labelFontSize, valueFontSize)
+        if (index != rows.lastIndex) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(PhoebeUi.border.copy(alpha = 0.62f)),
+            )
+        }
+    }
 }
 
 private fun displayFileUri(uri: String): String =
@@ -195,8 +210,21 @@ private fun DetailMetaRow(
     labelFontSize: TextUnit = 12.sp,
     valueFontSize: TextUnit = 13.sp,
 ) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Text(label, color = PhoebeUi.mutedText, fontSize = labelFontSize, modifier = Modifier.width(labelWidth))
-        Text(value, color = PhoebeUi.primaryText, fontSize = valueFontSize, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        Text(
+            value,
+            color = PhoebeUi.primaryText,
+            fontSize = valueFontSize,
+            textAlign = TextAlign.End,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
     }
 }

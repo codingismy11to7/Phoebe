@@ -245,11 +245,14 @@ fun SongDetailPanel(
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             item("intro") {
-                DetailSectionIntro(
-                    onBack = onBack,
-                    label = "Song",
-                    alignBackIconToContentStart = compact,
-                )
+                if (compact) {
+                    SongDetailMobileTopBar(onBack = onBack)
+                } else {
+                    DetailSectionIntro(
+                        onBack = onBack,
+                        label = "Song",
+                    )
+                }
             }
             item("hero") {
                 SongDetailHero(
@@ -262,10 +265,7 @@ fun SongDetailPanel(
                 )
             }
             item("metadata") {
-                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    if (compact) {
-                        SongLyricsEntry { onOpenLyrics(track) }
-                    }
+                Column(verticalArrangement = Arrangement.spacedBy(if (compact) 12.dp else 14.dp)) {
                     HomePanelLike { SongDetailMetadataRows(track, nowMs, lastPlayed, playHistory.playCountByTrack[track.id] ?: 0L) }
                 }
             }
@@ -274,24 +274,40 @@ fun SongDetailPanel(
 }
 
 @Composable
-private fun SongLyricsEntry(onClick: () -> Unit) {
+private fun SongDetailMobileTopBar(onBack: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .clickable(onClick = onClick)
-            .background(PhoebeUi.panel)
-            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(14.dp))
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+            .height(44.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        PhoebeIconView(PhoebeIcon.Lyrics, tint = PhoebeUi.accentLight, modifier = Modifier.size(20.dp))
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text("Lyrics", color = PhoebeUi.primaryText, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-            Text("Follow along with this song", color = PhoebeUi.secondaryText, fontSize = 12.sp)
+        Box(
+            Modifier
+                .size(44.dp)
+                .offset(x = (-10).dp)
+                .clip(CircleShape)
+                .clickable(onClick = onBack),
+            contentAlignment = Alignment.Center,
+        ) {
+            PhoebeIconView(PhoebeIcon.Back, tint = PhoebeUi.primaryText, modifier = Modifier.size(21.dp))
         }
-        PhoebeIconView(PhoebeIcon.Forward, tint = PhoebeUi.secondaryText, modifier = Modifier.size(18.dp))
+        Text(
+            "Song",
+            color = PhoebeUi.primaryText,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.weight(1f),
+        )
+        Box(
+            Modifier
+                .size(44.dp)
+                .offset(x = 10.dp)
+                .clip(CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            PhoebeIconView(PhoebeIcon.More, tint = PhoebeUi.secondaryText, modifier = Modifier.size(21.dp))
+        }
     }
 }
 
@@ -307,11 +323,13 @@ private fun SongDetailHero(
     if (compact) {
         Column(
             Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Box(
                 Modifier
-                    .size(220.dp)
+                    .fillMaxWidth(0.78f)
+                    .widthIn(max = 320.dp)
+                    .aspectRatio(1f)
                     .align(Alignment.CenterHorizontally),
             ) {
                 FlippableSongArtwork(
@@ -329,15 +347,16 @@ private fun SongDetailHero(
                         .padding(10.dp),
                 )
             }
-            SongDetailText(track, titleSize = 28.sp, titleLineHeight = 32.sp, titleMaxLines = 3, autoScroll = true)
-            SongActionRow(
+            SongDetailText(
                 track = track,
-                scrollable = true,
-                onPlay = onPlay,
-                onAddToUpNext = onAddToUpNext,
-                onDownload = onDownload,
-                onOpenLyrics = onOpenLyrics,
+                titleSize = 30.sp,
+                titleLineHeight = 34.sp,
+                titleMaxLines = 3,
+                autoScroll = true,
+                horizontalAlignment = Alignment.CenterHorizontally,
+                textAlign = TextAlign.Center,
             )
+            SongMobileActionRows(track, onPlay, onAddToUpNext, onDownload, onOpenLyrics)
         }
     } else {
         Row(
@@ -374,9 +393,15 @@ private fun SongDetailText(
     titleLineHeight: TextUnit,
     titleMaxLines: Int,
     autoScroll: Boolean = false,
+    horizontalAlignment: Alignment.Horizontal = Alignment.Start,
+    textAlign: TextAlign = TextAlign.Start,
 ) {
     val ratingActions = LocalRatingActions.current
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(
+        Modifier.fillMaxWidth(),
+        horizontalAlignment = horizontalAlignment,
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
         if (autoScroll) {
             AutoScrollingText(
                 track.title,
@@ -384,10 +409,25 @@ private fun SongDetailText(
                 fontSize = titleSize,
                 lineHeight = titleLineHeight,
                 fontWeight = FontWeight.Black,
-                modifier = Modifier.sharedBoundsTransition("song:${track.id}:title"),
+                textAlign = textAlign,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .sharedBoundsTransition("song:${track.id}:title"),
             )
-            AutoScrollingText(track.artist, color = PhoebeUi.secondaryText, fontSize = 17.sp)
-            AutoScrollingText(track.album, color = PhoebeUi.mutedText, fontSize = 14.sp)
+            AutoScrollingText(
+                track.artist,
+                color = PhoebeUi.secondaryText,
+                fontSize = 17.sp,
+                textAlign = textAlign,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            AutoScrollingText(
+                track.album,
+                color = PhoebeUi.mutedText,
+                fontSize = 14.sp,
+                textAlign = textAlign,
+                modifier = Modifier.fillMaxWidth(),
+            )
         } else {
             Text(
                 track.title,
@@ -395,20 +435,132 @@ private fun SongDetailText(
                 fontSize = titleSize,
                 lineHeight = titleLineHeight,
                 fontWeight = FontWeight.Black,
+                textAlign = textAlign,
                 maxLines = titleMaxLines,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.sharedBoundsTransition("song:${track.id}:title"),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .sharedBoundsTransition("song:${track.id}:title"),
             )
-            Text(track.artist, color = PhoebeUi.secondaryText, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(track.album, color = PhoebeUi.mutedText, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                track.artist,
+                color = PhoebeUi.secondaryText,
+                fontSize = 17.sp,
+                textAlign = textAlign,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                track.album,
+                color = PhoebeUi.mutedText,
+                fontSize = 14.sp,
+                textAlign = textAlign,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
         if (ratingActions.ratingsEnabled && track.isRemoteLibraryTrack()) {
-            RatingStars(
-                rating = ratingActions.ratingFor(track),
-                enabled = true,
-                onRating = { ratingActions.onRateTrack(track, it) },
-                starSize = 16.dp,
-                showClear = true,
+            SongRatingRow(track = track, ratingActions = ratingActions)
+        }
+    }
+}
+
+@Composable
+private fun SongRatingRow(
+    track: Track,
+    ratingActions: RatingActions,
+) {
+    val rating = ratingActions.ratingFor(track)
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        RatingStars(
+            rating = rating,
+            enabled = true,
+            onRating = { ratingActions.onRateTrack(track, it) },
+            starSize = 16.dp,
+            showClear = true,
+        )
+        Text(
+            rating?.let { formatSongRatingValue(it) } ?: "Unrated",
+            color = PhoebeUi.secondaryText,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
+private fun formatSongRatingValue(rating: Float): String {
+    val rounded = (rating * 10f).roundToInt() / 10f
+    return if (rounded % 1f == 0f) rounded.toInt().toString() else rounded.toString()
+}
+
+@Composable
+private fun SongMobileActionRows(
+    track: Track,
+    onPlay: () -> Unit,
+    onAddToUpNext: (Track) -> Unit,
+    onDownload: (Track) -> Unit,
+    onOpenLyrics: (Track) -> Unit,
+) {
+    val metadataEditorActions = LocalMetadataEditorActions.current
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            SongActionButton(
+                icon = PhoebeIcon.Play,
+                label = "Play",
+                modifier = Modifier
+                    .weight(1f)
+                    .height(48.dp)
+                    .playTrackTarget(track),
+                prominent = true,
+                onClick = onPlay,
+            )
+            SongActionButton(
+                icon = PhoebeIcon.Queue,
+                label = "Up Next",
+                modifier = Modifier
+                    .weight(1f)
+                    .height(48.dp),
+            ) { onAddToUpNext(track) }
+        }
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            SongActionButton(
+                icon = PhoebeIcon.Lyrics,
+                label = "Lyrics",
+                modifier = Modifier
+                    .weight(1f)
+                    .height(40.dp),
+                compact = true,
+            ) { onOpenLyrics(track) }
+            SongActionButton(
+                icon = PhoebeIcon.Edit,
+                label = "Edit Metadata",
+                modifier = Modifier
+                    .weight(1.35f)
+                    .height(40.dp),
+                compact = true,
+            ) {
+                metadataEditorActions.onRequestEdit(track)
+            }
+            SongDownloadActionButton(
+                track = track,
+                onDownload = onDownload,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(40.dp),
+                compact = true,
             )
         }
     }
@@ -430,46 +582,125 @@ private fun SongActionRow(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             contentPadding = PaddingValues(end = 4.dp),
         ) {
-            item("play") { SongActionButton(PhoebeIcon.Play, "Play", Modifier.playTrackTarget(track), onPlay) }
-            item("up-next") { SongActionButton(PhoebeIcon.Queue, "Up Next") { onAddToUpNext(track) } }
-            item("lyrics") { SongActionButton(PhoebeIcon.Lyrics, "Lyrics") { onOpenLyrics(track) } }
+            item("play") { SongActionButton(PhoebeIcon.Play, "Play", Modifier.playTrackTarget(track), onClick = onPlay) }
+            item("up-next") { SongActionButton(PhoebeIcon.Queue, "Up Next", onClick = { onAddToUpNext(track) }) }
+            item("lyrics") { SongActionButton(PhoebeIcon.Lyrics, "Lyrics", onClick = { onOpenLyrics(track) }) }
             item("edit-metadata") {
-                SongActionButton(PhoebeIcon.Edit, "Edit Metadata") {
+                SongActionButton(PhoebeIcon.Edit, "Edit Metadata", onClick = {
                     metadataEditorActions.onRequestEdit(track)
-                }
+                })
             }
-            item("download") { DownloadActionButton("Download", listOf(track)) { onDownload(track) } }
+            item("download") { SongDownloadActionButton(track = track, onDownload = onDownload) }
         }
     } else {
         Row(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            SongActionButton(PhoebeIcon.Play, "Play", Modifier.playTrackTarget(track), onPlay)
-            SongActionButton(PhoebeIcon.Queue, "Up Next") { onAddToUpNext(track) }
-            SongActionButton(PhoebeIcon.Lyrics, "Lyrics") { onOpenLyrics(track) }
-            SongActionButton(PhoebeIcon.Edit, "Edit Metadata") {
+            SongActionButton(PhoebeIcon.Play, "Play", Modifier.playTrackTarget(track), onClick = onPlay)
+            SongActionButton(PhoebeIcon.Queue, "Up Next", onClick = { onAddToUpNext(track) })
+            SongActionButton(PhoebeIcon.Lyrics, "Lyrics", onClick = { onOpenLyrics(track) })
+            SongActionButton(PhoebeIcon.Edit, "Edit Metadata", onClick = {
                 metadataEditorActions.onRequestEdit(track)
-            }
-            DownloadActionButton("Download", listOf(track)) { onDownload(track) }
+            })
+            SongDownloadActionButton(track = track, onDownload = onDownload)
         }
     }
 }
 
 @Composable
-fun SongActionButton(icon: PhoebeIcon, label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+private fun SongDownloadActionButton(
+    track: Track,
+    onDownload: (Track) -> Unit,
+    modifier: Modifier = Modifier,
+    compact: Boolean = false,
+) {
+    val downloads = LocalDownloadStatus.current
+    val downloadActions = LocalDownloadActions.current
+    val summary = downloads.summarize(listOf(track))
+    val isActive = summary.active > 0
+    val isComplete = summary.total > 0 &&
+        (summary.complete == summary.total || (summary.complete > 0 && summary.complete + summary.unavailable == summary.total))
+    val hasFailed = summary.failed > 0
+    var confirmCancel by remember(track.id) { mutableStateOf(false) }
+    var confirmDelete by remember(track.id) { mutableStateOf(false) }
+
+    SongActionButton(
+        icon = if (isComplete) PhoebeIcon.Check else PhoebeIcon.Download,
+        label = when {
+            isActive -> activeDownloadActionLabel()
+            isComplete -> "Downloaded"
+            hasFailed -> "Download Failed"
+            else -> "Download"
+        },
+        modifier = modifier,
+        compact = compact,
+    ) {
+        when {
+            isActive -> confirmCancel = true
+            isComplete -> confirmDelete = true
+            else -> onDownload(track)
+        }
+    }
+
+    if (confirmCancel) {
+        ConfirmDeleteDownloadsDialog(
+            title = "Cancel Download?",
+            body = "Stop downloading this song?",
+            confirmLabel = "Cancel Download",
+            onDismiss = { confirmCancel = false },
+            onConfirm = {
+                downloadActions.onCancelDownloadedTracks(listOf(track))
+                confirmCancel = false
+            },
+        )
+    }
+    if (confirmDelete) {
+        ConfirmDeleteDownloadsDialog(
+            title = "Delete Download?",
+            body = "Remove the downloaded copy of this song from this device?",
+            confirmLabel = "Delete Download",
+            onDismiss = { confirmDelete = false },
+            onConfirm = {
+                downloadActions.onDeleteDownloadedTracks(listOf(track))
+                confirmDelete = false
+            },
+        )
+    }
+}
+
+@Composable
+fun SongActionButton(
+    icon: PhoebeIcon,
+    label: String,
+    modifier: Modifier = Modifier,
+    prominent: Boolean = false,
+    compact: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val background = if (prominent) PhoebeUi.primaryText else PhoebeUi.elevatedFill
+    val contentColor = if (prominent) PhoebeUi.shellTop else PhoebeUi.primaryText
+    val iconTint = if (prominent) PhoebeUi.shellTop else PhoebeUi.accentLight
     Row(
         modifier
             .clip(RoundedCornerShape(999.dp))
             .clickable(onClick = onClick)
-            .background(PhoebeUi.elevatedFill)
+            .background(background)
             .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(999.dp))
-            .padding(horizontal = 14.dp, vertical = 9.dp),
+            .padding(horizontal = if (compact) 10.dp else 14.dp, vertical = if (compact) 8.dp else 9.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(7.dp),
+        horizontalArrangement = Arrangement.Center,
     ) {
-        PhoebeIconView(icon, tint = PhoebeUi.accentLight, modifier = Modifier.size(15.dp))
-        Text(label, color = PhoebeUi.primaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        PhoebeIconView(icon, tint = iconTint, modifier = Modifier.size(if (compact) 14.dp else 15.dp))
+        Spacer(Modifier.width(if (compact) 5.dp else 7.dp))
+        Text(
+            label,
+            color = contentColor,
+            fontSize = if (compact) 11.sp else 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -478,11 +709,10 @@ private fun HomePanelLike(content: @Composable androidx.compose.foundation.layou
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(14.dp))
             .background(PhoebeUi.panel)
-            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(10.dp))
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(14.dp))
+            .padding(horizontal = 16.dp, vertical = 6.dp),
         content = content,
     )
 }
@@ -609,6 +839,575 @@ private fun PlayAllActionButton(
     )
 }
 
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun MobileDetailPrimaryPlayButton(
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    label: String = "Play All",
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
+) {
+    val shape = RoundedCornerShape(999.dp)
+    Row(
+        modifier
+            .height(48.dp)
+            .clip(shape)
+            .combinedClickable(
+                enabled = enabled,
+                onClick = onClick,
+                onLongClick = onLongClick,
+            )
+            .background(Color.White.copy(alpha = if (enabled) 0.08f else 0.04f))
+            .border(BorderStroke(1.dp, Color.White.copy(alpha = if (enabled) 0.10f else 0.05f)), shape)
+            .padding(horizontal = 18.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        PhoebeIconView(
+            PhoebeIcon.Play,
+            tint = if (enabled) PhoebeUi.accentLight else PhoebeUi.mutedText,
+            modifier = Modifier.size(15.dp),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            label,
+            color = if (enabled) PhoebeUi.primaryText else PhoebeUi.mutedText,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
+private fun MobileDetailSecondaryButton(
+    icon: PhoebeIcon,
+    label: String,
+    enabled: Boolean = true,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val shape = RoundedCornerShape(999.dp)
+    Row(
+        modifier
+            .height(48.dp)
+            .clip(shape)
+            .clickable(enabled = enabled, onClick = onClick)
+            .background(Color.White.copy(alpha = 0.08f))
+            .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)), shape)
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        PhoebeIconView(
+            icon,
+            tint = if (enabled) PhoebeUi.accentLight else PhoebeUi.mutedText,
+            modifier = Modifier.size(14.dp),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            label,
+            color = if (enabled) PhoebeUi.primaryText else PhoebeUi.mutedText,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
+private fun MobileDetailIconSurface(
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    Box(
+        modifier
+            .size(48.dp)
+            .clip(CircleShape)
+            .background(Color.White.copy(alpha = 0.08f))
+            .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)), CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        content()
+    }
+}
+
+@Composable
+private fun MobileDetailTopBar(
+    label: String,
+    onBack: () -> Unit,
+    showOverflow: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier
+            .fillMaxWidth()
+            .height(48.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .align(Alignment.CenterStart)
+                .size(44.dp)
+                .clip(CircleShape)
+                .background(Color.Black.copy(alpha = 0.22f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            DetailBackButton(onBack = onBack)
+        }
+        Text(
+            label,
+            color = PhoebeUi.primaryText,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+        )
+        if (showOverflow) {
+            Box(
+                Modifier
+                    .align(Alignment.CenterEnd)
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.22f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                PhoebeIconView(PhoebeIcon.More, tint = PhoebeUi.primaryText, modifier = Modifier.size(18.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun MobileArtistDetailHeader(
+    artist: Artist,
+    artistThumbUrl: String?,
+    albumsCount: Int,
+    tracks: List<Track>,
+    visibleTracks: List<Track>,
+    albumWord: String,
+    songWord: String,
+    artistRadioAvailability: ArtistRadioAvailability?,
+    artistRadioStarting: Boolean,
+    favoriteActions: FavoriteActions,
+    onBack: () -> Unit,
+    onArtworkClick: () -> Unit,
+    onPlayAllTracks: (List<Track>) -> Unit,
+    onShuffleAllTracks: (List<Track>) -> Unit,
+    onPlayArtistRadio: (Artist) -> Unit,
+    onDownloadArtist: (Artist) -> Unit,
+) {
+    Column(
+        Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
+    ) {
+        MobileDetailTopBar(label = "Artist", onBack = onBack, showOverflow = false)
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(320.dp)
+                .clip(RoundedCornerShape(28.dp))
+                .clickable(onClick = onArtworkClick),
+        ) {
+            ArtworkImage(
+                artist.title,
+                artistThumbUrl,
+                Modifier
+                    .fillMaxSize()
+                    .sharedArtworkTransition("artist:${artist.id}"),
+                radius = 28.dp,
+                elevated = false,
+                maxDecodeDimension = 1024,
+                alignment = Alignment.TopCenter,
+            )
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                artist.title,
+                color = PhoebeUi.primaryText,
+                fontSize = 40.sp,
+                lineHeight = 42.sp,
+                fontWeight = FontWeight.Black,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.sharedBoundsTransition("artist:${artist.id}:title"),
+            )
+            Text(
+                "${albumsCount} $albumWord · ${tracks.size} $songWord",
+                color = PhoebeUi.secondaryText,
+                fontSize = 14.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            MobileDetailPrimaryPlayButton(
+                enabled = visibleTracks.isNotEmpty(),
+                modifier = Modifier.weight(1f),
+                onClick = { onPlayAllTracks(visibleTracks) },
+                onLongClick = { onShuffleAllTracks(visibleTracks) },
+            )
+            if (artistRadioAvailability == ArtistRadioAvailability.Available) {
+                MobileDetailSecondaryButton(
+                    icon = PhoebeIcon.Radio,
+                    label = if (artistRadioStarting) "Starting" else "Radio",
+                    enabled = !artistRadioStarting,
+                    onClick = { onPlayArtistRadio(artist) },
+                )
+            }
+            MobileDetailIconSurface {
+                DownloadActionButton("Download", tracks, iconOnly = true) { onDownloadArtist(artist) }
+            }
+            MobileDetailIconSurface {
+                LikeButton(
+                    liked = favoriteActions.isFavorite(artist),
+                    enabled = true,
+                    onClick = { favoriteActions.onToggleArtist(artist) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MobileAlbumDetailHeader(
+    album: Album,
+    tracks: List<Track>,
+    visibleTracks: List<Track>,
+    artist: Artist?,
+    favoriteActions: FavoriteActions,
+    onBack: () -> Unit,
+    onPlayTracks: (List<Track>, Int) -> Unit,
+    onDownloadAlbum: (Album) -> Unit,
+    onArtist: (Artist) -> Unit,
+) {
+    Column(
+        Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        MobileDetailTopBar(label = "Album", onBack = onBack, showOverflow = false)
+        ArtworkImage(
+            album.title,
+            album.thumbUrl,
+            Modifier
+                .fillMaxWidth()
+                .widthIn(max = 320.dp)
+                .aspectRatio(1f)
+                .sharedArtworkTransition("album:${album.id}"),
+            radius = 24.dp,
+            elevated = true,
+            maxDecodeDimension = 1024,
+        )
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                album.title,
+                color = PhoebeUi.primaryText,
+                fontSize = 32.sp,
+                lineHeight = 35.sp,
+                fontWeight = FontWeight.Black,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.sharedBoundsTransition("album:${album.id}:title"),
+            )
+            Text(
+                album.artist,
+                color = PhoebeUi.secondaryText,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .sharedBoundsTransition("album:${album.id}:subtitle")
+                    .clickable(enabled = artist != null) {
+                        artist?.let(onArtist)
+                    },
+            )
+            album.year?.let { year ->
+                Text(year.toString(), color = PhoebeUi.mutedText, fontSize = 13.sp)
+            }
+        }
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            MobileDetailPrimaryPlayButton(
+                enabled = visibleTracks.isNotEmpty(),
+                modifier = Modifier.weight(1f),
+                onClick = { onPlayTracks(visibleTracks, 0) },
+            )
+            MobileDetailIconSurface {
+                DownloadActionButton("Download", tracks, iconOnly = true) { onDownloadAlbum(album) }
+            }
+            MobileDetailIconSurface {
+                LikeButton(
+                    liked = favoriteActions.isFavorite(album),
+                    enabled = true,
+                    onClick = { favoriteActions.onToggleAlbum(album) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DesktopArtistDetailHeader(
+    artist: Artist,
+    artistThumbUrl: String?,
+    albumsCount: Int,
+    tracks: List<Track>,
+    visibleTracks: List<Track>,
+    albumWord: String,
+    songWord: String,
+    artistRadioAvailability: ArtistRadioAvailability?,
+    artistRadioStarting: Boolean,
+    favoriteActions: FavoriteActions,
+    onBack: () -> Unit,
+    onArtworkClick: () -> Unit,
+    onPlayAllTracks: (List<Track>) -> Unit,
+    onShuffleAllTracks: (List<Track>) -> Unit,
+    onPlayArtistRadio: (Artist) -> Unit,
+    onDownloadArtist: (Artist) -> Unit,
+    immersive: Boolean,
+) {
+    DesktopDetailHero(
+        label = "Artist",
+        title = artist.title,
+        eyebrow = "Artist",
+        meta = listOf("${albumsCount} $albumWord", "${tracks.size} $songWord"),
+        onBack = onBack,
+        immersive = immersive,
+        artwork = {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .sharedArtworkTransition("artist:${artist.id}")
+                    .clip(RoundedCornerShape(28.dp))
+                    .clickable(onClick = onArtworkClick),
+            ) {
+                ArtworkImage(
+                    artist.title,
+                    artistThumbUrl,
+                    Modifier.fillMaxSize(),
+                    radius = 28.dp,
+                    elevated = true,
+                    maxDecodeDimension = 1024,
+                    alignment = Alignment.TopCenter,
+                )
+            }
+        },
+        titleModifier = Modifier.sharedBoundsTransition("artist:${artist.id}:title"),
+        actions = {
+            PlayAllActionButton(
+                tracks = visibleTracks,
+                onClick = { onPlayAllTracks(visibleTracks) },
+                onLongClick = { onShuffleAllTracks(visibleTracks) },
+            )
+            if (artistRadioAvailability == ArtistRadioAvailability.Available) {
+                PlayRadioActionButton(
+                    starting = artistRadioStarting,
+                    label = "Radio",
+                    onClick = { onPlayArtistRadio(artist) },
+                )
+            }
+            DownloadActionButton("Download", tracks) { onDownloadArtist(artist) }
+            DesktopDetailIconSurface {
+                LikeButton(
+                    liked = favoriteActions.isFavorite(artist),
+                    enabled = true,
+                    onClick = { favoriteActions.onToggleArtist(artist) },
+                )
+            }
+        },
+    )
+}
+
+@Composable
+private fun DesktopAlbumDetailHeader(
+    album: Album,
+    tracks: List<Track>,
+    visibleTracks: List<Track>,
+    artist: Artist?,
+    favoriteActions: FavoriteActions,
+    onBack: () -> Unit,
+    onPlayTracks: (List<Track>, Int) -> Unit,
+    onDownloadAlbum: (Album) -> Unit,
+    onArtist: (Artist) -> Unit,
+    immersive: Boolean,
+) {
+    val meta = buildList {
+        album.year?.let { add(it.toString()) }
+        add(songCountLabel(tracks.size))
+    }
+    DesktopDetailHero(
+        label = "Album",
+        title = album.title,
+        eyebrow = "Album",
+        subtitle = album.artist,
+        meta = meta,
+        onBack = onBack,
+        immersive = immersive,
+        artwork = {
+            ArtworkImage(
+                album.title,
+                album.thumbUrl,
+                Modifier
+                    .fillMaxSize()
+                    .sharedArtworkTransition("album:${album.id}"),
+                radius = 18.dp,
+                elevated = true,
+                maxDecodeDimension = 1024,
+            )
+        },
+        titleModifier = Modifier.sharedBoundsTransition("album:${album.id}:title"),
+        subtitleModifier = Modifier
+            .sharedBoundsTransition("album:${album.id}:subtitle")
+            .clickable(enabled = artist != null) {
+                artist?.let(onArtist)
+            },
+        actions = {
+            PlayAllActionButton(
+                tracks = visibleTracks,
+                onClick = { onPlayTracks(visibleTracks, 0) },
+            )
+            DownloadActionButton("Download", tracks) { onDownloadAlbum(album) }
+            DesktopDetailIconSurface {
+                LikeButton(
+                    liked = favoriteActions.isFavorite(album),
+                    enabled = true,
+                    onClick = { favoriteActions.onToggleAlbum(album) },
+                )
+            }
+        },
+    )
+}
+
+@Composable
+private fun DesktopDetailHero(
+    label: String,
+    title: String,
+    eyebrow: String,
+    meta: List<String>,
+    onBack: () -> Unit,
+        artwork: @Composable () -> Unit,
+        modifier: Modifier = Modifier,
+        subtitle: String? = null,
+        immersive: Boolean = true,
+        titleModifier: Modifier = Modifier,
+        subtitleModifier: Modifier = Modifier,
+        actions: @Composable () -> Unit,
+) {
+    val heroHeight = if (immersive) 340.dp else 300.dp
+    val heroTitleSize = if (immersive) 52.sp else 44.sp
+    val heroTitleLineHeight = if (immersive) 54.sp else 46.sp
+    Row(
+        modifier
+            .fillMaxWidth()
+            .height(heroHeight),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(32.dp),
+    ) {
+            Column(
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
+                verticalArrangement = Arrangement.SpaceBetween,
+            ) {
+                DetailSectionIntro(onBack = onBack, label = label)
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    SectionLabel(eyebrow, PhoebeUi.accentLight)
+                    Text(
+                        title,
+                        color = PhoebeUi.primaryText,
+                        fontSize = heroTitleSize,
+                        lineHeight = heroTitleLineHeight,
+                        fontWeight = FontWeight.Black,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = titleModifier,
+                    )
+                    if (!subtitle.isNullOrBlank()) {
+                        Text(
+                            subtitle,
+                            color = PhoebeUi.secondaryText,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = subtitleModifier,
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        meta.filter { it.isNotBlank() }.forEach { item ->
+                            DesktopDetailMetaChip(item)
+                        }
+                    }
+                }
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    actions()
+                }
+            }
+            Box(
+                Modifier
+                    .fillMaxHeight()
+                    .aspectRatio(1f),
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            shadowElevation = 34f
+                            ambientShadowColor = Color.Black.copy(alpha = 0.42f)
+                            spotShadowColor = Color.Black.copy(alpha = 0.58f)
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    artwork()
+                }
+            }
+    }
+}
+
+@Composable
+private fun DesktopDetailMetaChip(label: String) {
+    Text(
+        label,
+        color = PhoebeUi.secondaryText,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.SemiBold,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(Color.White.copy(alpha = 0.07f))
+            .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)), RoundedCornerShape(999.dp))
+            .padding(horizontal = 11.dp, vertical = 6.dp),
+    )
+}
+
+@Composable
+private fun DesktopDetailIconSurface(content: @Composable () -> Unit) {
+    Box(
+        Modifier
+            .size(36.dp)
+            .clip(CircleShape)
+            .background(PhoebeUi.subtleFill)
+            .border(BorderStroke(1.dp, PhoebeUi.border), CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        content()
+    }
+}
+
 @Composable
 private fun ArtistDetailStatRow(icon: PhoebeIcon, value: String, label: String) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -662,7 +1461,12 @@ private fun ArtistStatsPanel(
     Column(
         modifier
             .fillMaxSize()
-            .padding(start = edgePadding, end = edgePadding, top = topPadding, bottom = 24.dp + chromeBottom)
+            .padding(
+                start = edgePadding,
+                end = edgePadding,
+                top = mobileContentTopPadding(topPadding),
+                bottom = 24.dp + chromeBottom,
+            )
             .verticalScroll(scrollState),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
@@ -843,6 +1647,7 @@ fun ArtistDetailPanel(
         } else {
             if (mobileBottomPadding > 144.dp) mobileBottomPadding else 144.dp
         }
+        val immersiveDesktopHeader = maxHeight >= 760.dp
         val albumGridItemSizeDp = libraryUi.albumGridItemSizeDp
         val albumGridColumns = rememberLibraryGridColumnCount(
             availableWidth = maxWidth,
@@ -881,63 +1686,47 @@ fun ArtistDetailPanel(
     ) {
         item(contentType = "artist-header") {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                DetailSectionIntro(
-                    onBack = onBack,
-                    label = "Artist",
-                    alignBackIconToContentStart = !useTable,
-                )
-                Text(
-                    artist.title,
-                    color = PhoebeUi.primaryText,
-                    fontSize = 30.sp,
-                    fontWeight = FontWeight.Black,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.sharedBoundsTransition("artist:${artist.id}:title"),
-                )
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("${albums.size} $albumWord · ${tracks.size} $songWord", color = PhoebeUi.secondaryText, fontSize = 14.sp)
-                    LikeButton(
-                        liked = favoriteActions.isFavorite(artist),
-                        enabled = true,
-                        onClick = { favoriteActions.onToggleArtist(artist) },
+                if (useTable) {
+                    DesktopArtistDetailHeader(
+                        artist = artist,
+                        artistThumbUrl = artistThumbUrl,
+                        albumsCount = albums.size,
+                        tracks = tracks,
+                        visibleTracks = visibleTracks,
+                        albumWord = albumWord,
+                        songWord = songWord,
+                        artistRadioAvailability = artistRadioAvailability,
+                        artistRadioStarting = artistRadioStarting,
+                        favoriteActions = favoriteActions,
+                        onBack = onBack,
+                        onArtworkClick = { showStats = true },
+                        onPlayAllTracks = onPlayAllTracks,
+                        onShuffleAllTracks = onShuffleAllTracks,
+                        onPlayArtistRadio = onPlayArtistRadio,
+                        onDownloadArtist = onDownloadArtist,
+                        immersive = immersiveDesktopHeader,
+                    )
+                    Spacer(Modifier.height(14.dp))
+                } else {
+                    MobileArtistDetailHeader(
+                        artist = artist,
+                        artistThumbUrl = artistThumbUrl,
+                        albumsCount = albums.size,
+                        tracks = tracks,
+                        visibleTracks = visibleTracks,
+                        albumWord = albumWord,
+                        songWord = songWord,
+                        artistRadioAvailability = artistRadioAvailability,
+                        artistRadioStarting = artistRadioStarting,
+                        favoriteActions = favoriteActions,
+                        onBack = onBack,
+                        onArtworkClick = { showStats = true },
+                        onPlayAllTracks = onPlayAllTracks,
+                        onShuffleAllTracks = onShuffleAllTracks,
+                        onPlayArtistRadio = onPlayArtistRadio,
+                        onDownloadArtist = onDownloadArtist,
                     )
                 }
-                if (!useTable) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        PlayAllActionButton(
-                            tracks = visibleTracks,
-                            onClick = { onPlayAllTracks(visibleTracks) },
-                            onLongClick = { onShuffleAllTracks(visibleTracks) },
-                        )
-                        if (artistRadioAvailability == ArtistRadioAvailability.Available) {
-                            PlayRadioActionButton(
-                                starting = artistRadioStarting,
-                                label = "Radio",
-                                onClick = { onPlayArtistRadio(artist) },
-                            )
-                        }
-                        DownloadActionButton("Download", tracks) { onDownloadArtist(artist) }
-                    }
-                }
-                Spacer(Modifier.height(6.dp))
-                Box(
-                    Modifier
-                        .size(120.dp)
-                        .sharedArtworkTransition("artist:${artist.id}")
-                        .clip(CircleShape)
-                        .clickable(onClick = { showStats = true }),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    ArtworkImage(
-                        artist.title,
-                        artistThumbUrl,
-                        Modifier.fillMaxSize(),
-                        radius = 60.dp,
-                        elevated = useTable,
-                    )
-                }
-                Spacer(Modifier.height(10.dp))
                 if (popularTracks.isNotEmpty() && searchQuery.isBlank()) {
                     PopularTracksSection(
                         tracks = popularTracks,
@@ -965,22 +1754,6 @@ fun ArtistDetailPanel(
                     onAscending = { albumAscending = it },
                     viewMode = albumViewMode,
                     onViewMode = { albumViewMode = it },
-                    actions = {
-                        if (useTable) {
-                            PlayAllActionButton(
-                                tracks = visibleTracks,
-                                onClick = { onPlayAllTracks(visibleTracks) },
-                                onLongClick = { onShuffleAllTracks(visibleTracks) },
-                            )
-                            if (artistRadioAvailability == ArtistRadioAvailability.Available) {
-                                PlayRadioActionButton(
-                                    starting = artistRadioStarting,
-                                    onClick = { onPlayArtistRadio(artist) },
-                                )
-                            }
-                            DownloadActionButton("Download Artist", tracks) { onDownloadArtist(artist) }
-                        }
-                    },
                 )
             }
         }
@@ -1338,7 +2111,7 @@ private fun PopularTracksSection(
 ) {
     val nowPlaying = LocalNowPlaying.current
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        SectionLabel("Popular Tracks", PhoebeUi.primaryText)
+        SectionLabel("Top Songs", PhoebeUi.primaryText)
         tracks.take(if (useTable) 6 else 5).forEachIndexed { index, track ->
             if (useTable) {
                 SongRow(
@@ -1693,6 +2466,7 @@ fun AlbumDetailPanel(
         } else {
             if (mobileBottomPadding > 144.dp) mobileBottomPadding else 144.dp
         }
+        val immersiveDesktopHeader = maxHeight >= 760.dp
         val listState = RetainedLazyListStates.remember("album-detail:${resolvedAlbum.id}")
     LazyColumn(
         state = listState,
@@ -1705,34 +2479,31 @@ fun AlbumDetailPanel(
     ) {
         item(contentType = "album-header") {
             Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
-                DetailSectionIntro(
-                    onBack = onBack,
-                    label = "Album",
-                    alignBackIconToContentStart = !useTable,
-                )
                 if (useTable) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(22.dp), verticalAlignment = Alignment.CenterVertically) {
-                        ArtworkImage(
-                            resolvedAlbum.title,
-                            resolvedAlbum.thumbUrl,
-                            Modifier.size(160.dp).sharedArtworkTransition("album:${resolvedAlbum.id}"),
-                            elevated = true,
-                        )
-                        AlbumDetailHeaderText(resolvedAlbum, tracks, artist, onDownloadAlbum, onArtist, showDownload = false)
-                    }
+                    DesktopAlbumDetailHeader(
+                        album = resolvedAlbum,
+                        tracks = tracks,
+                        visibleTracks = visibleTracks,
+                        artist = artist,
+                        favoriteActions = LocalFavoriteActions.current,
+                        onBack = onBack,
+                        onPlayTracks = onPlayTracks,
+                        onDownloadAlbum = onDownloadAlbum,
+                        onArtist = onArtist,
+                        immersive = immersiveDesktopHeader,
+                    )
                 } else {
-                    Column(
-                        Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        ArtworkImage(
-                            resolvedAlbum.title,
-                            resolvedAlbum.thumbUrl,
-                            Modifier.size(168.dp).sharedArtworkTransition("album:${resolvedAlbum.id}"),
-                            elevated = false,
-                        )
-                        AlbumDetailHeaderText(resolvedAlbum, tracks, artist, onDownloadAlbum, onArtist, compact = true)
-                    }
+                    MobileAlbumDetailHeader(
+                        album = resolvedAlbum,
+                        tracks = tracks,
+                        visibleTracks = visibleTracks,
+                        artist = artist,
+                        favoriteActions = LocalFavoriteActions.current,
+                        onBack = onBack,
+                        onPlayTracks = onPlayTracks,
+                        onDownloadAlbum = onDownloadAlbum,
+                        onArtist = onArtist,
+                    )
                 }
                 DetailSectionHeader(
                     title = "Tracks",
@@ -1751,13 +2522,6 @@ fun AlbumDetailPanel(
                     onAscending = null,
                     columns = libraryUi.columns,
                     onColumns = onLibraryColumns,
-                    actions = {
-                        if (useTable) {
-                            DownloadActionButton("Download Album", tracks) {
-                                onDownloadAlbum(resolvedAlbum)
-                            }
-                        }
-                    },
                 )
             }
         }

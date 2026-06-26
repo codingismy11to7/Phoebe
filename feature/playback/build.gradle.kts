@@ -10,7 +10,6 @@ kotlin {
                     implementation(project(":data:listenbrainz"))
                     implementation(project(":playback"))
                     implementation(project(":ui:media"))
-                    implementation(libs.haze.blur)
                 }
             }
         desktopMain {
