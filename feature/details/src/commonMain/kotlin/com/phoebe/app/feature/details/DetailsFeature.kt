@@ -11,6 +11,7 @@ import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.LibraryUiPreferences
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.Track
+import com.phoebe.app.domain.CollectionEntry
 
 @Immutable
 data class ArtistDetailRouteState(
@@ -36,6 +37,7 @@ class ArtistDetailRouteActions(
     val onPlayAllTracks: (List<Track>) -> Unit = { tracks -> onPlayTracks(tracks, 0) },
     val onShuffleAllTracks: (List<Track>) -> Unit = { tracks -> onPlayTracks(tracks.shuffled(), 0) },
     val onProbeArtistRadio: (Artist) -> Unit = {},
+    val onCollectionItems: (CollectionEntry, String) -> Unit = { _, _ -> },
 )
 
 @Immutable
@@ -55,6 +57,7 @@ class AlbumDetailRouteActions(
     val onDownloadAlbum: (Album) -> Unit,
     val onArtist: (Artist) -> Unit,
     val onLibraryColumns: (LibraryColumnVisibility) -> Unit,
+    val onCollectionItems: (CollectionEntry, String) -> Unit = { _, _ -> },
 )
 
 @Immutable
@@ -119,6 +122,7 @@ fun ArtistDetailRoute(
         onPlayArtistRadio = actions.onPlayArtistRadio,
         onArtist = actions.onArtist,
         onLibraryColumns = actions.onLibraryColumns,
+        onCollectionItems = actions.onCollectionItems,
     )
 }
 
@@ -142,6 +146,7 @@ fun AlbumDetailRoute(
         onDownloadAlbum = actions.onDownloadAlbum,
         onArtist = actions.onArtist,
         onLibraryColumns = actions.onLibraryColumns,
+        onCollectionItems = actions.onCollectionItems,
     )
 }
 

@@ -1316,6 +1316,12 @@ class AppState(
             }.onFailure {
                 mutableMessage.value = it.message ?: "Couldn't load album tracks."
             }
+            runCatching {
+                dependencies.catalogRepository.ensureAlbumDetails(session.value, album)
+            }.onFailure {
+                if (it is CancellationException) throw it
+                PhoebeLog.d("AppState") { "album details preload failed for '${album.title}': ${it.message}" }
+            }
         }
     }
 

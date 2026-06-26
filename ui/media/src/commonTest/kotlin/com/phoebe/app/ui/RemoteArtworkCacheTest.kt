@@ -136,6 +136,17 @@ class RemoteArtworkCacheTest {
     }
 
     @Test
+    fun retryFailedLoadsNowClearsTransientFailuresAndBumpsRetryEpoch() {
+        RemoteArtworkCache.markFailedForTest("resume-art", ListArtworkMaxDecodeDimension)
+        val before = RemoteArtworkCache.retryEpoch
+
+        RemoteArtworkCache.retryFailedLoadsNow()
+
+        assertFalse(RemoteArtworkCache.hasRecentFailure("resume-art", ListArtworkMaxDecodeDimension))
+        assertEquals(before + 1, RemoteArtworkCache.retryEpoch)
+    }
+
+    @Test
     fun trimForMemoryPressureEvictsCachedImages() {
         RemoteArtworkCache.configureLimitsForTest(maxEntries = 40, maxEstimatedBytes = Long.MAX_VALUE)
         repeat(24) { index ->

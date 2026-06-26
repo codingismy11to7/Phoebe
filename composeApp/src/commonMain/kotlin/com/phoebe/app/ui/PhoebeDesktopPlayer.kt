@@ -455,6 +455,7 @@ internal fun DesktopPlayer(
                                             onPlayArtistRadio = onPlayArtistRadio,
                                             onArtist = onArtist,
                                             onLibraryColumns = onLibraryColumns,
+                                            onCollectionItems = onCollectionValue,
                                         ),
                                         modifier = Modifier.weight(1f).fillMaxWidth(),
                                     )
@@ -477,6 +478,7 @@ internal fun DesktopPlayer(
                                             onDownloadAlbum = onDownloadAlbum,
                                             onArtist = onArtist,
                                             onLibraryColumns = onLibraryColumns,
+                                            onCollectionItems = onCollectionValue,
                                         ),
                                         modifier = Modifier.weight(1f).fillMaxWidth(),
                                     )

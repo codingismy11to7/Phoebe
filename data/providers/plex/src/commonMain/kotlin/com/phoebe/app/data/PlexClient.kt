@@ -191,6 +191,7 @@ class PlexClient(
                 style = it.primaryStyleTag(),
                 rating = it.userRating.toStarRating(),
                 favorite = it.isFavoriteArtistCollection(),
+                biography = it.summary,
             )
         }
         val meta = response.mediaContainer.metadata
@@ -210,6 +211,7 @@ class PlexClient(
                 style = item.primaryStyleTag(),
                 rating = item.userRating.toStarRating(),
                 favorite = item.isFavoriteArtistCollection(),
+                biography = item.summary,
             )
         }
         return (fromDirectories + fromMetadata).distinctBy { it.id }
@@ -228,10 +230,13 @@ class PlexClient(
                     thumbUrl = it.thumb?.let { thumb -> server.assetUrl(thumb, token) },
                     dateAddedMs = it.addedAt?.times(1000L),
                     genre = it.primaryGenreTag(),
-                    mood = it.primaryMoodTag(),
-                    style = it.primaryStyleTag(),
+                    mood = it.allMoodsJoined(),
+                    style = it.allStylesJoined(),
                     rating = it.userRating.toStarRating(),
                     favorite = it.isFavoriteAlbumCollection(),
+                    description = it.summary,
+                    recordLabel = it.studio,
+                    releaseDate = it.originallyAvailableAt,
                 )
             }
         }
@@ -244,10 +249,13 @@ class PlexClient(
                 thumbUrl = it.thumb?.let { thumb -> server.assetUrl(thumb, token) },
                 dateAddedMs = it.addedAt?.times(1000L),
                 genre = it.primaryGenreTag(),
-                mood = it.primaryMoodTag(),
-                style = it.primaryStyleTag(),
+                mood = it.allMoodsJoined(),
+                style = it.allStylesJoined(),
                 rating = it.userRating.toStarRating(),
                 favorite = it.isFavoriteAlbumCollection(),
+                description = it.summary,
+                recordLabel = it.studio,
+                releaseDate = it.originallyAvailableAt,
             )
         }
         return (fromDirectories + fromMetadata).distinctBy { it.id }
@@ -308,10 +316,13 @@ class PlexClient(
             thumbUrl = item.thumb?.let { thumb -> server.assetUrl(thumb, token) },
             dateAddedMs = item.addedAt?.times(1000L),
             genre = item.primaryGenreTag(),
-            mood = item.primaryMoodTag(),
-            style = item.primaryStyleTag(),
+            mood = item.allMoodsJoined(),
+            style = item.allStylesJoined(),
             rating = item.userRating.toStarRating(),
             favorite = item.isFavoriteAlbumCollection(),
+            description = item.summary,
+            recordLabel = item.studio,
+            releaseDate = item.originallyAvailableAt,
         )
     }
 
@@ -2198,6 +2209,17 @@ private fun List<PlexGenreTagDto>?.primaryTag(): String? =
     this?.firstNotNullOfOrNull { tag ->
         tag.tag?.trim()?.takeIf { it.isNotBlank() }
     }
+
+private fun List<PlexGenreTagDto>?.allTagsJoined(): String? =
+    this?.mapNotNull { tag -> tag.tag?.trim()?.takeIf { it.isNotBlank() } }
+        ?.takeIf { it.isNotEmpty() }
+        ?.joinToString(", ")
+
+private fun PlexMetadataDto.allMoodsJoined(): String? = moodTags.allTagsJoined()
+private fun PlexMetadataDto.allStylesJoined(): String? = styleTags.allTagsJoined()
+
+private fun PlexDirectoryDto.allMoodsJoined(): String? = moodTags.allTagsJoined()
+private fun PlexDirectoryDto.allStylesJoined(): String? = styleTags.allTagsJoined()
 
 private fun PlexMetadataDto?.collectionTagNames(): List<String> =
     this?.collectionTags

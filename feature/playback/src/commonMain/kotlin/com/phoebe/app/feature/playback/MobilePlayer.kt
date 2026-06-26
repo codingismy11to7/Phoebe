@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -287,7 +288,7 @@ fun MobilePlayer(
             (if (remotePlaybackTarget != null) MobilePlayerRemoteTargetReserve else 0.dp)
         val fullArtworkSize = minOf(
             screenWidth - 40.dp,
-            (screenHeight - 56.dp - 24.dp - metadataReserve - 130.dp - 72.dp).coerceAtLeast(180.dp),
+            (screenHeight - 56.dp - 24.dp - metadataReserve - 146.dp - 72.dp).coerceAtLeast(180.dp),
         )
 
         val currentArtworkSize = lerp(44.dp, fullArtworkSize, clampedExpansionFraction)
@@ -465,7 +466,7 @@ fun MobilePlayer(
             val currentMetadataOverlap = lerp(0.dp, metadataOverlap, clampedExpansionFraction)
             val currentReflectionHeight = (metadataReserve + metadataOverlap) * scale
             val reflectionY = currentArtworkY + currentArtworkSize - currentMetadataOverlap
-            val reflectionDismissAlpha = ((clampedExpansionFraction - 0.88f) / 0.12f).coerceIn(0f, 1f)
+            val reflectionDismissAlpha = ((clampedExpansionFraction - 0.5f) / 0.5f).coerceIn(0f, 1f)
             val reflectionAlpha = fullPlayerAlpha * reflectionDismissAlpha
 
             if (currentReflectionHeight > 0.dp && reflectionAlpha > 0f) {
@@ -601,7 +602,6 @@ fun MobilePlayer(
 
                 Column(
                     modifier = Modifier
-                        .weight(1f)
                         .fillMaxWidth()
                         .padding(horizontal = 20.dp)
                 ) {
@@ -655,19 +655,20 @@ fun MobilePlayer(
                     }
                 }
 
-                Spacer(Modifier.height(18.dp))
+                Spacer(Modifier.weight(1f).heightIn(min = 20.dp))
                 ProgressLine(
                     positionMs = positionMs,
                     bufferedPositionMs = timelineBufferedPositionMs,
                     durationMs = track?.durationMs ?: 0L,
                     waveformSeed = track?.let(::trackWaveformSeed) ?: "",
+                    barHeight = 56.dp,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 20.dp)
                         .graphicsLayer { alpha = fullPlayerElementsAlpha },
                     onSeek = if (track != null) onSeek else null,
                 )
-                Spacer(Modifier.height(22.dp))
+                Spacer(Modifier.weight(1f).heightIn(min = 16.dp))
                 Row(
                     Modifier
                         .fillMaxWidth()
@@ -678,7 +679,7 @@ fun MobilePlayer(
                 ) {
                     ShuffleIcon(active = shuffle, onClick = onShuffle)
                     TransportIcon(PhoebeIcon.Previous, "Previous Track", onPrevious, iconSize = 16.dp)
-                    Spacer(Modifier.size(58.dp))
+                    Spacer(Modifier.size(72.dp))
                     TransportIcon(PhoebeIcon.Next, "Next Track", onNext, iconSize = 16.dp)
                     RepeatIcon(mode = repeat, onClick = onRepeat)
                 }
@@ -864,7 +865,7 @@ fun MobilePlayer(
 
         if (track != null || fullPlayerAlpha > 0f) {
             val collapsedPlayButtonSize = 40.dp
-            val expandedPlayButtonSize = 58.dp
+            val expandedPlayButtonSize = 72.dp
             val playButtonSize = lerp(collapsedPlayButtonSize, expandedPlayButtonSize, clampedExpansionFraction)
             val collapsedPlayButtonX = screenWidth - 12.dp - collapsedPlayButtonSize
             val collapsedPlayButtonY = (MobileMiniPlayerChromeHeight - collapsedPlayButtonSize) / 2f
@@ -939,7 +940,7 @@ fun MobilePlayer(
                     (88.dp + navBarBottom).toPx()
                 }
                 val expandedSheetHeightPx = with(density) {
-                    val controlsPx = 130.dp.toPx()
+                    val controlsPx = 146.dp.toPx()
                     val headerPx = 56.dp.toPx()
                     (screenHeight.toPx() - controlsPx - headerPx)
                         .coerceAtLeast(collapsedSheetHeightPx + 80.dp.toPx())

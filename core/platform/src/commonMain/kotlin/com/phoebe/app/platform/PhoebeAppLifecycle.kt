@@ -12,13 +12,22 @@ object PhoebeAppLifecycle {
         private set
 
     private var memoryPressureListener: ((MemoryPressureLevel) -> Unit)? = null
+    private var uiVisibilityListener: ((Boolean) -> Unit)? = null
 
     fun setMemoryPressureListener(listener: ((MemoryPressureLevel) -> Unit)?) {
         memoryPressureListener = listener
     }
 
+    fun setUiVisibilityListener(listener: ((Boolean) -> Unit)?) {
+        uiVisibilityListener = listener
+    }
+
     fun setUiVisible(visible: Boolean) {
+        val changed = isUiVisible != visible
         isUiVisible = visible
+        if (changed) {
+            uiVisibilityListener?.invoke(visible)
+        }
         if (!visible) {
             notifyMemoryPressure(MemoryPressureLevel.UiHidden)
         }

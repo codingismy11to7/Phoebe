@@ -842,12 +842,11 @@ private fun buildPersonalMixList(
             val maxCount = slices.getOrElse(index) { 0 }
             sliceAdded[index] = addFromCandidates(candidates, maxCount, freshOnly = true)
         }
-        sliceCandidates.forEachIndexed { index, candidates ->
-            val maxCount = slices.getOrElse(index) { 0 }
-            val remaining = maxCount - sliceAdded[index]
-            if (remaining > 0) addFromCandidates(candidates, remaining, freshOnly = false)
-        }
+        // Aggressive Deprioritization: Instead of falling back to recent tracks for this specific slice,
+        // we let the slice fall short and make up the difference with fresh filler tracks.
         addFromCandidates(filler, target - size, freshOnly = true)
+        
+        // Absolute last resort if the entire library is exhausted of fresh tracks
         addFromCandidates(filler, target - size, freshOnly = false)
     }
 }

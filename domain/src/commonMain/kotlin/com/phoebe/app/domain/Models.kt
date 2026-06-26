@@ -215,6 +215,7 @@ data class Artist(
     /** User rating normalized to 0..5 stars. Plex stores this as 0..10. */
     val rating: Float? = null,
     val favorite: Boolean = false,
+    val biography: String? = null,
 )
 
 @Serializable
@@ -232,6 +233,9 @@ data class Album(
     val rating: Float? = null,
     val favorite: Boolean = false,
     val albumArtist: String? = null,
+    val description: String? = null,
+    val recordLabel: String? = null,
+    val releaseDate: String? = null,
 )
 
 @Serializable

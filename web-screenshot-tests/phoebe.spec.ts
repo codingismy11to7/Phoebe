@@ -96,6 +96,16 @@ async function openScenario(
   settleMs = 750,
 ) {
   await page.setViewportSize(viewport);
+  if (scenario === 'Radio') {
+    await page.route(/^https?:\/\//, async route => {
+      const requestUrl = new URL(route.request().url());
+      if (requestUrl.hostname === '127.0.0.1' || requestUrl.hostname === 'localhost') {
+        await route.continue();
+      } else {
+        await route.abort();
+      }
+    });
+  }
   await page.goto(`/?screenshot=${scenario}&theme=${theme}`, { waitUntil: 'domcontentloaded' });
   await page.locator('canvas').waitFor({ state: 'visible', timeout: 60_000 });
   await page.waitForTimeout(settleMs);
