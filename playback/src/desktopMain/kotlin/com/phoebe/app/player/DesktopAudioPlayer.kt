@@ -1736,6 +1736,12 @@ class DesktopAudioPlayer(
     private fun playJavaFxSync(uri: String, generation: Int): Boolean {
         val latch = CountDownLatch(1)
         val failed = AtomicBoolean(false)
+        val handleFailure = { error: Throwable ->
+            failed.set(true)
+            logPlaybackFailure(error)
+            diagnostics.playbackError(PlaybackEnginePath.JavaFxMediaPlayer, error.message)
+            if (latch.count > 0L) latch.countDown()
+        }
         JavaFxRuntime.runLater(
             block = {
                 runCatching {
@@ -1798,19 +1804,9 @@ class DesktopAudioPlayer(
                     if (playWhenReady && isPlayRequestCurrent(generation)) {
                         mediaPlayer.play()
                     }
-                }.onFailure { error ->
-                    failed.set(true)
-                    logPlaybackFailure(error)
-                    diagnostics.playbackError(PlaybackEnginePath.JavaFxMediaPlayer, error.message)
-                    if (latch.count > 0L) latch.countDown()
-                }
+                }.onFailure(handleFailure)
             },
-            onError = { error ->
-                failed.set(true)
-                logPlaybackFailure(error)
-                diagnostics.playbackError(PlaybackEnginePath.JavaFxMediaPlayer, error.message)
-                if (latch.count > 0L) latch.countDown()
-            }
+            onError = handleFailure
         )
         val signaled = latch.await(JavaFxStartupTimeoutSeconds, TimeUnit.SECONDS)
         return signaled && !failed.get() && isPlayRequestCurrent(generation)
@@ -2319,13 +2315,13 @@ private object JavaFxRuntime {
         start()
         ready.whenComplete { _, error ->
             if (error != null) {
-                onError?.invoke(error)
+                onError?.invoke(error) ?: PhoebeLog.d("DesktopAudioPlayer") { "JavaFxRuntime startup error: ${error.message ?: error::class.simpleName.orEmpty()}" }
                 return@whenComplete
             }
             try {
                 Platform.runLater(block)
             } catch (t: Throwable) {
-                onError?.invoke(t)
+                onError?.invoke(t) ?: PhoebeLog.d("DesktopAudioPlayer") { "Platform.runLater failed: ${t.message ?: t::class.simpleName.orEmpty()}" }
             }
         }
     }
