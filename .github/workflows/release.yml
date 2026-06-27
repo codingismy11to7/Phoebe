@@ -335,14 +335,10 @@ jobs:
             try {
               $repository = Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue
               if (-not $repository) {
-                Register-PSRepository `
-                  -Name PSGallery `
-                  -SourceLocation "https://www.powershellgallery.com/api/v2" `
-                  -InstallationPolicy Trusted
-              } else {
-                Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+                Register-PSRepository -Default
               }
 
+              Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
               Get-PSRepository -Name PSGallery
               break
             } catch {
