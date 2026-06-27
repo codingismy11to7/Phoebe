@@ -715,20 +715,6 @@ fun MobilePlayer(
                                 positionMs = positionMs,
                                 modifier = Modifier.fillMaxSize(),
                             )
-                            val isRadio = t.id.startsWith("radio:")
-                            val showFeedbackActions = isRadio || (likeActions.likesEnabled && t.canTogglePlexLike()) || (listenBrainzFeedbackTarget.available && listenBrainzFeedbackTarget.trackId == t.id)
-                            val showLikeControl = isRadio || (likeActions.likesEnabled && t.canTogglePlexLike())
-                            MobileNowPlayingOverlayActions(
-                                track = t,
-                                showAudioQualityBadge = false,
-                                showFeedbackActions = showFeedbackActions,
-                                showLikeControl = showLikeControl,
-                                likeActions = likeActions,
-                                showListenBrainzFeedback = !isRadio && listenBrainzFeedbackTarget.available && listenBrainzFeedbackTarget.trackId == t.id,
-                                listenBrainzFeedbackTarget = listenBrainzFeedbackTarget,
-                                onListenBrainzFeedback = onListenBrainzFeedback,
-                                alpha = overlayActionsAlpha,
-                            )
                         }
                     }
                 }

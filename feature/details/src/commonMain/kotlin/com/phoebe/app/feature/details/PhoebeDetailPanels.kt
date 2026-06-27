@@ -8,6 +8,7 @@ import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
@@ -1025,7 +1026,7 @@ private fun MobileArtistDetailHeader(
                     .sharedArtworkTransition("artist:${artist.id}"),
                 radius = 28.dp,
                 elevated = false,
-                maxDecodeDimension = 1024,
+                maxDecodeDimension = HeroArtworkMaxDecodeDimension,
                 alignment = Alignment.TopCenter,
             )
         }
@@ -1109,7 +1110,7 @@ private fun MobileAlbumDetailHeader(
                 .sharedArtworkTransition("album:${album.id}"),
             radius = 24.dp,
             elevated = true,
-            maxDecodeDimension = 1024,
+            maxDecodeDimension = HeroArtworkMaxDecodeDimension,
         )
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
@@ -1181,6 +1182,8 @@ private fun DesktopArtistDetailHeader(
     onShuffleAllTracks: (List<Track>) -> Unit,
     onPlayArtistRadio: (Artist) -> Unit,
     onDownloadArtist: (Artist) -> Unit,
+    searchQuery: String,
+    onSearchQuery: (String) -> Unit,
     immersive: Boolean,
 ) {
     DesktopDetailHero(
@@ -1190,6 +1193,21 @@ private fun DesktopArtistDetailHeader(
         meta = listOf("${albumsCount} $albumWord", "${tracks.size} $songWord"),
         onBack = onBack,
         immersive = immersive,
+        searchQuery = searchQuery,
+        onSearchQuery = onSearchQuery,
+        backgroundArtwork = { revealFullArtwork ->
+            ArtworkImage(
+                artist.title,
+                artistThumbUrl,
+                Modifier.fillMaxSize(),
+                radius = 0.dp,
+                shape = RoundedCornerShape(0.dp),
+                elevated = false,
+                maxDecodeDimension = HeroArtworkMaxDecodeDimension,
+                alignment = Alignment.Center,
+                contentScale = if (revealFullArtwork) ContentScale.Fit else ContentScale.Crop,
+            )
+        },
         artwork = {
             Box(
                 Modifier
@@ -1204,7 +1222,7 @@ private fun DesktopArtistDetailHeader(
                     Modifier.fillMaxSize(),
                     radius = 28.dp,
                     elevated = true,
-                    maxDecodeDimension = 1024,
+                    maxDecodeDimension = HeroArtworkMaxDecodeDimension,
                     alignment = Alignment.TopCenter,
                 )
             }
@@ -1246,6 +1264,8 @@ private fun DesktopAlbumDetailHeader(
     onPlayTracks: (List<Track>, Int) -> Unit,
     onDownloadAlbum: (Album) -> Unit,
     onArtist: (Artist) -> Unit,
+    searchQuery: String,
+    onSearchQuery: (String) -> Unit,
     immersive: Boolean,
 ) {
     val meta = buildList {
@@ -1260,6 +1280,21 @@ private fun DesktopAlbumDetailHeader(
         meta = meta,
         onBack = onBack,
         immersive = immersive,
+        searchQuery = searchQuery,
+        onSearchQuery = onSearchQuery,
+        backgroundArtwork = { revealFullArtwork ->
+            ArtworkImage(
+                album.title,
+                album.thumbUrl,
+                Modifier.fillMaxSize(),
+                radius = 0.dp,
+                shape = RoundedCornerShape(0.dp),
+                elevated = false,
+                maxDecodeDimension = HeroArtworkMaxDecodeDimension,
+                alignment = Alignment.Center,
+                contentScale = if (revealFullArtwork) ContentScale.Fit else ContentScale.Crop,
+            )
+        },
         artwork = {
             ArtworkImage(
                 album.title,
@@ -1269,7 +1304,7 @@ private fun DesktopAlbumDetailHeader(
                     .sharedArtworkTransition("album:${album.id}"),
                 radius = 18.dp,
                 elevated = true,
-                maxDecodeDimension = 1024,
+                maxDecodeDimension = HeroArtworkMaxDecodeDimension,
             )
         },
         titleModifier = Modifier.sharedBoundsTransition("album:${album.id}:title"),
@@ -1295,6 +1330,7 @@ private fun DesktopAlbumDetailHeader(
     )
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun DesktopDetailHero(
     label: String,
@@ -1302,17 +1338,175 @@ private fun DesktopDetailHero(
     eyebrow: String,
     meta: List<String>,
     onBack: () -> Unit,
-        artwork: @Composable () -> Unit,
-        modifier: Modifier = Modifier,
-        subtitle: String? = null,
-        immersive: Boolean = true,
-        titleModifier: Modifier = Modifier,
-        subtitleModifier: Modifier = Modifier,
-        actions: @Composable () -> Unit,
+    artwork: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+    subtitle: String? = null,
+    immersive: Boolean = true,
+    backgroundArtwork: (@Composable (Boolean) -> Unit)? = null,
+    searchQuery: String? = null,
+    onSearchQuery: ((String) -> Unit)? = null,
+    titleModifier: Modifier = Modifier,
+    subtitleModifier: Modifier = Modifier,
+    actions: @Composable () -> Unit,
 ) {
     val heroHeight = if (immersive) 340.dp else 300.dp
     val heroTitleSize = if (immersive) 52.sp else 44.sp
     val heroTitleLineHeight = if (immersive) 54.sp else 46.sp
+    var revealFullArtwork by remember(title) { mutableStateOf(false) }
+    val artworkRevealProgress by animateFloatAsState(
+        targetValue = if (revealFullArtwork) 1f else 0f,
+        animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing),
+        label = "detail-artwork-reveal",
+    )
+    val immersiveHeroHeight by animateDpAsState(
+        targetValue = if (revealFullArtwork) 760.dp else 540.dp,
+        animationSpec = tween(durationMillis = 360, easing = FastOutSlowInEasing),
+        label = "detail-hero-height",
+    )
+    val panelColor = PhoebeUi.panel
+    val horizontalGradientBrush = remember(panelColor) {
+        Brush.horizontalGradient(
+            0f to panelColor.copy(alpha = 0.98f),
+            0.36f to panelColor.copy(alpha = 0.78f),
+            0.72f to panelColor.copy(alpha = 0.18f),
+            1f to Color.Black.copy(alpha = 0.12f),
+        )
+    }
+    val verticalGradientBrush = remember(panelColor) {
+        Brush.verticalGradient(
+            0f to Color.Black.copy(alpha = 0.12f),
+            0.62f to Color.Transparent,
+            1f to panelColor.copy(alpha = 0.82f),
+        )
+    }
+    if (immersive && backgroundArtwork != null) {
+        Box(
+            modifier
+                .fillMaxWidth()
+                .height(immersiveHeroHeight)
+                .background(panelColor),
+        ) {
+            Box(
+                Modifier
+                    .matchParentSize()
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                    ) { revealFullArtwork = !revealFullArtwork },
+            ) {
+                Box(
+                    Modifier
+                        .matchParentSize()
+                        .graphicsLayer {
+                            alpha = 0.74f * (1f - artworkRevealProgress)
+                            scaleX = 1f + (0.035f * artworkRevealProgress)
+                            scaleY = 1f + (0.035f * artworkRevealProgress)
+                        },
+                ) {
+                    backgroundArtwork(false)
+                }
+                Box(
+                    Modifier
+                        .matchParentSize()
+                        .graphicsLayer {
+                            alpha = artworkRevealProgress
+                            scaleX = 0.88f + (0.12f * artworkRevealProgress)
+                            scaleY = 0.88f + (0.12f * artworkRevealProgress)
+                        },
+                ) {
+                    backgroundArtwork(true)
+                }
+            }
+            Box(
+                Modifier
+                    .matchParentSize()
+                    .graphicsLayer {
+                        alpha = 0.18f * artworkRevealProgress
+                    },
+            ) {
+                Box(Modifier.matchParentSize().background(Color.Black))
+            }
+            Box(
+                Modifier
+                    .matchParentSize()
+                    .graphicsLayer { alpha = 1f - artworkRevealProgress }
+                    .background(horizontalGradientBrush),
+            )
+            Box(
+                Modifier
+                    .matchParentSize()
+                    .graphicsLayer { alpha = 1f - artworkRevealProgress }
+                    .background(verticalGradientBrush),
+            )
+            if (searchQuery != null && onSearchQuery != null) {
+                SearchPill(
+                    query = searchQuery,
+                    onQueryChange = onSearchQuery,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 32.dp)
+                        .width(PhoebeDesktopLayout.searchWidth)
+                        .graphicsLayer { alpha = 1f - artworkRevealProgress },
+                )
+            }
+            Box(
+                Modifier
+                    .align(Alignment.TopStart)
+                    .padding(start = 28.dp, top = 24.dp)
+                    .graphicsLayer { alpha = 1f - artworkRevealProgress },
+            ) {
+                DetailSectionIntro(
+                    onBack = onBack,
+                    label = label,
+                    alignBackIconToContentStart = true,
+                )
+            }
+            Column(
+                Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(start = 28.dp, end = 150.dp, bottom = 34.dp)
+                    .widthIn(max = 680.dp)
+                    .graphicsLayer { alpha = 1f - artworkRevealProgress },
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                SectionLabel(eyebrow, PhoebeUi.accentLight)
+                Text(
+                    title,
+                    color = PhoebeUi.primaryText,
+                    fontSize = 54.sp,
+                    lineHeight = 56.sp,
+                    fontWeight = FontWeight.Black,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = titleModifier,
+                )
+                if (!subtitle.isNullOrBlank()) {
+                    Text(
+                        subtitle,
+                        color = PhoebeUi.secondaryText,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = subtitleModifier,
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    meta.filter { it.isNotBlank() }.forEach { item ->
+                        DesktopDetailMetaChip(item)
+                    }
+                }
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(top = 10.dp),
+                ) {
+                    actions()
+                }
+            }
+        }
+        return
+    }
     Row(
         modifier
             .fillMaxWidth()
@@ -1583,6 +1777,7 @@ fun ArtistDetailPanel(
     catalogRefreshing: Boolean = false,
     modifier: Modifier = Modifier,
     searchQuery: String = "",
+    onSearchQuery: (String) -> Unit = {},
     onBack: () -> Unit,
     onAlbum: (Album) -> Unit,
     onPlayTracks: (List<Track>, Int) -> Unit,
@@ -1662,7 +1857,7 @@ fun ArtistDetailPanel(
         } else {
             if (mobileBottomPadding > 144.dp) mobileBottomPadding else 144.dp
         }
-        val immersiveDesktopHeader = maxHeight >= 760.dp
+        val immersiveDesktopHeader = useTable && maxHeight >= 640.dp
         val albumGridItemSizeDp = libraryUi.albumGridItemSizeDp
         val albumGridColumns = rememberLibraryGridColumnCount(
             availableWidth = maxWidth,
@@ -1673,6 +1868,14 @@ fun ArtistDetailPanel(
             visibleAlbums.chunked(albumGridColumns)
         }
         val listState = RetainedLazyListStates.remember("artist-detail:${artist.id}")
+        val listStartPadding = if (useTable) 0.dp else startPadding
+        val listEndPadding = if (useTable) 0.dp else endPadding
+        val listTopPadding = if (useTable) 0.dp else mobileContentTopPadding(topPadding)
+        val contentPaddingModifier = if (useTable) {
+            Modifier.padding(start = startPadding, end = endPadding)
+        } else {
+            Modifier
+        }
         if (showStats) {
             ArtistStatsPanel(
                 artist = artist,
@@ -1694,9 +1897,9 @@ fun ArtistDetailPanel(
         state = listState,
         modifier = Modifier
             .fillMaxSize()
-            .padding(start = startPadding, end = endPadding),
+            .padding(start = listStartPadding, end = listEndPadding),
         contentPadding = PaddingValues(
-            top = mobileContentTopPadding(topPadding),
+            top = listTopPadding,
             bottom = bottomContentPadding
         ),
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -1721,9 +1924,41 @@ fun ArtistDetailPanel(
                         onShuffleAllTracks = onShuffleAllTracks,
                         onPlayArtistRadio = onPlayArtistRadio,
                         onDownloadArtist = onDownloadArtist,
+                        searchQuery = searchQuery,
+                        onSearchQuery = onSearchQuery,
                         immersive = immersiveDesktopHeader,
                     )
                     Spacer(Modifier.height(14.dp))
+                    Column(contentPaddingModifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (popularTracks.isNotEmpty() && searchQuery.isBlank()) {
+                            PopularTracksSection(
+                                tracks = popularTracks,
+                                useTable = true,
+                                columns = libraryUi.columns,
+                                onPlayTracks = onPlayTracks,
+                                onAddToUpNext = onAddToUpNext,
+                                onDownload = onDownload,
+                            )
+                            Spacer(Modifier.height(10.dp))
+                        }
+                        DetailSectionHeader(
+                            title = "Albums",
+                            sortBy = albumSortBy,
+                            sortKeys = listOf(LibrarySortBy.Name, LibrarySortBy.Year, LibrarySortBy.DateAdded),
+                            sortLabel = { key ->
+                                when (key) {
+                                    LibrarySortBy.Year -> "Release date"
+                                    LibrarySortBy.DateAdded -> "Date added"
+                                    else -> "Album name"
+                                }
+                            },
+                            onSortBy = { albumSortBy = it },
+                            ascending = albumAscending,
+                            onAscending = { albumAscending = it },
+                            viewMode = albumViewMode,
+                            onViewMode = { albumViewMode = it },
+                        )
+                    }
                 } else {
                     MobileArtistDetailHeader(
                         artist = artist,
@@ -1743,35 +1978,35 @@ fun ArtistDetailPanel(
                         onPlayArtistRadio = onPlayArtistRadio,
                         onDownloadArtist = onDownloadArtist,
                     )
-                }
-                if (popularTracks.isNotEmpty() && searchQuery.isBlank()) {
-                    PopularTracksSection(
-                        tracks = popularTracks,
-                        useTable = useTable,
-                        columns = libraryUi.columns,
-                        onPlayTracks = onPlayTracks,
-                        onAddToUpNext = onAddToUpNext,
-                        onDownload = onDownload,
+                    if (popularTracks.isNotEmpty() && searchQuery.isBlank()) {
+                        PopularTracksSection(
+                            tracks = popularTracks,
+                            useTable = false,
+                            columns = libraryUi.columns,
+                            onPlayTracks = onPlayTracks,
+                            onAddToUpNext = onAddToUpNext,
+                            onDownload = onDownload,
+                        )
+                        Spacer(Modifier.height(10.dp))
+                    }
+                    DetailSectionHeader(
+                        title = "Albums",
+                        sortBy = albumSortBy,
+                        sortKeys = listOf(LibrarySortBy.Name, LibrarySortBy.Year, LibrarySortBy.DateAdded),
+                        sortLabel = { key ->
+                            when (key) {
+                                LibrarySortBy.Year -> "Release date"
+                                LibrarySortBy.DateAdded -> "Date added"
+                                else -> "Album name"
+                            }
+                        },
+                        onSortBy = { albumSortBy = it },
+                        ascending = albumAscending,
+                        onAscending = { albumAscending = it },
+                        viewMode = albumViewMode,
+                        onViewMode = { albumViewMode = it },
                     )
-                    Spacer(Modifier.height(10.dp))
                 }
-                DetailSectionHeader(
-                    title = "Albums",
-                    sortBy = albumSortBy,
-                    sortKeys = listOf(LibrarySortBy.Name, LibrarySortBy.Year, LibrarySortBy.DateAdded),
-                    sortLabel = { key ->
-                        when (key) {
-                            LibrarySortBy.Year -> "Release date"
-                            LibrarySortBy.DateAdded -> "Date added"
-                            else -> "Album name"
-                        }
-                    },
-                    onSortBy = { albumSortBy = it },
-                    ascending = albumAscending,
-                    onAscending = { albumAscending = it },
-                    viewMode = albumViewMode,
-                    onViewMode = { albumViewMode = it },
-                )
             }
         }
         if (albumViewMode == LibraryViewMode.Grid) {
@@ -1782,7 +2017,7 @@ fun ArtistDetailPanel(
             ) { rowIndex ->
                 val row = albumGridRows[rowIndex]
                 Row(
-                    Modifier.fillMaxWidth(),
+                    contentPaddingModifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
                     row.forEach { album ->
@@ -1832,6 +2067,7 @@ fun ArtistDetailPanel(
                     subtitle = "${album.artist} • ${album.year ?: "Album"}",
                     seed = album.title,
                     thumbUrl = album.thumbUrl,
+                    modifier = contentPaddingModifier,
                     elevatedArtwork = useTable,
                     sharedKey = "album:${album.id}",
                     onClick = { onAlbum(album) },
@@ -1839,28 +2075,30 @@ fun ArtistDetailPanel(
             }
         }
         item(contentType = "artist-songs-header") {
-            Spacer(Modifier.height(8.dp))
-            DetailSectionHeader(
-                title = "Songs",
-                sortBy = songSortBy,
-                sortKeys = listOf(LibrarySortBy.Name, LibrarySortBy.Album, LibrarySortBy.Year, LibrarySortBy.DateAdded),
-                sortLabel = { key ->
-                    when (key) {
-                        LibrarySortBy.Album -> "Album name"
-                        LibrarySortBy.Year -> "Release date"
-                        LibrarySortBy.DateAdded -> "Date added"
-                        else -> "Song name"
-                    }
-                },
-                onSortBy = { songSortBy = it },
-                ascending = songAscending,
-                onAscending = { songAscending = it },
-                columns = libraryUi.columns,
-                onColumns = onLibraryColumns,
-            )
+            Column(contentPaddingModifier) {
+                Spacer(Modifier.height(8.dp))
+                DetailSectionHeader(
+                    title = "Songs",
+                    sortBy = songSortBy,
+                    sortKeys = listOf(LibrarySortBy.Name, LibrarySortBy.Album, LibrarySortBy.Year, LibrarySortBy.DateAdded),
+                    sortLabel = { key ->
+                        when (key) {
+                            LibrarySortBy.Album -> "Album name"
+                            LibrarySortBy.Year -> "Release date"
+                            LibrarySortBy.DateAdded -> "Date added"
+                            else -> "Song name"
+                        }
+                    },
+                    onSortBy = { songSortBy = it },
+                    ascending = songAscending,
+                    onAscending = { songAscending = it },
+                    columns = libraryUi.columns,
+                    onColumns = onLibraryColumns,
+                )
+            }
         }
         item(contentType = "artist-song-toolbar") {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(contentPaddingModifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 val tracksLoadingIds = LocalTracksLoading.current
                 val artistAlbumsLoading = catalogAlbumsForArtist(catalog, artist.title).any { it.id in tracksLoadingIds }
                 if (artistAlbumsLoading && searchQuery.isBlank()) {
@@ -1876,15 +2114,23 @@ fun ArtistDetailPanel(
                     if (artistAlbumsLoading) "Fetching songs…" else "No songs loaded yet.",
                     color = PhoebeUi.mutedText,
                     fontSize = 14.sp,
+                    modifier = contentPaddingModifier,
                 )
             }
         } else if (visibleTracks.isEmpty() && searchQuery.isNotBlank()) {
             item(contentType = "artist-song-empty") {
-                Text("No songs by ${artist.title} match \"$searchQuery\".", color = PhoebeUi.mutedText, fontSize = 14.sp)
+                Text(
+                    "No songs by ${artist.title} match \"$searchQuery\".",
+                    color = PhoebeUi.mutedText,
+                    fontSize = 14.sp,
+                    modifier = contentPaddingModifier,
+                )
             }
         } else if (useTable) {
             item(contentType = "artist-song-header") {
-                SongsTableHeader(libraryUi.columns, showLeadingHandle = false)
+                Box(contentPaddingModifier) {
+                    SongsTableHeader(libraryUi.columns, showLeadingHandle = false)
+                }
             }
             itemsIndexed(visibleTracks, key = { _, t -> t.id }, contentType = { _, _ -> "artist-song" }) { index, track ->
                 SongRow(
@@ -1895,6 +2141,7 @@ fun ArtistDetailPanel(
                     onPlay = { onPlayTracks(visibleTracks, index) },
                     onAddToUpNext = { onAddToUpNext(track) },
                     onDownload = { onDownload(track) },
+                    modifier = contentPaddingModifier,
                     showPlaylistDragHandle = false,
                 )
             }
@@ -1915,20 +2162,24 @@ fun ArtistDetailPanel(
         }
         if (similarArtists.isNotEmpty() && searchQuery.isBlank()) {
             item(contentType = "artist-similar-artists") {
-                SimilarArtistsSection(
-                    artists = similarArtists,
-                    catalog = catalog,
-                    useTable = useTable,
-                    onArtist = onArtist,
-                )
+                Box(contentPaddingModifier) {
+                    SimilarArtistsSection(
+                        artists = similarArtists,
+                        catalog = catalog,
+                        useTable = useTable,
+                        onArtist = onArtist,
+                    )
+                }
             }
         }
         if (!artist.genre.isNullOrBlank() || !artist.mood.isNullOrBlank() || !artist.style.isNullOrBlank() || !artist.biography.isNullOrBlank()) {
             item(contentType = "artist-about") {
-                AboutArtistPanel(
-                    artist = artist,
-                    onCollectionItems = onCollectionItems,
-                )
+                Box(contentPaddingModifier) {
+                    AboutArtistPanel(
+                        artist = artist,
+                        onCollectionItems = onCollectionItems,
+                    )
+                }
             }
         }
     }
@@ -2435,6 +2686,7 @@ fun AlbumDetailPanel(
     catalogRefreshing: Boolean = false,
     modifier: Modifier = Modifier,
     searchQuery: String = "",
+    onSearchQuery: (String) -> Unit = {},
     onBack: () -> Unit,
     onPlayTracks: (List<Track>, Int) -> Unit,
     onAddToUpNext: (Track) -> Unit,
@@ -2484,15 +2736,23 @@ fun AlbumDetailPanel(
         } else {
             if (mobileBottomPadding > 144.dp) mobileBottomPadding else 144.dp
         }
-        val immersiveDesktopHeader = maxHeight >= 760.dp
+        val immersiveDesktopHeader = useTable && maxHeight >= 640.dp
         val listState = RetainedLazyListStates.remember("album-detail:${resolvedAlbum.id}")
+        val listStartPadding = if (useTable) 0.dp else startPadding
+        val listEndPadding = if (useTable) 0.dp else endPadding
+        val listTopPadding = if (useTable) 0.dp else mobileContentTopPadding(topPadding)
+        val contentPaddingModifier = if (useTable) {
+            Modifier.padding(start = startPadding, end = endPadding)
+        } else {
+            Modifier
+        }
     LazyColumn(
         state = listState,
         modifier = Modifier
             .fillMaxSize()
-            .padding(start = startPadding, end = endPadding),
+            .padding(start = listStartPadding, end = listEndPadding),
         contentPadding = PaddingValues(
-            top = mobileContentTopPadding(topPadding),
+            top = listTopPadding,
             bottom = bottomContentPadding
         ),
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -2510,7 +2770,29 @@ fun AlbumDetailPanel(
                         onPlayTracks = onPlayTracks,
                         onDownloadAlbum = onDownloadAlbum,
                         onArtist = onArtist,
+                        searchQuery = searchQuery,
+                        onSearchQuery = onSearchQuery,
                         immersive = immersiveDesktopHeader,
+                    )
+                    Spacer(Modifier.height(18.dp))
+                    DetailSectionHeader(
+                        title = "Tracks",
+                        sortBy = sortBy,
+                        sortKeys = listOf(LibrarySortBy.AlbumOrder, LibrarySortBy.Name, LibrarySortBy.Year, LibrarySortBy.DateAdded),
+                        sortLabel = { key ->
+                            when (key) {
+                                LibrarySortBy.AlbumOrder -> "Album order"
+                                LibrarySortBy.Year -> "Release date"
+                                LibrarySortBy.DateAdded -> "Date added"
+                                else -> "Song name"
+                            }
+                        },
+                        onSortBy = { sortBy = it },
+                        ascending = null,
+                        onAscending = null,
+                        columns = libraryUi.columns,
+                        onColumns = onLibraryColumns,
+                        modifier = contentPaddingModifier,
                     )
                 } else {
                     MobileAlbumDetailHeader(
@@ -2524,29 +2806,29 @@ fun AlbumDetailPanel(
                         onDownloadAlbum = onDownloadAlbum,
                         onArtist = onArtist,
                     )
+                    DetailSectionHeader(
+                        title = "Tracks",
+                        sortBy = sortBy,
+                        sortKeys = listOf(LibrarySortBy.AlbumOrder, LibrarySortBy.Name, LibrarySortBy.Year, LibrarySortBy.DateAdded),
+                        sortLabel = { key ->
+                            when (key) {
+                                LibrarySortBy.AlbumOrder -> "Album order"
+                                LibrarySortBy.Year -> "Release date"
+                                LibrarySortBy.DateAdded -> "Date added"
+                                else -> "Song name"
+                            }
+                        },
+                        onSortBy = { sortBy = it },
+                        ascending = null,
+                        onAscending = null,
+                        columns = libraryUi.columns,
+                        onColumns = onLibraryColumns,
+                    )
                 }
-                DetailSectionHeader(
-                    title = "Tracks",
-                    sortBy = sortBy,
-                    sortKeys = listOf(LibrarySortBy.AlbumOrder, LibrarySortBy.Name, LibrarySortBy.Year, LibrarySortBy.DateAdded),
-                    sortLabel = { key ->
-                        when (key) {
-                            LibrarySortBy.AlbumOrder -> "Album order"
-                            LibrarySortBy.Year -> "Release date"
-                            LibrarySortBy.DateAdded -> "Date added"
-                            else -> "Song name"
-                        }
-                    },
-                    onSortBy = { sortBy = it },
-                    ascending = null,
-                    onAscending = null,
-                    columns = libraryUi.columns,
-                    onColumns = onLibraryColumns,
-                )
             }
         }
         item(contentType = "album-track-toolbar") {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(contentPaddingModifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (resolvedAlbum.id in LocalTracksLoading.current && searchQuery.isBlank()) {
                     CatalogLoadingStrip()
                 }
@@ -2562,11 +2844,14 @@ fun AlbumDetailPanel(
                     },
                     color = PhoebeUi.mutedText,
                     fontSize = 15.sp,
+                    modifier = contentPaddingModifier,
                 )
             }
         } else if (useTable) {
             item(contentType = "album-track-header") {
-                SongsTableHeader(libraryUi.columns)
+                Box(contentPaddingModifier) {
+                    SongsTableHeader(libraryUi.columns)
+                }
             }
             itemsIndexed(visibleTracks, key = { _, t -> t.id }, contentType = { _, _ -> "album-track" }) { index, track ->
                 SongRow(
@@ -2577,6 +2862,7 @@ fun AlbumDetailPanel(
                     onPlay = { playVisibleTrack(index) },
                     onAddToUpNext = { onAddToUpNext(track) },
                     onDownload = { onDownload(track) },
+                    modifier = contentPaddingModifier,
                 )
             }
         } else {
@@ -2596,10 +2882,12 @@ fun AlbumDetailPanel(
         }
         if (resolvedAlbum.rating != null || !resolvedAlbum.genre.isNullOrBlank() || !resolvedAlbum.mood.isNullOrBlank() || !resolvedAlbum.style.isNullOrBlank() || !resolvedAlbum.description.isNullOrBlank() || !resolvedAlbum.recordLabel.isNullOrBlank()) {
             item(contentType = "album-about") {
-                AboutAlbumPanel(
-                    album = resolvedAlbum,
-                    onCollectionItems = onCollectionItems,
-                )
+                Box(contentPaddingModifier) {
+                    AboutAlbumPanel(
+                        album = resolvedAlbum,
+                        onCollectionItems = onCollectionItems,
+                    )
+                }
             }
         }
     }

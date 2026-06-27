@@ -465,8 +465,7 @@ internal fun DesktopPlayer(
                                     ),
                                     modifier = Modifier.fillMaxSize(),
                                 )
-                                is AppScreen.ArtistDetail -> Column(Modifier.fillMaxSize()) {
-                                    LibraryTopBar(searchQuery = searchQuery, onSearchQuery = onSearchQuery)
+                                is AppScreen.ArtistDetail -> Box(Modifier.fillMaxSize()) {
                                     ArtistDetailRoute(
                                         state = ArtistDetailRouteState(
                                             artist = targetScreen.artist,
@@ -491,12 +490,12 @@ internal fun DesktopPlayer(
                                             onArtist = onArtist,
                                             onLibraryColumns = onLibraryColumns,
                                             onCollectionItems = onCollectionValue,
+                                            onSearchQuery = onSearchQuery,
                                         ),
-                                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                                        modifier = Modifier.fillMaxSize(),
                                     )
                                 }
-                                is AppScreen.AlbumDetail -> Column(Modifier.fillMaxSize()) {
-                                    LibraryTopBar(searchQuery = searchQuery, onSearchQuery = onSearchQuery)
+                                is AppScreen.AlbumDetail -> Box(Modifier.fillMaxSize()) {
                                     AlbumDetailRoute(
                                         state = AlbumDetailRouteState(
                                             album = targetScreen.album,
@@ -514,8 +513,9 @@ internal fun DesktopPlayer(
                                             onArtist = onArtist,
                                             onLibraryColumns = onLibraryColumns,
                                             onCollectionItems = onCollectionValue,
+                                            onSearchQuery = onSearchQuery,
                                         ),
-                                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                                        modifier = Modifier.fillMaxSize(),
                                     )
                                 }
                                 is AppScreen.SongDetail -> Column(Modifier.fillMaxSize()) {
@@ -814,6 +814,7 @@ internal fun DesktopPlayer(
                                             homeScreenLayoutMode = settingsState.homeScreenLayoutMode,
                                             session = session,
                                             listenBrainzCredentialAvailability = listenBrainzCredentialAvailability,
+                                            appUpdateState = settingsState.appUpdateState,
                                             initialCategory = if (section == BrowseSection.Downloads) {
                                                 SettingsCategory.Downloads
                                             } else {
@@ -863,6 +864,8 @@ internal fun DesktopPlayer(
                                             onDisconnectLastFm = settingsActions.onDisconnectLastFm,
                                             onLastFmSubmitNowPlaying = settingsActions.onLastFmSubmitNowPlaying,
                                             onLastFmSubmitScrobbles = settingsActions.onLastFmSubmitScrobbles,
+                                            onCheckForUpdates = settingsActions.onCheckForUpdates,
+                                            onInstallUpdate = settingsActions.onInstallUpdate,
                                         ),
                                         modifier = Modifier.fillMaxSize(),
                                     )

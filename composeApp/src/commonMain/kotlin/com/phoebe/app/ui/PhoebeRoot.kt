@@ -1691,6 +1691,7 @@ private fun PhoebeRootStateHolder(
                         onLastFmSubmitNowPlaying = state::setLastFmSubmitNowPlaying,
                         onLastFmSubmitScrobbles = state::setLastFmSubmitScrobbles,
                         appUpdateState = appUpdateState,
+                        onCheckForUpdates = state::checkForUpdates,
                         routeViewModelFactory = state.routeViewModelFactory,
                         onInstallUpdate = state::installAvailableUpdate,
                         showBottomChrome = false,
@@ -2101,6 +2102,7 @@ private fun PhoebeRootStateHolder(
                             SettingsCategory.AudioPlayback
                         },
                         listenBrainzCredentialAvailability = state.listenBrainzCredentialAvailability,
+                        appUpdateState = appUpdateState,
                     ),
                     settingsActions = SettingsActions(
                         onHomeSections = state::setHomeSections,
@@ -2146,6 +2148,8 @@ private fun PhoebeRootStateHolder(
                         onDisconnectLastFm = state::disconnectLastFm,
                         onLastFmSubmitNowPlaying = state::setLastFmSubmitNowPlaying,
                         onLastFmSubmitScrobbles = state::setLastFmSubmitScrobbles,
+                        onCheckForUpdates = state::checkForUpdates,
+                        onInstallUpdate = state::installAvailableUpdate,
                     ),
                 )
             }

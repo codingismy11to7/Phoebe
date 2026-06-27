@@ -2156,6 +2156,14 @@ class AppState(
         dependencies.appSettingsRepository.setDownloadPolicySettings(settings)
     }
 
+    fun checkForUpdates() = scope.launch {
+        dependencies.appUpdateService.checkForUpdates { error ->
+            val message = error.message ?: "Couldn't check for updates."
+            mutableMessage.value = message
+            mutablePlaybackSnackbar.value = message
+        }
+    }
+
     fun installAvailableUpdate() = scope.launch {
         dependencies.appUpdateService.installAvailableUpdate { message ->
             mutableMessage.value = message
