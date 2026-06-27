@@ -362,17 +362,24 @@ private fun FavoriteLibraryDesktopScaffold(
     content: @Composable () -> Unit,
 ) {
     Column(
-        modifier.fillMaxSize().padding(start = 36.dp, top = 32.dp, end = 28.dp, bottom = 24.dp),
+        modifier
+            .fillMaxSize()
+            .padding(
+                start = PhoebeDesktopLayout.contentStart,
+                top = PhoebeDesktopLayout.contentTop,
+                end = PhoebeDesktopLayout.contentEnd,
+                bottom = PhoebeDesktopLayout.contentBottom,
+            ),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
             DetailBackButton(onBack = onBack)
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Text(title, color = PhoebeUi.primaryText, fontSize = 30.sp, fontWeight = FontWeight.Black)
                 Text(countLabel, color = PhoebeUi.mutedText, fontSize = 13.sp)
             }
-            SearchPill(searchQuery, onSearchQuery, Modifier.width(380.dp))
+            SearchPill(searchQuery, onSearchQuery, Modifier.width(PhoebeDesktopLayout.searchWidth))
         }
         toolbar()
         Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -531,10 +538,10 @@ fun LibraryDesktopView(
             Modifier
                 .fillMaxSize()
                 .padding(
-                    start = 36.dp,
-                    top = 32.dp,
-                    end = 28.dp,
-                    bottom = 24.dp,
+                    start = PhoebeDesktopLayout.contentStart,
+                    top = PhoebeDesktopLayout.contentTop,
+                    end = PhoebeDesktopLayout.contentEnd,
+                    bottom = PhoebeDesktopLayout.contentBottom,
                 ),
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
@@ -674,7 +681,7 @@ private fun LibraryHeader(
             SearchPill(searchQuery, onSearchQuery, Modifier.fillMaxWidth())
         }
     } else {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
             Column(Modifier.weight(1f)) {
                 Text(
                     text = when (filter) {
@@ -688,7 +695,7 @@ private fun LibraryHeader(
                 )
                 Text("Your Library", color = PhoebeUi.mutedText, fontSize = 13.sp)
             }
-            SearchPill(searchQuery, onSearchQuery, Modifier.width(380.dp))
+            SearchPill(searchQuery, onSearchQuery, Modifier.width(PhoebeDesktopLayout.searchWidth))
         }
     }
 }

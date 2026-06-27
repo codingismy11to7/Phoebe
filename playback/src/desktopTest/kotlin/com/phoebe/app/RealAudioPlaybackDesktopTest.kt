@@ -612,6 +612,109 @@ class RealAudioPlaybackDesktopTest {
     }
 
     @Test
+    fun localMp3CrossfadeUsesJavaFxAndCommitsToSecondTrack() {
+        assumeRealAudioTestsEnabled()
+        val diagnostics = RecordingPlaybackDiagnostics()
+        val player = DesktopAudioPlayer(diagnostics)
+        try {
+            val first = fixtureTrack("mdn-t-rex-roar-cc0.mp3", durationMs = 2_500, id = "first-mp3-crossfade")
+            val second = fixtureTrack("mdn-t-rex-roar-cc0.mp3", durationMs = 10_000, id = "second-mp3-crossfade")
+
+            player.setCrossfadeDurationMs(12_000)
+            player.play(listOf(first, second), 0)
+
+            assertTrue(
+                waitUntil {
+                    diagnostics.hasEngine(PlaybackEnginePath.JavaFxMediaPlayer) &&
+                        player.state.value.isPlaying
+                },
+                "Local MP3 crossfade playback should use JavaFX, not SampledClip; " +
+                    "engines=${diagnostics.engineEvents()} errors=${diagnostics.errorEvents()}",
+            )
+            assertTrue(
+                waitUntil(timeoutMs = 35_000) {
+                    diagnostics.hasCommitted(PlaybackEnginePath.JavaFxMediaPlayer, second.id) &&
+                        player.state.value.currentTrack?.id == second.id
+                },
+                "Local MP3 JavaFX crossfade did not commit to the second track; " +
+                    "state=${player.state.value} volumes=${diagnostics.volumeSteps(PlaybackEnginePath.JavaFxMediaPlayer)} " +
+                    "errors=${diagnostics.errorEvents()}",
+            )
+            assertFalse(
+                diagnostics.hasEngine(PlaybackEnginePath.SampledClip),
+                "Local MP3 crossfade must not use SampledClip because Java Sound MP3 decoding can produce static",
+            )
+            val volumes = diagnostics.volumeSteps(PlaybackEnginePath.JavaFxMediaPlayer)
+            assertTrue(volumes.size >= 4, "Expected several JavaFX crossfade volume samples")
+            assertTrue(volumes.zipWithNext().all { (left, right) -> left.outgoingVolume >= right.outgoingVolume })
+            assertTrue(volumes.zipWithNext().all { (left, right) -> left.incomingVolume <= right.incomingVolume })
+            assertEquals(second, player.state.value.currentTrack)
+        } finally {
+            player.releaseForTests()
+        }
+    }
+
+    @Test
+    fun remoteMp3CrossfadeUsesJavaFxStreamAndCommitsToSecondTrack() {
+        assumeRealAudioTestsEnabled()
+        val bytes = fixtureBytes("mdn-t-rex-roar-cc0.mp3")
+        val requestEvents = Collections.synchronizedList(mutableListOf<String>())
+        val server = createRemoteMp3HttpServer(bytes, requestEvents)
+        server.start()
+        val diagnostics = RecordingPlaybackDiagnostics()
+        val player = DesktopAudioPlayer(diagnostics)
+        try {
+            val base = "http://127.0.0.1:${server.address.port}/library/track.mp3"
+            val first = remoteTrack(
+                id = "first-remote-mp3-crossfade",
+                uri = "$base?track=first",
+                durationMs = 2_500,
+                audioCodec = "mp3",
+            )
+            val second = remoteTrack(
+                id = "second-remote-mp3-crossfade",
+                uri = "$base?track=second",
+                durationMs = 10_000,
+                audioCodec = "mp3",
+            )
+
+            player.setCrossfadeDurationMs(12_000)
+            player.play(listOf(first, second), 0)
+
+            assertTrue(
+                waitUntil {
+                    diagnostics.hasEngine(PlaybackEnginePath.JavaFxMediaPlayer) &&
+                        player.state.value.isPlaying
+                },
+                "Remote MP3 crossfade playback should use JavaFX, not sampled playback; " +
+                    "engines=${diagnostics.engineEvents()} requests=${requestEvents.toList()} " +
+                    "errors=${diagnostics.errorEvents()}",
+            )
+            assertTrue(
+                waitUntil(timeoutMs = 35_000) {
+                    diagnostics.hasCommitted(PlaybackEnginePath.JavaFxMediaPlayer, second.id) &&
+                        player.state.value.currentTrack?.id == second.id
+                },
+                "Remote MP3 JavaFX crossfade did not commit to the second track; " +
+                    "state=${player.state.value} volumes=${diagnostics.volumeSteps(PlaybackEnginePath.JavaFxMediaPlayer)} " +
+                    "requests=${requestEvents.toList()} errors=${diagnostics.errorEvents()}",
+            )
+            assertFalse(
+                diagnostics.hasEngine(PlaybackEnginePath.SampledClip),
+                "Remote MP3 crossfade must not use SampledClip because Java Sound MP3 decoding can produce static",
+            )
+            val volumes = diagnostics.volumeSteps(PlaybackEnginePath.JavaFxMediaPlayer)
+            assertTrue(volumes.size >= 4, "Expected several JavaFX crossfade volume samples")
+            assertTrue(volumes.zipWithNext().all { (left, right) -> left.outgoingVolume >= right.outgoingVolume })
+            assertTrue(volumes.zipWithNext().all { (left, right) -> left.incomingVolume <= right.incomingVolume })
+            assertEquals(second, player.state.value.currentTrack)
+        } finally {
+            player.releaseForTests()
+            server.stop(0)
+        }
+    }
+
+    @Test
     fun desktopPlaybackFeedsListenBrainzReporterAfterAudibleThreshold() = runBlocking {
         assumeRealAudioTestsEnabled()
         val diagnostics = RecordingPlaybackDiagnostics()

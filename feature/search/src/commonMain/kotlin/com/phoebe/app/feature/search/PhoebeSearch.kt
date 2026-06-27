@@ -73,6 +73,7 @@ import com.phoebe.app.ui.ArtworkImage
 import com.phoebe.app.ui.AutoScrollingText
 import com.phoebe.app.ui.PhoebeIcon
 import com.phoebe.app.ui.PhoebeIconView
+import com.phoebe.app.ui.PhoebeDesktopLayout
 import com.phoebe.app.ui.PhoebeTheme
 import com.phoebe.app.ui.PhoebeUi
 import com.phoebe.app.ui.SearchPill
@@ -394,11 +395,12 @@ fun SearchDesktopView(
     }
     BoxWithConstraints(modifier) {
         val compactPane = maxWidth < 900.dp
-        val contentPadding = if (compactPane) {
-            PaddingValues(start = 36.dp, end = 28.dp, top = 32.dp, bottom = 24.dp)
-        } else {
-            PaddingValues(start = 36.dp, end = 28.dp, top = 32.dp, bottom = 24.dp)
-        }
+        val contentPadding = PaddingValues(
+            start = PhoebeDesktopLayout.contentStart,
+            end = PhoebeDesktopLayout.contentEnd,
+            top = PhoebeDesktopLayout.contentTop,
+            bottom = PhoebeDesktopLayout.contentBottom,
+        )
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -416,12 +418,12 @@ fun SearchDesktopView(
                     SavedSearchStrip(searchQuery, onSearchQuery, compact = true)
                 }
             } else {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
                     Column(Modifier.weight(1f)) {
                         Text("Search", color = PhoebeUi.primaryText, fontSize = 30.sp, fontWeight = FontWeight.Black)
                         Text("Find your favorite music", color = PhoebeUi.mutedText, fontSize = 13.sp)
                     }
-                    SearchInputWithSyntaxHelp(searchQuery, onSearchQuery, Modifier.width(428.dp))
+                    SearchPill(searchQuery, onSearchQuery, Modifier.width(PhoebeDesktopLayout.searchWidth))
                 }
                 SavedSearchStrip(searchQuery, onSearchQuery, compact = false)
             }

@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -113,13 +114,21 @@ fun RepeatBadge(mode: RepeatMode) {
         modifier = Modifier
             .clip(RoundedCornerShape(999.dp))
             .background(PhoebeUi.accent.copy(alpha = 0.18f))
+            .heightIn(min = 20.dp)
             .padding(horizontal = 8.dp, vertical = 3.dp)
             .semantics { contentDescription = description },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         PhoebeIconView(PhoebeIcon.Repeat, tint = PhoebeUi.accentLight, modifier = Modifier.size(10.dp))
-        Text(label, color = PhoebeUi.accentLight, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.04.em)
+        Text(
+            label,
+            color = PhoebeUi.accentLight,
+            fontSize = 10.sp,
+            lineHeight = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.04.em,
+        )
     }
 }
 

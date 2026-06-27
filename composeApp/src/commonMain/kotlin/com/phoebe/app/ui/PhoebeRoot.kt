@@ -1029,7 +1029,7 @@ private fun PhoebeRootStateHolder(
             onDeleteSmartPlaylist = { playlist -> state.deleteSmartPlaylist(playlist) },
         )
     }
-    val likedTracksKey = if (trackHeavySectionsEnabled) catalog.trackIndexKey() else -1L
+    val likedTracksKey = if (trackHeavySectionsEnabled) catalogTrackIndexKey else -1L
     val likeActions = remember(catalogActionsKey, likedTracksKey, sessionKey, radioDirectory.manualStations) {
         val likedPlaylist = catalog.playlists.firstOrNull { it.isLikedSongsPlaylist() }
         LikeActions(
@@ -1535,7 +1535,7 @@ private fun PhoebeRootStateHolder(
                     AppScreen.Home -> {
                     val onHomeBrowse = browseSection == BrowseSection.Home && selectedPlaylistId == null
                     val catalogForMobileBrowse = if (onHomeBrowse) {
-                        remember(catalogHomeMetadataKey, catalog.trackIndexKey()) { catalog }
+                        remember(catalogHomeMetadataKey, catalogTrackIndexKey) { catalog }
                     } else {
                         catalog
                     }
