@@ -39,6 +39,11 @@ actual fun createAudioPlayer(): AudioPlayer = AndroidAudioPlayerHolder.instance
 
 internal const val AndroidAutoplayConfirmedPositionMs = 250L
 
+internal fun shouldIgnoreAndroidServiceEndedCallback(
+    crossfadeOwnedTrackId: String?,
+    hasCrossfadePlayer: Boolean,
+): Boolean = crossfadeOwnedTrackId != null && hasCrossfadePlayer
+
 object AndroidAudioPlayerHolder {
     private val player: AndroidAudioPlayer by lazy { AndroidAudioPlayer() }
 
@@ -576,6 +581,7 @@ class AndroidAudioPlayer(
         state.value.currentIndex in state.value.queue.indices
 
     private fun handlePlatformPlaybackEnded() {
+        if (shouldIgnoreAndroidServiceEndedCallback(crossfadeOwnedTrackId, crossfadePlayer != null)) return
         val player = activeLocalPlayer()?.takeIf { it.playbackState == Player.STATE_ENDED } ?: return
         val endedAppIndex = endedPlatformAppIndex(player)
         if (endedAppIndex != null) {

@@ -79,6 +79,7 @@ class DesktopAudioPlayer(
     private var desktopCrossfadeGeneration = -1
     private var sampledClip: Clip? = null
     private var sampledStream: StreamingSampledPlayback? = null
+    private var sampledStreamSource: SampledStreamSource? = null
     private var remoteSampledFile: File? = null
     private var prefetchedCrossfade: PrefetchedCrossfade? = null
     private var crossfadePrefetchFuture: CompletableFuture<PrefetchedCrossfade?>? = null
@@ -104,16 +105,25 @@ class DesktopAudioPlayer(
         val file: File,
     )
 
+    private data class SampledStreamSource(
+        val uri: String?,
+        val file: File?,
+        val extension: String,
+        val fullyBufferedDurationMs: Long?,
+        val diagnosticLabel: String,
+    )
+
     private class StreamingSampledPlayback(
         val line: SourceDataLine,
         val stream: AudioInputStream,
         val equalizerProcessor: GraphicEqualizerProcessor?,
         val fullyBufferedDurationMs: Long?,
+        val startPositionMs: Long,
         val onStop: (() -> Unit)? = null,
     ) {
         val stopped = AtomicBoolean(false)
         @Volatile
-        var writtenPcmBytes: Long = 0L
+        var writtenPcmBytes: Long = stream.format.pcmBytesForDurationMs(startPositionMs)
         @Volatile
         var lastWriteAtNs: Long = System.nanoTime()
         @Volatile
@@ -131,7 +141,7 @@ class DesktopAudioPlayer(
         fun playbackPositionMs(nowNs: Long = System.nanoTime()): Long {
             val effectiveNowNs = pausedAtNs ?: nowNs
             val elapsedNs = (effectiveNowNs - startedAtNs - pausedDurationNs).coerceAtLeast(0L)
-            return elapsedNs / 1_000_000L
+            return startPositionMs + elapsedNs / 1_000_000L
         }
 
         fun stop() {
@@ -206,7 +216,7 @@ class DesktopAudioPlayer(
     ) {
         playTrack(
             track = track,
-            preferJavaFxForLocalStreaming = shouldPreferJavaFxForLocalCrossfade(queue, startIndex, track),
+            preferJavaFxForLocalStreaming = shouldPreferJavaFxForCrossfade(queue, startIndex, track),
         )
         scheduleCrossfadePrefetchAfterLoad(queue, startIndex, generation)
     }
@@ -219,7 +229,7 @@ class DesktopAudioPlayer(
     ) {
         playTrack(
             track = track,
-            preferJavaFxForLocalStreaming = shouldPreferJavaFxForLocalCrossfade(queue, startIndex, track),
+            preferJavaFxForLocalStreaming = shouldPreferJavaFxForCrossfade(queue, startIndex, track),
         )
         scheduleCrossfadePrefetchAfterLoad(queue, startIndex, generation)
     }
@@ -278,6 +288,7 @@ class DesktopAudioPlayer(
                 if (file == null) {
                     val streamingExtension = preferredStreamingExtension ?: streamingSampledExtensionFromUri(activeUri)
                     if (streamingExtension != null &&
+                        !preferJavaFxForLocalStreaming &&
                         DesktopSandboxPlayback.shouldStreamRemoteSampledPlayback(activeUri) &&
                         tryStartSampledStream(activeUri, streamingExtension, generation)
                     ) {
@@ -310,7 +321,7 @@ class DesktopAudioPlayer(
                         }
                     }
                 }
-                if (file != null && preferSampledPlayback(file)) {
+                if (file != null && !preferJavaFxForLocalStreaming && preferSampledPlayback(file)) {
                     val clip = openAndStartSampledClip(file)
                     if (clip != null) {
                         if (!isPlayRequestCurrent(generation)) {
@@ -338,7 +349,7 @@ class DesktopAudioPlayer(
                     }
                 }
                 val remoteExtension = preferredSampledExtension ?: sampledPlaybackExtensionFromUri(activeUri)
-                if (file == null && remoteExtension != null) {
+                if (file == null && !preferJavaFxForLocalStreaming && remoteExtension != null) {
                     val downloaded = downloadRemoteAudio(bufferedRemotePlaybackUri(activeUri, downloadUri), remoteExtension)
                     if (!isPlayRequestCurrent(generation)) {
                         runCatching { downloaded.delete() }
@@ -373,7 +384,13 @@ class DesktopAudioPlayer(
                 if (!isPlayRequestCurrent(generation)) return@execute
                 val playbackUri = file?.toURI()?.toString() ?: activeUri
                 fullyBufferedPlayback = file != null
-                if (shouldAttemptJavaFxForPlayback(activeUri, file, preferredSampledExtension)) {
+                if (shouldAttemptJavaFxForPlayback(
+                        activeUri = activeUri,
+                        file = file,
+                        preferredSampledExtension = preferredSampledExtension,
+                        preferJavaFxForLocalStreaming = preferJavaFxForLocalStreaming,
+                    )
+                ) {
                     val javaFxScheduled = startJavaFxPlayback(playbackUri, generation) {
                         if (!continuePlaybackAfterJavaFxFailure(
                                 activeUri = activeUri,
@@ -463,6 +480,10 @@ class DesktopAudioPlayer(
             pendingManualSeekUntilMs = System.currentTimeMillis() + ManualSeekPlatformSettleMs
             val stream = sampledStream
             if (stream != null) {
+                val source = sampledStreamSource
+                if (source != null && restartSampledStreamAt(source, pendingManualSeekPositionMs, generation)) {
+                    return@execute
+                }
                 runCatching { stream.line.flush() }
                 return@execute
             }
@@ -509,8 +530,6 @@ class DesktopAudioPlayer(
         baseVolume: Float,
         generation: Int,
     ): Boolean {
-        val outgoing = player ?: return false
-        if (sampledClip != null || sampledStream != null) return false
         val uri = desktopPlaybackUriForTrack(track)
         if (uri.isBlank()) return false
         val localFile = uriToLocalFile(uri)
@@ -521,11 +540,36 @@ class DesktopAudioPlayer(
         } else {
             null
         }
-        val file = localFile ?: prefetchedFile ?: return false
-        if (preferSampledPlayback(file) && file.extension.lowercase() !in JavaFxPreferredLocalCrossfadeExtensions) return false
+        val file = localFile ?: prefetchedFile
+        val outgoingSampledClip = sampledClip
+        val outgoingSampledStream = sampledStream
+        if (outgoingSampledClip != null || outgoingSampledStream != null) {
+            file ?: return false
+            if (!preferSampledPlayback(file) || file.extension.lowercase() in JavaFxPreferredLocalCrossfadeExtensions) {
+                return false
+            }
+            return startSampledCrossfadeOnPlatform(
+                outgoingClip = outgoingSampledClip,
+                outgoingStream = outgoingSampledStream,
+                incomingFile = file,
+                incomingTempFile = prefetchedFile,
+                queue = queue,
+                targetIndex = targetIndex,
+                durationMs = durationMs,
+                baseVolume = baseVolume,
+                generation = generation,
+            )
+        }
+        val outgoing = player ?: return false
+        if (file != null &&
+            preferSampledPlayback(file) &&
+            file.extension.lowercase() !in JavaFxPreferredLocalCrossfadeExtensions
+        ) {
+            return false
+        }
         if (desktopCrossfadeGeneration == generation) return true
         desktopCrossfadeGeneration = generation
-        val playbackUri = file.toURI().toString()
+        val playbackUri = file?.toURI()?.toString() ?: uri
         JavaFxRuntime.runLater {
             if (!isPlayRequestCurrent(generation) || player !== outgoing) {
                 if (desktopCrossfadeGeneration == generation) desktopCrossfadeGeneration = -1
@@ -613,6 +657,129 @@ class DesktopAudioPlayer(
         return true
     }
 
+    private fun startSampledCrossfadeOnPlatform(
+        outgoingClip: Clip?,
+        outgoingStream: StreamingSampledPlayback?,
+        incomingFile: File,
+        incomingTempFile: File?,
+        queue: List<Track>,
+        targetIndex: Int,
+        durationMs: Long,
+        baseVolume: Float,
+        generation: Int,
+    ): Boolean {
+        if (desktopCrossfadeGeneration == generation) return true
+        desktopCrossfadeGeneration = generation
+        playbackExecutor.execute {
+            if (!isPlayRequestCurrent(generation) ||
+                sampledClip !== outgoingClip ||
+                sampledStream !== outgoingStream
+            ) {
+                if (desktopCrossfadeGeneration == generation) desktopCrossfadeGeneration = -1
+                return@execute
+            }
+            val incoming = openAndStartSampledClip(incomingFile, initialVolume = 0f)
+            if (incoming == null) {
+                if (desktopCrossfadeGeneration == generation) desktopCrossfadeGeneration = -1
+                if (isPlayRequestCurrent(generation)) play(queue, targetIndex)
+                return@execute
+            }
+            if (prefetchedCrossfade?.trackId == queue[targetIndex].id) {
+                prefetchedCrossfade = null
+            }
+            diagnostics.crossfadeStarted(
+                engine = PlaybackEnginePath.SampledClip,
+                outgoingTrackId = state.value.currentTrack?.id,
+                incomingTrackId = queue[targetIndex].id,
+                durationMs = durationMs,
+            )
+            runSampledCrossfade(
+                outgoingClip = outgoingClip,
+                outgoingStream = outgoingStream,
+                incoming = incoming,
+                incomingTempFile = incomingTempFile,
+                queue = queue,
+                targetIndex = targetIndex,
+                durationMs = durationMs,
+                baseVolume = baseVolume,
+                generation = generation,
+            )
+        }
+        return true
+    }
+
+    private fun runSampledCrossfade(
+        outgoingClip: Clip?,
+        outgoingStream: StreamingSampledPlayback?,
+        incoming: Clip,
+        incomingTempFile: File?,
+        queue: List<Track>,
+        targetIndex: Int,
+        durationMs: Long,
+        baseVolume: Float,
+        generation: Int,
+    ) {
+        var committed = false
+        try {
+            val steps = 24
+            val stepDelay = (durationMs / steps).coerceAtLeast(16L)
+            repeat(steps) { index ->
+                if (!isPlayRequestCurrent(generation)) {
+                    return
+                }
+                val progress = (index + 1).toDouble() / steps.toDouble()
+                val outgoingVolume = (baseVolume * (1.0 - progress)).toFloat().coerceIn(0f, 1f)
+                val incomingVolume = (baseVolume * progress).toFloat().coerceIn(0f, 1f)
+                diagnostics.crossfadeVolume(
+                    engine = PlaybackEnginePath.SampledClip,
+                    step = index + 1,
+                    outgoingVolume = outgoingVolume,
+                    incomingVolume = incomingVolume,
+                )
+                outgoingClip?.let { applyVolumeToClip(it, outgoingVolume) }
+                outgoingStream?.let { applyVolumeToLine(it.line, outgoingVolume) }
+                applyVolumeToClip(incoming, incomingVolume)
+                Thread.sleep(stepDelay)
+            }
+            runCatching {
+                outgoingClip?.stop()
+                outgoingClip?.close()
+            }
+            runCatching { outgoingStream?.stop() }
+            if (desktopCrossfadeGeneration == generation) desktopCrossfadeGeneration = -1
+            if (isPlayRequestCurrent(generation)) {
+                sampledClip = incoming
+                sampledStream = null
+                sampledStreamSource = null
+                incomingTempFile?.let { temp ->
+                    remoteSampledFile?.takeIf { it != temp }?.delete()
+                    remoteSampledFile = temp
+                }
+                applyVolumeToClip(incoming, effectiveOutputVolume())
+                adoptCrossfadeTarget(
+                    queue = queue,
+                    targetIndex = targetIndex,
+                    positionMs = (incoming.microsecondPosition / 1_000L).coerceAtLeast(0L),
+                    generation = generation,
+                )
+                diagnostics.crossfadeCommitted(
+                    engine = PlaybackEnginePath.SampledClip,
+                    incomingTrackId = queue[targetIndex].id,
+                )
+                startSampledProgressProbe(incoming, generation)
+                prefetchCrossfadeCandidate(queue, targetIndex, generation)
+                committed = true
+            }
+        } finally {
+            if (!committed) {
+                runCatching {
+                    incoming.stop()
+                    incoming.close()
+                }
+            }
+        }
+    }
+
     private fun runDesktopCrossfade(
         outgoing: MediaPlayer,
         incoming: MediaPlayer,
@@ -694,14 +861,18 @@ class DesktopAudioPlayer(
         applySampledVolume(v)
     }
 
-    private fun shouldPreferJavaFxForLocalCrossfade(
+    private fun shouldPreferJavaFxForCrossfade(
         queue: List<Track>,
         currentIndex: Int,
         track: Track,
     ): Boolean {
         if (!isCrossfadeConfigured || queue.getOrNull(currentIndex + 1) == null) return false
-        val file = uriToLocalFile(desktopPlaybackUriForTrack(track)) ?: return false
-        return file.extension.lowercase() in JavaFxPreferredLocalCrossfadeExtensions
+        val playbackUri = desktopPlaybackUriForTrack(track)
+        val extension = sampledPlaybackExtensionFromTrack(track, playbackUri)
+            ?: streamingSampledExtensionFromTrack(track, playbackUri)
+            ?: runCatching { URI(playbackUri).path }.getOrNull()
+                ?.substringAfterLast('.', missingDelimiterValue = "")
+        return extension?.lowercase() in JavaFxPreferredLocalCrossfadeExtensions
     }
 
     private fun applyJavaFxEqualizer(mediaPlayer: MediaPlayer?, profile: EqualizerProfile) {
@@ -833,8 +1004,10 @@ class DesktopAudioPlayer(
         activeUri: String,
         file: File?,
         preferredSampledExtension: String?,
+        preferJavaFxForLocalStreaming: Boolean,
     ): Boolean {
         if (JavaFxRuntime.hasFailed) return false
+        if (file != null && preferJavaFxForLocalStreaming) return true
         if (file != null && preferSampledPlayback(file)) return false
         val extension = preferredSampledExtension
             ?: file?.extension?.takeIf { it.isNotBlank() }
@@ -1110,6 +1283,13 @@ class DesktopAudioPlayer(
             extension = resolvedExtension,
             generation = generation,
             fullyBufferedDurationMs = null,
+            source = SampledStreamSource(
+                uri = uri,
+                file = null,
+                extension = resolvedExtension,
+                fullyBufferedDurationMs = null,
+                diagnosticLabel = "remote-$resolvedExtension",
+            ),
         )
     }
 
@@ -1126,6 +1306,13 @@ class DesktopAudioPlayer(
             extension = extension,
             generation = generation,
             fullyBufferedDurationMs = state.value.durationMs.takeIf { it > 0L },
+            source = SampledStreamSource(
+                uri = null,
+                file = file,
+                extension = extension,
+                fullyBufferedDurationMs = state.value.durationMs.takeIf { it > 0L },
+                diagnosticLabel = "file-$extension",
+            ),
         )
     }
 
@@ -1186,6 +1373,7 @@ class DesktopAudioPlayer(
             pcmStream = stream,
             generation = generation,
             fullyBufferedDurationMs = null,
+            initialPositionMs = 0L,
             onStop = { process.destroyForcibly() },
             diagnosticLabel = "ffmpeg-pcm",
         )
@@ -1227,6 +1415,8 @@ class DesktopAudioPlayer(
         extension: String,
         generation: Int,
         fullyBufferedDurationMs: Long?,
+        source: SampledStreamSource? = null,
+        initialPositionMs: Long = 0L,
     ): Boolean {
         val pcmStream = runCatching {
             val raw = openStreamingRawAudioInputStream(inputStream, extension)
@@ -1241,6 +1431,9 @@ class DesktopAudioPlayer(
             pcmStream = pcmStream,
             generation = generation,
             fullyBufferedDurationMs = fullyBufferedDurationMs,
+            initialPositionMs = initialPositionMs,
+            source = source,
+            diagnosticLabel = source?.diagnosticLabel ?: "pcm",
         )
     }
 
@@ -1248,9 +1441,20 @@ class DesktopAudioPlayer(
         pcmStream: AudioInputStream,
         generation: Int,
         fullyBufferedDurationMs: Long?,
+        initialPositionMs: Long = 0L,
+        source: SampledStreamSource? = null,
         onStop: (() -> Unit)? = null,
         diagnosticLabel: String = "pcm",
     ): Boolean {
+        val startPositionMs = initialPositionMs.coerceAtLeast(0L).let { position ->
+            fullyBufferedDurationMs?.takeIf { it > 0L }?.let { duration -> position.coerceAtMost(duration) }
+                ?: position
+        }
+        if (startPositionMs > 0L && !skipPcmStreamToPosition(pcmStream, startPositionMs)) {
+            runCatching { pcmStream.close() }
+            runCatching { onStop?.invoke() }
+            return false
+        }
         val format = pcmStream.format
         val bufferSize = sourceLineBufferSize(format)
         val line = runCatching {
@@ -1290,9 +1494,11 @@ class DesktopAudioPlayer(
             stream = pcmStream,
             equalizerProcessor = streamingEqualizerProcessor(format),
             fullyBufferedDurationMs = fullyBufferedDurationMs,
+            startPositionMs = startPositionMs,
             onStop = onStop,
         )
         sampledStream = playback
+        sampledStreamSource = source
         PhoebeLog.d("DesktopAudioPlayer") { "sampled stream playback source=$diagnosticLabel format=$format" }
         diagnostics.engineSelected(PlaybackEnginePath.SampledStream)
         applyVolumeToLine(line, effectiveOutputVolume())
@@ -1309,6 +1515,57 @@ class DesktopAudioPlayer(
         startSampledStreamPump(playback, bufferSize, generation)
         return true
     }
+
+    private fun restartSampledStreamAt(
+        source: SampledStreamSource,
+        positionMs: Long,
+        generation: Int,
+    ): Boolean {
+        if (!isPlayRequestCurrent(generation)) return true
+        val inputStream = runCatching {
+            source.file?.inputStream()
+                ?: source.uri?.let { openRemoteAudioStream(it).inputStream }
+                ?: error("Missing sampled stream source")
+        }.getOrElse { error ->
+            logPlaybackFailure(error)
+            diagnostics.playbackError(PlaybackEnginePath.SampledStream, error.message)
+            return false
+        }
+        val pcmStream = runCatching {
+            val raw = openStreamingRawAudioInputStream(inputStream, source.extension)
+            preparePcmForSourceLine(raw)
+        }.getOrElse { error ->
+            runCatching { inputStream.close() }
+            logPlaybackFailure(error)
+            diagnostics.playbackError(PlaybackEnginePath.SampledStream, error.message)
+            return false
+        }
+        val previous = sampledStream
+        runCatching { previous?.stop() }
+        if (sampledStream === previous) {
+            sampledStream = null
+        }
+        return tryStartPcmSampledStream(
+            pcmStream = pcmStream,
+            generation = generation,
+            fullyBufferedDurationMs = source.fullyBufferedDurationMs,
+            initialPositionMs = positionMs,
+            source = source,
+            diagnosticLabel = source.diagnosticLabel,
+        )
+    }
+
+    private fun skipPcmStreamToPosition(stream: AudioInputStream, positionMs: Long): Boolean = runCatching {
+        var remainingBytes = stream.format.pcmBytesForDurationMs(positionMs)
+        val buffer = ByteArray(StreamingPcmBufferBytes)
+        while (remainingBytes > 0L) {
+            val read = stream.read(buffer, 0, minOf(buffer.size.toLong(), remainingBytes).toInt())
+            if (read < 0) return false
+            if (read == 0) continue
+            remainingBytes -= read.toLong()
+        }
+        true
+    }.getOrDefault(false)
 
     private fun openRemoteAudioStream(uri: String): RemoteAudioStream {
         val request = HttpRequest.newBuilder(URI(uri))
@@ -1517,8 +1774,16 @@ class DesktopAudioPlayer(
         } else {
             (playback.line.microsecondPosition / 1_000L).coerceAtLeast(0L)
         }
-        val positionMs = stabilizedPlatformPositionMs(audiblePositionMs, generation)
-            .coerceAtMost(decodedPositionMs.takeIf { it > 0L } ?: audiblePositionMs)
+        val manualSeekSettling = isManualSeekSettling(generation)
+        val stabilizedPositionMs = stabilizedPlatformPositionMs(audiblePositionMs, generation)
+        val positionMs = stabilizedPositionMs
+            .let { position ->
+                if (manualSeekSettling) {
+                    position
+                } else {
+                    position.coerceAtMost(decodedPositionMs.takeIf { it > 0L } ?: audiblePositionMs)
+                }
+            }
             .let { position -> if (durationMs > 0L) position.coerceAtMost(durationMs) else position }
         val decodedBufferedMs = maxOf(positionMs, decodedPositionMs)
         val bufferedPositionMs = playback.fullyBufferedDurationMs
@@ -1772,7 +2037,7 @@ class DesktopAudioPlayer(
         error("Clip playback needs 16-bit PCM; unsupported format: $fmt")
     }
 
-    private fun openAndStartSampledClip(file: File): Clip? {
+    private fun openAndStartSampledClip(file: File, initialVolume: Float = effectiveOutputVolume()): Clip? {
         val pcmStream = try {
             decodeToPcmStream(file)
         } catch (e: Throwable) {
@@ -1796,7 +2061,7 @@ class DesktopAudioPlayer(
                 runCatching { diagnosticsStream.close() }
                 throw e
             }
-            applyVolumeToClip(clip, effectiveOutputVolume())
+            applyVolumeToClip(clip, initialVolume)
             clip.start()
             clip
         }.getOrElse { e ->
@@ -1883,6 +2148,7 @@ class DesktopAudioPlayer(
     private fun disposeSampled() {
         runCatching { sampledStream?.stop() }
         sampledStream = null
+        sampledStreamSource = null
         runCatching {
             sampledClip?.stop()
             sampledClip?.close()
@@ -2041,6 +2307,9 @@ class DesktopAudioPlayer(
         }
         return targetPositionMs
     }
+
+    private fun isManualSeekSettling(generation: Int): Boolean =
+        pendingManualSeekGeneration == generation && System.currentTimeMillis() <= pendingManualSeekUntilMs
 
     private fun trackDurationOrClipDuration(generation: Int, clip: Clip): Long {
         val stateDuration = state.value.durationMs.takeIf { it > 0L }
@@ -2268,6 +2537,13 @@ private fun AudioFormat.durationMsForPcmBytes(bytes: Long): Long {
     val sampleRate = sampleRate.takeIf { it > 0f && !it.isNaN() } ?: return 0L
     val frames = bytes.coerceAtLeast(0L).toDouble() / frameSize.toDouble()
     return ((frames / sampleRate.toDouble()) * 1_000.0).toLong().coerceAtLeast(0L)
+}
+
+private fun AudioFormat.pcmBytesForDurationMs(durationMs: Long): Long {
+    val frameSize = frameSize.takeIf { it > 0 } ?: return 0L
+    val sampleRate = sampleRate.takeIf { it > 0f && !it.isNaN() } ?: return 0L
+    val frames = (durationMs.coerceAtLeast(0L).toDouble() / 1_000.0) * sampleRate.toDouble()
+    return (frames.toLong() * frameSize.toLong()).coerceAtLeast(0L)
 }
 
 private fun javafxDurationMs(duration: javafx.util.Duration?): Long {

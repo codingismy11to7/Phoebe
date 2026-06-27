@@ -375,7 +375,7 @@ private fun PlaylistsDesktopContent(
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
                     items(preparedVisiblePlaylists, key = { it.id }, contentType = { "playlist" }) { playlist ->
                         val liked = playlist.isLikedSongsPlaylist()
@@ -391,6 +391,7 @@ private fun PlaylistsDesktopContent(
                                 subtitle = "${playlist.trackCount} songs",
                                 thumbUrl = playlist.thumbUrl,
                                 accent = liked || smart,
+                                useContentRowBackground = true,
                                 onClick = { onPlaylist(playlist) },
                                 onLongClick = { onShufflePlaylist(playlist) },
                                 trailingContent = { PlaylistManagementMenuButton(playlist) },

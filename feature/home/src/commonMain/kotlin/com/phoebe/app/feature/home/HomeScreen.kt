@@ -2205,15 +2205,17 @@ private fun DesktopFavoriteArtistsPanel(
             SectionLabel("FAVORITE ARTISTS", PhoebeUi.mutedText)
             HomeEmptyState("Favorite artists will appear here.")
         } else {
-            val displayArtists = remember(artists) { artists.take(10) }
+            val displayArtists = remember(artists) {
+                artists.distinctBy { it.id }.filter { it.id.isNotBlank() }.take(10)
+            }
             DesktopFavoriteScrollableRow(
                 title = "FAVORITE ARTISTS",
                 showViewAll = totalCount > 10,
                 onViewAll = onViewAll,
                 horizontalGap = 12.dp,
             ) {
-                items(displayArtists, key = { "artist:${it.id}" }, contentType = { "favorite-artist" }) { artist ->
-                        MobileArtistTile(artist, artistThumbs[artist.id], "artist:${artist.id}", width = 112.dp) { onArtist(artist) }
+                items(displayArtists, key = { it.id }, contentType = { "favorite-artist" }) { artist ->
+                    MobileArtistTile(artist, artistThumbs[artist.id], "artist:${artist.id}", width = 112.dp) { onArtist(artist) }
                 }
             }
         }
@@ -2233,14 +2235,16 @@ private fun DesktopFavoriteAlbumsPanel(
             SectionLabel("FAVORITE ALBUMS", PhoebeUi.mutedText)
             HomeEmptyState("Favorite albums will appear here.")
         } else {
-            val displayAlbums = remember(albums) { albums.take(10) }
+            val displayAlbums = remember(albums) {
+                albums.distinctBy { it.id }.filter { it.id.isNotBlank() }.take(10)
+            }
             DesktopFavoriteScrollableRow(
                 title = "FAVORITE ALBUMS",
                 showViewAll = totalCount > 10,
                 onViewAll = onViewAll,
             ) {
-                items(displayAlbums, key = { "album:${it.id}" }, contentType = { "favorite-album" }) { album ->
-                        HomeArtworkTile(album.title, album.artist, album.thumbUrl, fallbackThumbUrl = albumArtworkFallbacks[album.id], modifier = Modifier.width(112.dp), sharedKey = "album:${album.id}") { onAlbum(album) }
+                items(displayAlbums, key = { it.id }, contentType = { "favorite-album" }) { album ->
+                    HomeArtworkTile(album.title, album.artist, album.thumbUrl, fallbackThumbUrl = albumArtworkFallbacks[album.id], modifier = Modifier.width(112.dp), sharedKey = "album:${album.id}") { onAlbum(album) }
                 }
             }
         }
@@ -2375,7 +2379,7 @@ private fun DesktopRandomPanels(
     onPrefetchArtist: (Artist) -> Unit,
     onPrefetchAlbum: (Album) -> Unit,
 ) {
-    val randomPanelHeight = 276.dp
+    val randomPanelHeight = 304.dp
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         if (maxWidth < 820.dp) {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {

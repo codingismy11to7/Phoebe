@@ -104,8 +104,8 @@ fun MobileQueueSheet(
                     onDragStopped = { velocity -> onSheetDragEndUpdated.value(velocity) },
                 )
                 .padding(horizontal = 18.dp)
-                .padding(top = 8.dp, bottom = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+                .padding(top = 8.dp, bottom = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Box(
                 Modifier
@@ -124,8 +124,7 @@ fun MobileQueueSheet(
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 32.dp)
-                    .padding(vertical = 2.dp),
+                    .heightIn(min = 32.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 SectionLabel("Up Next", PhoebeUi.primaryText)

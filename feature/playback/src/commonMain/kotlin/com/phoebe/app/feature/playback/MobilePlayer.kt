@@ -71,12 +71,23 @@ import kotlinx.coroutines.launch
 
 private const val MobilePlayerContinuousMotionDelayMs = 240L
 private val MobilePlayerMetadataReserveWithAlbum = 104.dp
+private val MobilePlayerCompactMetadataReserveWithAlbum = 88.dp
 private val MobilePlayerMetadataReserveWithoutAlbum = 84.dp
+private val MobilePlayerCompactMetadataReserveWithoutAlbum = 72.dp
 private val MobilePlayerRemoteTargetReserve = 18.dp
+private val MobilePlayerCompactRemoteTargetReserve = 14.dp
 private val MobilePlayerExpandedTopGap = 8.dp
 private val MobilePlayerExpandedArtworkBodyGap = 8.dp
 private val MobilePlayerExpandedProgressLineHeight = 72.dp
 private val MobilePlayerExpandedControlsGap = 10.dp
+private val MobilePlayerCompactControlsGap = 4.dp
+private val MobilePlayerExpandedUtilityControlsHeight = 44.dp
+private val MobilePlayerCompactUtilityControlsHeight = 38.dp
+private val MobilePlayerExpandedQueueGap = 22.dp
+private val MobilePlayerCompactQueueGap = 18.dp
+private val MobilePlayerExpandedPlayButtonSize = 64.dp
+private val MobilePlayerCompactPlayButtonSize = 56.dp
+private val MobilePlayerExpandedCompactRange = 56.dp
 private val CollapsedMobilePlayerMetadataHeight = 34.dp
 
 @Composable
@@ -355,20 +366,60 @@ fun MobilePlayer(
         val screenHeight = maxHeight
 
         val collapsedPlayButtonSize = 40.dp
-        val expandedPlayButtonSize = 64.dp
 
-        val baseMetadataReserve = if (track != null && track.album.isNotBlank()) {
+        val expandedBaseMetadataReserve = if (track != null && track.album.isNotBlank()) {
             MobilePlayerMetadataReserveWithAlbum
         } else {
             MobilePlayerMetadataReserveWithoutAlbum
         }
-        val metadataReserve = baseMetadataReserve +
-            (if (remotePlaybackTarget != null) MobilePlayerRemoteTargetReserve else 0.dp)
+        val compactBaseMetadataReserve = if (track != null && track.album.isNotBlank()) {
+            MobilePlayerCompactMetadataReserveWithAlbum
+        } else {
+            MobilePlayerCompactMetadataReserveWithoutAlbum
+        }
+        val expandedRemoteTargetReserve = if (remotePlaybackTarget != null) MobilePlayerRemoteTargetReserve else 0.dp
+        val compactRemoteTargetReserve = if (remotePlaybackTarget != null) MobilePlayerCompactRemoteTargetReserve else 0.dp
 
         val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
         val collapsedSheetHeight = 76.dp + navBarBottom
 
         val fullArtworkSize = screenWidth
+        val expandedDefaultHeight = fullArtworkSize +
+            expandedBaseMetadataReserve +
+            expandedRemoteTargetReserve +
+            MobilePlayerExpandedArtworkBodyGap +
+            MobilePlayerExpandedProgressLineHeight +
+            MobilePlayerExpandedControlsGap +
+            MobilePlayerExpandedPlayButtonSize +
+            MobilePlayerExpandedControlsGap +
+            MobilePlayerExpandedUtilityControlsHeight +
+            MobilePlayerExpandedQueueGap +
+            collapsedSheetHeight
+        val compactness = ((expandedDefaultHeight - screenHeight).value / MobilePlayerExpandedCompactRange.value)
+            .coerceIn(0f, 1f)
+        val metadataReserve = lerp(expandedBaseMetadataReserve, compactBaseMetadataReserve, compactness) +
+            lerp(expandedRemoteTargetReserve, compactRemoteTargetReserve, compactness)
+        val expandedProgressLineHeight = MobilePlayerExpandedProgressLineHeight
+        val expandedControlsGap = lerp(
+            MobilePlayerExpandedControlsGap,
+            MobilePlayerCompactControlsGap,
+            compactness,
+        )
+        val expandedUtilityControlsHeight = lerp(
+            MobilePlayerExpandedUtilityControlsHeight,
+            MobilePlayerCompactUtilityControlsHeight,
+            compactness,
+        )
+        val expandedQueueGap = lerp(
+            MobilePlayerExpandedQueueGap,
+            MobilePlayerCompactQueueGap,
+            compactness,
+        )
+        val expandedPlayButtonSize = lerp(
+            MobilePlayerExpandedPlayButtonSize,
+            MobilePlayerCompactPlayButtonSize,
+            compactness,
+        )
 
         val currentArtworkSize = lerp(44.dp, fullArtworkSize, clampedExpansionFraction)
         val targetArtworkX = 0.dp
@@ -575,12 +626,12 @@ fun MobilePlayer(
                     barHeight = 44.dp,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(MobilePlayerExpandedProgressLineHeight)
+                        .height(expandedProgressLineHeight)
                         .padding(horizontal = 20.dp)
                         .graphicsLayer { alpha = fullPlayerElementsAlpha },
                     onSeek = if (track != null) onSeek else null,
                 )
-                Spacer(Modifier.height(MobilePlayerExpandedControlsGap))
+                Spacer(Modifier.height(expandedControlsGap))
                 Row(
                     Modifier
                         .fillMaxWidth()
@@ -596,7 +647,7 @@ fun MobilePlayer(
                     TransportIcon(PhoebeIcon.Next, "Next Track", onNext, iconSize = 16.dp)
                     RepeatIcon(mode = repeat, onClick = onRepeat)
                 }
-                Spacer(Modifier.weight(1f).heightIn(min = MobilePlayerExpandedControlsGap))
+                Spacer(Modifier.weight(1f).heightIn(min = expandedControlsGap))
                 MobileExpandedUtilityControls(
                     castState = castState,
                     equalizerActive = equalizerProfile.enabled,
@@ -608,9 +659,10 @@ fun MobilePlayer(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 20.dp)
+                        .height(expandedUtilityControlsHeight)
                         .graphicsLayer { alpha = fullPlayerElementsAlpha },
                 )
-                Spacer(Modifier.weight(1f).heightIn(min = 8.dp))
+                Spacer(Modifier.weight(1f).heightIn(min = expandedQueueGap))
                 Spacer(modifier = Modifier.height(collapsedSheetHeight))
             }
         }
@@ -808,8 +860,8 @@ fun MobilePlayer(
             val expandedPlayButtonY = fullArtworkSize +
                 metadataReserve +
                 MobilePlayerExpandedArtworkBodyGap +
-                MobilePlayerExpandedProgressLineHeight +
-                MobilePlayerExpandedControlsGap
+                expandedProgressLineHeight +
+                expandedControlsGap
             val collapsedCastButtonX = collapsedPlayButtonX - 50.dp
             val collapsedCastButtonY = collapsedPlayButtonY
             val expandedCastButtonX = screenWidth - 20.dp - 40.dp

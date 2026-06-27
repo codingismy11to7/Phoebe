@@ -13,10 +13,17 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun LibraryTopBar(searchQuery: String, onSearchQuery: (String) -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 36.dp, vertical = 16.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(
+                start = PhoebeDesktopLayout.contentStart,
+                top = PhoebeDesktopLayout.contentTop,
+                end = PhoebeDesktopLayout.contentEnd,
+                bottom = 16.dp,
+            ),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center,
+        horizontalArrangement = Arrangement.End,
     ) {
-        SearchPill(searchQuery, onSearchQuery, Modifier.width(380.dp))
+        SearchPill(searchQuery, onSearchQuery, Modifier.width(PhoebeDesktopLayout.searchWidth))
     }
 }

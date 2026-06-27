@@ -10,7 +10,6 @@ import androidx.compose.runtime.setValue
 import com.phoebe.app.data.PlayHistorySnapshot
 import com.phoebe.app.data.derivationKey
 import com.phoebe.app.data.mostPlayedPendingResolution
-import com.phoebe.app.data.trackIndexKey
 import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.Track
 import kotlinx.coroutines.Dispatchers
@@ -54,7 +53,7 @@ fun rememberHomeFeatureState(
             playHistory.topRecentlyPlayed.take(15).map { it.trackId })
             .distinct()
     }
-    val resolvedTracksById by produceState(emptyMap<String, Track>(), mostPlayedPrefetchIds, catalog.trackIndexKey()) {
+    val resolvedTracksById by produceState(emptyMap<String, Track>(), mostPlayedPrefetchIds, catalogTrackIndexKey) {
         value = if (mostPlayedPrefetchIds.isEmpty()) {
             emptyMap()
         } else {

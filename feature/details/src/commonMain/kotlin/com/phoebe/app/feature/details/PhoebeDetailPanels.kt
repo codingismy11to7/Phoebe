@@ -1324,9 +1324,13 @@ private fun DesktopDetailHero(
                 Modifier
                     .weight(1f)
                     .fillMaxHeight(),
-                verticalArrangement = Arrangement.SpaceBetween,
             ) {
-                DetailSectionIntro(onBack = onBack, label = label)
+                DetailSectionIntro(
+                    onBack = onBack,
+                    label = label,
+                    alignBackIconToContentStart = true,
+                )
+                Spacer(Modifier.height(if (immersive) 54.dp else 42.dp))
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     SectionLabel(eyebrow, PhoebeUi.accentLight)
                     Text(
@@ -1356,12 +1360,14 @@ private fun DesktopDetailHero(
                         }
                     }
                 }
+                Spacer(Modifier.height(28.dp))
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     actions()
                 }
+                Spacer(Modifier.weight(1f))
             }
             Box(
                 Modifier
@@ -1647,8 +1653,9 @@ fun ArtistDetailPanel(
 
     BoxWithConstraints(modifier.fillMaxSize()) {
         val useTable = maxWidth >= 640.dp
-        val edgePadding = if (maxWidth < 640.dp) 20.dp else 36.dp
-        val topPadding = if (maxWidth < 640.dp) 16.dp else 36.dp
+        val startPadding = if (maxWidth < 640.dp) 20.dp else PhoebeDesktopLayout.contentStart
+        val endPadding = if (maxWidth < 640.dp) 20.dp else PhoebeDesktopLayout.contentEnd
+        val topPadding = 16.dp
         val mobileBottomPadding = mobileChromeBottom + 24.dp
         val bottomContentPadding = if (useTable) {
             if (mobileBottomPadding > 24.dp) mobileBottomPadding else 24.dp
@@ -1678,14 +1685,16 @@ fun ArtistDetailPanel(
                 onPlayArtistRadio = { onPlayArtistRadio(artist) },
                 onAlbum = onAlbum,
                 onBack = { showStats = false },
-                edgePadding = edgePadding,
+                edgePadding = startPadding,
                 topPadding = topPadding,
                 alignBackIconToContentStart = !useTable,
             )
         } else {
     LazyColumn(
         state = listState,
-        modifier = Modifier.fillMaxSize().padding(start = edgePadding, end = edgePadding),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(start = startPadding, end = endPadding),
         contentPadding = PaddingValues(
             top = mobileContentTopPadding(topPadding),
             bottom = bottomContentPadding
@@ -2466,8 +2475,9 @@ fun AlbumDetailPanel(
 
     BoxWithConstraints(modifier.fillMaxSize()) {
         val useTable = maxWidth >= 640.dp
-        val edgePadding = if (maxWidth < 640.dp) 20.dp else 36.dp
-        val topPadding = if (maxWidth < 640.dp) 16.dp else 36.dp
+        val startPadding = if (maxWidth < 640.dp) 20.dp else PhoebeDesktopLayout.contentStart
+        val endPadding = if (maxWidth < 640.dp) 20.dp else PhoebeDesktopLayout.contentEnd
+        val topPadding = 16.dp
         val mobileBottomPadding = mobileChromeBottom + 24.dp
         val bottomContentPadding = if (useTable) {
             if (mobileBottomPadding > 24.dp) mobileBottomPadding else 24.dp
@@ -2478,7 +2488,9 @@ fun AlbumDetailPanel(
         val listState = RetainedLazyListStates.remember("album-detail:${resolvedAlbum.id}")
     LazyColumn(
         state = listState,
-        modifier = Modifier.fillMaxSize().padding(start = edgePadding, end = edgePadding),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(start = startPadding, end = endPadding),
         contentPadding = PaddingValues(
             top = mobileContentTopPadding(topPadding),
             bottom = bottomContentPadding

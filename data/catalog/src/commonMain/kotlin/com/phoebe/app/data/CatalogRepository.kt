@@ -536,98 +536,98 @@ class CatalogRepository(
             detail = "Reading cached artists, albums, and playlists",
             blocking = false,
         )
-        val cachedShell = trace.disk("readCatalogShellFromDatabase") {
-            withContext(Dispatchers.Default) {
-                readCatalogShellFromDatabase().withoutInactiveLocalFolderCatalog(activeLocalFolderIds())
-            }
-        }
-        trace.disk("resetStaleDownloads") {
-            withContext(Dispatchers.Default) {
-                runCatching {
-                    runCatalogDbWrite { database.downloadsQueries.resetStaleDownloading() }
-                }.onFailure { error ->
-                    if (error is CancellationException) throw error
-                    PhoebeLog.d("CatalogRepository") { "stale download reset failed: ${error.message}" }
+        try {
+            val cachedShell = trace.disk("readCatalogShellFromDatabase") {
+                withContext(Dispatchers.Default) {
+                    readCatalogShellFromDatabase().withoutInactiveLocalFolderCatalog(activeLocalFolderIds())
                 }
             }
-        }
-        val downloads = trace.disk("readDownloadsFromDatabase") {
-            withContext(Dispatchers.Default) {
-                database.downloadsQueries.selectAll().awaitAsList().map { row ->
-                    row.toDownloadItem()
+            trace.disk("resetStaleDownloads") {
+                withContext(Dispatchers.Default) {
+                    runCatching {
+                        runCatalogDbWrite { database.downloadsQueries.resetStaleDownloading() }
+                    }.onFailure { error ->
+                        if (error is CancellationException) throw error
+                        PhoebeLog.d("CatalogRepository") { "stale download reset failed: ${error.message}" }
+                    }
                 }
             }
-        }
-        if (cachedShell.hasRestorableCatalogContent() || downloads.isNotEmpty()) {
-            val restoredShell = trace.memory("applyCachedShellToMemory") {
-                removeMissingLocalArtworkReferences(cachedShell.copy(downloads = downloads))
+            val downloads = trace.disk("readDownloadsFromDatabase") {
+                withContext(Dispatchers.Default) {
+                    database.downloadsQueries.selectAll().awaitAsList().map { row ->
+                        row.toDownloadItem()
+                    }
+                }
             }
-            replaceDownloadSnapshot(restoredShell.downloads, syncCatalog = false)
-            if (userArtifactsRepository.smartPlaylists.value.any { it.enabled }) {
-                val restoredTracks = trace.disk("hydrateCachedTracksFromDatabase") {
-                    runCatching { readTracksFromDatabase() }
-                        .onFailure { error ->
-                            PhoebeLog.d("CatalogRepository") {
-                                "cached track hydration failed: ${error.message}"
+            if (cachedShell.hasRestorableCatalogContent() || downloads.isNotEmpty()) {
+                val restoredShell = trace.memory("applyCachedShellToMemory") {
+                    removeMissingLocalArtworkReferences(cachedShell.copy(downloads = downloads))
+                }
+                replaceDownloadSnapshot(restoredShell.downloads, syncCatalog = false)
+                if (userArtifactsRepository.smartPlaylists.value.any { it.enabled }) {
+                    val restoredTracks = trace.disk("hydrateCachedTracksFromDatabase") {
+                        runCatching { readTracksFromDatabase() }
+                            .onFailure { error ->
+                                PhoebeLog.d("CatalogRepository") {
+                                    "cached track hydration failed: ${error.message}"
+                                }
                             }
-                        }
-                        .getOrNull()
+                            .getOrNull()
+                    }
+                    val restoredDownloads = restoredTracks?.downloads?.ifEmpty { restoredShell.downloads } ?: restoredShell.downloads
+                    replaceDownloadSnapshot(restoredDownloads, syncCatalog = false)
+                    mutableCatalog.value = withSmartPlaylists(
+                        restoredShell.copy(
+                            tracksByParent = restoredTracks?.tracksByParent.orEmpty(),
+                            downloads = restoredDownloads,
+                        ),
+                    )
+                } else {
+                    mutableCatalog.value = restoredShell
+                    trace.disk("hydrateCachedTracksFromDatabase") {
+                        runCatching { hydrateCachedTracksAfterShellRestore(restoredShell) }
+                            .onFailure { error ->
+                                PhoebeLog.d("CatalogRepository") {
+                                    "cached track hydration failed: ${error.message}"
+                                }
+                            }
+                    }
                 }
-                val restoredDownloads = restoredTracks?.downloads?.ifEmpty { restoredShell.downloads } ?: restoredShell.downloads
-                replaceDownloadSnapshot(restoredDownloads, syncCatalog = false)
-                mutableCatalog.value = withSmartPlaylists(
-                    restoredShell.copy(
-                        tracksByParent = restoredTracks?.tracksByParent.orEmpty(),
-                        downloads = restoredDownloads,
-                    ),
+                trace.mark(
+                    "restoreCachedCatalog complete",
+                    CatalogSyncStepKind.Other,
+                    "${mutableCatalog.value.albums.size} albums, " +
+                        "${mutableCatalog.value.playlists.size} playlists, " +
+                        "${mutableCatalog.value.tracksByParent.values.sumOf { it.size }} tracks",
                 )
-            } else {
-                mutableCatalog.value = restoredShell
-                trace.disk("hydrateCachedTracksFromDatabase") {
-                    runCatching { hydrateCachedTracksAfterShellRestore(restoredShell) }
-                        .onFailure { error ->
-                            PhoebeLog.d("CatalogRepository") {
-                                "cached track hydration failed: ${error.message}"
-                            }
-                        }
-                }
+                return
             }
-            trace.mark(
-                "restoreCachedCatalog complete",
-                CatalogSyncStepKind.Other,
-                "${mutableCatalog.value.albums.size} albums, " +
-                    "${mutableCatalog.value.playlists.size} playlists, " +
-                    "${mutableCatalog.value.tracksByParent.values.sumOf { it.size }} tracks",
+            val legacy = storage.readText(LegacyCatalogFile) ?: run {
+                trace.mark("restoreCachedCatalog: no cached catalog", CatalogSyncStepKind.Other)
+                return
+            }
+            val parsed = runCatching {
+                json.decodeFromString<CatalogSnapshot>(legacy)
+            }.getOrNull() ?: run {
+                trace.mark("restoreCachedCatalog: legacy file unreadable", CatalogSyncStepKind.Other)
+                return
+            }
+            val repaired = removeMissingLocalArtworkReferences(
+                parsed.withoutInactiveLocalFolderCatalog(activeLocalFolderIds()),
             )
+            trace.disk("migrateLegacyCatalogToDatabase") {
+                withContext(Dispatchers.Default) { runCatalogDbWrite { persist(repaired) } }
+            }
+            mutableCatalog.value = withSmartPlaylists(repaired)
+            storage.delete(LegacyCatalogFile)
+            trace.mark(
+                "restoreCachedCatalog from legacy file",
+                CatalogSyncStepKind.Other,
+                "${parsed.albums.size} albums",
+            )
+        } finally {
             mutableCatalogSyncState.value = CatalogSyncState()
-            return
         }
-        val legacy = storage.readText(LegacyCatalogFile) ?: run {
-            trace.mark("restoreCachedCatalog: no cached catalog", CatalogSyncStepKind.Other)
-            mutableCatalogSyncState.value = CatalogSyncState()
-            return
-        }
-        val parsed = runCatching {
-            json.decodeFromString<CatalogSnapshot>(legacy)
-        }.getOrNull() ?: run {
-            trace.mark("restoreCachedCatalog: legacy file unreadable", CatalogSyncStepKind.Other)
-            mutableCatalogSyncState.value = CatalogSyncState()
-            return
-        }
-        val repaired = removeMissingLocalArtworkReferences(
-            parsed.withoutInactiveLocalFolderCatalog(activeLocalFolderIds()),
-        )
-        trace.disk("migrateLegacyCatalogToDatabase") {
-            withContext(Dispatchers.Default) { runCatalogDbWrite { persist(repaired) } }
-        }
-        mutableCatalog.value = withSmartPlaylists(repaired)
-        storage.delete(LegacyCatalogFile)
-        trace.mark(
-            "restoreCachedCatalog from legacy file",
-            CatalogSyncStepKind.Other,
-            "${parsed.albums.size} albums",
-        )
-        mutableCatalogSyncState.value = CatalogSyncState()
     }
 
     suspend fun refreshAggregated(session: PlexSession?, backgroundIfCached: Boolean = false) {
