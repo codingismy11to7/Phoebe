@@ -375,6 +375,7 @@ internal fun MobileBrowseShell(
     onLastFmSubmitNowPlaying: (Boolean) -> Unit = {},
     onLastFmSubmitScrobbles: (Boolean) -> Unit = {},
     appUpdateState: AppUpdateState = AppUpdateState.Idle,
+    onCheckForUpdates: () -> Unit = {},
     routeViewModelFactory: RouteViewModelFactory,
     onInstallUpdate: () -> Unit = {},
     initialExpandedPhoneSection: PhoneHomeAccordionSection? = null,
@@ -439,6 +440,7 @@ internal fun MobileBrowseShell(
                         homeScreenLayoutMode = homeScreenLayoutMode,
                         session = session,
                         listenBrainzCredentialAvailability = listenBrainzCredentialAvailability,
+                        appUpdateState = appUpdateState,
                         initialCategory = if (section == BrowseSection.Downloads) {
                             SettingsCategory.Downloads
                         } else {
@@ -487,6 +489,8 @@ internal fun MobileBrowseShell(
                         onDisconnectLastFm = onDisconnectLastFm,
                         onLastFmSubmitNowPlaying = onLastFmSubmitNowPlaying,
                         onLastFmSubmitScrobbles = onLastFmSubmitScrobbles,
+                        onCheckForUpdates = onCheckForUpdates,
+                        onInstallUpdate = onInstallUpdate,
                     ),
                     modifier = Modifier.fillMaxSize().padding(top = chromePadding.top, bottom = chromePadding.bottom),
                 )

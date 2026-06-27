@@ -90,6 +90,7 @@ import com.phoebe.app.ui.PhoebeTintOption
 import com.phoebe.app.ui.PhoebeUi
 import com.phoebe.app.ui.SectionLabel
 import com.phoebe.app.ui.formatLastPlayed
+import com.phoebe.app.updates.AppUpdateState
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
@@ -166,6 +167,9 @@ fun SettingsDesktopView(
     onDisconnectLastFm: () -> Unit = {},
     onLastFmSubmitNowPlaying: (Boolean) -> Unit = {},
     onLastFmSubmitScrobbles: (Boolean) -> Unit = {},
+    appUpdateState: AppUpdateState = AppUpdateState.Idle,
+    onCheckForUpdates: () -> Unit = {},
+    onInstallUpdate: () -> Unit = {},
     modifier: Modifier = Modifier,
     initialCategory: SettingsCategory = SettingsCategory.AudioPlayback,
 ) {
@@ -281,7 +285,11 @@ fun SettingsDesktopView(
                         settings = appSettings,
                         onNotifyWhenDownloadFinishes = onNotifyWhenDownloadFinishes,
                     )
-                    SettingsCategory.About -> AboutSettingsCard()
+                    SettingsCategory.About -> AboutSettingsCard(
+                        updateState = appUpdateState,
+                        onCheckForUpdates = onCheckForUpdates,
+                        onInstallUpdate = onInstallUpdate,
+                    )
                     SettingsCategory.Advanced -> GenericPlaceholderCard(category.label)
                 }
             }
@@ -346,6 +354,9 @@ fun SettingsMobileView(
     onDisconnectLastFm: () -> Unit = {},
     onLastFmSubmitNowPlaying: (Boolean) -> Unit = {},
     onLastFmSubmitScrobbles: (Boolean) -> Unit = {},
+    appUpdateState: AppUpdateState = AppUpdateState.Idle,
+    onCheckForUpdates: () -> Unit = {},
+    onInstallUpdate: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -442,7 +453,12 @@ fun SettingsMobileView(
             onNotifyWhenDownloadFinishes = onNotifyWhenDownloadFinishes,
         )
         SectionLabel("ABOUT", PhoebeUi.accentLight)
-        AboutSettingsCard(compact = true)
+        AboutSettingsCard(
+            compact = true,
+            updateState = appUpdateState,
+            onCheckForUpdates = onCheckForUpdates,
+            onInstallUpdate = onInstallUpdate,
+        )
     }
 }
 
@@ -2305,7 +2321,14 @@ private fun AccountDetailRow(
 }
 
 @Composable
-private fun AboutSettingsCard(compact: Boolean = false) {
+private fun AboutSettingsCard(
+    compact: Boolean = false,
+    updateState: AppUpdateState = AppUpdateState.Idle,
+    onCheckForUpdates: () -> Unit = {},
+    onInstallUpdate: () -> Unit = {},
+) {
+    val checking = updateState == AppUpdateState.Checking
+    val installing = updateState is AppUpdateState.Installing
     SettingsCard {
         Text("About Phoebe", color = PhoebeUi.primaryText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
         Text(
@@ -2326,6 +2349,13 @@ private fun AboutSettingsCard(compact: Boolean = false) {
             AccountDetailRow(label = "Repository", value = "${PhoebeBuildInfo.githubOwner}/${PhoebeBuildInfo.githubRepo}")
         }
         Spacer(Modifier.height(if (compact) 12.dp else 14.dp))
+        AboutUpdateRow(
+            updateState = updateState,
+            enabled = !checking && !installing,
+            onCheckForUpdates = onCheckForUpdates,
+            onInstallUpdate = onInstallUpdate,
+        )
+        Spacer(Modifier.height(8.dp))
         AboutLinkRow(
             title = "Project on GitHub",
             subtitle = "Source code, releases, and issues",
@@ -2338,6 +2368,63 @@ private fun AboutSettingsCard(compact: Boolean = false) {
             subtitle = "Creator of Phoebe",
             linkLabel = "joetr.com",
             onClick = { openExternalUrl(CreatorWebsiteUrl) },
+        )
+    }
+}
+
+@Composable
+private fun AboutUpdateRow(
+    updateState: AppUpdateState,
+    enabled: Boolean,
+    onCheckForUpdates: () -> Unit,
+    onInstallUpdate: () -> Unit,
+) {
+    val subtitle = when (updateState) {
+        AppUpdateState.Idle -> "Check GitHub releases for a newer build"
+        AppUpdateState.Checking -> "Checking GitHub releases..."
+        AppUpdateState.Current -> "Phoebe is up to date"
+        is AppUpdateState.Available -> "Version ${updateState.update.versionName} is available"
+        is AppUpdateState.Installing -> updateState.message
+        is AppUpdateState.Failed -> updateState.message
+    }
+    val buttonLabel = when (updateState) {
+        AppUpdateState.Checking -> "Checking"
+        is AppUpdateState.Available -> "Update"
+        is AppUpdateState.Installing -> "Updating"
+        else -> "Check"
+    }
+    val onClick = if (updateState is AppUpdateState.Available) onInstallUpdate else onCheckForUpdates
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(PhoebeUi.subtleFill)
+            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(10.dp))
+            .padding(horizontal = 12.dp, vertical = 11.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("Updates", color = PhoebeUi.primaryText, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Text(
+                subtitle,
+                color = PhoebeUi.secondaryText,
+                fontSize = 12.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Text(
+            buttonLabel,
+            color = if (enabled) PhoebeUi.accentLight else PhoebeUi.mutedText,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .clip(RoundedCornerShape(6.dp))
+                .clickable(enabled = enabled, onClick = onClick)
+                .padding(horizontal = 8.dp, vertical = 6.dp),
         )
     }
 }

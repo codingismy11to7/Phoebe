@@ -38,6 +38,7 @@ class ArtistDetailRouteActions(
     val onShuffleAllTracks: (List<Track>) -> Unit = { tracks -> onPlayTracks(tracks.shuffled(), 0) },
     val onProbeArtistRadio: (Artist) -> Unit = {},
     val onCollectionItems: (CollectionEntry, String) -> Unit = { _, _ -> },
+    val onSearchQuery: (String) -> Unit = {},
 )
 
 @Immutable
@@ -58,6 +59,7 @@ class AlbumDetailRouteActions(
     val onArtist: (Artist) -> Unit,
     val onLibraryColumns: (LibraryColumnVisibility) -> Unit,
     val onCollectionItems: (CollectionEntry, String) -> Unit = { _, _ -> },
+    val onSearchQuery: (String) -> Unit = {},
 )
 
 @Immutable
@@ -123,6 +125,7 @@ fun ArtistDetailRoute(
         onArtist = actions.onArtist,
         onLibraryColumns = actions.onLibraryColumns,
         onCollectionItems = actions.onCollectionItems,
+        onSearchQuery = actions.onSearchQuery,
     )
 }
 
@@ -147,6 +150,7 @@ fun AlbumDetailRoute(
         onArtist = actions.onArtist,
         onLibraryColumns = actions.onLibraryColumns,
         onCollectionItems = actions.onCollectionItems,
+        onSearchQuery = actions.onSearchQuery,
     )
 }
 

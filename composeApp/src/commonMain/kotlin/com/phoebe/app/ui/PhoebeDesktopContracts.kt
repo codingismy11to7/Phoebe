@@ -240,6 +240,7 @@ internal data class SettingsUiState(
     val homeScreenLayoutMode: HomeScreenLayoutMode = HomeScreenLayoutMode.Default,
     val settingsInitialCategory: SettingsCategory = SettingsCategory.AudioPlayback,
     val listenBrainzCredentialAvailability: SecureCredentialAvailability = SecureCredentialAvailability.Unavailable,
+    val appUpdateState: AppUpdateState = AppUpdateState.Idle,
 )
 
 internal data class SettingsActions(
@@ -286,4 +287,6 @@ internal data class SettingsActions(
     val onDisconnectLastFm: () -> Unit = {},
     val onLastFmSubmitNowPlaying: (Boolean) -> Unit = {},
     val onLastFmSubmitScrobbles: (Boolean) -> Unit = {},
+    val onCheckForUpdates: () -> Unit = {},
+    val onInstallUpdate: () -> Unit = {},
 )

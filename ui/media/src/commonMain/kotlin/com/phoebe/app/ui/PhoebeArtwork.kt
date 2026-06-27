@@ -80,6 +80,7 @@ fun ArtworkImage(
     maxDecodeDimension: Int = ListArtworkMaxDecodeDimension,
     fallbackThumbUrl: String? = null,
     alignment: Alignment = Alignment.Center,
+    contentScale: ContentScale = ContentScale.Crop,
 ) {
     val imageState = rememberRemoteImageState(thumbUrl, maxDecodeDimension, fallbackThumbUrl)
     val imageModifier = when {
@@ -106,7 +107,7 @@ fun ArtworkImage(
                 Image(
                     bitmap = image,
                     contentDescription = null,
-                    contentScale = ContentScale.Crop,
+                    contentScale = contentScale,
                     alignment = alignment,
                     modifier = imageModifier,
                 )

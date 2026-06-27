@@ -16,6 +16,7 @@ import com.phoebe.app.domain.PersonalMixPreferences
 import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.platform.SecureCredentialAvailability
 import com.phoebe.app.ui.HomeScreenLayoutMode
+import com.phoebe.app.updates.AppUpdateState
 
 @Immutable
 data class SettingsRouteState(
@@ -33,6 +34,7 @@ data class SettingsRouteState(
     val session: PlexSession? = null,
     val listenBrainzCredentialAvailability: SecureCredentialAvailability = SecureCredentialAvailability.Unavailable,
     val initialCategory: SettingsCategory = SettingsCategory.AudioPlayback,
+    val appUpdateState: AppUpdateState = AppUpdateState.Idle,
 )
 
 @Immutable
@@ -88,6 +90,8 @@ class SettingsRouteActions(
     val onDisconnectLastFm: () -> Unit = {},
     val onLastFmSubmitNowPlaying: (Boolean) -> Unit = {},
     val onLastFmSubmitScrobbles: (Boolean) -> Unit = {},
+    val onCheckForUpdates: () -> Unit = {},
+    val onInstallUpdate: () -> Unit = {},
 )
 
 @Composable
@@ -152,6 +156,9 @@ fun SettingsDesktopRoute(
         onDisconnectLastFm = actions.onDisconnectLastFm,
         onLastFmSubmitNowPlaying = actions.onLastFmSubmitNowPlaying,
         onLastFmSubmitScrobbles = actions.onLastFmSubmitScrobbles,
+        appUpdateState = state.appUpdateState,
+        onCheckForUpdates = actions.onCheckForUpdates,
+        onInstallUpdate = actions.onInstallUpdate,
         modifier = modifier,
         initialCategory = state.initialCategory,
     )
@@ -219,6 +226,9 @@ fun SettingsMobileRoute(
         onDisconnectLastFm = actions.onDisconnectLastFm,
         onLastFmSubmitNowPlaying = actions.onLastFmSubmitNowPlaying,
         onLastFmSubmitScrobbles = actions.onLastFmSubmitScrobbles,
+        appUpdateState = state.appUpdateState,
+        onCheckForUpdates = actions.onCheckForUpdates,
+        onInstallUpdate = actions.onInstallUpdate,
         modifier = modifier,
     )
 }
