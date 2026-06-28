@@ -470,7 +470,7 @@ fun AddToPlaylistMenuItems(
                         }
                     },
                     onClick = {
-                        actions.onAddTrackToPlaylist(playlist, track)
+                        actions.onAddTrackToPlaylist(playlist, track, false)
                         onAfter()
                     },
                 )

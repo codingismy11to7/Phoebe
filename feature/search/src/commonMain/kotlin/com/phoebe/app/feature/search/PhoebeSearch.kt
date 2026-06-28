@@ -38,7 +38,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -83,8 +82,6 @@ import com.phoebe.app.ui.SectionLabel
 import com.phoebe.app.ui.TrackArtworkImage
 import com.phoebe.app.ui.formatDuration
 import com.phoebe.app.ui.openContextMenuOnSecondaryClick
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 data class SearchUiResults(
     val tracks: List<Track>,
@@ -107,23 +104,20 @@ private const val SearchResultLimit = 500
 @Composable
 internal fun rememberSearchUiResults(catalog: CatalogSnapshot, searchQuery: String): SearchUiResults {
     val query = searchQuery.trim()
-    return produceState(
-        initialValue = SearchResultsFactory.EmptyResults,
+    return remember(
         catalog.albums,
         catalog.artists,
         catalog.tracksByParent,
         catalog.downloads,
         query,
     ) {
-        value = if (query.isBlank()) {
+        if (query.isBlank()) {
             SearchResultsFactory.EmptyResults
         } else {
-            withContext(Dispatchers.Default) {
-                val allTracks = catalog.tracksByParent.values.asSequence().flatten().distinctBy { it.id }.toList()
-                deriveSearchUiResults(catalog, query, allTracks)
-            }
+            val allTracks = catalog.tracksByParent.values.asSequence().flatten().distinctBy { it.id }.toList()
+            deriveSearchUiResults(catalog, query, allTracks)
         }
-    }.value
+    }
 }
 
 fun deriveSearchUiResults(

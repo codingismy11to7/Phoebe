@@ -2561,11 +2561,36 @@ class CatalogRepository(
     private fun moveTracksToFrontById(tracks: List<Track>, trackIds: List<String>): List<Track> {
         val ids = trackIds.filter { it.isNotBlank() }.distinct()
         if (ids.isEmpty() || tracks.isEmpty()) return tracks
-        val tracksById = tracks.associateBy { it.id }
-        val front = ids.mapNotNull { tracksById[it] }
+        val idsSet = ids.toSet()
+        val firstIndices = mutableMapOf<String, Int>()
+        tracks.forEachIndexed { index, track ->
+            if (track.id in idsSet && track.id !in firstIndices) {
+                firstIndices[track.id] = index
+            }
+        }
+        val front = ids.mapNotNull { id -> firstIndices[id]?.let { tracks[it] } }
         if (front.isEmpty()) return tracks
-        val frontIds = front.map { it.id }.toSet()
-        return front + tracks.filterNot { it.id in frontIds }
+        val indicesToRemove = firstIndices.values.toSet()
+        val remaining = tracks.filterIndexed { index, _ -> index !in indicesToRemove }
+        return front + remaining
+    }
+
+    private fun moveTracksToFrontByPlaylistEntry(tracks: List<Track>, entries: List<Track>): List<Track> {
+        val keys = entries.map { it.playlistEntryKey() }.filter { it.isNotBlank() }.distinct()
+        if (keys.isEmpty() || tracks.isEmpty()) return tracks
+        val keysSet = keys.toSet()
+        val firstIndices = mutableMapOf<String, Int>()
+        tracks.forEachIndexed { index, track ->
+            val key = track.playlistEntryKey()
+            if (key in keysSet && key !in firstIndices) {
+                firstIndices[key] = index
+            }
+        }
+        val front = keys.mapNotNull { key -> firstIndices[key]?.let { tracks[it] } }
+        if (front.isEmpty()) return tracks
+        val indicesToRemove = firstIndices.values.toSet()
+        val remaining = tracks.filterIndexed { index, _ -> index !in indicesToRemove }
+        return front + remaining
     }
 
     private fun <T> List<T>.moved(from: Int, to: Int): List<T> {
@@ -5050,13 +5075,14 @@ class CatalogRepository(
     }
 
     /**
-     * Add [tracks] to an existing Plex playlist, de-duplicating against the tracks already on it.
-     * Only [Playlist] rows with `plex:` ids are supported; only Plex-sourced tracks are appended.
+     * Add [tracks] to an existing playlist, de-duplicating against existing entries unless
+     * [allowDuplicates] is true.
      */
     suspend fun addTracksToPlaylist(
         session: PlexSession?,
         playlist: Playlist,
         tracks: List<Track>,
+        allowDuplicates: Boolean = false,
     ) {
         PhoebeLog.d("CatalogRepository") { "addTracksToPlaylist entry → playlist='${playlist.title}' (${playlist.id}), tracks=${tracks.map { it.id }}" }
         if (tracks.isEmpty()) return
@@ -5065,7 +5091,7 @@ class CatalogRepository(
             return
         }
         if (playlist.isLocalPlaylist()) {
-            addTracksToLocalPlaylist(playlist, tracks)
+            addTracksToLocalPlaylist(playlist, tracks, allowDuplicates)
             return
         }
         val remotePrefix = playlist.remoteProviderPrefix()
@@ -5084,7 +5110,7 @@ class CatalogRepository(
             }
             val existingIds = existing.map { it.id }.toHashSet()
             val toAdd = tracks
-                .filterNot { it.id in existingIds }
+                .let { candidates -> if (allowDuplicates) candidates else candidates.filterNot { it.id in existingIds } }
                 .filter { !it.isLocalMediaPlayback() && it.id.startsWith("$remotePrefix:") }
             if (toAdd.isEmpty()) return
             var remoteAddSucceeded = false
@@ -5145,7 +5171,7 @@ class CatalogRepository(
 
         val existingIds = existing.map { it.id }.toHashSet()
         val toAdd = tracks
-            .filterNot { it.id in existingIds }
+            .let { candidates -> if (allowDuplicates) candidates else candidates.filterNot { it.id in existingIds } }
             .filter { !it.isLocalMediaPlayback() && it.isPlexLibraryTrack() && plexRatingKey(it.id) != null }
         if (toAdd.isEmpty()) {
             PhoebeLog.d("CatalogRepository") { "addTracksToPlaylist: nothing to add after Plex filters, skipping" }
@@ -5452,7 +5478,24 @@ class CatalogRepository(
             .let { preserveTrackDateAdded(existingTracks, it) }
         if (addedIds.any { id -> fetched.none { it.id == id } }) return null
 
-        val addedFetchedTracks = addedIds.mapNotNull { id -> fetched.firstOrNull { it.id == id } }
+        val existingKeys = existingTracks.map { it.playlistEntryKey() }.toSet()
+        val consumedItemIds = mutableSetOf<Long>()
+        fun isUnconsumed(track: Track): Boolean {
+            val playlistItemId = track.playlistItemId ?: return true
+            return playlistItemId !in consumedItemIds
+        }
+        val addedFetchedTracks = addedTracks.mapNotNull { addedTrack ->
+            val matched = fetched.lastOrNull { fetchedTrack ->
+                fetchedTrack.id == addedTrack.id &&
+                    isUnconsumed(fetchedTrack) &&
+                    fetchedTrack.playlistEntryKey() !in existingKeys
+            } ?: fetched.lastOrNull { fetchedTrack ->
+                fetchedTrack.id == addedTrack.id &&
+                    isUnconsumed(fetchedTrack)
+            }
+            matched?.playlistItemId?.let { consumedItemIds.add(it) }
+            matched
+        }
         addedFetchedTracks.asReversed().forEach { track ->
             val playlistItemId = track.playlistItemId ?: return@forEach
             runCatching {
@@ -5463,15 +5506,19 @@ class CatalogRepository(
                 }
             }
         }
-        return moveTracksToFrontById(fetched, addedIds)
+        return moveTracksToFrontByPlaylistEntry(fetched, addedFetchedTracks)
     }
 
-    private suspend fun addTracksToLocalPlaylist(playlist: Playlist, tracks: List<Track>) {
+    private suspend fun addTracksToLocalPlaylist(
+        playlist: Playlist,
+        tracks: List<Track>,
+        allowDuplicates: Boolean,
+    ) {
         val snapshot = mutableCatalog.value
         val existing = snapshot.tracksByParent[playlist.id].orEmpty()
         val existingIds = existing.map { it.id }.toHashSet()
         val toAdd = tracks
-            .filterNot { it.id in existingIds }
+            .let { candidates -> if (allowDuplicates) candidates else candidates.filterNot { it.id in existingIds } }
             .filter { it.canAddToLocalPlaylist() }
         if (toAdd.isEmpty()) return
         val updated = toAdd + existing

@@ -3,6 +3,7 @@ package com.phoebe.app
 import androidx.compose.ui.Modifier
 import com.github.takahirom.roborazzi.ExperimentalRoborazziApi
 import com.github.takahirom.roborazzi.RoborazziComposeOptions
+import com.github.takahirom.roborazzi.RoborazziOptions
 import com.github.takahirom.roborazzi.captureRoboImage
 import com.github.takahirom.roborazzi.size
 import com.phoebe.app.ui.PhoebeScreenshotApp
@@ -139,6 +140,9 @@ private fun capture(
 ) {
     captureRoboImage(
         filePath = "src/screenshotTest/roborazzi/$name.png",
+        roborazziOptions = RoborazziOptions(
+            compareOptions = RoborazziOptions.CompareOptions(changeThreshold = 0.0001F),
+        ),
         roborazziComposeOptions = RoborazziComposeOptions {
             size(widthDp = widthDp, heightDp = heightDp)
         },

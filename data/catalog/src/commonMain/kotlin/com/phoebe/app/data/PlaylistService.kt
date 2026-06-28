@@ -25,6 +25,11 @@ data class PlaylistCreateResult(
     val message: String? = null,
 )
 
+data class PlaylistAddResult(
+    val message: String,
+    val alreadyPresent: Boolean = false,
+)
+
 @SingleIn(AppScope::class)
 @Inject
 class PlaylistService(
@@ -79,20 +84,28 @@ class PlaylistService(
         catalog: CatalogSnapshot,
         playlist: Playlist,
         track: Track,
-    ): String {
+        allowDuplicate: Boolean = false,
+    ): PlaylistAddResult {
         val validationMessage = validateCanAddToPlaylist(session, playlist, track)
-        if (validationMessage != null) return validationMessage
+        if (validationMessage != null) return PlaylistAddResult(validationMessage)
         val before = catalog.tracksByParent[playlist.id].orEmpty()
         val trackKey = track.playlistEntryKey()
         val alreadyPresent = before.any { it.playlistEntryKey() == trackKey || it.id == track.id }
-        catalogRepository.addTracksToPlaylist(session, playlist, listOf(track))
+        if (alreadyPresent && !allowDuplicate) {
+            return PlaylistAddResult(message = "Song is already added.", alreadyPresent = true)
+        }
+        if (allowDuplicate && !playlist.isLocalPlaylist()) {
+            return PlaylistAddResult(message = "This playlist doesn't support adding the same song twice.")
+        }
+        catalogRepository.addTracksToPlaylist(session, playlist, listOf(track), allowDuplicates = allowDuplicate)
         val after = catalogRepository.catalog.value.tracksByParent[playlist.id].orEmpty()
-        return when {
+        val message = when {
             alreadyPresent && after.size == before.size -> "${track.title} is already in ${playlist.title}."
             after.any { it.playlistEntryKey() == trackKey || it.id == track.id } || after.size > before.size ->
                 "Added to ${playlist.title}."
             else -> "Couldn't add to ${playlist.title}."
         }
+        return PlaylistAddResult(message = message)
     }
 
     suspend fun movePlaylistTrack(session: PlexSession?, playlist: Playlist, fromIndex: Int, toIndex: Int): String? {

@@ -272,7 +272,7 @@ data class PlaylistActions(
     val playlists: List<Playlist> = emptyList(),
     val smartPlaylists: List<SmartPlaylist> = emptyList(),
     val playlistsEnabled: Boolean = false,
-    val onAddTrackToPlaylist: (Playlist, Track) -> Unit = { _, _ -> },
+    val onAddTrackToPlaylist: (Playlist, Track, Boolean) -> Unit = { _, _, _ -> },
     val onMovePlaylistTrack: (Playlist, Int, Int) -> Unit = { _, _, _ -> },
     val onRemovePlaylistTracks: (Playlist, List<Track>) -> Unit = { _, _ -> },
     val onCopyPlaylistToPlaylist: (source: Playlist, target: Playlist) -> Unit = { _, _ -> },

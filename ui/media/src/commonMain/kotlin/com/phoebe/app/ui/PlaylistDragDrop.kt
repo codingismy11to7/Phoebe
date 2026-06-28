@@ -110,7 +110,7 @@ fun Modifier.draggableSong(
             }
             val onEnd: () -> Unit = {
                 val target = controller.end()
-                if (target != null) actions.onAddTrackToPlaylist(target, track)
+                if (target != null) actions.onAddTrackToPlaylist(target, track, false)
             }
             val onCancel: () -> Unit = { controller.cancel() }
             if (immediate) {

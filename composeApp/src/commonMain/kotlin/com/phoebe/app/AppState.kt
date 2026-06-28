@@ -51,6 +51,7 @@ import com.phoebe.app.domain.isFromLocalFolder
 import com.phoebe.app.domain.isMusicAssistant
 import com.phoebe.app.domain.isNavidrome
 import com.phoebe.app.domain.isPlex
+import com.phoebe.app.domain.playlistEntryKey
 import com.phoebe.app.domain.serverAuthToken
 import com.phoebe.app.domain.supportsCollectionEntry
 import com.phoebe.app.domain.displayName
@@ -113,6 +114,12 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+
+data class PendingDuplicatePlaylistAdd(
+    val playlist: Playlist,
+    val track: Track,
+    val message: String,
+)
 
 class AppState(
     private val dependencies: AppDependencies,
@@ -264,6 +271,9 @@ class AppState(
 
     private val mutableMessage = MutableStateFlow("Sign in to your provider, or add a local music folder to get started.")
     val message: StateFlow<String> = mutableMessage
+
+    private val mutablePendingDuplicatePlaylistAdd = MutableStateFlow<PendingDuplicatePlaylistAdd?>(null)
+    val pendingDuplicatePlaylistAdd: StateFlow<PendingDuplicatePlaylistAdd?> = mutablePendingDuplicatePlaylistAdd.asStateFlow()
 
     private val mutablePlaybackSnackbar = MutableStateFlow<String?>(null)
     val playbackSnackbar: StateFlow<String?> = mutablePlaybackSnackbar.asStateFlow()
@@ -2480,9 +2490,50 @@ class AppState(
     }
 
     /** Append [track] to [playlist] when the session, playlist type, and track are eligible. */
-    fun addToPlaylist(playlist: com.phoebe.app.domain.Playlist, track: Track) = scope.launch {
+    fun addToPlaylist(playlist: com.phoebe.app.domain.Playlist, track: Track, allowDuplicate: Boolean = false) = scope.launch {
         PhoebeLog.d("AppState") { "addToPlaylist → playlist='${playlist.title}' (${playlist.id}), track='${track.title}' (${track.id})" }
-        mutableMessage.value = dependencies.playlistService.addToPlaylist(session.value, catalog.value, playlist, track)
+        if (allowDuplicate) {
+            mutablePendingDuplicatePlaylistAdd.value = null
+        }
+        val result = dependencies.playlistService.addToPlaylist(
+            session = session.value,
+            catalog = catalog.value,
+            playlist = playlist,
+            track = track,
+            allowDuplicate = allowDuplicate,
+        )
+        if (result.alreadyPresent && !allowDuplicate) {
+            mutablePendingDuplicatePlaylistAdd.value = PendingDuplicatePlaylistAdd(
+                playlist = playlist,
+                track = track,
+                message = result.message,
+            )
+        } else {
+            mutablePendingDuplicatePlaylistAdd.value = null
+            mutableMessage.value = result.message
+        }
+    }
+
+    fun dismissDuplicatePlaylistAdd() {
+        mutablePendingDuplicatePlaylistAdd.value = null
+    }
+
+    fun moveDuplicatePlaylistAddToTop(pending: PendingDuplicatePlaylistAdd) = scope.launch {
+        mutablePendingDuplicatePlaylistAdd.value = null
+        val tracks = catalog.value.tracksByParent[pending.playlist.id].orEmpty()
+        val targetKey = pending.track.playlistEntryKey()
+        val fromIndex = tracks.indexOfFirst { it.playlistEntryKey() == targetKey || it.id == pending.track.id }
+        if (fromIndex < 0) {
+            mutableMessage.value = "Couldn't find that song in ${pending.playlist.title}."
+            return@launch
+        }
+        if (fromIndex == 0) {
+            mutableMessage.value = "Song is already at the top of ${pending.playlist.title}."
+            return@launch
+        }
+        dependencies.playlistService.movePlaylistTrack(session.value, pending.playlist, fromIndex, 0)
+            ?.let { mutableMessage.value = it }
+            ?: run { mutableMessage.value = "Moved to the top of ${pending.playlist.title}." }
     }
 
     fun movePlaylistTrack(playlist: Playlist, fromIndex: Int, toIndex: Int) = scope.launch {
