@@ -44,6 +44,47 @@ class LocalPlaylistEndToEndDesktopTest {
     }
 
     @Test
+    fun localPlaylistCanAddSameSongTwiceWhenAllowed() = runTest {
+        val music = temp.newFolder("duplicate-music")
+        File(music, "alpha.mp3").writeBytes(minimalMp3Bytes())
+
+        val (db, sqlDriver) = newInMemoryPhoebeDatabase()
+        driver = sqlDriver
+        val http = testHttpClient(MockEngine { respond("", HttpStatusCode.NotFound) })
+        val storage = PlatformStorage()
+        val mediaSources = MediaSourcesRepository(db, storage)
+        val catalog = testCatalogRepository(
+            plexClient = PlexClient(http),
+            database = db,
+            storage = storage,
+            httpClient = http,
+            mediaSourcesRepository = mediaSources,
+        )
+
+        mediaSources.addLocalFolder(music.toURI().toString(), "Duplicate MP3s")
+        catalog.refreshAggregated(session = null)
+        val alpha = catalog.catalog.value.tracksByParent.values.flatten().single { it.title == "alpha" }
+
+        val created = catalog.createLocalPlaylist("Double Alpha", listOf(alpha))
+        assertNotNull(created)
+
+        catalog.addTracksToPlaylist(null, created, listOf(alpha), allowDuplicates = true)
+
+        val playlist = catalog.catalog.value.playlists.single { it.title == "Double Alpha" }
+        assertEquals(2, playlist.trackCount)
+        assertEquals(
+            listOf("alpha", "alpha"),
+            catalog.tracksForPlaylist(null, playlist).map { it.title },
+        )
+
+        catalog.refreshAggregated(session = null)
+        assertEquals(
+            listOf("alpha", "alpha"),
+            catalog.tracksForPlaylist(null, playlist).map { it.title },
+        )
+    }
+
+    @Test
     fun createAddPersistAndExportLocalPlaylist() = runTest {
         val music = temp.newFolder("music")
         File(music, "alpha.mp3").writeBytes(minimalMp3Bytes())

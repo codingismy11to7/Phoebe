@@ -66,8 +66,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -398,6 +402,7 @@ fun MobileHomeScreen(
                 listState = listState,
                 modifier = Modifier.fillMaxSize(),
                 chromePadding = chromePadding,
+                catalogRefreshing = catalogRefreshing,
                 catalogSyncInProgress = catalogSyncInProgress,
                 sectionOrder = sectionOrder,
                 collectionEntries = supportedCollections,
@@ -434,6 +439,7 @@ fun MobileHomeScreen(
                 listState = listState,
                 modifier = Modifier.fillMaxSize(),
                 chromePadding = chromePadding,
+                catalogRefreshing = catalogRefreshing,
                 catalogSyncInProgress = catalogSyncInProgress,
                 sectionOrder = sectionOrder,
                 collectionRows = collectionRows,
@@ -640,6 +646,7 @@ private fun MobileHomeContent(
     listState: LazyListState,
     modifier: Modifier,
     chromePadding: MobileChromePadding,
+    catalogRefreshing: Boolean,
     catalogSyncInProgress: Boolean,
     sectionOrder: List<HomeSection>,
     collectionRows: List<List<HomeCollectionEntry>>,
@@ -814,13 +821,10 @@ private fun MobileHomeContent(
                     }
                 }
                 HomeSection.Random -> item(key = "random", contentType = "random-section") {
-                    val randomArtists = remember(state.randomArtists) { state.randomArtists.take(10) }
-                    val randomAlbums = remember(state.randomAlbums) { state.randomAlbums.take(10) }
                     if (usePhoneAccordions) {
                         PhoneRandomAccordionSection(
-                            randomArtists = randomArtists,
-                            randomAlbums = randomAlbums,
-                            artistThumbs = artistThumbs,
+                            state = state,
+                            catalogRefreshing = catalogRefreshing,
                             albumArtworkFallbacks = albumArtworkFallbacks,
                             expanded = expandedPhoneSection == PhoneHomeAccordionSection.Random,
                             onToggle = {
@@ -834,15 +838,16 @@ private fun MobileHomeContent(
                             onRefreshAlbums = onRefreshAlbums,
                         )
                     } else {
-                        MobileRandomSection(
-                            randomArtists = randomArtists,
-                            randomAlbums = randomAlbums,
-                            artistThumbs = artistThumbs,
+                        DesktopRandomPanels(
+                            state = state,
+                            catalogRefreshing = catalogRefreshing,
                             albumArtworkFallbacks = albumArtworkFallbacks,
                             onArtist = onArtist,
                             onAlbum = onAlbum,
                             onRefreshArtists = onRefreshArtists,
                             onRefreshAlbums = onRefreshAlbums,
+                            onPrefetchArtist = {},
+                            onPrefetchAlbum = {},
                         )
                     }
                 }
@@ -859,6 +864,7 @@ private fun MobileExpandedHomeContent(
     listState: LazyListState,
     modifier: Modifier,
     chromePadding: MobileChromePadding,
+    catalogRefreshing: Boolean,
     catalogSyncInProgress: Boolean,
     sectionOrder: List<HomeSection>,
     collectionEntries: List<HomeCollectionEntry>,
@@ -996,20 +1002,17 @@ private fun MobileExpandedHomeContent(
                         )
                     }
                     HomeSection.Random -> {
-                        item(key = "expanded-random-artists", contentType = "expanded-random-artists") {
-                            ExpandedRandomArtistsShelf(
-                                randomArtists = remember(state.randomArtists) { state.randomArtists.take(10) },
-                                artistThumbs = artistThumbs,
-                                onArtist = onArtist,
-                                onRefreshArtists = onRefreshArtists,
-                            )
-                        }
-                        item(key = "expanded-random-albums", contentType = "expanded-random-albums") {
-                            ExpandedRandomAlbumsShelf(
-                                randomAlbums = remember(state.randomAlbums) { state.randomAlbums.take(10) },
+                        item(key = "expanded-random", contentType = "expanded-random") {
+                            DesktopRandomPanels(
+                                state = state,
+                                catalogRefreshing = catalogRefreshing,
                                 albumArtworkFallbacks = albumArtworkFallbacks,
+                                onArtist = onArtist,
                                 onAlbum = onAlbum,
+                                onRefreshArtists = onRefreshArtists,
                                 onRefreshAlbums = onRefreshAlbums,
+                                onPrefetchArtist = {},
+                                onPrefetchAlbum = {},
                             )
                         }
                     }
@@ -1049,10 +1052,10 @@ private fun ExpandedMixesShelf(
 ) {
     ExpandedHomeShelf("CREATE A MIX", horizontalSpacing = 9.dp) {
         item(key = "personal-mix", contentType = "expanded-mix-action") {
-            MobileActionCard("Personal", PhoebeIcon.Person, Modifier.width(126.dp), onClick = onPlayPersonalMix)
+            MobileActionCard("Personal", PhoebeIcon.Person, Modifier.width(104.dp), onClick = onPlayPersonalMix)
         }
         item(key = "decade-mix", contentType = "expanded-mix-action") {
-            MobileActionCard("Decade", PhoebeIcon.Calendar, Modifier.width(126.dp)) {
+            MobileActionCard("Decade", PhoebeIcon.Calendar, Modifier.width(104.dp)) {
                 onClearDecadeMixNotice()
                 onShowDecadeMix()
             }
@@ -1060,9 +1063,9 @@ private fun ExpandedMixesShelf(
         items(radioStations, key = { "radio:${it.key}" }, contentType = { "expanded-radio-station" }) { station ->
             val starting = station.key in radioStartingIds
             MobileActionCard(
-                if (starting) "Starting..." else station.title,
+                if (starting) "Starting..." else station.mixTitle(),
                 station.homeRadioIcon(),
-                Modifier.width(156.dp),
+                Modifier.width(116.dp),
                 enabled = !starting,
             ) {
                 onPlayRadioStation(station)
@@ -1082,7 +1085,7 @@ private fun ExpandedCollectionsShelf(
     } else {
         ExpandedHomeShelf("COLLECTIONS", horizontalSpacing = 9.dp) {
             items(collectionEntries, key = { it.collectionEntry.toString() }, contentType = { "expanded-collection" }) { entry ->
-                MobileActionCard(entry.mobileTitle, entry.icon, Modifier.width(152.dp)) {
+                CollectionActionTile(entry.mobileTitle, entry.icon, Modifier.size(96.dp)) {
                     onCollections(entry.collectionEntry)
                 }
             }
@@ -1659,9 +1662,8 @@ private fun PhoneRecentsAccordionSection(
 
 @Composable
 private fun PhoneRandomAccordionSection(
-    randomArtists: List<Artist>,
-    randomAlbums: List<Album>,
-    artistThumbs: Map<String, String>,
+    state: HomeUiState,
+    catalogRefreshing: Boolean,
     albumArtworkFallbacks: Map<String, String>,
     expanded: Boolean,
     onToggle: () -> Unit,
@@ -1677,15 +1679,16 @@ private fun PhoneRandomAccordionSection(
         expanded = expanded,
         onToggle = onToggle,
     ) {
-        MobileRandomExpandedContent(
-            randomArtists = randomArtists,
-            randomAlbums = randomAlbums,
-            artistThumbs = artistThumbs,
+        DesktopRandomPanels(
+            state = state,
+            catalogRefreshing = catalogRefreshing,
             albumArtworkFallbacks = albumArtworkFallbacks,
             onArtist = onArtist,
             onAlbum = onAlbum,
             onRefreshArtists = onRefreshArtists,
             onRefreshAlbums = onRefreshAlbums,
+            onPrefetchArtist = {},
+            onPrefetchAlbum = {},
         )
     }
 }
@@ -1918,14 +1921,10 @@ private fun MobileCollectionsSection(
     onCollections: (CollectionEntry) -> Unit,
 ) {
     SectionLabel("COLLECTIONS", PhoebeUi.mutedText)
-    Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-        collectionRows.forEach { row ->
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                row.forEach { entry ->
-                    MobileActionCard(entry.mobileTitle, entry.icon, Modifier.weight(1f)) {
-                        onCollections(entry.collectionEntry)
-                    }
-                }
+    HomeHorizontalCarousel(Modifier.fillMaxWidth(), horizontalSpacing = 9.dp) {
+        items(collectionRows.flatten(), key = { it.collectionEntry.toString() }, contentType = { "mobile-collection" }) { entry ->
+            CollectionActionTile(entry.mobileTitle, entry.icon, Modifier.size(96.dp)) {
+                onCollections(entry.collectionEntry)
             }
         }
     }
@@ -2035,24 +2034,22 @@ private fun DesktopMixesPanel(
     HomePanel(Modifier.fillMaxWidth()) {
         SectionLabel("CREATE A MIX", PhoebeUi.mutedText)
         LazyRow(
-            modifier = Modifier.fillMaxWidth().height(94.dp),
+            modifier = Modifier.fillMaxWidth().height(112.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item("personal-mix", contentType = "mix-action") {
                 HomeActionCard(
                     "Personal Mix",
-                    "Recent favorites, familiar anchors, and a little discovery",
                     PhoebeIcon.Person,
-                    Modifier.width(260.dp),
+                    Modifier.width(126.dp),
                     onClick = onPlayPersonalMix,
                 )
             }
             item("decade-mix", contentType = "mix-action") {
                 HomeActionCard(
                     "Decade Mix",
-                    "Queue a shuffled era from your library",
                     PhoebeIcon.Calendar,
-                    Modifier.width(260.dp),
+                    Modifier.width(126.dp),
                 ) {
                     onClearDecadeMixNotice()
                     onShowDecadeMix()
@@ -2061,10 +2058,9 @@ private fun DesktopMixesPanel(
             items(radioStations, key = { "radio:${it.id}:${it.key}" }, contentType = { "plex-radio-station" }) { station ->
                 val starting = station.key in radioStartingIds
                 HomeActionCard(
-                    title = station.title,
-                    subtitle = if (starting) "Starting radio..." else station.subtitle,
+                    title = station.mixTitle(),
                     icon = station.homeRadioIcon(),
-                    modifier = Modifier.width(220.dp),
+                    modifier = Modifier.width(126.dp),
                     enabled = !starting,
                 ) {
                     onPlayRadioStation(station)
@@ -2086,10 +2082,10 @@ private fun MobileMixesSection(
     SectionLabel("CREATE A MIX", PhoebeUi.mutedText)
     HomeHorizontalCarousel(Modifier.fillMaxWidth(), horizontalSpacing = 9.dp) {
         item(key = "personal-mix", contentType = "mobile-mix-action") {
-            MobileActionCard("Personal", PhoebeIcon.Person, Modifier.width(126.dp), onClick = onPlayPersonalMix)
+            MobileActionCard("Personal", PhoebeIcon.Person, Modifier.width(104.dp), onClick = onPlayPersonalMix)
         }
         item(key = "decade-mix", contentType = "mobile-mix-action") {
-            MobileActionCard("Decade", PhoebeIcon.Calendar, Modifier.width(126.dp)) {
+            MobileActionCard("Decade", PhoebeIcon.Calendar, Modifier.width(104.dp)) {
                 onClearDecadeMixNotice()
                 onShowDecadeMix()
             }
@@ -2097,9 +2093,9 @@ private fun MobileMixesSection(
         items(radioStations, key = { it.key }, contentType = { "mobile-radio-station" }) { station ->
             val starting = station.key in radioStartingIds
             MobileActionCard(
-                if (starting) "Starting..." else station.title,
+                if (starting) "Starting..." else station.mixTitle(),
                 station.homeRadioIcon(),
-                Modifier.width(156.dp),
+                Modifier.width(116.dp),
                 enabled = !starting,
             ) {
                 onPlayRadioStation(station)
@@ -2395,14 +2391,15 @@ private fun DesktopRandomPanels(
     onPrefetchArtist: (Artist) -> Unit,
     onPrefetchAlbum: (Album) -> Unit,
 ) {
-    val randomPanelHeight = 304.dp
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         if (maxWidth < 820.dp) {
+            val randomPanelHeight = 336.dp
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 RandomArtistPanel(state.randomArtists.firstOrNull(), state.randomArtistStats, catalogRefreshing, onArtist, onRefreshArtists, onPrefetchArtist, Modifier.fillMaxWidth().height(randomPanelHeight))
                 RandomAlbumPanel(state.randomAlbums.firstOrNull(), state.randomAlbumStats, catalogRefreshing, albumArtworkFallbacks, onAlbum, onRefreshAlbums, onPrefetchAlbum, Modifier.fillMaxWidth().height(randomPanelHeight))
             }
         } else {
+            val randomPanelHeight = 304.dp
             Row(Modifier.fillMaxWidth().height(randomPanelHeight), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 RandomArtistPanel(state.randomArtists.firstOrNull(), state.randomArtistStats, catalogRefreshing, onArtist, onRefreshArtists, onPrefetchArtist, Modifier.weight(1f).fillMaxHeight())
                 RandomAlbumPanel(state.randomAlbums.firstOrNull(), state.randomAlbumStats, catalogRefreshing, albumArtworkFallbacks, onAlbum, onRefreshAlbums, onPrefetchAlbum, Modifier.weight(1f).fillMaxHeight())
@@ -2511,57 +2508,86 @@ private fun DesktopCollectionsGrid(
     supportedCollectionEntries: Set<CollectionEntry>,
     onCollections: (CollectionEntry) -> Unit,
 ) {
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val columns = if (maxWidth >= 760.dp) 3 else 2
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            collectionEntries(supportedCollectionEntries).chunked(columns).forEach { row ->
-                Row(Modifier.fillMaxWidth().height(82.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    row.forEach { entry ->
-                        HomeActionCard(
-                            title = entry.homeTitle,
-                            subtitle = entry.homeSubtitle,
-                            icon = entry.icon,
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            onCollections(entry.collectionEntry)
-                        }
-                    }
-                    repeat(columns - row.size) {
-                        Spacer(Modifier.weight(1f))
-                    }
-                }
+    HomeHorizontalCarousel(Modifier.fillMaxWidth(), horizontalSpacing = 12.dp) {
+        items(collectionEntries(supportedCollectionEntries), key = { it.collectionEntry.toString() }, contentType = { "desktop-collection" }) { entry ->
+            CollectionActionTile(
+                label = entry.homeTitle,
+                icon = entry.icon,
+                modifier = Modifier.size(116.dp),
+            ) {
+                onCollections(entry.collectionEntry)
             }
         }
     }
 }
 
 @Composable
+private fun CollectionActionTile(
+    label: String,
+    icon: PhoebeIcon,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val colors = rememberHomeActionColors(icon)
+    val shape = RoundedCornerShape(8.dp)
+    Column(
+        modifier
+            .aspectRatio(1f)
+            .clip(shape)
+            .clickable(onClick = onClick)
+            .homeActionTileSurface(colors, shape)
+            .padding(horizontal = 10.dp, vertical = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        HomeActionIcon(icon, 34.dp, tint = colors.icon)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            label,
+            color = PhoebeUi.primaryText,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+@Composable
 private fun HomeActionCard(
     title: String,
-    subtitle: String,
     icon: PhoebeIcon,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     onLongClick: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
-    Row(
+    val colors = rememberHomeActionColors(icon)
+    val shape = RoundedCornerShape(8.dp)
+    Column(
         modifier
             .fillMaxHeight()
-            .clip(RoundedCornerShape(8.dp))
+            .clip(shape)
             .combinedClickable(enabled = enabled, onClick = onClick, onLongClick = onLongClick)
-            .background(PhoebeUi.subtleFill)
-            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(8.dp))
-            .padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+            .homeActionTileSurface(colors, shape)
+            .padding(horizontal = 12.dp, vertical = 14.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
     ) {
-        HomeActionIcon(icon, 46.dp)
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(title, color = PhoebeUi.primaryText, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(subtitle, color = PhoebeUi.secondaryText, fontSize = 11.sp, lineHeight = 15.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        }
-        PhoebeIconView(PhoebeIcon.Forward, tint = PhoebeUi.secondaryText, modifier = Modifier.size(14.dp))
+        HomeActionIcon(icon, 42.dp, tint = colors.icon)
+        Spacer(Modifier.height(10.dp))
+        Text(
+            title,
+            color = PhoebeUi.primaryText,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 
@@ -2573,20 +2599,40 @@ private fun MobileActionCard(
     enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
+    val colors = rememberHomeActionColors(icon)
+    val shape = RoundedCornerShape(8.dp)
     Column(
         modifier
-            .height(84.dp)
-            .clip(RoundedCornerShape(8.dp))
+            .height(92.dp)
+            .clip(shape)
             .clickable(enabled = enabled, onClick = onClick)
-            .background(PhoebeUi.subtleFill)
-            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(8.dp))
-            .padding(8.dp),
+            .homeActionTileSurface(colors, shape)
+            .padding(horizontal = 10.dp, vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        HomeActionIcon(icon, 38.dp)
-        Spacer(Modifier.height(7.dp))
-        Text(label, color = PhoebeUi.primaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        HomeActionIcon(icon, 38.dp, tint = colors.icon)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            label,
+            color = PhoebeUi.primaryText,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            lineHeight = 14.sp,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+private fun PlexRadioStation.mixTitle(): String {
+    val normalized = title.lowercase()
+    return when {
+        "deep" in normalized && "cut" in normalized -> "Deep Cut Mix"
+        "time" in normalized && "travel" in normalized -> "Time Travel Mix"
+        else -> title
     }
 }
 
@@ -2645,8 +2691,64 @@ private fun DecadeMixDialog(
     }
 }
 
+private fun Modifier.homeActionTileSurface(
+    colors: HomeActionColors,
+    shape: RoundedCornerShape,
+): Modifier =
+    background(colors.background)
+        .drawWithCache {
+            val flareWidth = size.width * 0.82f
+            val flareLeft = (size.width - flareWidth) / 2f
+            val waveHeight = 8.dp.toPx().coerceAtMost(size.height * 0.16f)
+            val bottom = size.height
+            val waveTop = bottom - waveHeight
+            val wavePath = Path().apply {
+                moveTo(flareLeft, bottom)
+                lineTo(flareLeft, waveTop + waveHeight * 0.48f)
+                cubicTo(
+                    flareLeft + flareWidth * 0.20f,
+                    waveTop - waveHeight * 0.18f,
+                    flareLeft + flareWidth * 0.34f,
+                    waveTop + waveHeight * 0.88f,
+                    flareLeft + flareWidth * 0.50f,
+                    waveTop + waveHeight * 0.42f,
+                )
+                cubicTo(
+                    flareLeft + flareWidth * 0.66f,
+                    waveTop - waveHeight * 0.04f,
+                    flareLeft + flareWidth * 0.78f,
+                    waveTop + waveHeight * 0.92f,
+                    flareLeft + flareWidth,
+                    waveTop + waveHeight * 0.36f,
+                )
+                lineTo(flareLeft + flareWidth, bottom)
+                close()
+            }
+            onDrawBehind {
+                val glowHeight = 16.dp.toPx().coerceAtMost(size.height * 0.25f)
+                drawRect(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(Color.Transparent, colors.flare.copy(alpha = 0.08f)),
+                        startY = size.height - glowHeight,
+                        endY = size.height,
+                    ),
+                    topLeft = Offset(flareLeft, size.height - glowHeight),
+                    size = Size(flareWidth, glowHeight),
+                )
+                drawPath(
+                    path = wavePath,
+                    color = colors.flare.copy(alpha = 0.16f),
+                )
+            }
+        }
+        .border(BorderStroke(1.dp, colors.border), shape)
+
 @Composable
-private fun HomeActionIcon(icon: PhoebeIcon, size: androidx.compose.ui.unit.Dp) {
+private fun HomeActionIcon(
+    icon: PhoebeIcon,
+    size: androidx.compose.ui.unit.Dp,
+    tint: Color? = null,
+) {
     val lightMode = LocalPhoebePalette.current.canvasBackground.luminance() > 0.5f
     val palette = remember(icon, lightMode) { homeIconPalette(icon, lightMode) }
     val shape = RoundedCornerShape(8.dp)
@@ -2654,20 +2756,37 @@ private fun HomeActionIcon(icon: PhoebeIcon, size: androidx.compose.ui.unit.Dp) 
         Modifier
             .size(size)
             .clip(shape)
-            .background(
-                Brush.linearGradient(
-                    listOf(
-                        palette.first.copy(alpha = 0.34f),
-                        palette.second.copy(alpha = 0.20f),
-                    ),
-                ),
-            )
-            .border(BorderStroke(1.dp, palette.first.copy(alpha = 0.30f)), shape),
+            .background(Color.Transparent),
         contentAlignment = Alignment.Center,
     ) {
-        PhoebeIconView(icon, tint = palette.foreground, modifier = Modifier.size(size * 0.48f))
+        PhoebeIconView(icon, tint = tint ?: palette.foreground, modifier = Modifier.size(size * 0.84f))
     }
 }
+
+@Composable
+private fun rememberHomeActionColors(icon: PhoebeIcon): HomeActionColors {
+    val lightMode = LocalPhoebePalette.current.canvasBackground.luminance() > 0.5f
+    val palette = remember(icon, lightMode) { homeIconPalette(icon, lightMode) }
+    return remember(palette, lightMode) {
+        HomeActionColors(
+            background = palette.first.copy(alpha = if (lightMode) 0.010f else 0.018f),
+            border = palette.first.copy(alpha = if (lightMode) 0.040f else 0.055f),
+            flare = palette.first,
+            icon = if (lightMode) {
+                palette.first.copy(alpha = 0.58f)
+            } else {
+                palette.foreground.copy(alpha = 0.76f)
+            },
+        )
+    }
+}
+
+private data class HomeActionColors(
+    val background: Color,
+    val border: Color,
+    val flare: Color,
+    val icon: Color,
+)
 
 private data class HomeIconPalette(
     val first: Color,
@@ -2810,7 +2929,7 @@ private fun RandomArtistPanel(
         artist?.let(onPrefetch)
     }
     HomePanel(modifier) {
-        SectionHeader("RANDOM ARTIST", "Refresh", onRefresh)
+        RandomPanelHeader("Random artist", onRefresh)
         if (artist == null) {
             HomeEmptyState("Add music to your library to discover artists here.")
         } else {
@@ -2819,7 +2938,7 @@ private fun RandomArtistPanel(
                     artist = artist,
                     stats = stats?.takeIf { it.artistId == artist.id },
                     catalogRefreshing = catalogRefreshing,
-                    modifier = Modifier.fillMaxWidth(0.92f),
+                    modifier = Modifier.fillMaxWidth(),
                     onClick = { onArtist(artist) },
                 )
             }
@@ -2844,7 +2963,7 @@ private fun RandomAlbumPanel(
         album?.let(onPrefetch)
     }
     HomePanel(modifier) {
-        SectionHeader("RANDOM ALBUM", "Refresh", onRefresh)
+        RandomPanelHeader("Random album", onRefresh)
         if (album == null) {
             HomeEmptyState("Add music to your library to discover albums here.")
         } else {
@@ -2854,10 +2973,49 @@ private fun RandomAlbumPanel(
                     stats = stats?.takeIf { it.albumId == album.id },
                     catalogRefreshing = catalogRefreshing,
                     fallbackThumbUrl = albumArtworkFallbacks[album.id],
-                    modifier = Modifier.fillMaxWidth(0.92f),
+                    modifier = Modifier.fillMaxWidth(),
                     onClick = { onAlbum(album) },
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun RandomPanelHeader(
+    title: String,
+    onRefresh: () -> Unit,
+) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Box(
+                Modifier
+                    .size(26.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(PhoebeUi.elevatedFill),
+                contentAlignment = Alignment.Center,
+            ) {
+                PhoebeIconView(PhoebeIcon.InterwovenArrows, tint = PhoebeUi.accentLight, modifier = Modifier.size(14.dp))
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                Text(title, color = PhoebeUi.primaryText, fontSize = 13.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("A fresh pick from your library", color = PhoebeUi.mutedText, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        Box(
+            Modifier
+                .size(34.dp)
+                .clip(CircleShape)
+                .clickable(onClick = onRefresh)
+                .background(PhoebeUi.subtleFill)
+                .border(BorderStroke(1.dp, PhoebeUi.border), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            PhoebeIconView(PhoebeIcon.Repeat, tint = PhoebeUi.secondaryText, modifier = Modifier.size(15.dp))
         }
     }
 }
@@ -2878,24 +3036,21 @@ private fun FeaturedArtistCard(
     val albumCount = stats?.albumCount ?: artist.albumCount
     val trackCount = stats?.trackCount ?: artist.songCount
     val genre = stats?.genre.takeUnless { trackStatsLoading }
-    val totalDuration = stats?.totalDurationMs ?: 0L
-    val lastPlayedLabel = remember(stats?.lastPlayedMs, nowMs) { formatLastPlayed(stats?.lastPlayedMs, nowMs) }
-    val albumWord = if (albumCount == 1) "album" else "albums"
-    val songWord = if (trackCount == 1) "song" else "songs"
-    val artworkSize = 124.dp
-
-    Row(
+    val listenersLabel = remember(stats?.lastPlayedMs, nowMs) {
+        stats?.lastPlayedMs?.let { formatLastPlayed(it, nowMs) } ?: "New"
+    }
+    val artworkSize = 96.dp
+    Column(
         modifier
             .clip(RoundedCornerShape(8.dp))
             .clickable(onClick = onClick)
-            .padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(18.dp),
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Column(
-            Modifier.width(136.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             ArtworkImage(
                 artist.title,
@@ -2907,45 +3062,64 @@ private fun FeaturedArtistCard(
                 radius = artworkSize / 2f,
                 elevated = false,
             )
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    artist.title,
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                AutoScrollingText(
+                    text = artist.title,
                     color = PhoebeUi.primaryText,
-                    fontSize = 15.sp,
+                    fontSize = 17.sp,
                     fontWeight = FontWeight.Black,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center,
                     modifier = Modifier.sharedBoundsTransition("artist:${artist.id}:title"),
                 )
-                if (trackStatsLoading) {
-                    HomeStatLoadingBar(Modifier.width(96.dp))
-                } else if (!genre.isNullOrBlank()) {
-                    Text(genre, color = PhoebeUi.mutedText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
-                }
             }
         }
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            HomeArtistStat(
-                value = "$albumCount $albumWord",
-                label = "Albums",
-                icon = PhoebeIcon.Library,
-                loading = albumsLoading,
-            )
-            HomeArtistStat(
-                value = "$trackCount $songWord",
-                label = "Songs",
-                icon = PhoebeIcon.Music,
-                loading = trackStatsLoading,
-            )
-            HomeArtistStat(
-                value = formatHoursMinutes(totalDuration),
-                label = "Total duration",
-                icon = PhoebeIcon.ActiveDot,
-                loading = trackStatsLoading,
-            )
-            HomeArtistStat(lastPlayedLabel, "Last played", PhoebeIcon.Bell)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            RandomMetric("Last played", listenersLabel, Modifier.weight(1f))
+            RandomMetric("Albums", albumCount.toString(), Modifier.weight(1f), loading = albumsLoading)
+            RandomMetric("Tracks", trackCount.toString(), Modifier.weight(1f), loading = trackStatsLoading)
+            RandomMetric("Genre", genre ?: "Mixed", Modifier.weight(1.35f), loading = trackStatsLoading)
         }
+        RandomExploreButton("Explore Artist", onClick)
+    }
+}
+
+@Composable
+private fun RandomMetric(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    loading: Boolean = false,
+) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Text(label, color = PhoebeUi.mutedText, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (loading) {
+            HomeStatLoadingBar(Modifier.fillMaxWidth().height(11.dp))
+        } else {
+            AutoScrollingText(
+                text = value,
+                color = PhoebeUi.primaryText,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+    }
+}
+
+@Composable
+private fun RandomExploreButton(
+    label: String,
+    onClick: () -> Unit,
+) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(48.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .background(PhoebeUi.elevatedFill)
+            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(8.dp)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, color = PhoebeUi.accentLight, fontSize = 13.sp, fontWeight = FontWeight.Black, maxLines = 1)
     }
 }
 
@@ -3042,71 +3216,49 @@ private fun FeaturedAlbumCard(
     val trackCount = stats?.trackCount ?: 0
     val songWord = if (trackCount == 1) "song" else "songs"
 
-    Row(
+    Column(
         modifier
             .clip(RoundedCornerShape(8.dp))
             .clickable(onClick = onClick)
-            .padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Column(
-            Modifier.width(136.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(7.dp),
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             ArtworkImage(
                 album.title,
                 album.thumbUrl,
-                Modifier.size(112.dp).sharedArtworkTransition("album:${album.id}"),
+                Modifier.size(96.dp).sharedArtworkTransition("album:${album.id}"),
                 radius = 10.dp,
                 elevated = false,
                 fallbackThumbUrl = fallbackThumbUrl,
             )
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    album.title,
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                AutoScrollingText(
+                    text = album.title,
                     color = PhoebeUi.primaryText,
-                    fontSize = 15.sp,
+                    fontSize = 17.sp,
                     fontWeight = FontWeight.Black,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center,
                     modifier = Modifier.sharedBoundsTransition("album:${album.id}:title"),
                 )
-                Text(
-                    album.artist,
+                AutoScrollingText(
+                    text = album.artist,
                     color = PhoebeUi.secondaryText,
                     fontSize = 12.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center,
                     modifier = Modifier.sharedBoundsTransition("album:${album.id}:subtitle"),
                 )
-                if (trackStatsLoading) {
-                    HomeStatLoadingBar(Modifier.width(96.dp))
-                } else if (!genre.isNullOrBlank()) {
-                    Text(genre, color = PhoebeUi.mutedText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
-                }
             }
         }
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            album.year?.let { year ->
-                HomeArtistStat(year.toString(), "Release year", PhoebeIcon.Grid)
-            }
-            HomeArtistStat(
-                value = "$trackCount $songWord",
-                label = "Tracks",
-                icon = PhoebeIcon.Music,
-                loading = trackStatsLoading,
-            )
-            HomeArtistStat(
-                value = formatHoursMinutes(duration),
-                label = "Total duration",
-                icon = PhoebeIcon.ActiveDot,
-                loading = trackStatsLoading,
-            )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            RandomMetric("Released", album.year?.toString() ?: "Unknown", Modifier.weight(1f))
+            RandomMetric("Tracks", "$trackCount $songWord", Modifier.weight(1f), loading = trackStatsLoading)
+            RandomMetric("Length", formatHoursMinutes(duration), Modifier.weight(1f), loading = trackStatsLoading)
+            RandomMetric("Genre", genre ?: "Mixed", Modifier.weight(1.2f), loading = trackStatsLoading)
         }
+        RandomExploreButton("Explore Album", onClick)
     }
 }
 

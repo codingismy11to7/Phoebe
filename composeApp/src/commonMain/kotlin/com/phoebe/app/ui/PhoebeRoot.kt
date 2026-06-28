@@ -154,6 +154,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.zIndex
 import kotlin.math.roundToInt
 import com.phoebe.app.AppState
+import com.phoebe.app.PendingDuplicatePlaylistAdd
 import com.phoebe.app.feature.auth.AuthWelcomeMobileRoute
 import com.phoebe.app.feature.auth.AuthWelcomeRouteActions
 import com.phoebe.app.feature.auth.AuthWelcomeRouteState
@@ -376,6 +377,7 @@ private fun PhoebeRootStateHolder(
     val serversLoading by state.serversLoading.collectAsState()
     val librariesLoading by state.librariesLoading.collectAsState()
     val message by state.message.collectAsState()
+    val pendingDuplicatePlaylistAdd by state.pendingDuplicatePlaylistAdd.collectAsState()
     val playbackSnackbar by state.playbackSnackbar.collectAsState()
     val appUpdateState by state.appUpdateState.collectAsState()
     val pendingUpdateInstallConfirmation by state.pendingUpdateInstallConfirmation.collectAsState()
@@ -1001,7 +1003,7 @@ private fun PhoebeRootStateHolder(
             playlists = list,
             smartPlaylists = smartPlaylists,
             playlistsEnabled = plexReady || localReady,
-            onAddTrackToPlaylist = { playlist, track -> state.addToPlaylist(playlist, track) },
+            onAddTrackToPlaylist = { playlist, track, allowDuplicate -> state.addToPlaylist(playlist, track, allowDuplicate) },
             onMovePlaylistTrack = { playlist, from, to -> state.movePlaylistTrack(playlist, from, to) },
             onRemovePlaylistTracks = { playlist, tracks -> state.removePlaylistTracks(playlist, tracks) },
             onCopyPlaylistToPlaylist = { source, target -> state.copyPlaylistIntoPlaylist(source, target) },
@@ -2210,6 +2212,12 @@ private fun PhoebeRootStateHolder(
             onDismiss = state::dismissPlaybackSnackbar,
             modifier = Modifier.align(Alignment.BottomCenter),
         )
+        PlaylistDuplicateSnackbar(
+            pendingAdd = pendingDuplicatePlaylistAdd,
+            onDismiss = state::dismissDuplicatePlaylistAdd,
+            onMoveToTop = state::moveDuplicatePlaylistAddToTop,
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
         pendingUpdateInstallConfirmation?.let { update ->
             UpdateInstallConfirmationDialog(
                 update = update,
@@ -2247,29 +2255,81 @@ private fun PlaybackFailureSnackbar(
             .padding(horizontal = 18.dp, vertical = 18.dp)
             .zIndex(20f),
     ) {
-        Surface(
-            color = PhoebeUi.panel.copy(alpha = 0.96f),
-            contentColor = PhoebeUi.primaryText,
-            shape = RoundedCornerShape(8.dp),
-            border = BorderStroke(1.dp, PhoebeUi.border),
-            shadowElevation = 12.dp,
-            modifier = Modifier.widthIn(max = 520.dp),
+        PhoebeActionSnackbar(
+            message = message.orEmpty(),
+            actionLabel = "Dismiss",
+            onAction = onDismiss,
+        )
+    }
+}
+
+@Composable
+private fun PlaylistDuplicateSnackbar(
+    pendingAdd: PendingDuplicatePlaylistAdd?,
+    onDismiss: () -> Unit,
+    onMoveToTop: (PendingDuplicatePlaylistAdd) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    LaunchedEffect(pendingAdd) {
+        if (pendingAdd != null) {
+            delay(8_000L)
+            onDismiss()
+        }
+    }
+    var lastNonNullPending by remember { mutableStateOf<PendingDuplicatePlaylistAdd?>(null) }
+    if (pendingAdd != null) {
+        lastNonNullPending = pendingAdd
+    }
+    AnimatedVisibility(
+        visible = pendingAdd != null,
+        enter = slideInVertically(tween(180, easing = FastOutSlowInEasing)) { it / 2 } + fadeIn(tween(180)),
+        exit = slideOutVertically(tween(160, easing = FastOutSlowInEasing)) { it / 2 } + fadeOut(tween(160)),
+        modifier = modifier
+            .navigationBarsPadding()
+            .padding(horizontal = 18.dp, vertical = 18.dp)
+            .zIndex(21f),
+    ) {
+        val currentPending = lastNonNullPending
+        if (currentPending != null) {
+            PhoebeActionSnackbar(
+                message = currentPending.message,
+                actionLabel = "Move to top",
+                onAction = {
+                    onMoveToTop(currentPending)
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun PhoebeActionSnackbar(
+    message: String,
+    actionLabel: String,
+    onAction: () -> Unit,
+) {
+    Surface(
+        color = PhoebeUi.panel.copy(alpha = 0.96f),
+        contentColor = PhoebeUi.primaryText,
+        shape = RoundedCornerShape(8.dp),
+        border = BorderStroke(1.dp, PhoebeUi.border),
+        shadowElevation = 12.dp,
+        modifier = Modifier.widthIn(max = 520.dp),
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
         ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-            ) {
-                Text(
-                    text = message.orEmpty(),
-                    color = PhoebeUi.primaryText,
-                    fontSize = 14.sp,
-                    lineHeight = 19.sp,
-                    modifier = Modifier.weight(1f),
-                )
-                TextButton(onClick = onDismiss) {
-                    Text("Dismiss")
-                }
+            Text(
+                text = message,
+                color = PhoebeUi.primaryText,
+                fontSize = 14.sp,
+                lineHeight = 19.sp,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onAction) {
+                Text(actionLabel)
             }
         }
     }
