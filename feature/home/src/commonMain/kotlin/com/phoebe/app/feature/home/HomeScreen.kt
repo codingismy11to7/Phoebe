@@ -10,6 +10,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -73,6 +74,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -101,8 +103,24 @@ import com.phoebe.app.domain.canTogglePlexLike
 import com.phoebe.app.ui.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import org.jetbrains.compose.resources.DrawableResource
+import org.jetbrains.compose.resources.painterResource
+import phoebe.feature.home.generated.resources.Res
+import phoebe.feature.home.generated.resources.collection_album_genre
+import phoebe.feature.home.generated.resources.collection_album_mood
+import phoebe.feature.home.generated.resources.collection_album_style
+import phoebe.feature.home.generated.resources.collection_artist_genre
+import phoebe.feature.home.generated.resources.collection_artist_mood
+import phoebe.feature.home.generated.resources.collection_artist_style
+import phoebe.feature.home.generated.resources.mix_decade
+import phoebe.feature.home.generated.resources.mix_deep_cuts
+import phoebe.feature.home.generated.resources.mix_library
+import phoebe.feature.home.generated.resources.mix_personal
+import phoebe.feature.home.generated.resources.mix_time_travel
 
 private val PhoneHomeAccordionBreakpoint: Dp = 600.dp
+private val MobileHomePosterCardSize: Dp = 148.dp
+private const val HomeMixCardAspectRatio = 1f
 
 @Immutable
 data class MobileHomeRouteState(
@@ -1052,23 +1070,38 @@ private fun ExpandedMixesShelf(
 ) {
     ExpandedHomeShelf("CREATE A MIX", horizontalSpacing = 9.dp) {
         item(key = "personal-mix", contentType = "expanded-mix-action") {
-            MobileActionCard("Personal", PhoebeIcon.Person, Modifier.width(104.dp), onClick = onPlayPersonalMix)
+            HomeMixPosterCard("Personal Mix", PhoebeIcon.Person, Res.drawable.mix_personal, Modifier.width(MobileHomePosterCardSize), onClick = onPlayPersonalMix)
         }
         item(key = "decade-mix", contentType = "expanded-mix-action") {
-            MobileActionCard("Decade", PhoebeIcon.Calendar, Modifier.width(104.dp)) {
+            HomeMixPosterCard("Decade Mix", PhoebeIcon.Calendar, Res.drawable.mix_decade, Modifier.width(MobileHomePosterCardSize)) {
                 onClearDecadeMixNotice()
                 onShowDecadeMix()
             }
         }
         items(radioStations, key = { "radio:${it.key}" }, contentType = { "expanded-radio-station" }) { station ->
             val starting = station.key in radioStartingIds
-            MobileActionCard(
-                if (starting) "Starting..." else station.mixTitle(),
-                station.homeRadioIcon(),
-                Modifier.width(116.dp),
-                enabled = !starting,
-            ) {
-                onPlayRadioStation(station)
+            val title = if (starting) "Starting..." else station.mixTitle()
+            val icon = station.homeRadioIcon()
+            val artwork = station.mixArtworkResource()
+            if (artwork != null) {
+                HomeMixPosterCard(
+                    title = title,
+                    icon = icon,
+                    artwork = artwork,
+                    modifier = Modifier.width(MobileHomePosterCardSize),
+                    enabled = !starting,
+                ) {
+                    onPlayRadioStation(station)
+                }
+            } else {
+                MobileActionCard(
+                    title,
+                    icon,
+                    Modifier.width(116.dp),
+                    enabled = !starting,
+                ) {
+                    onPlayRadioStation(station)
+                }
             }
         }
     }
@@ -1085,7 +1118,13 @@ private fun ExpandedCollectionsShelf(
     } else {
         ExpandedHomeShelf("COLLECTIONS", horizontalSpacing = 9.dp) {
             items(collectionEntries, key = { it.collectionEntry.toString() }, contentType = { "expanded-collection" }) { entry ->
-                CollectionActionTile(entry.mobileTitle, entry.icon, Modifier.size(96.dp)) {
+                HomeMixPosterCard(
+                    title = entry.mobileTitle,
+                    icon = entry.icon,
+                    artwork = entry.artwork,
+                    modifier = Modifier.width(MobileHomePosterCardSize),
+                    titleFormatter = ::collectionPosterTitle,
+                ) {
                     onCollections(entry.collectionEntry)
                 }
             }
@@ -1516,6 +1555,15 @@ private data class PhoneHomeAction(
     val onClick: () -> Unit,
 )
 
+private data class PhoneHomePosterAction(
+    val label: String,
+    val icon: PhoebeIcon,
+    val artwork: DrawableResource?,
+    val enabled: Boolean = true,
+    val titleFormatter: (String) -> String = ::mixPosterTitle,
+    val onClick: () -> Unit,
+)
+
 @Composable
 private fun PhoneMixesAccordionSection(
     expanded: Boolean,
@@ -1528,10 +1576,11 @@ private fun PhoneMixesAccordionSection(
     onShowDecadeMix: () -> Unit,
 ) {
     val actions = listOf(
-        PhoneHomeAction("Personal", PhoebeIcon.Person, onClick = onPlayPersonalMix),
-        PhoneHomeAction(
-            label = "Decade",
+        PhoneHomePosterAction("Personal Mix", PhoebeIcon.Person, Res.drawable.mix_personal, onClick = onPlayPersonalMix),
+        PhoneHomePosterAction(
+            label = "Decade Mix",
             icon = PhoebeIcon.Calendar,
+            artwork = Res.drawable.mix_decade,
             onClick = {
                 onClearDecadeMixNotice()
                 onShowDecadeMix()
@@ -1539,9 +1588,10 @@ private fun PhoneMixesAccordionSection(
         ),
     ) + radioStations.map { station ->
         val starting = station.key in radioStartingIds
-        PhoneHomeAction(
-            label = if (starting) "Starting..." else station.title,
+        PhoneHomePosterAction(
+            label = if (starting) "Starting..." else station.mixTitle(),
             icon = station.homeRadioIcon(),
+            artwork = station.mixArtworkResource(),
             enabled = !starting,
             onClick = { onPlayRadioStation(station) },
         )
@@ -1553,7 +1603,7 @@ private fun PhoneMixesAccordionSection(
         expanded = expanded,
         onToggle = onToggle,
     ) {
-        PhoneHomeActionGrid(actions)
+        PhoneHomePosterActionGrid(actions)
     }
 }
 
@@ -1574,11 +1624,13 @@ private fun PhoneCollectionsAccordionSection(
         if (collectionEntries.isEmpty()) {
             HomeEmptyState("No collections are available.")
         } else {
-            PhoneHomeActionGrid(
+            PhoneHomePosterActionGrid(
                 collectionEntries.map { entry ->
-                    PhoneHomeAction(
+                    PhoneHomePosterAction(
                         label = entry.mobileTitle,
                         icon = entry.icon,
+                        artwork = entry.artwork,
+                        titleFormatter = ::collectionPosterTitle,
                         onClick = { onCollections(entry.collectionEntry) },
                     )
                 },
@@ -1840,6 +1892,40 @@ private fun PhoneHomeActionGrid(actions: List<PhoneHomeAction>) {
     }
 }
 
+@Composable
+private fun PhoneHomePosterActionGrid(actions: List<PhoneHomePosterAction>) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+        actions.chunked(2).forEach { rowActions ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                rowActions.forEach { action ->
+                    if (action.artwork != null) {
+                        HomeMixPosterCard(
+                            title = action.label,
+                            icon = action.icon,
+                            artwork = action.artwork,
+                            modifier = Modifier.weight(1f),
+                            enabled = action.enabled,
+                            titleFormatter = action.titleFormatter,
+                            onClick = action.onClick,
+                        )
+                    } else {
+                        MobileActionCard(
+                            label = action.label,
+                            icon = action.icon,
+                            modifier = Modifier.weight(1f),
+                            enabled = action.enabled,
+                            onClick = action.onClick,
+                        )
+                    }
+                }
+                if (rowActions.size == 1) {
+                    Spacer(Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
 private fun optionCountLabel(count: Int): String =
     if (count == 1) "1 option" else "$count options"
 
@@ -1923,7 +2009,13 @@ private fun MobileCollectionsSection(
     SectionLabel("COLLECTIONS", PhoebeUi.mutedText)
     HomeHorizontalCarousel(Modifier.fillMaxWidth(), horizontalSpacing = 9.dp) {
         items(collectionRows.flatten(), key = { it.collectionEntry.toString() }, contentType = { "mobile-collection" }) { entry ->
-            CollectionActionTile(entry.mobileTitle, entry.icon, Modifier.size(96.dp)) {
+            HomeMixPosterCard(
+                title = entry.mobileTitle,
+                icon = entry.icon,
+                artwork = entry.artwork,
+                modifier = Modifier.width(MobileHomePosterCardSize),
+                titleFormatter = ::collectionPosterTitle,
+            ) {
                 onCollections(entry.collectionEntry)
             }
         }
@@ -2034,22 +2126,24 @@ private fun DesktopMixesPanel(
     HomePanel(Modifier.fillMaxWidth()) {
         SectionLabel("CREATE A MIX", PhoebeUi.mutedText)
         LazyRow(
-            modifier = Modifier.fillMaxWidth().height(112.dp),
+            modifier = Modifier.fillMaxWidth().height(148.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item("personal-mix", contentType = "mix-action") {
-                HomeActionCard(
+                HomeMixPosterCard(
                     "Personal Mix",
                     PhoebeIcon.Person,
-                    Modifier.width(126.dp),
+                    Res.drawable.mix_personal,
+                    Modifier.width(148.dp),
                     onClick = onPlayPersonalMix,
                 )
             }
             item("decade-mix", contentType = "mix-action") {
-                HomeActionCard(
+                HomeMixPosterCard(
                     "Decade Mix",
                     PhoebeIcon.Calendar,
-                    Modifier.width(126.dp),
+                    Res.drawable.mix_decade,
+                    Modifier.width(148.dp),
                 ) {
                     onClearDecadeMixNotice()
                     onShowDecadeMix()
@@ -2057,13 +2151,28 @@ private fun DesktopMixesPanel(
             }
             items(radioStations, key = { "radio:${it.id}:${it.key}" }, contentType = { "plex-radio-station" }) { station ->
                 val starting = station.key in radioStartingIds
-                HomeActionCard(
-                    title = station.mixTitle(),
-                    icon = station.homeRadioIcon(),
-                    modifier = Modifier.width(126.dp),
-                    enabled = !starting,
-                ) {
-                    onPlayRadioStation(station)
+                val title = if (starting) "Starting..." else station.mixTitle()
+                val icon = station.homeRadioIcon()
+                val artwork = station.mixArtworkResource()
+                if (artwork != null) {
+                    HomeMixPosterCard(
+                        title = title,
+                        icon = icon,
+                        artwork = artwork,
+                        modifier = Modifier.width(148.dp),
+                        enabled = !starting,
+                    ) {
+                        onPlayRadioStation(station)
+                    }
+                } else {
+                    HomeActionCard(
+                        title = title,
+                        icon = icon,
+                        modifier = Modifier.width(MobileHomePosterCardSize),
+                        enabled = !starting,
+                    ) {
+                        onPlayRadioStation(station)
+                    }
                 }
             }
         }
@@ -2082,23 +2191,38 @@ private fun MobileMixesSection(
     SectionLabel("CREATE A MIX", PhoebeUi.mutedText)
     HomeHorizontalCarousel(Modifier.fillMaxWidth(), horizontalSpacing = 9.dp) {
         item(key = "personal-mix", contentType = "mobile-mix-action") {
-            MobileActionCard("Personal", PhoebeIcon.Person, Modifier.width(104.dp), onClick = onPlayPersonalMix)
+            HomeMixPosterCard("Personal Mix", PhoebeIcon.Person, Res.drawable.mix_personal, Modifier.width(MobileHomePosterCardSize), onClick = onPlayPersonalMix)
         }
         item(key = "decade-mix", contentType = "mobile-mix-action") {
-            MobileActionCard("Decade", PhoebeIcon.Calendar, Modifier.width(104.dp)) {
+            HomeMixPosterCard("Decade Mix", PhoebeIcon.Calendar, Res.drawable.mix_decade, Modifier.width(MobileHomePosterCardSize)) {
                 onClearDecadeMixNotice()
                 onShowDecadeMix()
             }
         }
         items(radioStations, key = { it.key }, contentType = { "mobile-radio-station" }) { station ->
             val starting = station.key in radioStartingIds
-            MobileActionCard(
-                if (starting) "Starting..." else station.mixTitle(),
-                station.homeRadioIcon(),
-                Modifier.width(116.dp),
-                enabled = !starting,
-            ) {
-                onPlayRadioStation(station)
+            val title = if (starting) "Starting..." else station.mixTitle()
+            val icon = station.homeRadioIcon()
+            val artwork = station.mixArtworkResource()
+            if (artwork != null) {
+                HomeMixPosterCard(
+                    title = title,
+                    icon = icon,
+                    artwork = artwork,
+                    modifier = Modifier.width(MobileHomePosterCardSize),
+                    enabled = !starting,
+                ) {
+                    onPlayRadioStation(station)
+                }
+            } else {
+                MobileActionCard(
+                    title,
+                    icon,
+                    Modifier.width(116.dp),
+                    enabled = !starting,
+                ) {
+                    onPlayRadioStation(station)
+                }
             }
         }
     }
@@ -2446,6 +2570,7 @@ private data class HomeCollectionEntry(
     val homeSubtitle: String,
     val mobileTitle: String,
     val icon: PhoebeIcon,
+    val artwork: DrawableResource,
 )
 
 private fun collectionEntryRows(supportedCollectionEntries: Set<CollectionEntry>): List<List<HomeCollectionEntry>> =
@@ -2465,6 +2590,7 @@ private fun allHomeCollectionEntries(): List<HomeCollectionEntry> =
             homeSubtitle = "Browse artist mood tags",
             mobileTitle = "Artist Mood",
             icon = PhoebeIcon.MoodFace,
+            artwork = Res.drawable.collection_artist_mood,
         ),
         HomeCollectionEntry(
             collectionEntry = CollectionEntry(CollectionTarget.Albums, CollectionFacet.Mood),
@@ -2472,6 +2598,7 @@ private fun allHomeCollectionEntries(): List<HomeCollectionEntry> =
             homeSubtitle = "Browse album mood tags",
             mobileTitle = "Album Mood",
             icon = PhoebeIcon.MoodFace,
+            artwork = Res.drawable.collection_album_mood,
         ),
         HomeCollectionEntry(
             collectionEntry = CollectionEntry(CollectionTarget.Artists, CollectionFacet.Style),
@@ -2479,6 +2606,7 @@ private fun allHomeCollectionEntries(): List<HomeCollectionEntry> =
             homeSubtitle = "Browse artist style tags",
             mobileTitle = "Artist Style",
             icon = PhoebeIcon.SunglassesFace,
+            artwork = Res.drawable.collection_artist_style,
         ),
         HomeCollectionEntry(
             collectionEntry = CollectionEntry(CollectionTarget.Albums, CollectionFacet.Style),
@@ -2486,6 +2614,7 @@ private fun allHomeCollectionEntries(): List<HomeCollectionEntry> =
             homeSubtitle = "Browse album style tags",
             mobileTitle = "Album Style",
             icon = PhoebeIcon.SunglassesFace,
+            artwork = Res.drawable.collection_album_style,
         ),
         HomeCollectionEntry(
             collectionEntry = CollectionEntry(CollectionTarget.Artists, CollectionFacet.Genre),
@@ -2493,6 +2622,7 @@ private fun allHomeCollectionEntries(): List<HomeCollectionEntry> =
             homeSubtitle = "Browse artist genres",
             mobileTitle = "Artist Genre",
             icon = PhoebeIcon.GenreMasks,
+            artwork = Res.drawable.collection_artist_genre,
         ),
         HomeCollectionEntry(
             collectionEntry = CollectionEntry(CollectionTarget.Albums, CollectionFacet.Genre),
@@ -2500,6 +2630,7 @@ private fun allHomeCollectionEntries(): List<HomeCollectionEntry> =
             homeSubtitle = "Browse album genres",
             mobileTitle = "Album Genre",
             icon = PhoebeIcon.GenreMasks,
+            artwork = Res.drawable.collection_album_genre,
         ),
     )
 
@@ -2510,10 +2641,12 @@ private fun DesktopCollectionsGrid(
 ) {
     HomeHorizontalCarousel(Modifier.fillMaxWidth(), horizontalSpacing = 12.dp) {
         items(collectionEntries(supportedCollectionEntries), key = { it.collectionEntry.toString() }, contentType = { "desktop-collection" }) { entry ->
-            CollectionActionTile(
-                label = entry.homeTitle,
+            HomeMixPosterCard(
+                title = entry.homeTitle,
                 icon = entry.icon,
-                modifier = Modifier.size(116.dp),
+                artwork = entry.artwork,
+                modifier = Modifier.width(148.dp),
+                titleFormatter = ::collectionPosterTitle,
             ) {
                 onCollections(entry.collectionEntry)
             }
@@ -2551,6 +2684,58 @@ private fun CollectionActionTile(
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+@Composable
+private fun HomeMixPosterCard(
+    title: String,
+    icon: PhoebeIcon,
+    artwork: DrawableResource,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    titleFormatter: (String) -> String = ::mixPosterTitle,
+    onClick: () -> Unit,
+) {
+    val colors = rememberHomeActionColors(icon)
+    val shape = RoundedCornerShape(8.dp)
+    Box(
+        modifier
+            .aspectRatio(HomeMixCardAspectRatio)
+            .clip(shape)
+            .combinedClickable(enabled = enabled, onClick = onClick)
+            .background(Color.Black)
+            .border(BorderStroke(1.dp, colors.border.copy(alpha = 0.68f)), shape),
+    ) {
+        Image(
+            painter = painterResource(artwork),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize(),
+        )
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        0f to Color.Black.copy(alpha = 0.18f),
+                        0.45f to Color.Transparent,
+                        1f to Color.Black.copy(alpha = 0.86f),
+                    ),
+                ),
+        )
+        Text(
+            text = titleFormatter(title),
+            color = Color.White,
+            fontSize = 20.sp,
+            lineHeight = 21.sp,
+            fontWeight = FontWeight.Black,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(start = 12.dp, end = 10.dp, bottom = 14.dp),
         )
     }
 }
@@ -2635,6 +2820,37 @@ private fun PlexRadioStation.mixTitle(): String {
         else -> title
     }
 }
+
+private fun PlexRadioStation.mixArtworkResource(): DrawableResource? {
+    val normalized = title.lowercase()
+    return when {
+        "deep" in normalized && "cut" in normalized -> Res.drawable.mix_deep_cuts
+        "time" in normalized && "travel" in normalized -> Res.drawable.mix_time_travel
+        "library" in normalized -> Res.drawable.mix_library
+        else -> null
+    }
+}
+
+private fun mixPosterTitle(title: String): String =
+    when (title.lowercase()) {
+        "personal mix" -> "PERSONAL\nMIX"
+        "decade mix" -> "DECADE\nMIX"
+        "library radio" -> "LIBRARY\nRADIO"
+        "deep cut mix" -> "DEEP CUT\nMIX"
+        "time travel mix" -> "TIME\nTRAVEL"
+        else -> title.uppercase()
+    }
+
+private fun collectionPosterTitle(title: String): String =
+    when (title.lowercase()) {
+        "artist mood" -> "ARTIST\nMOOD"
+        "album mood" -> "ALBUM\nMOOD"
+        "artist style" -> "ARTIST\nSTYLE"
+        "album style" -> "ALBUM\nSTYLE"
+        "artist genre" -> "ARTIST\nGENRE"
+        "album genre" -> "ALBUM\nGENRE"
+        else -> title.uppercase()
+    }
 
 @Composable
 private fun DecadeMixDialog(
@@ -2748,12 +2964,13 @@ private fun HomeActionIcon(
     icon: PhoebeIcon,
     size: androidx.compose.ui.unit.Dp,
     tint: Color? = null,
+    modifier: Modifier = Modifier,
 ) {
     val lightMode = LocalPhoebePalette.current.canvasBackground.luminance() > 0.5f
     val palette = remember(icon, lightMode) { homeIconPalette(icon, lightMode) }
     val shape = RoundedCornerShape(8.dp)
     Box(
-        Modifier
+        modifier
             .size(size)
             .clip(shape)
             .background(Color.Transparent),
