@@ -56,8 +56,8 @@ val desktopJavaLauncher = javaToolchains.launcherFor {
 val desktopJavaHome = desktopJavaLauncher.map { launcher ->
     launcher.metadata.installationPath.asFile.absolutePath
 }
-val desktopJavaExecutable = desktopJavaHome.map { javaHome ->
-    File(javaHome, "bin/java").absolutePath
+val desktopJavaExecutable = desktopJavaLauncher.map { launcher ->
+    launcher.executablePath.asFile.absolutePath
 }
 
 fun providerValue(name: String, envName: String): String? =

@@ -482,8 +482,8 @@ object RemoteArtworkCache {
             val response = httpClient.get(fetchUrl) {
                 applyEmbyFamilyArtworkAuth(sourceUrl)
             }
-            val bytes = response.body<ByteArray>()
             if (!response.status.isSuccess()) return null
+            val bytes = response.body<ByteArray>()
             bytes.takeIf { it.isNotEmpty() }
         } catch (error: CancellationException) {
             throw error

@@ -85,11 +85,13 @@ import com.phoebe.app.ui.PhoebeIcon
 import com.phoebe.app.ui.PhoebeIconView
 import com.phoebe.app.ui.PhoebeUi
 import com.phoebe.app.ui.SectionLabel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private const val RadioSearchDebounceMillis = 450L
 
@@ -702,12 +704,15 @@ private fun RadioMapRoute(
             radioMapClusterThresholdDegrees(mapZoom)
         }
     }
-    val items = remember(directory.globeStations, expandedClusterIds, clusterThresholdDegrees) {
-        clusterStations(
-            stations = directory.globeStations,
-            clusterThresholdDegrees = clusterThresholdDegrees,
-            expandedClusterIds = expandedClusterIds,
-        )
+    var items by remember { mutableStateOf(emptyList<RadioMapItem>()) }
+    LaunchedEffect(directory.globeStations, expandedClusterIds, clusterThresholdDegrees) {
+        items = withContext(Dispatchers.Default) {
+            clusterStations(
+                stations = directory.globeStations,
+                clusterThresholdDegrees = clusterThresholdDegrees,
+                expandedClusterIds = expandedClusterIds,
+            )
+        }
     }
     val selectedItem = remember(items, selectedItemId) {
         selectedItemId?.let { id -> items.findRadioMapItem(id) } ?: items.firstOrNull()

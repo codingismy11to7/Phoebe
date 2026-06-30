@@ -346,71 +346,90 @@ private class DesktopRadioMapChromiumHolder(
     private var client: CefClient? = null
     private var pendingUrl: String = initialUrl
     private var loadedUrl: String? = null
+    private val cefExecutor: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "Phoebe-radio-map-cef").apply { isDaemon = true }
+    }
+    @Volatile
+    private var disposed: Boolean = false
 
     init {
         showMessage("Loading radio map browser...")
-        SwingUtilities.invokeLater {
+        cefExecutor.execute {
             runCatching {
                 log("starting jcefmaven browser")
-                val app = DesktopRadioMapCef.instance()
-                val nextClient = app.createClient()
-                nextClient.addLifeSpanHandler(
-                    object : CefLifeSpanHandlerAdapter() {
-                        override fun onAfterCreated(createdBrowser: CefBrowser) {
-                            log("created browser; loading $pendingUrl")
-                            val url = pendingUrl
-                            loadedUrl = url
-                            createdBrowser.loadURL(url)
-                        }
-
-                        override fun onBeforeClose(closingBrowser: CefBrowser) {
-                            log("browser closing")
-                        }
-                    },
-                )
-                nextClient.addDisplayHandler(
-                    object : CefDisplayHandlerAdapter() {
-                        override fun onConsoleMessage(
-                            browser: CefBrowser,
-                            level: CefSettings.LogSeverity,
-                            message: String,
-                            source: String,
-                            line: Int,
-                        ): Boolean {
-                            log("console [$level] $source:$line $message")
-                            return false
-                        }
-                    },
-                )
-                nextClient.addLoadHandler(
-                    object : CefLoadHandlerAdapter() {
-                        override fun onLoadError(
-                            browser: CefBrowser,
-                            frame: CefFrame,
-                            errorCode: CefLoadHandler.ErrorCode,
-                            errorText: String,
-                            failedUrl: String,
-                        ) {
-                            if (errorCode == CefLoadHandler.ErrorCode.ERR_ABORTED) {
-                                log("ignored aborted load for $failedUrl")
-                                return
-                            }
-                            if (frame.isMain) {
-                                showFallback("Could not load inline map: $errorText")
-                            }
-                            log("load error [$errorCode] $failedUrl $errorText")
-                        }
-                    },
-                )
-                val nextBrowser = nextClient.createBrowser("about:blank", true, false)
-                client = nextClient
-                browser = nextBrowser
-                showBrowser(nextBrowser.uiComponent)
-                nextBrowser.createImmediately()
+                DesktopRadioMapCef.instance()
+            }.onSuccess { app ->
+                SwingUtilities.invokeLater {
+                    if (!disposed) {
+                        createBrowser(app)
+                    }
+                }
             }.onFailure { error ->
                 log("start failed: ${error.stackTraceToString()}")
                 showFallback("Could not start inline browser: ${error.message ?: error::class.simpleName}")
             }
+        }
+    }
+
+    private fun createBrowser(app: CefApp) {
+        runCatching {
+            val nextClient = app.createClient()
+            nextClient.addLifeSpanHandler(
+                object : CefLifeSpanHandlerAdapter() {
+                    override fun onAfterCreated(createdBrowser: CefBrowser) {
+                        log("created browser; loading $pendingUrl")
+                        val url = pendingUrl
+                        loadedUrl = url
+                        createdBrowser.loadURL(url)
+                    }
+
+                    override fun onBeforeClose(closingBrowser: CefBrowser) {
+                        log("browser closing")
+                    }
+                },
+            )
+            nextClient.addDisplayHandler(
+                object : CefDisplayHandlerAdapter() {
+                    override fun onConsoleMessage(
+                        browser: CefBrowser,
+                        level: CefSettings.LogSeverity,
+                        message: String,
+                        source: String,
+                        line: Int,
+                    ): Boolean {
+                        log("console [$level] $source:$line $message")
+                        return false
+                    }
+                },
+            )
+            nextClient.addLoadHandler(
+                object : CefLoadHandlerAdapter() {
+                    override fun onLoadError(
+                        browser: CefBrowser,
+                        frame: CefFrame,
+                        errorCode: CefLoadHandler.ErrorCode,
+                        errorText: String,
+                        failedUrl: String,
+                    ) {
+                        if (errorCode == CefLoadHandler.ErrorCode.ERR_ABORTED) {
+                            log("ignored aborted load for $failedUrl")
+                            return
+                        }
+                        if (frame.isMain) {
+                            showFallback("Could not load inline map: $errorText")
+                        }
+                        log("load error [$errorCode] $failedUrl $errorText")
+                    }
+                },
+            )
+            val nextBrowser = nextClient.createBrowser("about:blank", true, false)
+            client = nextClient
+            browser = nextBrowser
+            showBrowser(nextBrowser.uiComponent)
+            nextBrowser.createImmediately()
+        }.onFailure { error ->
+            log("start failed: ${error.stackTraceToString()}")
+            showFallback("Could not start inline browser: ${error.message ?: error::class.simpleName}")
         }
     }
 
@@ -426,6 +445,8 @@ private class DesktopRadioMapChromiumHolder(
     }
 
     fun dispose() {
+        disposed = true
+        cefExecutor.shutdownNow()
         SwingUtilities.invokeLater {
             runCatching { browser?.close(true) }
             runCatching { client?.dispose() }
