@@ -415,8 +415,8 @@ compose.desktop {
         mainClass = "com.phoebe.app.MainKt"
         javaHome = desktopJavaHome.get()
         jvmArgs += listOf(
-            "-Xms32m",
-            "-Xmx256m",
+            "-Xms64m",
+            "-Xmx768m",
             "-XX:MinHeapFreeRatio=5",
             "-XX:MaxHeapFreeRatio=20",
             "-XX:+UseStringDeduplication",

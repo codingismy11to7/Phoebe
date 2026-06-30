@@ -8,13 +8,17 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import com.phoebe.app.platform.DesktopInlineRadioMapCoordinator
 import com.phoebe.app.domain.RadioMapViewport
 import com.phoebe.app.ui.LocalPhoebePalette
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
 import java.awt.BorderLayout
+import java.awt.Color as AwtColor
 import java.awt.Component
 import java.awt.Desktop
+import java.awt.event.ComponentAdapter
+import java.awt.event.ComponentEvent
 import java.io.File
 import java.io.IOException
 import java.net.InetSocketAddress
@@ -36,6 +40,7 @@ import org.cef.CefClient
 import org.cef.CefSettings
 import org.cef.browser.CefBrowser
 import org.cef.browser.CefFrame
+import org.cef.browser.CefMessageRouter
 import org.cef.handler.CefDisplayHandlerAdapter
 import org.cef.handler.CefLifeSpanHandlerAdapter
 import org.cef.handler.CefLoadHandler
@@ -82,7 +87,6 @@ internal actual fun RadioMapHost(
             },
             onPlay = { itemId ->
                 currentItems.value.findRadioMapItem(itemId)?.let { item ->
-                    currentOnItemSelected.value(item)
                     if (item is RadioMapItem.Station) {
                         currentOnItemPlay.value(item)
                     }
@@ -120,11 +124,16 @@ internal actual fun RadioMapHost(
     }
 
     DisposableEffect(browserHolder) {
-        onDispose { browserHolder.dispose() }
+        DesktopInlineRadioMapCoordinator.onInlineMapHostMounted()
+        onDispose {
+            DesktopInlineRadioMapCoordinator.onInlineMapHostUnmounted()
+            browserHolder.dispose()
+        }
     }
 
     SwingPanel(
         modifier = modifier,
+        background = Color(0xFF080B12),
         factory = {
             browserHolder.panel.also {
                 val snapshot = server.update(items, selectedItem, startingStationIds, mapLoading)
@@ -158,6 +167,11 @@ private fun desktopRadioMapInlineBrowserEnabled(): Boolean =
     System.getProperty("phoebe.radioMap.inlineBrowser")?.toBooleanStrictOrNull()
         ?: System.getenv("PHOEBE_RADIO_MAP_INLINE_BROWSER")?.toBooleanStrictOrNull()
         ?: true
+
+private fun desktopRadioMapDisableGpu(): Boolean =
+    System.getProperty("phoebe.radioMap.disableGpu")?.toBooleanStrictOrNull()
+        ?: System.getenv("PHOEBE_RADIO_MAP_DISABLE_GPU")?.toBooleanStrictOrNull()
+        ?: !System.getProperty("os.name").orEmpty().lowercase().contains("windows")
 
 private class DesktopRadioMapBrowserServer(
     private val googleMapsApiKey: String,
@@ -199,7 +213,7 @@ private class DesktopRadioMapBrowserServer(
             when (exchange.requestURI.path) {
                 "/", "/radio-map" -> exchange.sendHtml(currentHtml())
                 "/select" -> exchange.handleItemAction(onSelected)
-                "/play" -> exchange.handleItemAction(onPlay)
+                "/play" -> exchange.handlePlayAction(onPlay)
                 "/zoom" -> exchange.handleZoom()
                 "/viewport" -> exchange.handleViewport()
                 "/searchArea" -> exchange.handleSearchArea()
@@ -259,6 +273,14 @@ private class DesktopRadioMapBrowserServer(
         val itemId = queryParameters()["id"].orEmpty()
         if (itemId.isNotBlank()) {
             SwingUtilities.invokeLater { action(itemId) }
+        }
+        sendText("ok")
+    }
+
+    private fun HttpExchange.handlePlayAction(action: (String) -> Unit) {
+        val itemId = queryParameters()["id"].orEmpty()
+        if (itemId.isNotBlank()) {
+            executor.execute { action(itemId) }
         }
         sendText("ok")
     }
@@ -333,6 +355,20 @@ private fun DesktopRadioMapSnapshot.toJavaScript(): String {
     """.trimIndent()
 }
 
+private fun DesktopRadioMapSnapshot.toLightweightJavaScript(): String {
+    val startingIdsPayload = startingIdsJson.escapeJs()
+    return """
+        (function() {
+          if (window.setRadioMapSearchLoading) {
+            window.setRadioMapSearchLoading($mapLoading);
+          }
+          if (window.setRadioMapStartingStationIds) {
+            window.setRadioMapStartingStationIds(JSON.parse("$startingIdsPayload"));
+          }
+        })();
+    """.trimIndent()
+}
+
 private class DesktopRadioMapExternalLauncherPanel(
     onOpenExternal: () -> Unit,
 ) : JPanel() {
@@ -357,6 +393,8 @@ private class DesktopRadioMapExternalLauncherPanel(
 }
 
 private const val PreferredDesktopRadioMapPort = 41473
+private const val DesktopRadioMapFullMarkerUpdateDebounceMs = 350L
+private val DesktopRadioMapPanelBackground = AwtColor(0x08, 0x0B, 0x12)
 
 private fun createDesktopRadioMapServer(): HttpServer =
     try {
@@ -381,46 +419,87 @@ private class DesktopRadioMapChromiumHolder(
     initialUrl: String,
     private val onOpenExternal: () -> Unit,
 ) {
-    val panel: JPanel = JPanel(BorderLayout())
+    val panel: JPanel = JPanel(BorderLayout()).apply {
+        isOpaque = true
+        background = DesktopRadioMapPanelBackground
+    }
     private var browser: CefBrowser? = null
     private var client: CefClient? = null
     private var pendingUrl: String = initialUrl
+    private var pendingSnapshot: DesktopRadioMapSnapshot? = null
     private var loadedUrl: String? = null
-    private val cefExecutor: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "Phoebe-radio-map-cef").apply { isDaemon = true }
-    }
     @Volatile
     private var disposed: Boolean = false
+    @Volatile
+    private var activated: Boolean = false
+    @Volatile
+    private var browserCreated: Boolean = false
+    @Volatile
+    private var browserAttached: Boolean = false
+    @Volatile
+    private var lastInjectedScript: String? = null
+    @Volatile
+    private var lastLightweightScript: String? = null
+    @Volatile
+    private var lastMarkersJson: String? = null
+    @Volatile
+    private var pendingFullMarkerGeneration: Long = 0L
+    private val jsExecutor: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "Phoebe-radio-map-js").apply { isDaemon = true }
+    }
+    private val resumeListener: () -> Unit = {
+        jsExecutor.execute {
+            if (!disposed) {
+                flushPendingSnapshot()
+            }
+        }
+    }
+
+    private val resizeListener = object : ComponentAdapter() {
+        override fun componentResized(event: ComponentEvent) {
+            syncBrowserSize()
+            activateBrowserIfReady()
+        }
+
+        override fun componentShown(event: ComponentEvent) {
+            syncBrowserSize()
+            activateBrowserIfReady()
+        }
+    }
 
     init {
+        DesktopInlineRadioMapCoordinator.onScriptsResume(resumeListener)
         showMessage("Loading radio map browser...")
-        cefExecutor.execute {
-            runCatching {
-                log("starting jcefmaven browser")
-                DesktopRadioMapCef.instance()
-            }.onSuccess { app ->
-                SwingUtilities.invokeLater {
-                    if (!disposed) {
-                        createBrowser(app)
-                    }
-                }
-            }.onFailure { error ->
-                log("start failed: ${error.stackTraceToString()}")
-                showFallback("Could not start inline browser: ${error.message ?: error::class.simpleName}")
-            }
+        val start = Runnable { startBrowser() }
+        if (SwingUtilities.isEventDispatchThread()) {
+            start.run()
+        } else {
+            SwingUtilities.invokeLater(start)
+        }
+    }
+
+    private fun startBrowser() {
+        if (disposed) return
+        runCatching {
+            log("starting jcefmaven browser")
+            javax.swing.JPopupMenu.setDefaultLightWeightPopupEnabled(false)
+            createBrowser(DesktopRadioMapCef.instance())
+        }.onFailure { error ->
+            log("start failed: ${error.stackTraceToString()}")
+            showFallback("Could not start inline browser: ${error.message ?: error::class.simpleName}")
         }
     }
 
     private fun createBrowser(app: CefApp) {
         runCatching {
             val nextClient = app.createClient()
+            nextClient.addMessageRouter(CefMessageRouter.create())
             nextClient.addLifeSpanHandler(
                 object : CefLifeSpanHandlerAdapter() {
                     override fun onAfterCreated(createdBrowser: CefBrowser) {
-                        log("created browser; loading $pendingUrl")
-                        val url = pendingUrl
-                        loadedUrl = url
-                        createdBrowser.loadURL(url)
+                        log("browser created")
+                        browserCreated = true
+                        SwingUtilities.invokeLater { activateBrowserIfReady() }
                     }
 
                     override fun onBeforeClose(closingBrowser: CefBrowser) {
@@ -450,6 +529,19 @@ private class DesktopRadioMapChromiumHolder(
             )
             nextClient.addLoadHandler(
                 object : CefLoadHandlerAdapter() {
+                    override fun onLoadEnd(
+                        browser: CefBrowser,
+                        frame: CefFrame,
+                        httpStatusCode: Int,
+                    ) {
+                        if (!frame.isMain) return
+                        val url = frame.url.orEmpty()
+                        log("load end $url status=$httpStatusCode")
+                        if (url.isBlank() || url == "about:blank") return
+                        loadedUrl = url
+                        flushPendingSnapshot()
+                    }
+
                     override fun onLoadError(
                         browser: CefBrowser,
                         frame: CefFrame,
@@ -468,32 +560,116 @@ private class DesktopRadioMapChromiumHolder(
                     }
                 },
             )
-            val nextBrowser = nextClient.createBrowser("about:blank", true, false)
+            val nextBrowser = nextClient.createBrowser("about:blank", false, false)
             client = nextClient
             browser = nextBrowser
-            showBrowser(nextBrowser.uiComponent)
-            nextBrowser.createImmediately()
+            showBrowser(nextBrowser.uiComponent) {
+                browserAttached = true
+                activateBrowserIfReady()
+            }
         }.onFailure { error ->
             log("start failed: ${error.stackTraceToString()}")
             showFallback("Could not start inline browser: ${error.message ?: error::class.simpleName}")
         }
     }
 
+    private fun activateBrowserIfReady() {
+        if (activated || disposed || !browserCreated || !browserAttached) return
+        val currentBrowser = browser ?: return
+        if (panel.width <= 0 || panel.height <= 0) return
+        activated = true
+        syncBrowserSize()
+        currentBrowser.createImmediately()
+        log("loading $pendingUrl (${panel.width}x${panel.height})")
+        currentBrowser.loadURL(pendingUrl)
+    }
+
+    private fun syncBrowserSize() {
+        val currentBrowser = browser ?: return
+        val width = panel.width.coerceAtLeast(1)
+        val height = panel.height.coerceAtLeast(1)
+        val uiComponent = currentBrowser.uiComponent
+        if (uiComponent.width != width || uiComponent.height != height) {
+            uiComponent.setSize(width, height)
+            uiComponent.revalidate()
+            uiComponent.repaint()
+        }
+    }
+
     fun update(snapshot: DesktopRadioMapSnapshot) {
         pendingUrl = snapshot.url
-        val currentBrowser = browser
-        if (currentBrowser != null && loadedUrl == null) {
-            loadedUrl = snapshot.url
-            currentBrowser.loadURL(snapshot.url)
-        } else if (currentBrowser != null) {
-            currentBrowser.executeJavaScript(snapshot.toJavaScript(), loadedUrl.orEmpty(), 0)
+        pendingSnapshot = snapshot
+        val currentBrowser = browser ?: return
+        if (loadedUrl == null) {
+            return
+        }
+        applySnapshot(currentBrowser, snapshot)
+    }
+
+    private fun flushPendingSnapshot() {
+        val snapshot = pendingSnapshot ?: return
+        val currentBrowser = browser ?: return
+        if (loadedUrl.isNullOrBlank()) return
+        applySnapshot(currentBrowser, snapshot)
+    }
+
+    private fun applySnapshot(currentBrowser: CefBrowser, snapshot: DesktopRadioMapSnapshot) {
+        if (DesktopInlineRadioMapCoordinator.shouldDeferBrowserScripts) return
+        val markersChanged = snapshot.markersJson != lastMarkersJson
+        if (markersChanged) {
+            if (lastMarkersJson == null) {
+                applyFullSnapshot(currentBrowser, snapshot)
+            } else {
+                scheduleFullSnapshot(currentBrowser, snapshot)
+            }
+        }
+        applyLightweightSnapshot(currentBrowser, snapshot)
+    }
+
+    private fun applyFullSnapshot(currentBrowser: CefBrowser, snapshot: DesktopRadioMapSnapshot) {
+        val script = snapshot.toJavaScript()
+        if (script == lastInjectedScript) return
+        lastInjectedScript = script
+        lastLightweightScript = null
+        lastMarkersJson = snapshot.markersJson
+        executeBrowserScript(currentBrowser, script)
+    }
+
+    private fun applyLightweightSnapshot(currentBrowser: CefBrowser, snapshot: DesktopRadioMapSnapshot) {
+        val script = snapshot.toLightweightJavaScript()
+        if (script == lastLightweightScript) return
+        lastLightweightScript = script
+        executeBrowserScript(currentBrowser, script)
+    }
+
+    private fun scheduleFullSnapshot(currentBrowser: CefBrowser, snapshot: DesktopRadioMapSnapshot) {
+        val generation = System.nanoTime()
+        pendingFullMarkerGeneration = generation
+        jsExecutor.execute {
+            Thread.sleep(DesktopRadioMapFullMarkerUpdateDebounceMs)
+            if (disposed || pendingFullMarkerGeneration != generation) return@execute
+            val latest = pendingSnapshot ?: snapshot
+            if (latest.markersJson == lastMarkersJson) return@execute
+            val browser = browser ?: return@execute
+            applyFullSnapshot(browser, latest)
+        }
+    }
+
+    private fun executeBrowserScript(currentBrowser: CefBrowser, script: String) {
+        if (DesktopInlineRadioMapCoordinator.shouldDeferBrowserScripts) return
+        val frameUrl = loadedUrl.orEmpty()
+        jsExecutor.execute {
+            if (disposed) return@execute
+            currentBrowser.executeJavaScript(script, frameUrl, 0)
         }
     }
 
     fun dispose() {
         disposed = true
-        cefExecutor.shutdownNow()
+        DesktopInlineRadioMapCoordinator.removeScriptsResumeListener(resumeListener)
+        jsExecutor.shutdownNow()
         SwingUtilities.invokeLater {
+            panel.removeComponentListener(resizeListener)
             runCatching { browser?.close(true) }
             runCatching { client?.dispose() }
             browser = null
@@ -501,12 +677,16 @@ private class DesktopRadioMapChromiumHolder(
         }
     }
 
-    private fun showBrowser(component: Component) {
+    private fun showBrowser(component: Component, onAttached: () -> Unit = {}) {
         SwingUtilities.invokeLater {
             panel.removeAll()
+            component.background = DesktopRadioMapPanelBackground
             panel.add(component, BorderLayout.CENTER)
+            panel.addComponentListener(resizeListener)
             panel.revalidate()
             panel.repaint()
+            syncBrowserSize()
+            onAttached()
         }
     }
 
@@ -559,11 +739,13 @@ private object DesktopRadioMapCef {
                     println("radio-map desktop browser: jcefmaven $progress$suffix")
                 }
                 addJcefArgs(
-                    "--disable-gpu",
                     "--disable-features=FontationsFontBackend",
                 )
+                if (desktopRadioMapDisableGpu()) {
+                    addJcefArgs("--disable-gpu")
+                }
                 getCefSettings().apply {
-                        windowless_rendering_enabled = true
+                    windowless_rendering_enabled = false
                     cache_path = File(System.getProperty("user.home"), ".phoebe/jcef-maven-cache").absolutePath
                     log_file = File(System.getProperty("user.home"), ".phoebe/jcef-maven.log").absolutePath
                     log_severity = CefSettings.LogSeverity.LOGSEVERITY_WARNING
