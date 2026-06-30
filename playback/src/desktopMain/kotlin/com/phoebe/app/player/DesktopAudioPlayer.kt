@@ -1208,6 +1208,7 @@ class DesktopAudioPlayer(
                         failStartup()
                     }
                     mediaPlayer.setOnPlaying {
+                        if (!isPlayRequestCurrent(generation)) return@setOnPlaying
                         playingStarted.set(true)
                         playingWatchdogStop.set(true)
                         cancelJavaFxStartupWatchdog()
@@ -1222,6 +1223,7 @@ class DesktopAudioPlayer(
                         syncJavaFxPlayback(mediaPlayer, generation, isBuffering = true)
                     }
                     mediaPlayer.setOnReady {
+                        if (!isPlayRequestCurrent(generation)) return@setOnReady
                         mediaReady.set(true)
                         cancelJavaFxStartupWatchdog()
                         schedulePlayingWatchdog()

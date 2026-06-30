@@ -447,13 +447,10 @@ private class DesktopRadioMapChromiumHolder(
     private val jsExecutor: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "Phoebe-radio-map-js").apply { isDaemon = true }
     }
-
-    init {
-        DesktopInlineRadioMapCoordinator.onScriptsResume {
-            jsExecutor.execute {
-                if (!disposed) {
-                    flushPendingSnapshot()
-                }
+    private val resumeListener: () -> Unit = {
+        jsExecutor.execute {
+            if (!disposed) {
+                flushPendingSnapshot()
             }
         }
     }
@@ -471,6 +468,7 @@ private class DesktopRadioMapChromiumHolder(
     }
 
     init {
+        DesktopInlineRadioMapCoordinator.onScriptsResume(resumeListener)
         showMessage("Loading radio map browser...")
         val start = Runnable { startBrowser() }
         if (SwingUtilities.isEventDispatchThread()) {
@@ -668,6 +666,7 @@ private class DesktopRadioMapChromiumHolder(
 
     fun dispose() {
         disposed = true
+        DesktopInlineRadioMapCoordinator.removeScriptsResumeListener(resumeListener)
         jsExecutor.shutdownNow()
         SwingUtilities.invokeLater {
             panel.removeComponentListener(resizeListener)

@@ -45,22 +45,31 @@ object DesktopInlineRadioMapCoordinator {
         resumeListeners.add(listener)
     }
 
+    fun removeScriptsResumeListener(listener: () -> Unit) {
+        resumeListeners.remove(listener)
+    }
+
     fun beginLiveRadioStartup() {
-        liveRadioStartupActive = true
-        autoEndFuture?.cancel(false)
-        autoEndFuture = autoEndExecutor.schedule(
-            { endLiveRadioStartup() },
-            LiveRadioStartupAutoEndMs,
-            TimeUnit.MILLISECONDS,
-        )
+        synchronized(this) {
+            liveRadioStartupActive = true
+            autoEndFuture?.cancel(false)
+            autoEndFuture = autoEndExecutor.schedule(
+                { endLiveRadioStartup() },
+                LiveRadioStartupAutoEndMs,
+                TimeUnit.MILLISECONDS,
+            )
+        }
     }
 
     fun endLiveRadioStartup() {
-        if (!liveRadioStartupActive) return
-        val shouldResumeScripts = isInlineMapActive
-        liveRadioStartupActive = false
-        autoEndFuture?.cancel(false)
-        autoEndFuture = null
+        val shouldResumeScripts = synchronized(this) {
+            if (!liveRadioStartupActive) return
+            val shouldResume = isInlineMapActive
+            liveRadioStartupActive = false
+            autoEndFuture?.cancel(false)
+            autoEndFuture = null
+            shouldResume
+        }
         if (shouldResumeScripts) {
             resumeListeners.forEach { listener -> runCatching(listener) }
         }
