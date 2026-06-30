@@ -4,6 +4,7 @@ import com.phoebe.app.data.PlexClient
 import com.phoebe.app.domain.AudioAnalysisSource
 import com.phoebe.app.domain.EqualizerProfile
 import com.phoebe.app.domain.Track
+import com.phoebe.app.platform.DesktopInlineRadioMapCoordinator
 import com.phoebe.app.platform.PhoebeLog
 import javazoom.spi.mpeg.sampled.file.MpegAudioFileReader
 import javazoom.spi.vorbis.sampled.file.VorbisAudioFileReader
@@ -253,7 +254,7 @@ class DesktopAudioPlayer(
         preferJavaFxForLocalStreaming: Boolean,
     ) {
         if (uri.isBlank()) {
-            markPlaybackFailed()
+            finishPlaybackFailed()
             return
         }
         val generation = activePlayGeneration
@@ -277,13 +278,23 @@ class DesktopAudioPlayer(
                 }
                 val isLiveStream = file == null && state.value.durationMs <= 0L && isRemoteUri(activeUri)
                 if (isLiveStream) {
+                    DesktopInlineRadioMapCoordinator.beginLiveRadioStartup()
                     if (!isPlayRequestCurrent(generation)) return@execute
                     if (tryStartFfmpegPcmStream(activeUri, generation)) {
                         return@execute
                     }
-                    diagnostics.playbackError(PlaybackEnginePath.SampledStream, "FFmpeg live streaming failed to start")
-                    markPlaybackFailed(generation = generation)
-                    return@execute
+                    if (tryLiveRadioSampledPlayback(
+                            activeUri = activeUri,
+                            preferredStreamingExtension = preferredStreamingExtension,
+                            preferredSampledExtension = preferredSampledExtension,
+                            generation = generation,
+                        )
+                    ) {
+                        return@execute
+                    }
+                    PhoebeLog.d("DesktopAudioPlayer") {
+                        "ffmpeg live stream unavailable for $activeUri; trying JavaFX and sampled fallbacks"
+                    }
                 }
                 if (file == null) {
                     val streamingExtension = preferredStreamingExtension ?: streamingSampledExtensionFromUri(activeUri)
@@ -333,7 +344,7 @@ class DesktopAudioPlayer(
                         startSampledProgressProbe(clip, generation)
                         applyVolumesFromState()
                         updateBufferedPosition(trackDurationOrClipDuration(generation, clip), generation)
-                        markPlaybackReady(generation = generation)
+                        finishPlaybackReady(generation = generation)
                         return@execute
                     }
                 }
@@ -368,7 +379,7 @@ class DesktopAudioPlayer(
                         startSampledProgressProbe(clip, generation)
                         applyVolumesFromState()
                         updateBufferedPosition(trackDurationOrClipDuration(generation, clip), generation)
-                        markPlaybackReady(generation = generation)
+                        finishPlaybackReady(generation = generation)
                         return@execute
                     }
                     disposeSampled()
@@ -401,7 +412,7 @@ class DesktopAudioPlayer(
                                 generation = generation,
                             )
                         ) {
-                            markPlaybackFailed(generation = generation)
+                            finishPlaybackFailed(generation = generation)
                         }
                     }
                     if (!javaFxScheduled &&
@@ -414,7 +425,7 @@ class DesktopAudioPlayer(
                             generation = generation,
                         )
                     ) {
-                        markPlaybackFailed(generation = generation)
+                        finishPlaybackFailed(generation = generation)
                     }
                     return@execute
                 }
@@ -428,13 +439,13 @@ class DesktopAudioPlayer(
                     )
                 ) {
                     diagnostics.playbackError(PlaybackEnginePath.JavaFxMediaPlayer, "Desktop playback failed to start")
-                    markPlaybackFailed(generation = generation)
+                    finishPlaybackFailed(generation = generation)
                 }
             }.onFailure { error ->
                 if (!isPlayRequestCurrent(generation)) return@execute
                 logPlaybackFailure(error)
                 diagnostics.playbackError(PlaybackEnginePath.JavaFxMediaPlayer, error.message)
-                markPlaybackFailed(generation = generation)
+                finishPlaybackFailed(generation = generation)
             }
         }
     }
@@ -1024,6 +1035,42 @@ class DesktopAudioPlayer(
         return true
     }
 
+    private fun finishPlaybackReady(isPlaying: Boolean = true, generation: Int = activePlayGeneration) {
+        DesktopInlineRadioMapCoordinator.endLiveRadioStartup()
+        markPlaybackReady(isPlaying = isPlaying, generation = generation)
+    }
+
+    private fun finishPlaybackFailed(generation: Int = activePlayGeneration, message: String? = null) {
+        DesktopInlineRadioMapCoordinator.endLiveRadioStartup()
+        markPlaybackFailed(generation = generation, message = message)
+    }
+
+    private fun tryLiveRadioSampledPlayback(
+        activeUri: String,
+        preferredStreamingExtension: String?,
+        preferredSampledExtension: String?,
+        generation: Int,
+    ): Boolean {
+        val extensions = linkedSetOf<String?>()
+        preferredStreamingExtension?.let { extensions.add(it) }
+        streamingSampledExtensionFromUri(activeUri)?.let { extensions.add(it) }
+        preferredSampledExtension?.let { extensions.add(it) }
+        extensions.add(null)
+        for (extension in extensions) {
+            if (extension != null &&
+                !DesktopSandboxPlayback.shouldStreamRemoteSampledPlayback(activeUri) &&
+                DesktopSandboxPlayback.streamingSampledExtensionFromSuffix(extension) == null &&
+                DesktopSandboxPlayback.sampledPlaybackExtensionFromSuffix(extension) == null
+            ) {
+                continue
+            }
+            if (tryStartSampledStream(activeUri, extension, generation)) {
+                return true
+            }
+        }
+        return false
+    }
+
     private fun continuePlaybackAfterJavaFxFailure(
         activeUri: String,
         downloadUri: String?,
@@ -1092,13 +1139,30 @@ class DesktopAudioPlayer(
         val watchdogStop = AtomicBoolean(false)
         javaFxStartupWatchdogStop = watchdogStop
         val mediaReady = AtomicBoolean(false)
+        val playingStarted = AtomicBoolean(false)
+        val playingWatchdogStop = AtomicBoolean(false)
         val startupFailed = AtomicBoolean(false)
         fun failStartup() {
             if (!startupFailed.compareAndSet(false, true)) return
             cancelJavaFxStartupWatchdog()
+            playingWatchdogStop.set(true)
             playbackExecutor.execute {
                 if (!isPlayRequestCurrent(generation)) return@execute
                 onStartupFailed()
+            }
+        }
+        fun schedulePlayingWatchdog() {
+            CompletableFuture.delayedExecutor(JavaFxMediaPlayingTimeoutMs, TimeUnit.MILLISECONDS).execute {
+                if (playingWatchdogStop.get() || playingStarted.get()) return@execute
+                if (!isPlayRequestCurrent(generation)) return@execute
+                playingWatchdogStop.set(true)
+                playbackExecutor.execute {
+                    if (playingStarted.get() || !isPlayRequestCurrent(generation)) return@execute
+                    PhoebeLog.d("DesktopAudioPlayer") {
+                        "JavaFX media ready but never started playing within ${JavaFxMediaPlayingTimeoutMs}ms"
+                    }
+                    failStartup()
+                }
             }
         }
         scheduleJavaFxStartupWatchdog(
@@ -1144,12 +1208,14 @@ class DesktopAudioPlayer(
                         failStartup()
                     }
                     mediaPlayer.setOnPlaying {
+                        playingStarted.set(true)
+                        playingWatchdogStop.set(true)
                         cancelJavaFxStartupWatchdog()
                         syncJavaFxPlayback(mediaPlayer, generation, isBuffering = false)
                         playbackExecutor.execute {
                             if (!isPlayRequestCurrent(generation)) return@execute
                             applyVolumesFromState()
-                            markPlaybackReady(generation = generation)
+                            finishPlaybackReady(generation = generation)
                         }
                     }
                     mediaPlayer.setOnStalled {
@@ -1158,6 +1224,7 @@ class DesktopAudioPlayer(
                     mediaPlayer.setOnReady {
                         mediaReady.set(true)
                         cancelJavaFxStartupWatchdog()
+                        schedulePlayingWatchdog()
                         syncJavaFxPlayback(mediaPlayer, generation, isBuffering = false)
                         mediaPlayer.bufferProgressTimeProperty().addListener { _, _, _ ->
                             syncJavaFxPlayback(mediaPlayer, generation, isBuffering = false)
@@ -1209,7 +1276,7 @@ class DesktopAudioPlayer(
         startSampledProgressProbe(clip, generation)
         applyVolumesFromState()
         updateBufferedPosition(trackDurationOrClipDuration(generation, clip), generation)
-        markPlaybackReady(generation = generation)
+        finishPlaybackReady(generation = generation)
         return true
     }
 
@@ -1251,7 +1318,7 @@ class DesktopAudioPlayer(
                 startSampledProgressProbe(clip, generation)
                 applyVolumesFromState()
                 updateBufferedPosition(trackDurationOrClipDuration(generation, clip), generation)
-                markPlaybackReady(generation = generation)
+                finishPlaybackReady(generation = generation)
                 return true
             }
             disposeSampled()
@@ -1260,7 +1327,7 @@ class DesktopAudioPlayer(
         fullyBufferedPlayback = true
         return startJavaFxPlayback(downloaded.toURI().toString(), generation) {
             if (!trySampledFallbackAfterJavaFxFailure(downloaded, generation)) {
-                markPlaybackFailed(generation = generation)
+                finishPlaybackFailed(generation = generation)
             }
         }
     }
@@ -1387,11 +1454,13 @@ class DesktopAudioPlayer(
     }
 
     private fun findFfmpegExecutable(): String? {
+        val isWindows = System.getProperty("os.name").orEmpty().lowercase().contains("windows")
+        val executableNames = if (isWindows) listOf("ffmpeg.exe", "ffmpeg") else listOf("ffmpeg")
         val pathCandidates = System.getenv("PATH")
             .orEmpty()
             .split(File.pathSeparator)
             .filter { it.isNotBlank() }
-            .map { File(it, "ffmpeg") }
+            .flatMap { directory -> executableNames.map { name -> File(directory, name) } }
         return (pathCandidates + FfmpegFallbackPaths.map(::File))
             .firstOrNull { it.isFile && it.canExecute() }
             ?.absolutePath
@@ -1676,7 +1745,7 @@ class DesktopAudioPlayer(
                 if (isPlayRequestCurrent(generation) && sampledStream === playback && !playback.stopped.get()) {
                     logPlaybackFailure(error)
                     diagnostics.playbackError(PlaybackEnginePath.SampledStream, error.message)
-                    markPlaybackFailed(generation = generation)
+                    finishPlaybackFailed(generation = generation)
                 }
             } finally {
                 if (sampledStream === playback) {
@@ -1793,9 +1862,9 @@ class DesktopAudioPlayer(
         if (linePlaying) {
             diagnostics.platformPlaying(PlaybackEnginePath.SampledStream, positionMs, durationMs)
         }
-        if (!playback.reportedOutput && linePlaying && positionMs > 0L) {
+        if (!playback.reportedOutput && linePlaying && playback.writtenPcmBytes > 0L) {
             playback.reportedOutput = true
-            markPlaybackReady(generation = generation)
+            finishPlaybackReady(generation = generation)
         }
         val isStarting = !playback.paused && !playback.reportedOutput
         val isStarved = !playback.paused && !linePlaying && playback.reportedOutput
@@ -2420,6 +2489,7 @@ class DesktopAudioPlayer(
     private companion object {
         const val JavaFxEqualizerBandMatchTolerance = 0.045f
         const val JavaFxMediaReadyTimeoutMs = 3_000L
+        const val JavaFxMediaPlayingTimeoutMs = 8_000L
         const val JavaFxCrossfadeReadyTimeoutMs = 3_000L
         const val JavaFxDisposeSettleMs = 250L
         const val PlaybackUiSyncIntervalMs = 250L

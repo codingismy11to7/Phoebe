@@ -362,6 +362,38 @@ internal fun radioMapHtml(
               const count = Number(marker?.phoebeStation?.count);
               return total + (Number.isFinite(count) && count > 0 ? count : 1);
             }, 0);
+            const clusterPositions = (station) => {
+              if (station.isCluster && Array.isArray(station.children) && station.children.length > 0) {
+                return station.children
+                  .filter((child) => Number.isFinite(Number(child.lat)) && Number.isFinite(Number(child.lng)))
+                  .map((child) => ({ lat: Number(child.lat), lng: Number(child.lng) }));
+              }
+              if (Number.isFinite(Number(station.lat)) && Number.isFinite(Number(station.lng))) {
+                return [{ lat: Number(station.lat), lng: Number(station.lng) }];
+              }
+              return [];
+            };
+            const focusMapOnPositions = (positions) => {
+              if (!map || positions.length === 0) return false;
+              if (positions.length === 1) {
+                map.setCenter(positions[0]);
+                map.setZoom(Math.max(Number(map.getZoom()) || 2, 14));
+                return true;
+              }
+              const bounds = new google.maps.LatLngBounds();
+              positions.forEach((position) => bounds.extend(position));
+              if (bounds.isEmpty()) return false;
+              map.fitBounds(bounds, 48);
+              const listener = map.addListener('idle', () => {
+                google.maps.event.removeListener(listener);
+                const zoom = Number(map.getZoom());
+                if (Number.isFinite(zoom) && zoom > 18) {
+                  map.setZoom(18);
+                }
+              });
+              return true;
+            };
+            const focusMapOnStation = (station) => focusMapOnPositions(clusterPositions(station));
             const markerIcon = (station, selected) => {
               const count = station.isCluster ? String(station.count) : '';
               const digitCount = count.length;
@@ -403,8 +435,7 @@ internal fun radioMapHtml(
                     window.PhoebeRadioMap?.selectItem?.(station.id);
                   }
                   postDesktopBridge('select', station.id, null, null);
-                  map.setCenter({ lat: station.lat, lng: station.lng });
-                  map.setZoom(Math.min((map.getZoom() || 2) + 2, 18));
+                  focusMapOnStation(station);
                   setStatus('Showing ' + targetLabel + '.', true);
                   return;
                 }
@@ -425,7 +456,7 @@ internal fun radioMapHtml(
             window.initRadioMap = async () => {
               try {
                 setStatus('Loading radio stations...');
-                const [{ Map }, { MarkerClusterer }] = await Promise.all([
+                const [{ Map }, { MarkerClusterer, SuperClusterAlgorithm }] = await Promise.all([
                   google.maps.importLibrary('maps'),
                   import('https://cdn.jsdelivr.net/npm/@googlemaps/markerclusterer/+esm'),
                 ]);
@@ -467,6 +498,7 @@ internal fun radioMapHtml(
                   clusterer = new MarkerClusterer({
                     map,
                     markers: currentMarkers,
+                    algorithm: new SuperClusterAlgorithm({ maxZoom: 11 }),
                     renderer: {
                       render: ({ markers, position }) => {
                         const count = representedMarkerCount(markers || []);
@@ -491,8 +523,14 @@ internal fun radioMapHtml(
                         }
                         postDesktopBridge('select', sourceCluster.id, null, null);
                       }
-                      map.setCenter(cluster.position);
-                      map.setZoom(Math.min((map.getZoom() || 2) + 2, 18));
+                      const markerPositions = markers
+                        .map((marker) => marker?.getPosition?.())
+                        .filter((position) => position != null)
+                        .map((position) => ({ lat: position.lat(), lng: position.lng() }));
+                      if (!focusMapOnPositions(markerPositions)) {
+                        map.setCenter(cluster.position);
+                        map.setZoom(Math.min((map.getZoom() || 2) + 2, 18));
+                      }
                     },
                   });
                   setStatus('Loaded ' + representedStationCount(sourceMarkers) + ' radio stations.', true);
@@ -524,7 +562,7 @@ internal fun radioMapHtml(
               }
             };
           </script>
-          <script async src="https://maps.googleapis.com/maps/api/js?key=${googleMapsApiKey.escapeJs()}&v=weekly&callback=initRadioMap"></script>
+          <script async defer src="https://maps.googleapis.com/maps/api/js?key=${googleMapsApiKey.escapeJs()}&v=weekly&loading=async&callback=initRadioMap"></script>
         </head>
         <body class="$bodyClass">
           <div id="map"></div>

@@ -697,12 +697,8 @@ private fun RadioMapRoute(
 
     val externalBrowserMap = radioMapUsesExternalBrowser()
     val minimalEmbeddedMap = radioMapUsesMinimalEmbeddedChrome()
-    val clusterThresholdDegrees = remember(mapZoom, externalBrowserMap, minimalEmbeddedMap) {
-        if (externalBrowserMap || minimalEmbeddedMap) {
-            1.5
-        } else {
-            radioMapClusterThresholdDegrees(mapZoom)
-        }
+    val clusterThresholdDegrees = remember(mapZoom) {
+        radioMapClusterThresholdDegrees(mapZoom)
     }
     var items by remember { mutableStateOf(emptyList<RadioMapItem>()) }
     LaunchedEffect(directory.globeStations, expandedClusterIds, clusterThresholdDegrees) {
@@ -728,16 +724,23 @@ private fun RadioMapRoute(
         directory.globeAutoPrefetching,
         directory.globeLoadedStationCount,
         directory.canLoadNextGlobePage,
+        minimalEmbeddedMap,
     ) {
-        val initialDenseBatchReady = directory.globeLoadedStationCount >= RadioMapInitialPresentationStationTarget
+        val presentationTarget = if (minimalEmbeddedMap) {
+            RadioMapEmbeddedDesktopPresentationStationTarget
+        } else {
+            RadioMapInitialPresentationStationTarget
+        }
+        val initialDenseBatchReady = directory.globeLoadedStationCount >= presentationTarget
         val loadingSettled = !directory.globeAutoPrefetching || !directory.canLoadNextGlobePage
-        if (!mapPresented && items.isNotEmpty() && !directory.globeLoading && (initialDenseBatchReady || loadingSettled)) {
+        val readyForEmbeddedMap = minimalEmbeddedMap && items.isNotEmpty() && !directory.globeLoading
+        if (!mapPresented && items.isNotEmpty() && !directory.globeLoading && (readyForEmbeddedMap || initialDenseBatchReady || loadingSettled)) {
             mapPresented = true
         }
     }
     val shouldWaitForMapMarkers = !externalBrowserMap &&
         !mapPresented &&
-        (items.isEmpty() || directory.globeLoading || directory.globeAutoPrefetching)
+        (items.isEmpty() || directory.globeLoading || (!minimalEmbeddedMap && directory.globeAutoPrefetching))
     val submitSearch: () -> Unit = {
         actions.onGlobeSearch(RadioStationSearchQuery(text = queryText.trim()), 0)
     }
@@ -1631,3 +1634,4 @@ internal fun expandedRadioMapClusterIds(
     }
 
 private const val RadioMapInitialPresentationStationTarget = 2_000
+private const val RadioMapEmbeddedDesktopPresentationStationTarget = 250

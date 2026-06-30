@@ -70,6 +70,7 @@ kotlin {
         }
         desktopMain {
             dependencies {
+                implementation(project(":core:platform"))
                 implementation("me.friwi:jcefmaven:146.0.10")
             }
         }
