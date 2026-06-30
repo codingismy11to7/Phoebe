@@ -4,9 +4,12 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.ImageBitmapConfig
 import androidx.compose.ui.graphics.colorspace.ColorSpace
 import androidx.compose.ui.graphics.colorspace.ColorSpaces
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.test.runTest
 import kotlin.test.AfterTest
@@ -216,6 +219,32 @@ class RemoteArtworkCacheTest {
         }
 
         assertEquals(12, RemoteArtworkCache.stats().imageCount)
+    }
+
+    @Test
+    fun canceledWaiterCancelsStaleInFlightLoad() = runTest {
+        val loadStarted = CompletableDeferred<Unit>()
+        val loadCanceled = CompletableDeferred<Unit>()
+        RemoteArtworkCache.loadArtworkForTest = { _, _ ->
+            loadStarted.complete(Unit)
+            try {
+                awaitCancellation()
+            } finally {
+                loadCanceled.complete(Unit)
+            }
+        }
+
+        val job = async {
+            RemoteArtworkCache.awaitLoad("slow-art", ListArtworkMaxDecodeDimension)
+        }
+        loadStarted.await()
+        assertEquals(1, RemoteArtworkCache.stats().inFlightCount)
+
+        job.cancelAndJoin()
+        loadCanceled.await()
+
+        assertEquals(0, RemoteArtworkCache.stats().inFlightCount)
+        assertNull(RemoteArtworkCache.cached("slow-art", ListArtworkMaxDecodeDimension))
     }
 
     @Test

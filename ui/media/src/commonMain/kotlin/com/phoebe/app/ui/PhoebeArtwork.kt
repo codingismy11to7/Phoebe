@@ -51,11 +51,14 @@ import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.get
 import io.ktor.http.isSuccess
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -276,6 +279,12 @@ object RemoteArtworkCache {
         val maxDecodeDimension: Int,
     )
 
+    private class InFlightLoad(
+        var waiters: Int,
+    ) {
+        lateinit var deferred: Deferred<ImageBitmap?>
+    }
+
     private val images = mutableMapOf<CacheKey, ImageBitmap>()
     private val cacheLock = ArtworkCacheLock()
 
@@ -283,7 +292,7 @@ object RemoteArtworkCache {
     private val storage: PlatformStorage by lazy { PlatformStorage() }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var gate = Semaphore(permits = DefaultLoadPermits)
-    private val inFlight = mutableMapOf<CacheKey, Deferred<ImageBitmap?>>()
+    private val inFlight = mutableMapOf<CacheKey, InFlightLoad>()
     private val estimatedBytesByKey = mutableMapOf<CacheKey, Long>()
     private val accessOrder = LinkedHashMap<CacheKey, Unit>()
     private val recentFailures = mutableMapOf<CacheKey, Long>()
@@ -291,6 +300,7 @@ object RemoteArtworkCache {
     private var maxEntries = DefaultMaxEntries
     private var maxEstimatedBytes = platformMaxEstimatedBytes
     private var estimatedBytes = 0L
+    internal var loadArtworkForTest: (suspend (url: String, maxDecodeDimension: Int) -> ImageBitmap?)? = null
     internal var retryEpoch by mutableLongStateOf(0L)
         private set
 
@@ -352,6 +362,7 @@ object RemoteArtworkCache {
             accessOrder.clear()
             recentFailures.clear()
             estimatedBytes = 0L
+            inFlight.values.forEach { it.deferred.cancel() }
             inFlight.clear()
         }
     }
@@ -368,18 +379,31 @@ object RemoteArtworkCache {
         withCacheLock { cachedLocked(key) }?.let { return it }
         if (!withCacheLock { shouldRetryFailedLoadLocked(key) }) return null
 
-        val job = withCacheLock {
+        val load = withCacheLock {
             cachedLocked(key)?.let { return it }
             if (!shouldRetryFailedLoadLocked(key)) return null
-            inFlight[key] ?: scope.async {
-                try {
-                    fetchAndDecode(key)
-                } finally {
-                    withCacheLock { inFlight.remove(key) }
+            inFlight[key]?.also { it.waiters += 1 }
+                ?: InFlightLoad(waiters = 1).also { load ->
+                    load.deferred = scope.async(start = CoroutineStart.LAZY) {
+                        try {
+                            fetchAndDecode(key)
+                        } finally {
+                            withCacheLock {
+                                if (inFlight[key] === load) {
+                                    inFlight.remove(key)
+                                }
+                            }
+                        }
+                    }
+                    inFlight[key] = load
+                    load.deferred.start()
                 }
-            }.also { inFlight[key] = it }
         }
-        return job.await()
+        return try {
+            load.deferred.await()
+        } finally {
+            releaseWaiter(key, load)
+        }
     }
 
     suspend fun awaitLoadWithFallback(
@@ -412,28 +436,37 @@ object RemoteArtworkCache {
             withCacheLock { cachedLocked(key) }?.let { return@withPermit it }
             val url = key.url
             val remote = url.startsWith("http://") || url.startsWith("https://")
-            val decoded = runCatching {
-                if (remote) {
-                    withTimeoutOrNull(RemoteArtworkLoadTimeoutMs) {
-                        remoteArtworkRequestUrls(url, key.maxDecodeDimension)
-                            .firstNotNullOfOrNull { fetchUrl ->
-                                fetchRemoteArtworkBytes(url, fetchUrl)?.let { bytes ->
-                                    yield()
-                                    decodeImageBitmap(bytes, key.maxDecodeDimension)
+            val testLoader = loadArtworkForTest
+            val decoded = if (testLoader != null) {
+                testLoader(url, key.maxDecodeDimension)
+            } else {
+                try {
+                    if (remote) {
+                        withTimeoutOrNull(RemoteArtworkLoadTimeoutMs) {
+                            remoteArtworkRequestUrls(url, key.maxDecodeDimension)
+                                .firstNotNullOfOrNull { fetchUrl ->
+                                    fetchRemoteArtworkBytes(url, fetchUrl)?.let { bytes ->
+                                        yield()
+                                        decodeImageBitmap(bytes, key.maxDecodeDimension)
+                                    }
                                 }
+                        }
+                            ?: storage.readBytes(cachedArtworkPathForUrl(url))?.let { bytes ->
+                                yield()
+                                decodeImageBitmap(bytes, key.maxDecodeDimension)
                             }
-                    }
-                        ?: storage.readBytes(cachedArtworkPathForUrl(url))?.let { bytes ->
+                    } else {
+                        storage.readUriBytes(url)?.let { bytes ->
                             yield()
                             decodeImageBitmap(bytes, key.maxDecodeDimension)
                         }
-                } else {
-                    storage.readUriBytes(url)?.let { bytes ->
-                        yield()
-                        decodeImageBitmap(bytes, key.maxDecodeDimension)
                     }
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (_: Throwable) {
+                    null
                 }
-            }.getOrNull()
+            }
             if (decoded != null) {
                 withCacheLock { putLocked(key, decoded) }
                 decoded
@@ -445,14 +478,18 @@ object RemoteArtworkCache {
     }
 
     private suspend fun fetchRemoteArtworkBytes(sourceUrl: String, fetchUrl: String): ByteArray? =
-        runCatching {
+        try {
             val response = httpClient.get(fetchUrl) {
                 applyEmbyFamilyArtworkAuth(sourceUrl)
             }
             val bytes = response.body<ByteArray>()
-            if (!response.status.isSuccess()) return@runCatching null
+            if (!response.status.isSuccess()) return null
             bytes.takeIf { it.isNotEmpty() }
-        }.getOrNull()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Throwable) {
+            null
+        }
 
     private fun cachedLocked(key: CacheKey): ImageBitmap? {
         val image = images[key] ?: return null
@@ -522,6 +559,18 @@ object RemoteArtworkCache {
         return retry
     }
 
+    private fun releaseWaiter(key: CacheKey, load: InFlightLoad) {
+        withCacheLock {
+            val current = inFlight[key] ?: return
+            if (current !== load) return
+            current.waiters -= 1
+            if (current.waiters <= 0 && !current.deferred.isCompleted) {
+                inFlight.remove(key)
+                current.deferred.cancel()
+            }
+        }
+    }
+
     private inline fun <T> withCacheLock(block: () -> T): T = cacheLock.withCacheLock(block)
 
     fun stats(): ArtworkCacheStats =
@@ -548,6 +597,7 @@ object RemoteArtworkCache {
             estimatedBytes = 0L
             maxEntries = DefaultMaxEntries
             maxEstimatedBytes = platformMaxEstimatedBytes
+            loadArtworkForTest = null
             inFlight.clear()
         }
         retryEpoch = 0L

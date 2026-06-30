@@ -35,6 +35,7 @@ import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.PersonalMixPreferences
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.RadioDirectoryState
+import com.phoebe.app.domain.RadioMapViewport
 import com.phoebe.app.domain.RadioNowPlayingMetadata
 import com.phoebe.app.domain.RadioStation
 import com.phoebe.app.domain.RadioStationSearchQuery
@@ -88,6 +89,7 @@ import com.phoebe.app.ui.AppNavigationRequest
 import com.phoebe.app.ui.CollectionMixSeed
 import com.phoebe.app.updates.AppUpdateState
 import io.ktor.http.Url
+import kotlin.random.Random
 import io.ktor.http.encodeURLParameter
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -1588,6 +1590,25 @@ class AppState(
         }
     }
 
+    fun playPopularMix() = scope.launch {
+        val popularPool = runCatching {
+            dependencies.catalogRepository.popularTracksForLibrary(session.value)
+        }.getOrElse { error ->
+            val notice = error.message ?: "Couldn't load popular songs."
+            mutableMessage.value = notice
+            return@launch
+        }
+        val tracks = popularPool.weightedPopularMix()
+        if (tracks.isEmpty()) {
+            mutableMessage.value = "No provider top songs found."
+            return@launch
+        }
+        if (playTracks(tracks, 0)) {
+            requestNavigation(AppNavigationRequest.Player)
+            mutableMessage.value = "Playing ${tracks.size} popular songs."
+        }
+    }
+
     fun refreshRadioStations() = scope.launch {
         val currentSession = session.value
         val selectedLibrary = currentSession?.selectedLibrary
@@ -2058,6 +2079,26 @@ class AppState(
         dependencies.radioRepository.browseCountry(countryCode)
     }
 
+    fun loadInternetRadioMap(query: RadioStationSearchQuery = RadioStationSearchQuery(), page: Int = 0) = scope.launch {
+        dependencies.radioRepository.loadGlobe(query, page)
+    }
+
+    fun loadFocusedInternetRadioMap(
+        query: RadioStationSearchQuery = RadioStationSearchQuery(),
+        page: Int = 0,
+        countryCode: String? = null,
+        viewport: RadioMapViewport? = null,
+        autoPrefetch: Boolean = page == 0,
+    ) = scope.launch {
+        dependencies.radioRepository.loadGlobe(
+            query = query,
+            page = page,
+            countryCode = countryCode,
+            viewport = viewport,
+            autoPrefetch = autoPrefetch,
+        )
+    }
+
     fun showInternetRadioStation(stationId: String) = scope.launch {
         dependencies.radioRepository.showStation(stationId)
     }
@@ -2105,7 +2146,8 @@ class AppState(
         }
         try {
             if (playTracks(listOf(track), 0, clearShuffle = true)) {
-                mutableMessage.value = "Playing ${station.name}."
+                val message = "Playing ${station.name}."
+                mutableMessage.value = message
                 surfaceInternetRadioStartupTimeout(track, station)
             }
         } finally {
@@ -2937,6 +2979,40 @@ private data class PlaybackHistoryRecord(
     val playedAtMs: Long = Long.MIN_VALUE,
 )
 
+private fun List<Track>.weightedPopularMix(
+    limit: Int = PopularMixTrackLimit,
+    random: Random = Random.Default,
+): List<Track> {
+    val remaining = distinctBy { it.id }
+        .mapIndexed { index, track ->
+            PopularMixCandidate(
+                track = track,
+                weight = 1.0 / kotlin.math.sqrt(index.toDouble() + 1.0),
+            )
+        }
+        .toMutableList()
+    val selected = mutableListOf<Track>()
+    while (selected.size < limit && remaining.isNotEmpty()) {
+        val totalWeight = remaining.sumOf { it.weight }
+        var cursor = random.nextDouble(totalWeight)
+        var selectedIndex = remaining.lastIndex
+        for (index in remaining.indices) {
+            cursor -= remaining[index].weight
+            if (cursor <= 0.0) {
+                selectedIndex = index
+                break
+            }
+        }
+        selected += remaining.removeAt(selectedIndex).track
+    }
+    return selected
+}
+
+private data class PopularMixCandidate(
+    val track: Track,
+    val weight: Double,
+)
+
 private const val PlaybackHistoryDedupeWindowMs = 30_000L
 
 private const val PlayHistoryCatalogResolveTimeoutMs = 1_500L
@@ -2945,6 +3021,7 @@ private const val ProviderPlayHistoryDebounceMs = 8_000L
 
 private const val InternetRadioStartupTimeoutMs = 30_000L
 private const val RadioNowPlayingRefreshMs = 30_000L
+private const val PopularMixTrackLimit = 50
 
 private const val PLEX_SIGN_IN_TIMEOUT_MS = 20_000L
 

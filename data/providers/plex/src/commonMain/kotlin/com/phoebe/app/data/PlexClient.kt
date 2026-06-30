@@ -362,6 +362,37 @@ class PlexClient(
         return response.mediaContainer.metadata.mapNotNull { it.toTrack(server, token) }
     }
 
+    suspend fun popularTracksForLibrary(
+        server: PlexServer,
+        library: MusicLibrary,
+        token: String,
+        limit: Int = 50,
+    ): List<Track> {
+        if (limit <= 0) return emptyList()
+        val response: PlexMediaContainerResponse = withReachableBase(server) { base ->
+            val response = httpClient.get("$base/library/sections/${library.key}/all") {
+                plexServerAuth(token)
+                header(HttpHeaders.Accept, "application/json")
+                header("X-Plex-Container-Start", "0")
+                header("X-Plex-Container-Size", limit.toString())
+                parameter("X-Plex-Container-Start", 0)
+                parameter("X-Plex-Container-Size", limit)
+                parameter("type", PlexTrackType)
+                parameter("album.subformat!", "Compilation,Live")
+                parameter("group", "title")
+                parameter("ratingCount>>", 0)
+                parameter("sort", "ratingCount:desc")
+                parameter("limit", limit)
+            }
+            if (!response.status.isSuccess()) {
+                val body = response.bodyAsText()
+                error("Plex library popular tracks failed (${response.status.value}) via $base: ${body.take(200)}")
+            }
+            response.body()
+        }
+        return response.mediaContainer.metadata.mapNotNull { it.toTrack(server, token) }
+    }
+
     suspend fun similarArtistsForArtist(
         server: PlexServer,
         ratingKey: String,

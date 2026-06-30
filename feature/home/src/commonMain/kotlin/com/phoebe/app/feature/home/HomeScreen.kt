@@ -116,6 +116,7 @@ import phoebe.feature.home.generated.resources.mix_decade
 import phoebe.feature.home.generated.resources.mix_deep_cuts
 import phoebe.feature.home.generated.resources.mix_library
 import phoebe.feature.home.generated.resources.mix_personal
+import phoebe.feature.home.generated.resources.mix_popular
 import phoebe.feature.home.generated.resources.mix_time_travel
 
 private val PhoneHomeAccordionBreakpoint: Dp = 600.dp
@@ -168,6 +169,7 @@ class MobileHomeCallbacks(
     val onClearDecadeMixNotice: () -> Unit,
     val onPlayRadioStation: (PlexRadioStation) -> Unit,
     val onPlayPersonalMix: () -> Unit,
+    val onPlayPopularMix: () -> Unit,
     val onPlayTracks: (List<Track>, Int) -> Unit,
     val onAddToUpNext: (Track) -> Unit,
     val onDownload: (Track) -> Unit,
@@ -208,6 +210,7 @@ fun MobileHomeRoute(
         radioStartingIds = routeState.radioStartingIds,
         onPlayRadioStation = callbacks.onPlayRadioStation,
         onPlayPersonalMix = callbacks.onPlayPersonalMix,
+        onPlayPopularMix = callbacks.onPlayPopularMix,
         onPlayTracks = callbacks.onPlayTracks,
         onAddToUpNext = callbacks.onAddToUpNext,
         onDownload = callbacks.onDownload,
@@ -262,6 +265,7 @@ fun DesktopHomeScreen(
     radioStartingIds: Set<String> = emptySet(),
     onPlayRadioStation: (PlexRadioStation) -> Unit = {},
     onPlayPersonalMix: () -> Unit = {},
+    onPlayPopularMix: () -> Unit = {},
     onPlayTracks: (List<Track>, Int) -> Unit,
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
@@ -315,7 +319,7 @@ fun DesktopHomeScreen(
         normalizedHomeSections(homeSections).forEach { section ->
             when (section) {
                 HomeSection.Mixes -> item("mixes") {
-                    DesktopMixesPanel(onPlayPersonalMix, radioStations, radioStartingIds, onPlayRadioStation, onClearDecadeMixNotice, panelStyle = panelStyle) {
+                    DesktopMixesPanel(onPlayPersonalMix, onPlayPopularMix, radioStations, radioStartingIds, onPlayRadioStation, onClearDecadeMixNotice, panelStyle = panelStyle) {
                         showDecadeMix = true
                     }
                 }
@@ -397,6 +401,7 @@ fun MobileHomeScreen(
     radioStartingIds: Set<String> = emptySet(),
     onPlayRadioStation: (PlexRadioStation) -> Unit = {},
     onPlayPersonalMix: () -> Unit = {},
+    onPlayPopularMix: () -> Unit = {},
     onPlayTracks: (List<Track>, Int) -> Unit,
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
@@ -459,6 +464,7 @@ fun MobileHomeScreen(
                 onRefreshArtists = onRefreshArtists,
                 onRefreshAlbums = onRefreshAlbums,
                 onPlayPersonalMix = onPlayPersonalMix,
+                onPlayPopularMix = onPlayPopularMix,
                 radioStations = radioStations,
                 radioStartingIds = radioStartingIds,
                 onPlayRadioStation = onPlayRadioStation,
@@ -500,6 +506,7 @@ fun MobileHomeScreen(
                 onRefreshArtists = onRefreshArtists,
                 onRefreshAlbums = onRefreshAlbums,
                 onPlayPersonalMix = onPlayPersonalMix,
+                onPlayPopularMix = onPlayPopularMix,
                 radioStations = radioStations,
                 radioStartingIds = radioStartingIds,
                 onPlayRadioStation = onPlayRadioStation,
@@ -707,6 +714,7 @@ private fun MobileHomeContent(
     onRefreshArtists: () -> Unit,
     onRefreshAlbums: () -> Unit,
     onPlayPersonalMix: () -> Unit,
+    onPlayPopularMix: () -> Unit,
     radioStations: List<PlexRadioStation>,
     radioStartingIds: Set<String>,
     onPlayRadioStation: (PlexRadioStation) -> Unit,
@@ -779,27 +787,28 @@ private fun MobileHomeContent(
                     }
                 }
                 is MobileHomeSectionItem.Standard -> when (item.section) {
-                HomeSection.Mixes -> item(key = "mix", contentType = "mix-section") {
-                    if (usePhoneAccordions) {
-                        PhoneMixesAccordionSection(
-                            expanded = expandedPhoneSection == PhoneHomeAccordionSection.Mixes,
-                            onToggle = {
-                                onExpandedPhoneSection(
-                                    toggledPhoneHomeAccordion(expandedPhoneSection, PhoneHomeAccordionSection.Mixes),
-                                )
-                            },
-                            onPlayPersonalMix = onPlayPersonalMix,
-                            radioStations = radioStations,
-                            radioStartingIds = radioStartingIds,
-                            onPlayRadioStation = onPlayRadioStation,
-                            onClearDecadeMixNotice = onClearDecadeMixNotice,
-                            onShowDecadeMix = onShowDecadeMix,
-                        )
-                    } else {
-                        MobileMixesSection(onPlayPersonalMix, radioStations, radioStartingIds, onPlayRadioStation, onClearDecadeMixNotice, onShowDecadeMix)
+                    HomeSection.Mixes -> item(key = "mix", contentType = "mix-section") {
+                        if (usePhoneAccordions) {
+                            PhoneMixesAccordionSection(
+                                expanded = expandedPhoneSection == PhoneHomeAccordionSection.Mixes,
+                                onToggle = {
+                                    onExpandedPhoneSection(
+                                        toggledPhoneHomeAccordion(expandedPhoneSection, PhoneHomeAccordionSection.Mixes),
+                                    )
+                                },
+                                onPlayPersonalMix = onPlayPersonalMix,
+                                onPlayPopularMix = onPlayPopularMix,
+                                radioStations = radioStations,
+                                radioStartingIds = radioStartingIds,
+                                onPlayRadioStation = onPlayRadioStation,
+                                onClearDecadeMixNotice = onClearDecadeMixNotice,
+                                onShowDecadeMix = onShowDecadeMix,
+                            )
+                        } else {
+                            MobileMixesSection(onPlayPersonalMix, onPlayPopularMix, radioStations, radioStartingIds, onPlayRadioStation, onClearDecadeMixNotice, onShowDecadeMix)
+                        }
                     }
-                }
-                HomeSection.Collections -> item(key = "collections", contentType = "collections-section") {
+                    HomeSection.Collections -> item(key = "collections", contentType = "collections-section") {
                     if (usePhoneAccordions) {
                         PhoneCollectionsAccordionSection(
                             collectionEntries = collectionEntries,
@@ -921,6 +930,7 @@ private fun MobileExpandedHomeContent(
     onRefreshArtists: () -> Unit,
     onRefreshAlbums: () -> Unit,
     onPlayPersonalMix: () -> Unit,
+    onPlayPopularMix: () -> Unit,
     radioStations: List<PlexRadioStation>,
     radioStartingIds: Set<String>,
     onPlayRadioStation: (PlexRadioStation) -> Unit,
@@ -1017,6 +1027,7 @@ private fun MobileExpandedHomeContent(
                     HomeSection.Mixes -> item(key = "expanded-mixes", contentType = "expanded-mixes") {
                         ExpandedMixesShelf(
                             onPlayPersonalMix = onPlayPersonalMix,
+                            onPlayPopularMix = onPlayPopularMix,
                             radioStations = radioStations,
                             radioStartingIds = radioStartingIds,
                             onPlayRadioStation = onPlayRadioStation,
@@ -1080,6 +1091,7 @@ private fun ExpandedHomeShelf(
 @Composable
 private fun ExpandedMixesShelf(
     onPlayPersonalMix: () -> Unit,
+    onPlayPopularMix: () -> Unit,
     radioStations: List<PlexRadioStation>,
     radioStartingIds: Set<String>,
     onPlayRadioStation: (PlexRadioStation) -> Unit,
@@ -1089,6 +1101,9 @@ private fun ExpandedMixesShelf(
     ExpandedHomeShelf("CREATE A MIX", horizontalSpacing = 9.dp) {
         item(key = "personal-mix", contentType = "expanded-mix-action") {
             HomeMixPosterCard("Personal Mix", PhoebeIcon.Person, Res.drawable.mix_personal, Modifier.width(MobileHomePosterCardSize), onClick = onPlayPersonalMix)
+        }
+        item(key = "popular-mix", contentType = "expanded-mix-action") {
+            HomeMixPosterCard("popular", PhoebeIcon.PlaylistPlay, Res.drawable.mix_popular, Modifier.width(MobileHomePosterCardSize), onClick = onPlayPopularMix)
         }
         item(key = "decade-mix", contentType = "expanded-mix-action") {
             HomeMixPosterCard("Decade Mix", PhoebeIcon.Calendar, Res.drawable.mix_decade, Modifier.width(MobileHomePosterCardSize)) {
@@ -1587,6 +1602,7 @@ private fun PhoneMixesAccordionSection(
     expanded: Boolean,
     onToggle: () -> Unit,
     onPlayPersonalMix: () -> Unit,
+    onPlayPopularMix: () -> Unit,
     radioStations: List<PlexRadioStation>,
     radioStartingIds: Set<String>,
     onPlayRadioStation: (PlexRadioStation) -> Unit,
@@ -1595,6 +1611,7 @@ private fun PhoneMixesAccordionSection(
 ) {
     val actions = listOf(
         PhoneHomePosterAction("Personal Mix", PhoebeIcon.Person, Res.drawable.mix_personal, onClick = onPlayPersonalMix),
+        PhoneHomePosterAction("popular", PhoebeIcon.PlaylistPlay, Res.drawable.mix_popular, onClick = onPlayPopularMix),
         PhoneHomePosterAction(
             label = "Decade Mix",
             icon = PhoebeIcon.Calendar,
@@ -2135,6 +2152,7 @@ private fun MobilePlayedHistoryShortcuts(
 @Composable
 private fun DesktopMixesPanel(
     onPlayPersonalMix: () -> Unit,
+    onPlayPopularMix: () -> Unit,
     radioStations: List<PlexRadioStation>,
     radioStartingIds: Set<String>,
     onPlayRadioStation: (PlexRadioStation) -> Unit,
@@ -2155,6 +2173,15 @@ private fun DesktopMixesPanel(
                     Res.drawable.mix_personal,
                     Modifier.width(148.dp),
                     onClick = onPlayPersonalMix,
+                )
+            }
+            item("popular-mix", contentType = "mix-action") {
+                HomeMixPosterCard(
+                    "popular",
+                    PhoebeIcon.PlaylistPlay,
+                    Res.drawable.mix_popular,
+                    Modifier.width(148.dp),
+                    onClick = onPlayPopularMix,
                 )
             }
             item("decade-mix", contentType = "mix-action") {
@@ -2201,6 +2228,7 @@ private fun DesktopMixesPanel(
 @Composable
 private fun MobileMixesSection(
     onPlayPersonalMix: () -> Unit,
+    onPlayPopularMix: () -> Unit,
     radioStations: List<PlexRadioStation>,
     radioStartingIds: Set<String>,
     onPlayRadioStation: (PlexRadioStation) -> Unit,
@@ -2211,6 +2239,9 @@ private fun MobileMixesSection(
     HomeHorizontalCarousel(Modifier.fillMaxWidth(), horizontalSpacing = 9.dp) {
         item(key = "personal-mix", contentType = "mobile-mix-action") {
             HomeMixPosterCard("Personal Mix", PhoebeIcon.Person, Res.drawable.mix_personal, Modifier.width(MobileHomePosterCardSize), onClick = onPlayPersonalMix)
+        }
+        item(key = "popular-mix", contentType = "mobile-mix-action") {
+            HomeMixPosterCard("popular", PhoebeIcon.PlaylistPlay, Res.drawable.mix_popular, Modifier.width(MobileHomePosterCardSize), onClick = onPlayPopularMix)
         }
         item(key = "decade-mix", contentType = "mobile-mix-action") {
             HomeMixPosterCard("Decade Mix", PhoebeIcon.Calendar, Res.drawable.mix_decade, Modifier.width(MobileHomePosterCardSize)) {
@@ -2876,6 +2907,7 @@ private fun PlexRadioStation.mixArtworkResource(): DrawableResource? {
 private fun mixPosterTitle(title: String): String =
     when (title.lowercase()) {
         "personal mix" -> "PERSONAL\nMIX"
+        "popular" -> "POPULAR"
         "decade mix" -> "DECADE\nMIX"
         "library radio" -> "LIBRARY\nRADIO"
         "deep cut mix" -> "DEEP CUT\nMIX"

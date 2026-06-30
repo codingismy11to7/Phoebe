@@ -53,8 +53,11 @@ val desktopJavaLanguageVersion = JavaLanguageVersion.of(22)
 val desktopJavaLauncher = javaToolchains.launcherFor {
     languageVersion.set(desktopJavaLanguageVersion)
 }
-val desktopJavaExecutable = desktopJavaLauncher.map { launcher ->
-    launcher.executablePath.asFile.absolutePath
+val desktopJavaHome = desktopJavaLauncher.map { launcher ->
+    launcher.metadata.installationPath.asFile.absolutePath
+}
+val desktopJavaExecutable = desktopJavaHome.map { javaHome ->
+    File(javaHome, "bin/java").absolutePath
 }
 
 fun providerValue(name: String, envName: String): String? =
@@ -410,7 +413,7 @@ val macMediaKeysResourceDirName = providers.provider {
 compose.desktop {
     application {
         mainClass = "com.phoebe.app.MainKt"
-        desktopJavaLauncher.orNull?.metadata?.installationPath?.asFile?.absolutePath?.let { javaHome = it }
+        javaHome = desktopJavaHome.get()
         jvmArgs += listOf(
             "-Xms32m",
             "-Xmx256m",
@@ -422,7 +425,12 @@ compose.desktop {
         if (System.getProperty("os.name").lowercase().contains("mac")) {
             val mediaKeysDylibPath =
                 layout.buildDirectory.get().asFile.resolve("native/macos/libPhoebeMediaKeys.dylib").absolutePath
-            jvmArgs += listOf("-Dphoebe.mediakeys.lib=$mediaKeysDylibPath")
+            jvmArgs += listOf(
+                "-Dphoebe.mediakeys.lib=$mediaKeysDylibPath",
+                "--add-opens=java.desktop/sun.awt=ALL-UNNAMED",
+                "--add-opens=java.desktop/sun.lwawt=ALL-UNNAMED",
+                "--add-opens=java.desktop/sun.lwawt.macosx=ALL-UNNAMED",
+            )
         }
         buildTypes.release.proguard {
             isEnabled.set(phoebeDesktopProguard)
@@ -483,7 +491,7 @@ val compileMacMediaKeysNative = tasks.register<Exec>("compileMacMediaKeysNative"
     outputs.file(outFile)
     doFirst { outDir.mkdirs() }
     doFirst {
-        val javaHome = desktopJavaLauncher.get().metadata.installationPath.asFile.absolutePath
+        val javaHome = desktopJavaHome.get()
         commandLine(
             "clang",
             "-dynamiclib",
@@ -527,6 +535,9 @@ tasks.withType<JavaExec>().configureEach {
         setExecutable(desktopJavaExecutable.get())
     }
     systemProperty("phoebe.debug", "true")
+    System.getProperty("phoebe.desktop.navigationPath")
+        ?.takeIf { it.isNotBlank() }
+        ?.let { systemProperty("phoebe.desktop.navigationPath", it) }
     val debugHome = File(System.getProperty("user.home"), ".phoebe-debug")
     systemProperty("phoebe.storage.root", debugHome.absolutePath)
 

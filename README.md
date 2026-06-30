@@ -177,6 +177,36 @@ PR CI runs desktop tests, Wasm tests, Roborazzi screenshot verification, Playwri
 
 The Android SDK path is set in `local.properties` for this machine and ignored by git.
 
+### Google Maps key for local development
+
+The radio map works without a checked-in Google Maps key. For local development, supply your own key in ignored local configuration:
+
+```properties
+# local.properties
+phoebe.googleMaps.apiKey=your-google-maps-api-key
+```
+
+Use platform-specific keys when you need different API restrictions:
+
+```properties
+phoebe.googleMaps.androidApiKey=your-android-key
+phoebe.googleMaps.iosApiKey=your-ios-key
+phoebe.googleMaps.desktopApiKey=your-desktop-key
+phoebe.googleMaps.webApiKey=your-web-key
+```
+
+You can also pass keys with environment variables for a single shell session:
+
+```bash
+export PHOEBE_GOOGLE_MAPS_API_KEY=your-google-maps-api-key
+export PHOEBE_GOOGLE_MAPS_ANDROID_API_KEY=your-android-key
+export PHOEBE_GOOGLE_MAPS_IOS_API_KEY=your-ios-key
+export PHOEBE_GOOGLE_MAPS_DESKTOP_API_KEY=your-desktop-key
+export PHOEBE_GOOGLE_MAPS_WEB_API_KEY=your-web-key
+```
+
+Platform-specific keys take precedence over the shared `phoebe.googleMaps.apiKey` / `PHOEBE_GOOGLE_MAPS_API_KEY` fallback. Keep these values out of git; release keys are configured separately as GitHub secrets in [docs/github-actions.md](docs/github-actions.md).
+
 **iOS debug build:**
 
 ```bash

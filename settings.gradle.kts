@@ -16,6 +16,7 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        maven("https://cache-redirector.jetbrains.com/intellij-dependencies")
     }
 }
 

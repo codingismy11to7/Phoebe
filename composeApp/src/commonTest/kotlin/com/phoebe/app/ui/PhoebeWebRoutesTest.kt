@@ -29,6 +29,15 @@ class PhoebeWebRoutesTest {
             phoebeWebRoutesForPath("/radio/countries"),
         )
         assertEquals("/radio/countries", PhoebeRoute.RadioCountries.toPhoebeWebPath())
+        assertEquals(
+            listOf(PhoebeRoute.Browse(BrowseSection.Radio), PhoebeRoute.RadioMap),
+            phoebeWebRoutesForPath("/radio/map"),
+        )
+        assertEquals(
+            listOf(PhoebeRoute.Browse(BrowseSection.Radio), PhoebeRoute.RadioMap),
+            phoebeWebRoutesForPath("/radio/globe"),
+        )
+        assertEquals("/radio/map", PhoebeRoute.RadioMap.toPhoebeWebPath())
     }
 
     @Test

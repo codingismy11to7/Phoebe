@@ -1,6 +1,9 @@
 import Foundation
 import SwiftUI
 import ComposeApp
+#if canImport(GoogleMaps)
+import GoogleMaps
+#endif
 
 @main
 struct iOSApp: App {
@@ -13,6 +16,9 @@ struct iOSApp: App {
         if !isPlaybackSmoke {
             PlatformPlayback_iosKt.ensureIosPlaybackRuntime()
             IosCastCoordinator.shared.initialize()
+            #if canImport(GoogleMaps)
+            IosRadioMapNativeBridge.shared.factory = PhoebeRadioMapNativeViewFactory()
+            #endif
         }
     }
 

@@ -77,12 +77,14 @@ class RadioBrowserClient(
         query: RadioStationSearchQuery,
         limit: Int = DefaultLimit,
         offset: Int = 0,
+        requireGeoInfo: Boolean = false,
     ): List<RadioStation> {
         val normalized = query.normalized()
         return withMirrorFallback { baseUrl ->
             httpClient.get("$baseUrl/json/stations/search") {
                 radioBrowserHeaders()
                 parameter("hidebroken", true)
+                if (requireGeoInfo) parameter("has_geo_info", true)
                 parameter("limit", limit)
                 if (offset > 0) parameter("offset", offset)
                 parameter("order", "clickcount")
@@ -206,6 +208,11 @@ data class RadioBrowserStationDto(
     val favicon: String = "",
     val tags: String = "",
     val countrycode: String = "",
+    val state: String = "",
+    @SerialName("geo_lat")
+    val geoLat: Double? = null,
+    @SerialName("geo_long")
+    val geoLong: Double? = null,
     val language: String = "",
     val codec: String = "",
     val bitrate: Int = 0,
@@ -226,6 +233,9 @@ data class RadioBrowserStationDto(
             category = null,
             tags = tags.takeIf { it.isNotBlank() },
             countryCode = countrycode.takeIf { it.isNotBlank() },
+            state = state.takeIf { it.isNotBlank() },
+            geoLat = geoLat?.takeIf { it in -90.0..90.0 },
+            geoLong = geoLong?.takeIf { it in -180.0..180.0 },
             language = language.takeIf { it.isNotBlank() },
             codec = codec.takeIf { it.isNotBlank() },
             bitrateKbps = bitrate.takeIf { it > 0 },
