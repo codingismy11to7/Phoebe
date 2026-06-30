@@ -106,6 +106,7 @@ jobs:
       ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
       ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      PHOEBE_GOOGLE_MAPS_ANDROID_API_KEY: ${{ secrets.PHOEBE_GOOGLE_MAPS_ANDROID_API_KEY }}
 
     steps:
       - name: Checkout
@@ -130,6 +131,7 @@ jobs:
           [[ -n "${ANDROID_KEYSTORE_PASSWORD}" ]] || missing+=("ANDROID_KEYSTORE_PASSWORD")
           [[ -n "${ANDROID_KEY_ALIAS}" ]] || missing+=("ANDROID_KEY_ALIAS")
           [[ -n "${ANDROID_KEY_PASSWORD}" ]] || missing+=("ANDROID_KEY_PASSWORD")
+          [[ -n "${PHOEBE_GOOGLE_MAPS_ANDROID_API_KEY}" ]] || missing+=("PHOEBE_GOOGLE_MAPS_ANDROID_API_KEY")
           if (( ${#missing[@]} > 0 )); then
             echo "::error::Missing required Android signing secrets: ${missing[*]}"
             exit 1
@@ -182,6 +184,8 @@ jobs:
     needs: version
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    env:
+      PHOEBE_GOOGLE_MAPS_DESKTOP_API_KEY: ${{ secrets.PHOEBE_GOOGLE_MAPS_DESKTOP_API_KEY }}
 
     steps:
       - name: Checkout
@@ -204,6 +208,16 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+
+      - name: Validate Linux release secrets
+        shell: bash
+        run: |
+          missing=()
+          [[ -n "${PHOEBE_GOOGLE_MAPS_DESKTOP_API_KEY}" ]] || missing+=("PHOEBE_GOOGLE_MAPS_DESKTOP_API_KEY")
+          if (( ${#missing[@]} > 0 )); then
+            echo "::error::Missing required Linux release secrets: ${missing[*]}"
+            exit 1
+          fi
 
       - name: Build Linux package
         run: >
@@ -269,6 +283,7 @@ jobs:
       AZURE_SIGNING_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
       AZURE_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_SIGNING_ACCOUNT_NAME }}
       AZURE_SIGNING_CERTIFICATE_PROFILE_NAME: ${{ secrets.AZURE_SIGNING_CERTIFICATE_PROFILE_NAME }}
+      PHOEBE_GOOGLE_MAPS_DESKTOP_API_KEY: ${{ secrets.PHOEBE_GOOGLE_MAPS_DESKTOP_API_KEY }}
 
     steps:
       - name: Checkout
@@ -294,8 +309,9 @@ jobs:
           if (-not $env:AZURE_SIGNING_ENDPOINT) { $missing += "AZURE_SIGNING_ENDPOINT" }
           if (-not $env:AZURE_SIGNING_ACCOUNT_NAME) { $missing += "AZURE_SIGNING_ACCOUNT_NAME" }
           if (-not $env:AZURE_SIGNING_CERTIFICATE_PROFILE_NAME) { $missing += "AZURE_SIGNING_CERTIFICATE_PROFILE_NAME" }
+          if (-not $env:PHOEBE_GOOGLE_MAPS_DESKTOP_API_KEY) { $missing += "PHOEBE_GOOGLE_MAPS_DESKTOP_API_KEY" }
           if ($missing.Count -gt 0) {
-            Write-Error "Missing required Azure Artifact Signing settings: $($missing -join ', ')"
+            Write-Error "Missing required Windows release secrets: $($missing -join ', ')"
             exit 1
           }
 
@@ -384,6 +400,7 @@ jobs:
       APPLE_ID: ${{ secrets.APPLE_ID }}
       APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      PHOEBE_GOOGLE_MAPS_DESKTOP_API_KEY: ${{ secrets.PHOEBE_GOOGLE_MAPS_DESKTOP_API_KEY }}
 
     steps:
       - name: Checkout
@@ -415,8 +432,9 @@ jobs:
           [[ -n "${APPLE_ID}" ]] || missing+=("APPLE_ID")
           [[ -n "${APPLE_APP_SPECIFIC_PASSWORD}" ]] || missing+=("APPLE_APP_SPECIFIC_PASSWORD")
           [[ -n "${APPLE_TEAM_ID}" ]] || missing+=("APPLE_TEAM_ID")
+          [[ -n "${PHOEBE_GOOGLE_MAPS_DESKTOP_API_KEY}" ]] || missing+=("PHOEBE_GOOGLE_MAPS_DESKTOP_API_KEY")
           if (( ${#missing[@]} > 0 )); then
-            echo "::error::Missing required macOS signing/notarization secrets: ${missing[*]}"
+            echo "::error::Missing required macOS release secrets: ${missing[*]}"
             exit 1
           fi
 
@@ -570,6 +588,7 @@ jobs:
     timeout-minutes: 90
     env:
       MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+      PHOEBE_GOOGLE_MAPS_IOS_API_KEY: ${{ secrets.PHOEBE_GOOGLE_MAPS_IOS_API_KEY }}
 
     steps:
       - name: Checkout
@@ -590,6 +609,16 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+
+      - name: Validate iOS release secrets
+        shell: bash
+        run: |
+          missing=()
+          [[ -n "${PHOEBE_GOOGLE_MAPS_IOS_API_KEY}" ]] || missing+=("PHOEBE_GOOGLE_MAPS_IOS_API_KEY")
+          if (( ${#missing[@]} > 0 )); then
+            echo "::error::Missing required iOS release secrets: ${missing[*]}"
+            exit 1
+          fi
 
       - name: Install Google Cast SDK for iOS
         shell: bash
@@ -808,6 +837,8 @@ jobs:
       contents: read
       id-token: write
       pages: write
+    env:
+      PHOEBE_GOOGLE_MAPS_WEB_API_KEY: ${{ secrets.PHOEBE_GOOGLE_MAPS_WEB_API_KEY }}
 
     steps:
       - name: Checkout
@@ -831,6 +862,16 @@ jobs:
           key: ${{ runner.os }}-kotlin-wasm-binaryen-${{ hashFiles('gradle/libs.versions.toml') }}
           restore-keys: |
             ${{ runner.os }}-kotlin-wasm-binaryen-
+
+      - name: Validate web release secrets
+        shell: bash
+        run: |
+          missing=()
+          [[ -n "${PHOEBE_GOOGLE_MAPS_WEB_API_KEY}" ]] || missing+=("PHOEBE_GOOGLE_MAPS_WEB_API_KEY")
+          if (( ${#missing[@]} > 0 )); then
+            echo "::error::Missing required web release secrets: ${missing[*]}"
+            exit 1
+          fi
 
       - name: Build web bundle
         run: ./.github/scripts/gradle-wasm-retry.sh :composeApp:wasmJsBrowserDistribution

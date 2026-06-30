@@ -18,8 +18,9 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
-import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.printToLog
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.performTextClearance
@@ -49,6 +50,7 @@ class RadioRouteDesktopTest {
     fun desktopRadioHomeShowsCountryEntryWithoutEmbeddingCountryRows() =
         runDesktopComposeUiTest(width = 900, height = 620) {
             var browseCountries = false
+            var browseGlobe = false
             val countries = listOf(
                 RadioCountry(name = "The United States Of America", code = "US", stationCount = 7349),
                 RadioCountry(name = "Germany", code = "DE", stationCount = 5951),
@@ -91,6 +93,7 @@ class RadioRouteDesktopTest {
                                 onUpdateManualStation = { _, _, _ -> },
                                 onDeleteManualStation = {},
                                 onBrowseCountries = { browseCountries = true },
+                                onBrowseGlobe = { browseGlobe = true },
                             ),
                             contentPadding = PaddingValues(20.dp),
                         )
@@ -106,7 +109,124 @@ class RadioRouteDesktopTest {
             )
             onNode(hasText("Browse by country") and hasClickAction()).performClick()
             assertEquals(true, browseCountries)
+            onNode(hasText("Browse on map") and hasClickAction()).performClick()
+            assertEquals(true, browseGlobe)
             onNodeWithText("BBC Radio 6 Music").assertIsDisplayed()
+        }
+
+    @OptIn(ExperimentalTestApi::class, ExperimentalComposeUiApi::class)
+    @Test
+    fun desktopRadioMapShowsFallbackAndSelectableStation() =
+        runDesktopComposeUiTest(width = 900, height = 620) {
+            val stations = listOf(
+                RadioStation(
+                    id = "kexp",
+                    name = "KEXP",
+                    streamUrl = "https://radio.example/kexp.mp3",
+                    countryCode = "US",
+                    state = "Washington",
+                    geoLat = 47.608,
+                    geoLong = -122.335,
+                    source = RadioStationSource.RadioBrowser,
+                ),
+                RadioStation(
+                    id = "de-fallback",
+                    name = "Berlin Fallback",
+                    streamUrl = "https://radio.example/de.mp3",
+                    countryCode = "DE",
+                    source = RadioStationSource.RadioBrowser,
+                ),
+            )
+            var played: RadioStation? = null
+
+            setContent {
+                PhoebeTheme {
+                    Box(Modifier.size(900.dp, 620.dp)) {
+                        RadioRoute(
+                            state = RadioRouteState(
+                                directory = RadioDirectoryState(globeStations = stations),
+                            ),
+                            actions = RadioRouteActions(
+                                onSearch = {},
+                                onLoadMore = {},
+                                onRefreshPopular = {},
+                                onPlay = { played = it },
+                                onAddManualStation = { _, _ -> },
+                                onUpdateManualStation = { _, _, _ -> },
+                                onDeleteManualStation = {},
+                            ),
+                            contentPadding = PaddingValues(20.dp),
+                            mode = RadioRouteMode.Map,
+                        )
+                    }
+                }
+            }
+
+            waitForIdle()
+            onNodeWithText("Google Maps map").assertIsDisplayed()
+            onNode(hasText("KEXP") and hasClickAction()).performClick()
+            assertEquals(
+                false,
+                onAllNodesWithText("Berlin Fallback").fetchSemanticsNodes().isNotEmpty(),
+            )
+            assertEquals("kexp", played?.id)
+        }
+
+    @OptIn(ExperimentalTestApi::class, ExperimentalComposeUiApi::class)
+    @Test
+    fun desktopRadioMapLoadingFallbackHidesClusterRows() =
+        runDesktopComposeUiTest(width = 900, height = 620) {
+            val stations = listOf(
+                RadioStation(
+                    id = "s1",
+                    name = "Station 1",
+                    streamUrl = "https://radio.example/1.mp3",
+                    geoLat = 40.0,
+                    geoLong = -100.0,
+                    source = RadioStationSource.RadioBrowser,
+                ),
+                RadioStation(
+                    id = "s2",
+                    name = "Station 2",
+                    streamUrl = "https://radio.example/2.mp3",
+                    geoLat = 40.2,
+                    geoLong = -99.8,
+                    source = RadioStationSource.RadioBrowser,
+                ),
+            )
+
+            setContent {
+                PhoebeTheme {
+                    Box(Modifier.size(900.dp, 620.dp)) {
+                        RadioRoute(
+                            state = RadioRouteState(
+                                directory = RadioDirectoryState(
+                                    globeStations = stations,
+                                    globeAutoPrefetching = true,
+                                ),
+                            ),
+                            actions = RadioRouteActions(
+                                onSearch = {},
+                                onLoadMore = {},
+                                onRefreshPopular = {},
+                                onPlay = {},
+                                onAddManualStation = { _, _ -> },
+                                onUpdateManualStation = { _, _, _ -> },
+                                onDeleteManualStation = {},
+                            ),
+                            contentPadding = PaddingValues(20.dp),
+                            mode = RadioRouteMode.Map,
+                        )
+                    }
+                }
+            }
+
+            waitForIdle()
+            onNodeWithText("Loading station locations").assertIsDisplayed()
+            assertFalse(
+                onAllNodesWithText("2 stations").fetchSemanticsNodes().isNotEmpty(),
+                "Loading map fallback should not render cluster rows.",
+            )
         }
 
     @OptIn(ExperimentalTestApi::class, ExperimentalComposeUiApi::class)

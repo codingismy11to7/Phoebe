@@ -78,6 +78,8 @@ private fun PhoebeRoute?.requiresBrowseSource(): Boolean = when (this) {
     PhoebeRoute.Player,
     is PhoebeRoute.RadioCountry,
     PhoebeRoute.RadioCountries,
+    PhoebeRoute.RadioGlobe,
+    PhoebeRoute.RadioMap,
     is PhoebeRoute.RadioStation,
     PhoebeRoute.ServerPicker,
     PhoebeRoute.SignIn,
@@ -102,6 +104,8 @@ fun PhoebeRoute.toPhoebeWebPath(
         BrowseSection.Settings -> "/settings"
     }
     PhoebeRoute.RadioCountries -> "/radio/countries"
+    PhoebeRoute.RadioGlobe -> "/radio/map"
+    PhoebeRoute.RadioMap -> "/radio/map"
     is PhoebeRoute.RadioCountry -> "/radio/${countryCode.trim().uppercase()}"
     is PhoebeRoute.RadioStation -> "/radio/${encodePhoebePathSegment(stationId)}"
     is PhoebeRoute.Collections -> "/collections/${entry.target.pathSegment()}/${entry.facet.pathSegment()}"
@@ -158,12 +162,12 @@ private inline fun <reified T : AppScreen> PhoebeRouteResolution?.resolvedScreen
 private fun parseRadioPath(segments: List<String>): List<PhoebeRoute> {
     val value = segments.getOrNull(1)?.let(::decodePhoebePathSegment)
         ?: return listOf(PhoebeRoute.Browse(BrowseSection.Radio))
-    val route = if (value.isCountryCodeSegment()) {
-        PhoebeRoute.RadioCountry(value.uppercase())
-    } else if (value == "countries") {
-        PhoebeRoute.RadioCountries
-    } else {
-        PhoebeRoute.RadioStation(value)
+    val route = when {
+        value == "countries" -> PhoebeRoute.RadioCountries
+        value == "globe" -> PhoebeRoute.RadioMap
+        value == "map" -> PhoebeRoute.RadioMap
+        value.isCountryCodeSegment() -> PhoebeRoute.RadioCountry(value.uppercase())
+        else -> PhoebeRoute.RadioStation(value)
     }
     return listOf(PhoebeRoute.Browse(BrowseSection.Radio), route)
 }

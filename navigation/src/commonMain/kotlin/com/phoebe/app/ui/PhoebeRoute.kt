@@ -76,6 +76,12 @@ sealed interface PhoebeRoute : NavKey {
     data object RadioCountries : PhoebeRoute
 
     @Serializable
+    data object RadioGlobe : PhoebeRoute
+
+    @Serializable
+    data object RadioMap : PhoebeRoute
+
+    @Serializable
     data class RadioCountry(val countryCode: String) : PhoebeRoute
 
     @Serializable
@@ -145,6 +151,8 @@ val phoebeRouteSerializersModule = SerializersModule {
         subclass(PhoebeRoute.LibraryPicker::class, PhoebeRoute.LibraryPicker.serializer())
         subclass(PhoebeRoute.Browse::class, PhoebeRoute.Browse.serializer())
         subclass(PhoebeRoute.RadioCountries::class, PhoebeRoute.RadioCountries.serializer())
+        subclass(PhoebeRoute.RadioGlobe::class, PhoebeRoute.RadioGlobe.serializer())
+        subclass(PhoebeRoute.RadioMap::class, PhoebeRoute.RadioMap.serializer())
         subclass(PhoebeRoute.RadioCountry::class, PhoebeRoute.RadioCountry.serializer())
         subclass(PhoebeRoute.RadioStation::class, PhoebeRoute.RadioStation.serializer())
         subclass(PhoebeRoute.Collections::class, PhoebeRoute.Collections.serializer())
@@ -210,6 +218,8 @@ fun resolvePhoebeRoute(
     PhoebeRoute.LibraryPicker -> route.resolved(AppScreen.LibraryPicker)
     is PhoebeRoute.Browse -> route.resolved(AppScreen.Home)
     PhoebeRoute.RadioCountries -> route.resolved(AppScreen.Home)
+    PhoebeRoute.RadioGlobe -> route.resolved(AppScreen.Home)
+    PhoebeRoute.RadioMap -> route.resolved(AppScreen.Home)
     is PhoebeRoute.RadioCountry -> route.resolved(AppScreen.Home)
     is PhoebeRoute.RadioStation -> route.resolved(AppScreen.Home)
     is PhoebeRoute.Collections -> route.resolved(AppScreen.Collections(route.entry))
@@ -263,7 +273,7 @@ fun Track.route(): PhoebeRoute = PhoebeRoute.SongDetail(id)
 fun Playlist.route(): PhoebeRoute = PhoebeRoute.PlaylistDetail(id)
 
 fun List<PhoebeRoute>.renderablePhoebeRoutes(): List<PhoebeRoute> =
-    filterNot { it is PhoebeRoute.RadioCountries || it is PhoebeRoute.RadioCountry || it is PhoebeRoute.RadioStation }
+    filterNot { it is PhoebeRoute.RadioCountries || it is PhoebeRoute.RadioGlobe || it is PhoebeRoute.RadioMap || it is PhoebeRoute.RadioCountry || it is PhoebeRoute.RadioStation }
         .ifEmpty { listOf(PhoebeRoute.SignIn) }
 
 val PhoebeRoute.telemetryName: String
@@ -282,6 +292,8 @@ val PhoebeRoute.telemetryName: String
             BrowseSection.Settings -> "settings"
         }
         PhoebeRoute.RadioCountries -> "radio_countries"
+        PhoebeRoute.RadioGlobe -> "radio_globe"
+        PhoebeRoute.RadioMap -> "radio_map"
         is PhoebeRoute.RadioCountry -> "radio_country"
         is PhoebeRoute.RadioStation -> "radio_station"
         is PhoebeRoute.Collections -> "collections"

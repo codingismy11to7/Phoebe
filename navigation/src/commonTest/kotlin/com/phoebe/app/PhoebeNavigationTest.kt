@@ -41,6 +41,8 @@ class PhoebeNavigationTest {
             PhoebeRoute.Browse(BrowseSection.Home),
             PhoebeRoute.Browse(BrowseSection.Search),
             PhoebeRoute.RadioCountries,
+            PhoebeRoute.RadioGlobe,
+            PhoebeRoute.RadioMap,
             PhoebeRoute.RadioCountry("US"),
             PhoebeRoute.RadioStation("station-uuid-1"),
             PhoebeRoute.Collections(entry),
@@ -103,6 +105,21 @@ class PhoebeNavigationTest {
             routes,
         )
         assertEquals("/radio/countries", routes.last().toPhoebeWebPath())
+    }
+
+    @Test
+    fun radioMapWebRouteRoundTrips() {
+        val routes = phoebeWebRoutesForPath("/radio/map")
+
+        assertEquals(
+            listOf(PhoebeRoute.Browse(BrowseSection.Radio), PhoebeRoute.RadioMap),
+            routes,
+        )
+        assertEquals("/radio/map", routes.last().toPhoebeWebPath())
+        assertEquals(
+            listOf(PhoebeRoute.Browse(BrowseSection.Radio), PhoebeRoute.RadioMap),
+            phoebeWebRoutesForPath("/radio/globe"),
+        )
     }
 
     @Test

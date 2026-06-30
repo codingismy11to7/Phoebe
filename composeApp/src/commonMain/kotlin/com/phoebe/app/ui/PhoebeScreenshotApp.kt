@@ -1041,6 +1041,7 @@ private fun screenshotMobileHomeCallbacks(): MobileHomeCallbacks =
         onClearDecadeMixNotice = {},
         onPlayRadioStation = {},
         onPlayPersonalMix = {},
+        onPlayPopularMix = {},
         onPlayTracks = { _, _ -> },
         onAddToUpNext = {},
         onDownload = {},

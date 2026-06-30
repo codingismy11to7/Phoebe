@@ -3586,6 +3586,24 @@ class CatalogRepository(
         return tracks
     }
 
+    suspend fun popularTracksForLibrary(session: PlexSession?, limit: Int = LibraryPopularTrackLimit): List<Track> {
+        val plexSession = session?.takeIf { it.isPlex() } ?: return emptyList()
+        val server = plexSession.selectedServer ?: return emptyList()
+        val library = plexSession.selectedLibrary ?: return emptyList()
+        val token = plexSession.serverAuthToken() ?: return emptyList()
+        val tracks = plexClient.popularTracksForLibrary(
+            server = server,
+            library = library,
+            token = token,
+            limit = limit,
+        ).map { it.withPlexPrefix() }
+        if (tracks.isNotEmpty()) {
+            publishIndexedPlexTracks(tracks)
+            runCatalogDbWrite { persistTrackBatch(tracks) }
+        }
+        return tracks
+    }
+
     suspend fun ensureSimilarArtistsForArtist(session: PlexSession?, artist: Artist): List<Artist> {
         mutableCatalog.value.similarArtistsByArtist[artist.id]?.let { return it }
         val plexSession = session?.takeIf { it.isPlex() } ?: return emptyList()
@@ -8202,6 +8220,7 @@ class CatalogRepository(
         const val SyncProgressUpdateIntervalMs = 600L
         const val PlaylistWarmParallelism = 4
         const val ArtistPopularTrackLimit = 12
+        const val LibraryPopularTrackLimit = 250
         const val ArtistSimilarArtistLimit = 20
         const val LikelyWarmAlbumCount = 50
         const val DecadeTrackPageSize = 250

@@ -224,12 +224,17 @@ internal fun DesktopPlayer(
     val onRadioPlay = browseActions.onRadioPlay
     val onRadioCountries = browseActions.onRadioCountries
     val onRadioCountry = browseActions.onRadioCountry
+    val onRadioMap = browseActions.onRadioMap
+    val onRadioMapSearch = browseActions.onRadioMapSearch
+    val onRadioMapCountry = browseActions.onRadioMapCountry
+    val onRadioMapViewport = browseActions.onRadioMapViewport
     val onRadioStation = browseActions.onRadioStation
     val onRadioRoot = browseActions.onRadioRoot
     val onRadioAddManualStation = browseActions.onRadioAddManualStation
     val onRadioUpdateManualStation = browseActions.onRadioUpdateManualStation
     val onRadioDeleteManualStation = browseActions.onRadioDeleteManualStation
     val onPlayPersonalMix = browseActions.onPlayPersonalMix
+    val onPlayPopularMix = browseActions.onPlayPopularMix
     val onPopDetail = browseActions.onPopDetail
     val onPlayTracks = browseActions.onPlayTracks
     val onPlayAllTracks = browseActions.onPlayAllTracks
@@ -730,6 +735,7 @@ internal fun DesktopPlayer(
                                                 onClearDecadeMixNotice = onClearDecadeMixNotice,
                                                 onPlayRadioStation = onPlayRadioStation,
                                                 onPlayPersonalMix = onPlayPersonalMix,
+                                                onPlayPopularMix = onPlayPopularMix,
                                                 onPlayTracks = onPlayTracks,
                                                 onAddToUpNext = onAddToUpNext,
                                                 onDownload = onDownload,
@@ -905,6 +911,10 @@ internal fun DesktopPlayer(
                                         onRadioPlay = onRadioPlay,
                                         onRadioCountries = onRadioCountries,
                                         onRadioCountry = onRadioCountry,
+                                        onRadioMap = onRadioMap,
+                                        onRadioMapSearch = onRadioMapSearch,
+                                        onRadioMapCountry = onRadioMapCountry,
+                                        onRadioMapViewport = onRadioMapViewport,
                                         onRadioStation = onRadioStation,
                                         onRadioRoot = onRadioRoot,
                                         onRadioAddManualStation = onRadioAddManualStation,
@@ -1023,6 +1033,8 @@ private fun PhoebeRoute.hasDesktopSharedElements(): Boolean = when (this) {
     is PhoebeRoute.PlaylistDetail,
     is PhoebeRoute.PlaylistSlugDetail,
     PhoebeRoute.RadioCountries,
+    PhoebeRoute.RadioGlobe,
+    PhoebeRoute.RadioMap,
     is PhoebeRoute.RadioCountry,
     is PhoebeRoute.RadioStation,
     is PhoebeRoute.RecentlyAdded,

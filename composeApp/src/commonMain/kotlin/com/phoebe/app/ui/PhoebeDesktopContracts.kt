@@ -45,6 +45,7 @@ import com.phoebe.app.domain.PlayerTransportState
 import com.phoebe.app.domain.PlayHistoryKind
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.RadioDirectoryState
+import com.phoebe.app.domain.RadioMapViewport
 import com.phoebe.app.domain.RadioNowPlayingMetadata
 import com.phoebe.app.domain.RadioStation
 import com.phoebe.app.domain.RadioStationSearchQuery
@@ -171,12 +172,17 @@ internal data class BrowseActions(
     val onRadioPlay: (RadioStation) -> Unit = {},
     val onRadioCountries: () -> Unit = {},
     val onRadioCountry: (String) -> Unit = {},
+    val onRadioMap: () -> Unit = {},
+    val onRadioMapSearch: (RadioStationSearchQuery, Int) -> Unit = { _, _ -> },
+    val onRadioMapCountry: (String) -> Unit = {},
+    val onRadioMapViewport: (RadioMapViewport) -> Unit = {},
     val onRadioStation: (RadioStation) -> Unit = onRadioPlay,
     val onRadioRoot: () -> Unit = {},
     val onRadioAddManualStation: (String, String) -> Unit = { _, _ -> },
     val onRadioUpdateManualStation: (RadioStation, String, String) -> Unit = { _, _, _ -> },
     val onRadioDeleteManualStation: (RadioStation) -> Unit = {},
     val onPlayPersonalMix: () -> Unit = {},
+    val onPlayPopularMix: () -> Unit = {},
     val onPopDetail: () -> Unit,
     val onPlayTracks: (List<Track>, Int) -> Unit,
     val onPlayAllTracks: (List<Track>) -> Unit = { tracks -> onPlayTracks(tracks, 0) },

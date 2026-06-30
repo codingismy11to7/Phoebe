@@ -75,6 +75,7 @@ fun main(args: Array<String>) {
         }
         var useLightAppearance by remember { mutableStateOf(false) }
         var appState by remember { mutableStateOf<AppState?>(null) }
+        val initialNavigationPath = remember { desktopInitialNavigationPath() }
         val closeApplication = {
             requestDesktopShutdown(appState)
             exitApplication()
@@ -108,6 +109,7 @@ fun main(args: Array<String>) {
                             appState = it
                             desktopAppState.set(it)
                         },
+                        navigationPath = initialNavigationPath,
                     )
                     if (useCustomWindowsTitleBar) {
                         DesktopWindowTitleBar(
@@ -120,6 +122,10 @@ fun main(args: Array<String>) {
         }
     }
 }
+
+private fun desktopInitialNavigationPath(): String? =
+    System.getProperty("phoebe.desktop.navigationPath")
+        ?.takeIf { it.isNotBlank() }
 
 private fun requestDesktopShutdown(appState: AppState?) {
     if (desktopShutdownStarted.compareAndSet(false, true)) {

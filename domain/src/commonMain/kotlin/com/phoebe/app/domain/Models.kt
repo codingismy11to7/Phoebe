@@ -317,6 +317,9 @@ data class RadioStation(
     val category: String? = null,
     val tags: String? = null,
     val countryCode: String? = null,
+    val state: String? = null,
+    val geoLat: Double? = null,
+    val geoLong: Double? = null,
     val language: String? = null,
     val codec: String? = null,
     val bitrateKbps: Int? = null,
@@ -329,6 +332,7 @@ data class RadioStation(
             category?.takeIf { it.isNotBlank() },
             description?.takeIf { it.isNotBlank() },
             countryCode?.takeIf { it.isNotBlank() },
+            state?.takeIf { it.isNotBlank() },
             language?.takeIf { it.isNotBlank() }?.replaceFirstChar { char -> char.uppercase() },
             codec?.takeIf { it.isNotBlank() },
             bitrateKbps?.takeIf { it > 0 }?.let { "${it}kbps" },
@@ -339,6 +343,11 @@ data class RadioStation(
                 RadioStationSource.Recommended -> "Recommended stream"
             }
         }
+
+    val hasGeoLocation: Boolean
+        get() = geoLat != null && geoLong != null &&
+            geoLat in -90.0..90.0 &&
+            geoLong in -180.0..180.0
 
     val faviconUrlOrFallback: String?
         get() = faviconUrl ?: homepageOrigin?.let { "$it/favicon.ico" }
@@ -408,12 +417,57 @@ data class RadioDirectoryState(
     val languages: List<RadioFilterOption> = emptyList(),
     val tags: List<RadioFilterOption> = emptyList(),
     val directoryStations: List<RadioStation> = emptyList(),
+    val globeStations: List<RadioStation> = emptyList(),
     val searchQuery: RadioStationSearchQuery = RadioStationSearchQuery(),
+    val globeSearchQuery: RadioStationSearchQuery = RadioStationSearchQuery(),
     val loading: Boolean = false,
     val loadingMore: Boolean = false,
+    val globeLoading: Boolean = false,
     val canLoadMore: Boolean = false,
     val errorMessage: String? = null,
+    val globeErrorMessage: String? = null,
+    val globePageIndex: Int = 0,
+    val globePageSize: Int = 750,
+    val globeLoadedStationCount: Int = globeStations.size,
+    val globeAutoPrefetching: Boolean = false,
+    val globeMapScope: RadioMapScope = RadioMapScope(),
+    val globeViewport: RadioMapViewport? = null,
+    val canLoadPreviousGlobePage: Boolean = false,
+    val canLoadNextGlobePage: Boolean = false,
 )
+
+@Serializable
+data class RadioMapScope(
+    val countryCode: String = "",
+    val kind: RadioMapScopeKind = RadioMapScopeKind.Global,
+) {
+    val normalizedCountryCode: String
+        get() = countryCode.trim().uppercase()
+}
+
+@Serializable
+enum class RadioMapScopeKind {
+    Global,
+    Country,
+    Viewport,
+}
+
+@Serializable
+data class RadioMapViewport(
+    val north: Double,
+    val south: Double,
+    val east: Double,
+    val west: Double,
+    val zoom: Double,
+) {
+    val isValid: Boolean
+        get() = north in -90.0..90.0 &&
+            south in -90.0..90.0 &&
+            east in -180.0..180.0 &&
+            west in -180.0..180.0 &&
+            north >= south &&
+            zoom.isFinite()
+}
 
 @Serializable
 enum class MobileBottomTab {

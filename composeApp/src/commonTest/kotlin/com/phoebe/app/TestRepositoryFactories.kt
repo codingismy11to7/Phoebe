@@ -57,3 +57,16 @@ fun testSessionRepository(
         storage = storage,
         databaseWriteGate = databaseWriteGate,
     )
+
+fun testRadioRepository(
+    database: PhoebeDatabase,
+    radioBrowserClient: com.phoebe.app.data.RadioBrowserClient,
+    subsonicClient: SubsonicClient,
+    sessionRepository: SessionRepository,
+): com.phoebe.app.data.RadioRepository =
+    com.phoebe.app.data.RadioRepository(
+        database = database,
+        radioBrowserClient = radioBrowserClient,
+        subsonicClient = subsonicClient,
+        sessionRepository = sessionRepository,
+    )

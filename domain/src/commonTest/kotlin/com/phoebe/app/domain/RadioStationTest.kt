@@ -40,9 +40,18 @@ class RadioStationTest {
         assertNull(station.fallbackArtworkUrl)
     }
 
+    @Test
+    fun hasGeoLocationRequiresValidLatitudeAndLongitude() {
+        assertEquals(true, radioStation(geoLat = 47.608, geoLong = -122.335).hasGeoLocation)
+        assertEquals(false, radioStation(geoLat = 91.0, geoLong = -122.335).hasGeoLocation)
+        assertEquals(false, radioStation(geoLat = 47.608, geoLong = null).hasGeoLocation)
+    }
+
     private fun radioStation(
         homepageUrl: String? = null,
         faviconUrl: String? = null,
+        geoLat: Double? = null,
+        geoLong: Double? = null,
     ): RadioStation =
         RadioStation(
             id = "station",
@@ -50,5 +59,7 @@ class RadioStationTest {
             streamUrl = "https://stream.example/live",
             homepageUrl = homepageUrl,
             faviconUrl = faviconUrl,
+            geoLat = geoLat,
+            geoLong = geoLong,
         )
 }

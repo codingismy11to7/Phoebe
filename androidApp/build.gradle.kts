@@ -1,3 +1,5 @@
+import java.util.Properties
+
 val phoebeVersionName = providers.gradleProperty("phoebe.versionName")
     .orElse(providers.environmentVariable("PHOEBE_VERSION_NAME"))
     .orElse("1.0.0")
@@ -7,8 +9,25 @@ val phoebeVersionCode = providers.gradleProperty("phoebe.versionCode")
     .map(String::toInt)
     .orElse(1)
 
+fun localProperty(name: String): String? {
+    val file = rootProject.file("local.properties")
+    if (!file.isFile) return null
+    val properties = Properties()
+    file.inputStream().use(properties::load)
+    return properties.getProperty(name)?.takeIf { it.isNotBlank() }
+}
+
 fun providerValue(name: String, envName: String): String? =
     providers.gradleProperty(name).orElse(providers.environmentVariable(envName)).orNull
+
+fun secretProperty(name: String, envName: String) =
+    providers.gradleProperty(name)
+        .orElse(providers.environmentVariable(envName))
+        .orElse(providers.provider { localProperty(name).orEmpty() })
+        .map { it.trim() }
+
+val googleMapsApiKey = secretProperty("phoebe.googleMaps.apiKey", "PHOEBE_GOOGLE_MAPS_API_KEY")
+val googleMapsAndroidApiKey = secretProperty("phoebe.googleMaps.androidApiKey", "PHOEBE_GOOGLE_MAPS_ANDROID_API_KEY")
 
 plugins {
     alias(libs.plugins.androidApplication)
@@ -24,6 +43,8 @@ android {
         targetSdk = 36
         versionCode = phoebeVersionCode.get()
         versionName = phoebeVersionName.get()
+        manifestPlaceholders["phoebeGoogleMapsAndroidApiKey"] = googleMapsAndroidApiKey.get()
+            .ifBlank { googleMapsApiKey.get() }
     }
 
     buildTypes {

@@ -188,6 +188,10 @@ Android signing:
 - `ANDROID_KEYSTORE_PASSWORD`
 - `ANDROID_KEY_ALIAS`
 - `ANDROID_KEY_PASSWORD`
+- `PHOEBE_GOOGLE_MAPS_ANDROID_API_KEY`: Google Maps key for the release Android app
+- `PHOEBE_GOOGLE_MAPS_IOS_API_KEY`: Google Maps key for the release iOS app
+- `PHOEBE_GOOGLE_MAPS_DESKTOP_API_KEY`: Google Maps key for Linux, Windows, and macOS release packages
+- `PHOEBE_GOOGLE_MAPS_WEB_API_KEY`: Google Maps key for the production web release
 
 Windows MSI signing uses Azure Artifact Signing with GitHub OIDC:
 

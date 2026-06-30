@@ -218,6 +218,7 @@ import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.PlexRadioStation
 import com.phoebe.app.domain.RadioDirectoryState
+import com.phoebe.app.domain.RadioMapViewport
 import com.phoebe.app.domain.RadioStation
 import com.phoebe.app.domain.RadioStationSearchQuery
 import com.phoebe.app.domain.RepeatMode
@@ -301,12 +302,17 @@ internal fun MobileBrowseShell(
     onPlayInternetRadioStation: (RadioStation) -> Unit = {},
     onInternetRadioCountries: () -> Unit = {},
     onInternetRadioCountry: (String) -> Unit = {},
+    onInternetRadioMap: () -> Unit = {},
+    onInternetRadioMapSearch: (RadioStationSearchQuery, Int) -> Unit = { _, _ -> },
+    onInternetRadioMapCountry: (String) -> Unit = {},
+    onInternetRadioMapViewport: (RadioMapViewport) -> Unit = {},
     onOpenInternetRadioStation: (RadioStation) -> Unit = onPlayInternetRadioStation,
     onInternetRadioRoot: () -> Unit = {},
     onAddManualRadioStation: (String, String) -> Unit = { _, _ -> },
     onUpdateManualRadioStation: (RadioStation, String, String) -> Unit = { _, _, _ -> },
     onDeleteManualRadioStation: (RadioStation) -> Unit = {},
     onPlayPersonalMix: () -> Unit = {},
+    onPlayPopularMix: () -> Unit = {},
     onPlayTracks: (List<Track>, Int) -> Unit,
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
@@ -401,6 +407,12 @@ internal fun MobileBrowseShell(
         section == BrowseSection.Settings -> "Settings"
         section == BrowseSection.Downloads -> "Downloads"
         selectedPlaylistId != null -> "Playlist"
+        section == BrowseSection.Radio -> when (internetRadioRouteMode) {
+            RadioRouteMode.Home -> mobileSectionTitle(section)
+            RadioRouteMode.CountryIndex -> "Browse by country"
+            RadioRouteMode.CountryStations -> "Country radio"
+            RadioRouteMode.Map -> "Radio map"
+        }
         else -> mobileSectionTitle(section)
     }
     val density = LocalDensity.current
@@ -433,6 +445,8 @@ internal fun MobileBrowseShell(
             title = toolbarTitle,
             onBack = if (section == BrowseSection.Settings && selectedPlaylistId == null) {
                 { onNavigate(BrowseSection.Home) }
+            } else if (section == BrowseSection.Radio && internetRadioRouteMode != RadioRouteMode.Home) {
+                onInternetRadioRoot
             } else {
                 null
             },
@@ -679,6 +693,7 @@ internal fun MobileBrowseShell(
                         onClearDecadeMixNotice,
                         onPlayRadioStation,
                         onPlayPersonalMix,
+                        onPlayPopularMix,
                         onPlayTracks,
                         onAddToUpNext,
                         onDownload,
@@ -702,6 +717,7 @@ internal fun MobileBrowseShell(
                             onClearDecadeMixNotice = onClearDecadeMixNotice,
                             onPlayRadioStation = onPlayRadioStation,
                             onPlayPersonalMix = onPlayPersonalMix,
+                            onPlayPopularMix = onPlayPopularMix,
                             onPlayTracks = onPlayTracks,
                             onAddToUpNext = onAddToUpNext,
                             onDownload = onDownload,
@@ -792,6 +808,10 @@ internal fun MobileBrowseShell(
                         onUpdateManualStation = onUpdateManualRadioStation,
                         onDeleteManualStation = onDeleteManualRadioStation,
                         onBrowseCountries = onInternetRadioCountries,
+                        onBrowseGlobe = onInternetRadioMap,
+                        onGlobeSearch = onInternetRadioMapSearch,
+                        onGlobeCountry = onInternetRadioMapCountry,
+                        onGlobeViewport = onInternetRadioMapViewport,
                         onCountry = { country -> onInternetRadioCountry(country.code) },
                         onStation = onOpenInternetRadioStation,
                         onClearCountry = onInternetRadioRoot,
