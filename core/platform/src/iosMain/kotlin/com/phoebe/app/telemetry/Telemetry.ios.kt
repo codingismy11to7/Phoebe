@@ -11,6 +11,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import platform.Foundation.NSDate
+import platform.Foundation.NSLock
 import platform.Foundation.timeIntervalSince1970
 
 private const val TelemetryPlatform = "ios"
@@ -20,6 +21,7 @@ private var sentryClient: ManualSentryClient? = null
 private var httpClient: HttpClient? = null
 private var currentScreen: String? = null
 private val breadcrumbs = ArrayDeque<ManualSentryBreadcrumb>()
+private val breadcrumbsLock = NSLock()
 private val telemetryScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
 internal actual fun platformInitializeTelemetry(
@@ -93,7 +95,9 @@ internal actual fun platformCaptureException(throwable: Throwable) {
 internal actual fun platformCloseTelemetry() {
     sentryClient = null
     currentScreen = null
-    breadcrumbs.clear()
+    breadcrumbsLock.withLock {
+        breadcrumbs.clear()
+    }
     httpClient?.close()
     httpClient = null
 }
@@ -125,6 +129,9 @@ private fun sendEvent(
     handled: Boolean,
 ) {
     val client = sentryClient ?: return
+    val breadcrumbsSnapshot = breadcrumbsLock.withLock {
+        breadcrumbs.toList()
+    }
     val envelope = manualSentryEventEnvelope(
         client = client,
         timestampSeconds = timestampSeconds(),
@@ -132,7 +139,7 @@ private fun sendEvent(
         logger = logger,
         message = message,
         attributes = attributes,
-        breadcrumbs = breadcrumbs.toList(),
+        breadcrumbs = breadcrumbsSnapshot,
         exceptionType = exceptionType,
         exceptionValue = exceptionValue,
         stack = stack,
@@ -159,17 +166,27 @@ private fun recordBreadcrumb(
     message: String,
     data: Map<String, String> = emptyMap(),
 ) {
-    breadcrumbs.addLast(
-        ManualSentryBreadcrumb(
-            timestampSeconds = timestampSeconds(),
-            level = level,
-            category = category,
-            message = message,
-            data = data,
-        ),
+    val breadcrumb = ManualSentryBreadcrumb(
+        timestampSeconds = timestampSeconds(),
+        level = level,
+        category = category,
+        message = message,
+        data = data,
     )
-    while (breadcrumbs.size > MaxBreadcrumbs) {
-        breadcrumbs.removeFirst()
+    breadcrumbsLock.withLock {
+        breadcrumbs.addLast(breadcrumb)
+        while (breadcrumbs.size > MaxBreadcrumbs) {
+            breadcrumbs.removeFirst()
+        }
+    }
+}
+
+private inline fun <T> NSLock.withLock(block: () -> T): T {
+    lock()
+    return try {
+        block()
+    } finally {
+        unlock()
     }
 }
 
