@@ -51,14 +51,12 @@ internal actual fun RadioMapHost(
     items: List<RadioMapItem>,
     selectedItem: RadioMapItem?,
     startingStationIds: Set<String>,
-    mapLoading: Boolean,
     markerTintColor: Color,
     googleMapsApiKey: String?,
     onItemSelected: (RadioMapItem) -> Unit,
     onItemPlay: (RadioMapItem) -> Unit,
     onMapZoomChanged: (Double) -> Unit,
     onMapViewportChanged: (RadioMapViewport) -> Unit,
-    onMapSearchArea: (RadioMapViewport) -> Unit,
     modifier: Modifier,
     fallback: @Composable (Modifier) -> Unit,
 ) {
@@ -72,7 +70,6 @@ internal actual fun RadioMapHost(
     val currentOnItemPlay = rememberUpdatedState(onItemPlay)
     val currentOnMapZoomChanged = rememberUpdatedState(onMapZoomChanged)
     val currentOnMapViewportChanged = rememberUpdatedState(onMapViewportChanged)
-    val currentOnMapSearchArea = rememberUpdatedState(onMapSearchArea)
     val markerTintCssHex = remember(markerTintColor) { markerTintColor.toRadioMapCssHex() }
     val useLightTheme = LocalPhoebePalette.current.canvasBackground.luminance() > 0.5f
     val server = remember(googleMapsApiKey, markerTintCssHex, useLightTheme) {
@@ -94,7 +91,6 @@ internal actual fun RadioMapHost(
             },
             onZoomChanged = { zoom -> currentOnMapZoomChanged.value(zoom) },
             onViewportChanged = { viewport -> currentOnMapViewportChanged.value(viewport) },
-            onSearchArea = { viewport -> currentOnMapSearchArea.value(viewport) },
         )
     }
     DisposableEffect(server) {
@@ -106,11 +102,11 @@ internal actual fun RadioMapHost(
             modifier = modifier,
             factory = {
                 DesktopRadioMapExternalLauncherPanel(onOpenExternal = { server.openInBrowser() }).also {
-                    server.update(items, selectedItem = null, startingStationIds = startingStationIds, mapLoading = mapLoading)
+                    server.update(items, selectedItem = null, startingStationIds = startingStationIds)
                 }
             },
             update = {
-                server.update(items, selectedItem = null, startingStationIds = startingStationIds, mapLoading = mapLoading)
+                server.update(items, selectedItem = null, startingStationIds = startingStationIds)
             },
         )
         return
@@ -136,12 +132,12 @@ internal actual fun RadioMapHost(
         background = Color(0xFF080B12),
         factory = {
             browserHolder.panel.also {
-                val snapshot = server.update(items, selectedItem, startingStationIds, mapLoading)
+                val snapshot = server.update(items, selectedItem, startingStationIds)
                 browserHolder.update(snapshot)
             }
         },
         update = {
-            val snapshot = server.update(items, selectedItem, startingStationIds, mapLoading)
+            val snapshot = server.update(items, selectedItem, startingStationIds)
             browserHolder.update(snapshot)
         },
     )
@@ -163,6 +159,8 @@ internal actual fun radioMapUsesExternalBrowser(): Boolean = !desktopRadioMapInl
 
 internal actual fun radioMapUsesMinimalEmbeddedChrome(): Boolean = desktopRadioMapInlineBrowserEnabled()
 
+internal actual fun radioMapHostClustersMarkers(): Boolean = true
+
 private fun desktopRadioMapInlineBrowserEnabled(): Boolean =
     System.getProperty("phoebe.radioMap.inlineBrowser")?.toBooleanStrictOrNull()
         ?: System.getenv("PHOEBE_RADIO_MAP_INLINE_BROWSER")?.toBooleanStrictOrNull()
@@ -181,7 +179,6 @@ private class DesktopRadioMapBrowserServer(
     private val onPlay: (String) -> Unit,
     private val onZoomChanged: (Double) -> Unit,
     private val onViewportChanged: (RadioMapViewport) -> Unit,
-    private val onSearchArea: (RadioMapViewport) -> Unit,
 ) {
     private val executor: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "Phoebe-radio-map-browser").apply { isDaemon = true }
@@ -199,9 +196,6 @@ private class DesktopRadioMapBrowserServer(
     private var startingStationIds: Set<String> = emptySet()
 
     @Volatile
-    private var mapLoading: Boolean = false
-
-    @Volatile
     private var revision: Long = 0L
 
     val cacheBustedUrl: String
@@ -216,7 +210,6 @@ private class DesktopRadioMapBrowserServer(
                 "/play" -> exchange.handlePlayAction(onPlay)
                 "/zoom" -> exchange.handleZoom()
                 "/viewport" -> exchange.handleViewport()
-                "/searchArea" -> exchange.handleSearchArea()
                 else -> exchange.sendText("Not found", status = 404)
             }
         }
@@ -227,7 +220,6 @@ private class DesktopRadioMapBrowserServer(
         items: List<RadioMapItem>,
         selectedItem: RadioMapItem?,
         startingStationIds: Set<String>,
-        mapLoading: Boolean,
     ): DesktopRadioMapSnapshot {
         if (items != this.items) {
             revision += 1
@@ -235,13 +227,11 @@ private class DesktopRadioMapBrowserServer(
         this.items = items
         this.selectedItem = selectedItem
         this.startingStationIds = startingStationIds
-        this.mapLoading = mapLoading
         return DesktopRadioMapSnapshot(
             url = cacheBustedUrl,
             markersJson = items.toRadioMapMarkerJson(),
             selectedId = selectedItem?.id,
             startingIdsJson = startingStationIds.toRadioMapStartingIdsJson(),
-            mapLoading = mapLoading,
         )
     }
 
@@ -262,7 +252,6 @@ private class DesktopRadioMapBrowserServer(
             items = items,
             selectedItem = selectedItem,
             startingStationIds = startingStationIds,
-            mapLoading = mapLoading,
             googleMapsApiKey = googleMapsApiKey,
             markerTintCssHex = markerTintCssHex,
             desktopBridgeBaseUrl = url.substringBeforeLast('/'),
@@ -307,21 +296,6 @@ private class DesktopRadioMapBrowserServer(
         }
         sendText("ok")
     }
-
-    private fun HttpExchange.handleSearchArea() {
-        val params = queryParameters()
-        val viewport = RadioMapViewport(
-            north = params["north"]?.toDoubleOrNull() ?: Double.NaN,
-            south = params["south"]?.toDoubleOrNull() ?: Double.NaN,
-            east = params["east"]?.toDoubleOrNull() ?: Double.NaN,
-            west = params["west"]?.toDoubleOrNull() ?: Double.NaN,
-            zoom = params["zoom"]?.toDoubleOrNull() ?: Double.NaN,
-        )
-        if (viewport.isValid) {
-            SwingUtilities.invokeLater { onSearchArea(viewport) }
-        }
-        sendText("ok")
-    }
 }
 
 private data class DesktopRadioMapSnapshot(
@@ -329,7 +303,6 @@ private data class DesktopRadioMapSnapshot(
     val markersJson: String,
     val selectedId: String?,
     val startingIdsJson: String,
-    val mapLoading: Boolean,
 )
 
 private fun DesktopRadioMapSnapshot.toJavaScript(): String {
@@ -341,12 +314,12 @@ private fun DesktopRadioMapSnapshot.toJavaScript(): String {
           const markers = JSON.parse("$markerPayload");
           const selectedId = $selected;
           const startingIds = JSON.parse("$startingIdsPayload");
+          window.PhoebeRadioMap = window.PhoebeRadioMap || {};
+          window.PhoebeRadioMap.latestRadioMapData = { markers: markers, selectedId: selectedId, startingIds: startingIds };
+          window.PhoebeRadioMap.getLatestData = () => window.PhoebeRadioMap.latestRadioMapData;
           window.PhoebeRadioMapLatest = { markers: markers, selectedId: selectedId, startingIds: startingIds };
           if (window.updateRadioMapMarkers) {
             window.updateRadioMapMarkers(markers, selectedId);
-          }
-          if (window.setRadioMapSearchLoading) {
-            window.setRadioMapSearchLoading($mapLoading);
           }
           if (window.setRadioMapStartingStationIds) {
             window.setRadioMapStartingStationIds(startingIds);
@@ -356,14 +329,24 @@ private fun DesktopRadioMapSnapshot.toJavaScript(): String {
 }
 
 private fun DesktopRadioMapSnapshot.toLightweightJavaScript(): String {
+    val selected = selectedId?.let { """"${it.escapeJs()}"""" } ?: "null"
     val startingIdsPayload = startingIdsJson.escapeJs()
     return """
         (function() {
-          if (window.setRadioMapSearchLoading) {
-            window.setRadioMapSearchLoading($mapLoading);
+          const selectedId = $selected;
+          const startingIds = JSON.parse("$startingIdsPayload");
+          window.PhoebeRadioMap = window.PhoebeRadioMap || {};
+          const latest = window.PhoebeRadioMap.latestRadioMapData || window.PhoebeRadioMapLatest || { markers: null, selectedId: null, startingIds: [] };
+          latest.selectedId = selectedId;
+          latest.startingIds = startingIds;
+          window.PhoebeRadioMap.latestRadioMapData = latest;
+          window.PhoebeRadioMap.getLatestData = () => window.PhoebeRadioMap.latestRadioMapData;
+          window.PhoebeRadioMapLatest = latest;
+          if (window.updateRadioMapSelection) {
+            window.updateRadioMapSelection(selectedId);
           }
           if (window.setRadioMapStartingStationIds) {
-            window.setRadioMapStartingStationIds(JSON.parse("$startingIdsPayload"));
+            window.setRadioMapStartingStationIds(startingIds);
           }
         })();
     """.trimIndent()

@@ -22,14 +22,12 @@ internal actual fun RadioMapHost(
     items: List<RadioMapItem>,
     selectedItem: RadioMapItem?,
     startingStationIds: Set<String>,
-    mapLoading: Boolean,
     markerTintColor: Color,
     googleMapsApiKey: String?,
     onItemSelected: (RadioMapItem) -> Unit,
     onItemPlay: (RadioMapItem) -> Unit,
     onMapZoomChanged: (Double) -> Unit,
     onMapViewportChanged: (RadioMapViewport) -> Unit,
-    onMapSearchArea: (RadioMapViewport) -> Unit,
     modifier: Modifier,
     fallback: @Composable (Modifier) -> Unit,
 ) {
@@ -44,15 +42,19 @@ internal actual fun RadioMapHost(
     val currentOnItemPlay = rememberUpdatedState(onItemPlay)
     val currentOnMapZoomChanged = rememberUpdatedState(onMapZoomChanged)
     val currentOnMapViewportChanged = rememberUpdatedState(onMapViewportChanged)
-    val currentOnMapSearchArea = rememberUpdatedState(onMapSearchArea)
     val markerTintCssHex = remember(markerTintColor) { markerTintColor.toRadioMapCssHex() }
     val useLightTheme = LocalPhoebePalette.current.canvasBackground.luminance() > 0.5f
+    val markerItems = remember(items) {
+        items.flattenRadioMapStationMarkers().sortedBy { it.id }
+    }
+    val markerJson = remember(markerItems) { markerItems.toRadioMapMarkerJson() }
+    val selectedItemId = selectedItem?.id
+    val startingIdsJson = remember(startingStationIds) { startingStationIds.toRadioMapStartingIdsJson() }
     val initialHtml = remember(googleMapsApiKey, markerTintCssHex, useLightTheme) {
         radioMapHtml(
-            items = items,
+            items = markerItems,
             selectedItem = selectedItem,
             startingStationIds = startingStationIds,
-            mapLoading = mapLoading,
             googleMapsApiKey = googleMapsApiKey,
             markerTintCssHex = markerTintCssHex,
             useLightTheme = useLightTheme,
@@ -94,9 +96,6 @@ internal actual fun RadioMapHost(
             onViewportChanged = { north, south, east, west, zoom ->
                 currentOnMapViewportChanged.value(RadioMapViewport(north, south, east, west, zoom))
             },
-            onSearchArea = { north, south, east, west, zoom ->
-                currentOnMapSearchArea.value(RadioMapViewport(north, south, east, west, zoom))
-            },
         )
         iframeId = nextIframeId
         onDispose {
@@ -115,34 +114,27 @@ internal actual fun RadioMapHost(
         )
     }
 
-    LaunchedEffect(iframeId, items, selectedItem, startingStationIds, mapLoading) {
+    LaunchedEffect(iframeId, markerJson) {
         val currentIframeId = iframeId ?: return@LaunchedEffect
         updateRadioMapIframeData(
             id = currentIframeId,
-            jsonString = items.toRadioMapMarkerJson(),
-            selectedId = selectedItem?.id,
-            startingIdsJson = startingStationIds.toRadioMapStartingIdsJson(),
-            mapLoading = mapLoading,
-            onSelected = { itemId ->
-                val item = currentItems.value.findRadioMapItem(itemId) ?: return@updateRadioMapIframeData
-                currentOnItemSelected.value(item)
-            },
-            onPlay = { itemId ->
-                val item = currentItems.value.findRadioMapItem(itemId) ?: return@updateRadioMapIframeData
-                currentOnItemSelected.value(item)
-                if (item is RadioMapItem.Station) {
-                    currentOnItemPlay.value(item)
-                }
-            },
-            onZoomChanged = { zoom ->
-                currentOnMapZoomChanged.value(zoom)
-            },
-            onViewportChanged = { north, south, east, west, zoom ->
-                currentOnMapViewportChanged.value(RadioMapViewport(north, south, east, west, zoom))
-            },
-            onSearchArea = { north, south, east, west, zoom ->
-                currentOnMapSearchArea.value(RadioMapViewport(north, south, east, west, zoom))
-            },
+            jsonString = markerJson,
+        )
+    }
+
+    LaunchedEffect(iframeId, selectedItemId) {
+        val currentIframeId = iframeId ?: return@LaunchedEffect
+        updateRadioMapIframeSelection(
+            id = currentIframeId,
+            selectedId = selectedItemId,
+        )
+    }
+
+    LaunchedEffect(iframeId, startingIdsJson) {
+        val currentIframeId = iframeId ?: return@LaunchedEffect
+        updateRadioMapIframeStartingStationIds(
+            id = currentIframeId,
+            startingIdsJson = startingIdsJson,
         )
     }
 }
@@ -155,6 +147,8 @@ internal actual fun radioMapUsesExternalBrowser(): Boolean = false
 
 internal actual fun radioMapUsesMinimalEmbeddedChrome(): Boolean = true
 
+internal actual fun radioMapHostClustersMarkers(): Boolean = true
+
 private data class RadioMapWebBounds(
     val x: Float = 0f,
     val y: Float = 0f,
@@ -165,7 +159,7 @@ private data class RadioMapWebBounds(
 @OptIn(ExperimentalWasmJsInterop::class)
 @JsFun(
     """
-    (html, onSelected, onPlay, onZoomChanged, onViewportChanged, onSearchArea) => {
+    (html, onSelected, onPlay, onZoomChanged, onViewportChanged) => {
       const id = "phoebe-radio-map-" + Math.random().toString(36).slice(2);
       const iframe = document.createElement("iframe");
       iframe.id = id;
@@ -187,6 +181,8 @@ private data class RadioMapWebBounds(
       const bridge = bridgeHost.PhoebeRadioMap || {};
       bridgeHost.PhoebeRadioMap = bridge;
       globalThis.PhoebeRadioMap = bridge;
+      bridge.latestRadioMapData = bridge.latestRadioMapData || { markers: null, selectedId: null, startingIds: [] };
+      bridge.getLatestData = () => bridge.latestRadioMapData;
       bridge.selectItem = (itemId) => onSelected(String(itemId || ""));
       bridge.playItem = (itemId) => onPlay(String(itemId || ""));
       bridge.zoomChanged = (zoom) => {
@@ -203,16 +199,6 @@ private data class RadioMapWebBounds(
           onViewportChanged(parsedNorth, parsedSouth, parsedEast, parsedWest, parsedZoom);
         }
       };
-      bridge.searchArea = (north, south, east, west, zoom) => {
-        const parsedNorth = Number(north);
-        const parsedSouth = Number(south);
-        const parsedEast = Number(east);
-        const parsedWest = Number(west);
-        const parsedZoom = Number(zoom);
-        if ([parsedNorth, parsedSouth, parsedEast, parsedWest, parsedZoom].every(Number.isFinite)) {
-          onSearchArea(parsedNorth, parsedSouth, parsedEast, parsedWest, parsedZoom);
-        }
-      };
       const handleMessage = (event) => {
         const data = event.data || {};
         if (data.phoebeRadioMap !== true) return;
@@ -225,8 +211,6 @@ private data class RadioMapWebBounds(
           bridge.zoomChanged(data.zoom);
         } else if (data.action === "viewportChanged" && data.viewport) {
           bridge.viewportChanged(data.viewport.north, data.viewport.south, data.viewport.east, data.viewport.west, data.viewport.zoom);
-        } else if (data.action === "searchArea" && data.viewport) {
-          bridge.searchArea(data.viewport.north, data.viewport.south, data.viewport.east, data.viewport.west, data.viewport.zoom);
         }
       };
       window.addEventListener("message", handleMessage);
@@ -242,7 +226,6 @@ private external fun createRadioMapIframe(
     onPlay: (String) -> Unit,
     onZoomChanged: (Double) -> Unit,
     onViewportChanged: (Double, Double, Double, Double, Double) -> Unit,
-    onSearchArea: (Double, Double, Double, Double, Double) -> Unit,
 ): String
 
 @OptIn(ExperimentalWasmJsInterop::class)
@@ -300,49 +283,19 @@ private external fun removeRadioMapIframe(id: String)
 @OptIn(ExperimentalWasmJsInterop::class)
 @JsFun(
     """
-    (id, jsonString, selectedId, startingIdsJson, mapLoading, onSelected, onPlay, onZoomChanged, onViewportChanged, onSearchArea) => {
+    (id, jsonString) => {
       const markers = JSON.parse(jsonString);
-      const startingIds = JSON.parse(startingIdsJson);
       const bridgeHost = typeof window !== "undefined" ? window : globalThis;
       const bridge = bridgeHost.PhoebeRadioMap || {};
       bridgeHost.PhoebeRadioMap = bridge;
       globalThis.PhoebeRadioMap = bridge;
-      bridge.selectItem = (itemId) => onSelected(String(itemId || ""));
-      bridge.playItem = (itemId) => onPlay(String(itemId || ""));
-      bridge.zoomChanged = (zoom) => {
-        const parsed = Number(zoom);
-        if (Number.isFinite(parsed)) onZoomChanged(parsed);
-      };
-      bridge.viewportChanged = (north, south, east, west, zoom) => {
-        const parsedNorth = Number(north);
-        const parsedSouth = Number(south);
-        const parsedEast = Number(east);
-        const parsedWest = Number(west);
-        const parsedZoom = Number(zoom);
-        if ([parsedNorth, parsedSouth, parsedEast, parsedWest, parsedZoom].every(Number.isFinite)) {
-          onViewportChanged(parsedNorth, parsedSouth, parsedEast, parsedWest, parsedZoom);
-        }
-      };
-      bridge.searchArea = (north, south, east, west, zoom) => {
-        const parsedNorth = Number(north);
-        const parsedSouth = Number(south);
-        const parsedEast = Number(east);
-        const parsedWest = Number(west);
-        const parsedZoom = Number(zoom);
-        if ([parsedNorth, parsedSouth, parsedEast, parsedWest, parsedZoom].every(Number.isFinite)) {
-          onSearchArea(parsedNorth, parsedSouth, parsedEast, parsedWest, parsedZoom);
-        }
-      };
-      bridge.getLatestData = () => ({ markers: markers, selectedId: selectedId, startingIds: startingIds });
+      const latest = bridge.latestRadioMapData || { markers: null, selectedId: null, startingIds: [] };
+      latest.markers = markers;
+      bridge.latestRadioMapData = latest;
+      bridge.getLatestData = () => bridge.latestRadioMapData;
       const iframe = document.getElementById(id);
       if (iframe && iframe.contentWindow && iframe.contentWindow.updateRadioMapMarkers) {
-        iframe.contentWindow.updateRadioMapMarkers(markers, selectedId);
-      }
-      if (iframe && iframe.contentWindow && iframe.contentWindow.setRadioMapSearchLoading) {
-        iframe.contentWindow.setRadioMapSearchLoading(Boolean(mapLoading));
-      }
-      if (iframe && iframe.contentWindow && iframe.contentWindow.setRadioMapStartingStationIds) {
-        iframe.contentWindow.setRadioMapStartingStationIds(startingIds);
+        iframe.contentWindow.updateRadioMapMarkers(markers, latest.selectedId);
       }
     }
     """,
@@ -350,12 +303,54 @@ private external fun removeRadioMapIframe(id: String)
 private external fun updateRadioMapIframeData(
     id: String,
     jsonString: String,
+)
+
+@OptIn(ExperimentalWasmJsInterop::class)
+@JsFun(
+    """
+    (id, selectedId) => {
+      const nextSelectedId = selectedId == null ? null : String(selectedId);
+      const bridgeHost = typeof window !== "undefined" ? window : globalThis;
+      const bridge = bridgeHost.PhoebeRadioMap || {};
+      bridgeHost.PhoebeRadioMap = bridge;
+      globalThis.PhoebeRadioMap = bridge;
+      const latest = bridge.latestRadioMapData || { markers: null, selectedId: null, startingIds: [] };
+      latest.selectedId = nextSelectedId;
+      bridge.latestRadioMapData = latest;
+      bridge.getLatestData = () => bridge.latestRadioMapData;
+      const iframe = document.getElementById(id);
+      if (iframe && iframe.contentWindow && iframe.contentWindow.updateRadioMapSelection) {
+        iframe.contentWindow.updateRadioMapSelection(nextSelectedId);
+      }
+    }
+    """,
+)
+private external fun updateRadioMapIframeSelection(
+    id: String,
     selectedId: String?,
+)
+
+@OptIn(ExperimentalWasmJsInterop::class)
+@JsFun(
+    """
+    (id, startingIdsJson) => {
+      const startingIds = JSON.parse(startingIdsJson);
+      const bridgeHost = typeof window !== "undefined" ? window : globalThis;
+      const bridge = bridgeHost.PhoebeRadioMap || {};
+      bridgeHost.PhoebeRadioMap = bridge;
+      globalThis.PhoebeRadioMap = bridge;
+      const latest = bridge.latestRadioMapData || { markers: null, selectedId: null, startingIds: [] };
+      latest.startingIds = startingIds;
+      bridge.latestRadioMapData = latest;
+      bridge.getLatestData = () => bridge.latestRadioMapData;
+      const iframe = document.getElementById(id);
+      if (iframe && iframe.contentWindow && iframe.contentWindow.setRadioMapStartingStationIds) {
+        iframe.contentWindow.setRadioMapStartingStationIds(startingIds);
+      }
+    }
+    """,
+)
+private external fun updateRadioMapIframeStartingStationIds(
+    id: String,
     startingIdsJson: String,
-    mapLoading: Boolean,
-    onSelected: (String) -> Unit,
-    onPlay: (String) -> Unit,
-    onZoomChanged: (Double) -> Unit,
-    onViewportChanged: (Double, Double, Double, Double, Double) -> Unit,
-    onSearchArea: (Double, Double, Double, Double, Double) -> Unit,
 )

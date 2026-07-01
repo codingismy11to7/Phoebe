@@ -52,6 +52,21 @@ fun clusterStations(
     expandedClusterIds: Set<String> = emptySet()
 ): List<RadioMapItem> {
     val geoStations = stations.filter { it.hasGeoLocation }
+    if (clusterThresholdDegrees <= 0.0) {
+        return geoStations
+            .sortedBy { it.id }
+            .mapNotNull { station ->
+                val latitude = station.geoLat ?: return@mapNotNull null
+                val longitude = station.geoLong ?: return@mapNotNull null
+                RadioMapItem.Station(
+                    station = station,
+                    latitude = latitude,
+                    longitude = longitude,
+                    approximate = false,
+                )
+            }
+    }
+
     val items = mutableListOf<RadioMapItem>()
 
     val preciseClusters = mutableListOf<MutableList<RadioStation>>()

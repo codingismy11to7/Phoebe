@@ -7,7 +7,6 @@ import com.phoebe.app.db.PhoebeDatabase
 import com.phoebe.app.domain.RadioDirectoryState
 import com.phoebe.app.domain.RadioMapScope
 import com.phoebe.app.domain.RadioMapScopeKind
-import com.phoebe.app.domain.RadioMapViewport
 import com.phoebe.app.domain.RadioStation
 import com.phoebe.app.domain.RadioStationSearchQuery
 import com.phoebe.app.domain.RadioStationSource
@@ -95,74 +94,59 @@ class RadioRepository(
         query: RadioStationSearchQuery = mutableState.value.globeSearchQuery,
         page: Int = 0,
         countryCode: String? = null,
-        viewport: RadioMapViewport? = null,
-        autoPrefetch: Boolean = page == 0,
     ) {
         val normalized = query.normalized()
         val explicitCountryCode = countryCode?.trim()?.uppercase().orEmpty()
-        val currentState = mutableState.value
-        if (viewport != null && explicitCountryCode.isBlank() && (currentState.globeLoading || currentState.globeAutoPrefetching)) {
-            return
-        }
-        val requestedScope = radioMapScopeFor(explicitCountryCode, viewport, currentState.globeStations)
-        if (viewport != null && explicitCountryCode.isBlank() && requestedScope.kind == RadioMapScopeKind.Global) {
-            return
+        val scopedCountryCode = explicitCountryCode.ifBlank { normalized.countryCode }
+        val requestedScope = if (scopedCountryCode.isNotBlank()) {
+            RadioMapScope(countryCode = scopedCountryCode, kind = RadioMapScopeKind.Country)
+        } else {
+            RadioMapScope()
         }
         val scopedQuery = requestedScope.normalizedCountryCode
             .takeIf { it.isNotBlank() }
             ?.let { normalized.copy(countryCode = it).normalized() }
             ?: normalized
-        val isNewQuery = scopedQuery != currentState.globeSearchQuery ||
-            requestedScope != currentState.globeMapScope
-        if (viewport != null && explicitCountryCode.isBlank() && !isNewQuery) {
-            return
-        }
-        val targetPage = when {
-            isNewQuery -> 0
-            page == 0 &&
-                explicitCountryCode.isNotBlank() &&
-                requestedScope.kind != RadioMapScopeKind.Global &&
-                currentState.canLoadNextGlobePage ->
-                currentState.globePageIndex + 1
-            else -> page
-        }
-        val appendScopedResults = requestedScope.kind != RadioMapScopeKind.Global &&
-            currentState.globeStations.isNotEmpty() &&
-            normalized.text == currentState.globeSearchQuery.text
 
-        loadGlobePage(
-            query = scopedQuery,
-            scope = requestedScope,
-            viewport = viewport?.takeIf { it.isValid },
-            page = targetPage,
-            reset = (isNewQuery || targetPage == 0) && !appendScopedResults,
-            autoPrefetching = false,
+        val previous = mutableState.value
+        mutableState.value = previous.copy(
+            globeLoading = true,
+            globeAutoPrefetching = false,
+            globeErrorMessage = null,
+            globeSearchQuery = scopedQuery,
+            globePageIndex = 0,
+            globePageSize = GlobeGeoStationLimit,
+            globeMapScope = requestedScope,
+            globeViewport = null,
+            globeStations = emptyList(),
+            globeLoadedStationCount = 0,
+            globeMapLoaded = false,
+            canLoadPreviousGlobePage = false,
+            canLoadNextGlobePage = false,
         )
 
-        if (!autoPrefetch) return
-
-        var nextPage = mutableState.value.globePageIndex + 1
-        while (
-            mutableState.value.globeSearchQuery == scopedQuery &&
-            mutableState.value.globeMapScope == requestedScope &&
-            mutableState.value.canLoadNextGlobePage &&
-            mutableState.value.globeStations.size < GlobeAutoPrefetchStationCap
-        ) {
-            loadGlobePage(
-                query = scopedQuery,
-                scope = requestedScope,
-                viewport = viewport?.takeIf { it.isValid },
-                page = nextPage,
-                reset = false,
-                autoPrefetching = true,
-            )
-            nextPage = mutableState.value.globePageIndex + 1
-        }
+        val result = runCatching {
+            loadAllGlobeStations(scopedQuery)
+        }.onFailure { if (it is CancellationException) throw it }
 
         val current = mutableState.value
-        if (current.globeSearchQuery == scopedQuery && current.globeMapScope == requestedScope) {
-            mutableState.value = current.copy(globeAutoPrefetching = false)
-        }
+        if (current.globeSearchQuery != scopedQuery || current.globeMapScope != requestedScope) return
+
+        val stations = result.getOrDefault(emptyList())
+        mutableState.value = current.copy(
+            globeStations = stations,
+            globeLoadedStationCount = stations.size,
+            globeMapLoaded = result.isSuccess,
+            globeLoading = false,
+            globeAutoPrefetching = false,
+            globeErrorMessage = result.exceptionOrNull()?.message
+                ?: if (result.isFailure) "Could not load radio map stations." else null,
+            globePageIndex = 0,
+            globePageSize = GlobeGeoStationLimit,
+            globeViewport = null,
+            canLoadPreviousGlobePage = false,
+            canLoadNextGlobePage = false,
+        )
     }
 
     suspend fun showStation(stationId: String) {
@@ -329,133 +313,27 @@ class RadioRepository(
         )
     }
 
-    private suspend fun loadGlobePage(
-        query: RadioStationSearchQuery,
-        scope: RadioMapScope,
-        viewport: RadioMapViewport?,
-        page: Int,
-        reset: Boolean,
-        autoPrefetching: Boolean,
-    ) {
-        val safePage = page.coerceAtLeast(0)
-        val previous = mutableState.value
-        mutableState.value = previous.copy(
-            globeLoading = !autoPrefetching,
-            globeAutoPrefetching = autoPrefetching,
-            globeErrorMessage = null,
-            globeSearchQuery = query,
-            globePageIndex = safePage,
-            globePageSize = GlobeGeoStationLimit,
-            globeMapScope = scope,
-            globeViewport = viewport,
-            globeStations = if (reset) emptyList() else previous.globeStations,
-            globeLoadedStationCount = if (reset) 0 else previous.globeStations.size,
-        )
-
-        val geoOffset = safePage * GlobeGeoStationLimit
-        val geoResult = runCatching {
-            radioBrowserClient.search(
+    private suspend fun loadAllGlobeStations(query: RadioStationSearchQuery): List<RadioStation> {
+        val stationsById = LinkedHashMap<String, RadioStation>()
+        var offset = 0
+        while (offset < GlobeGeoStationSafetyCap) {
+            val limit = minOf(GlobeGeoStationLimit, GlobeGeoStationSafetyCap - offset)
+            val page = radioBrowserClient.search(
                 query,
-                limit = GlobeGeoStationLimit,
-                offset = geoOffset,
+                limit = limit,
+                offset = offset,
                 requireGeoInfo = true,
             )
-        }.onFailure { if (it is CancellationException) throw it }
-
-        val result = runCatching {
-            val geoStations = geoResult.getOrDefault(emptyList())
-            if (geoResult.isFailure) {
-                throw geoResult.exceptionOrNull()
-                    ?: Exception("Could not load radio map stations.")
+            page.forEach { station ->
+                if (station.id !in stationsById) {
+                    stationsById[station.id] = station
+                }
             }
-            GlobePageResult(
-                geoStations = geoStations,
-                stations = geoStations.distinctBy { it.id },
-            )
-        }.onFailure { if (it is CancellationException) throw it }
-
-        val current = mutableState.value
-        if (current.globeSearchQuery != query || current.globeMapScope != scope || current.globePageIndex != safePage) return
-
-        if (result.isFailure) {
-            val exception = result.exceptionOrNull()
-            val stations = if (safePage == 0 && reset) emptyList() else current.globeStations
-            mutableState.value = current.copy(
-                globeStations = stations,
-                globeLoadedStationCount = stations.size,
-                globeLoading = false,
-                globeAutoPrefetching = false,
-                globeErrorMessage = exception?.message ?: "Could not load radio map stations.",
-                canLoadPreviousGlobePage = safePage > 0,
-                canLoadNextGlobePage = false,
-            )
-        } else {
-            val pageResult = result.getOrThrow()
-            val stations = if (safePage == 0 && reset) {
-                pageResult.stations
-            } else {
-                (current.globeStations + pageResult.stations).distinctBy { it.id }
-            }
-            mutableState.value = current.copy(
-                globeStations = stations,
-                globeLoadedStationCount = stations.size,
-                globeLoading = false,
-                globeAutoPrefetching = autoPrefetching,
-                globeErrorMessage = null,
-                canLoadPreviousGlobePage = safePage > 0,
-                canLoadNextGlobePage = pageResult.geoStations.size >= GlobeGeoStationLimit,
-            )
+            if (page.size < limit) break
+            offset += limit
         }
+        return stationsById.values.toList()
     }
-
-    private fun radioMapScopeFor(
-        countryCode: String?,
-        viewport: RadioMapViewport?,
-        currentStations: List<RadioStation>,
-    ): RadioMapScope {
-        val explicitCountry = countryCode?.trim()?.uppercase().orEmpty()
-        if (explicitCountry.isNotBlank()) {
-            return RadioMapScope(countryCode = explicitCountry, kind = RadioMapScopeKind.Country)
-        }
-        val validViewport = viewport?.takeIf { it.isValid }
-        val inferredCountry = validViewport?.let { inferRadioMapCountryCode(it, currentStations) }.orEmpty()
-        return if (inferredCountry.isNotBlank()) {
-            RadioMapScope(countryCode = inferredCountry, kind = RadioMapScopeKind.Viewport)
-        } else {
-            RadioMapScope()
-        }
-    }
-
-    private fun inferRadioMapCountryCode(
-        viewport: RadioMapViewport,
-        stations: List<RadioStation>,
-    ): String? {
-        if (viewport.zoom < GlobeViewportCountryPrefetchMinZoom) return null
-        return stations
-            .asSequence()
-            .filter { station ->
-                val lat = station.geoLat
-                val lng = station.geoLong
-                val country = station.countryCode
-                lat != null &&
-                    lng != null &&
-                    country?.isNotBlank() == true &&
-                    lat <= viewport.north &&
-                    lat >= viewport.south &&
-                    longitudeInViewport(lng, viewport.west, viewport.east)
-            }
-            .groupingBy { it.countryCode!!.trim().uppercase() }
-            .eachCount()
-            .maxByOrNull { it.value }
-            ?.key
-    }
-
-    private fun longitudeInViewport(longitude: Double, west: Double, east: Double): Boolean =
-        if (west <= east) {
-            longitude in west..east
-        } else {
-            longitude >= west || longitude <= east
-        }
 
     private suspend fun loadDirectory(query: RadioStationSearchQuery) {
         mutableState.value = mutableState.value.copy(
@@ -659,14 +537,8 @@ private fun String.radioHomepageFaviconUrl(): String? {
 }
 
 private const val DirectoryPageSize = 100
-private const val GlobeGeoStationLimit = 1_000
-private const val GlobeAutoPrefetchStationCap = 5_000
-private const val GlobeViewportCountryPrefetchMinZoom = 4.0
-
-private data class GlobePageResult(
-    val geoStations: List<RadioStation>,
-    val stations: List<RadioStation>,
-)
+private const val GlobeGeoStationLimit = 20_000
+private const val GlobeGeoStationSafetyCap = 50_000
 
 @Serializable
 data class RadioStationsExport(

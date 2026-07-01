@@ -53,15 +53,18 @@ private final class PhoebeRadioMapNativeContainerView: UIView, GMSMapViewDelegat
     private let onMarkerPlay: (String) -> Void
     private let onMapZoomChanged: (KotlinDouble) -> Void
     private let onMapViewportChanged: (KotlinDouble, KotlinDouble, KotlinDouble, KotlinDouble, KotlinDouble) -> Void
+    private let clusterQueue = DispatchQueue(label: "com.phoebe.radioMap.cluster", qos: .userInitiated)
     private var sourceMarkers: [PhoebeRadioMapNativeMarker] = []
     private var renderedMarkers: [GMSMarker] = []
     private var renderedMarkersById: [String: GMSMarker] = [:]
+    private var renderedMarkerSignaturesById: [String: PhoebeRadioMapMarkerSignature] = [:]
     private var selectedStationId: String?
     private var markerTintColor: UIColor
+    private var markerIconCache: [PhoebeRadioMapIconKey: UIImage] = [:]
     private var lastMarkersJson: String?
     private var lastMarkerTintArgb: Int32?
     private var useLightTheme: Bool
-    private var lastZoomBucket: Double?
+    private var renderGeneration = 0
 
     init(
         markersJson: String,
@@ -108,6 +111,7 @@ private final class PhoebeRadioMapNativeContainerView: UIView, GMSMapViewDelegat
         var markerDataChanged = false
         if markerTintArgb != lastMarkerTintArgb {
             markerTintColor = radioMapUIColor(fromArgb: markerTintArgb)
+            markerIconCache.removeAll(keepingCapacity: true)
             lastMarkerTintArgb = markerTintArgb
             markerStyleChanged = true
         }
@@ -123,7 +127,7 @@ private final class PhoebeRadioMapNativeContainerView: UIView, GMSMapViewDelegat
             markerDataChanged = true
         }
         if markerDataChanged {
-            renderMarkers()
+            requestRenderMarkers()
         } else if markerStyleChanged {
             updateRenderedMarkerIcons()
         } else if selectionChanged {
@@ -144,18 +148,13 @@ private final class PhoebeRadioMapNativeContainerView: UIView, GMSMapViewDelegat
     func mapView(_ mapView: GMSMapView, idleAt position: GMSCameraPosition) {
         onMapZoomChanged(KotlinDouble(value: Double(position.zoom)))
         notifyViewportChanged(position: position)
-        let bucket = radioMapClusterThresholdDegrees(Double(position.zoom))
-        if bucket != lastZoomBucket {
-            lastZoomBucket = bucket
-            renderMarkers()
-        }
+        requestRenderMarkers()
     }
 
     func mapView(_ mapView: GMSMapView, didTap marker: GMSMarker) -> Bool {
         guard let item = marker.userData as? PhoebeRadioMapNativeMarker else { return false }
         if item.isClusterMarker {
-            mapView.animate(toLocation: CLLocationCoordinate2D(latitude: item.latitude, longitude: item.longitude))
-            mapView.animate(toZoom: min(mapView.camera.zoom + 2.0, 18.0))
+            focusMap(on: item)
             return true
         }
         let previousSelectedStationId = selectedStationId
@@ -165,20 +164,74 @@ private final class PhoebeRadioMapNativeContainerView: UIView, GMSMapViewDelegat
         return true
     }
 
-    private func renderMarkers() {
+    private func requestRenderMarkers() {
+        renderGeneration += 1
+        let generation = renderGeneration
+        let markers = sourceMarkers
+        let zoom = Double(mapView.camera.zoom)
+        let visibleBounds = radioMapVisibleBounds(
+            for: mapView,
+            paddingRatio: RadioMapRenderPaddingRatio
+        )
+        clusterQueue.async { [weak self] in
+            let visibleMarkers = clusterMarkersForZoom(
+                markers,
+                zoom: zoom,
+                visibleBounds: visibleBounds
+            )
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.renderGeneration == generation else { return }
+                self.applyRenderedMarkers(visibleMarkers)
+            }
+        }
+    }
+
+    private func applyRenderedMarkers(_ visibleMarkers: [PhoebeRadioMapNativeMarker]) {
+        var visibleIds = Set<String>()
+        visibleIds.reserveCapacity(visibleMarkers.count)
+        visibleMarkers.forEach { item in
+            visibleIds.insert(item.id)
+            let signature = PhoebeRadioMapMarkerSignature(item: item)
+            if let marker = renderedMarkersById[item.id] {
+                marker.userData = item
+                if renderedMarkerSignaturesById[item.id] != signature {
+                    marker.position = CLLocationCoordinate2D(latitude: item.latitude, longitude: item.longitude)
+                    marker.title = item.name
+                    marker.icon = markerIcon(for: item)
+                    renderedMarkerSignaturesById[item.id] = signature
+                }
+            } else {
+                let marker = GMSMarker(position: CLLocationCoordinate2D(latitude: item.latitude, longitude: item.longitude))
+                marker.title = item.name
+                marker.userData = item
+                marker.icon = markerIcon(for: item)
+                marker.map = mapView
+                renderedMarkersById[item.id] = marker
+                renderedMarkerSignaturesById[item.id] = signature
+            }
+        }
+
+        renderedMarkersById.keys
+            .filter { !visibleIds.contains($0) }
+            .forEach { itemId in
+                renderedMarkersById[itemId]?.map = nil
+                renderedMarkersById.removeValue(forKey: itemId)
+                renderedMarkerSignaturesById.removeValue(forKey: itemId)
+            }
+
+        renderedMarkers = visibleMarkers.compactMap { renderedMarkersById[$0.id] }
+    }
+
+    private func clearRenderedMarkers() {
+        renderGeneration += 1
         renderedMarkers.forEach { $0.map = nil }
         renderedMarkers.removeAll()
         renderedMarkersById.removeAll(keepingCapacity: true)
-        let visibleMarkers = clusterMarkersForZoom(sourceMarkers, zoom: Double(mapView.camera.zoom))
-        visibleMarkers.forEach { item in
-            let marker = GMSMarker(position: CLLocationCoordinate2D(latitude: item.latitude, longitude: item.longitude))
-            marker.title = item.name
-            marker.userData = item
-            marker.icon = markerIcon(for: item)
-            marker.map = mapView
-            renderedMarkers.append(marker)
-            renderedMarkersById[item.id] = marker
-        }
+        renderedMarkerSignaturesById.removeAll(keepingCapacity: true)
+    }
+
+    deinit {
+        clearRenderedMarkers()
     }
 
     private func updateRenderedMarkerIcons() {
@@ -186,6 +239,27 @@ private final class PhoebeRadioMapNativeContainerView: UIView, GMSMapViewDelegat
             guard let item = marker.userData as? PhoebeRadioMapNativeMarker else { return }
             marker.icon = markerIcon(for: item)
         }
+    }
+
+    private func focusMap(on item: PhoebeRadioMapNativeMarker) {
+        let positions = markerPositions(for: item)
+        guard positions.count > 1 else {
+            mapView.animate(toLocation: CLLocationCoordinate2D(latitude: item.latitude, longitude: item.longitude))
+            mapView.animate(toZoom: min(mapView.camera.zoom + 2.0, 18.0))
+            return
+        }
+        var bounds = GMSCoordinateBounds(coordinate: positions[0], coordinate: positions[0])
+        positions.dropFirst().forEach { coordinate in
+            bounds = bounds.includingCoordinate(coordinate)
+        }
+        mapView.animate(with: GMSCameraUpdate.fit(bounds, withPadding: 48.0))
+    }
+
+    private func markerPositions(for item: PhoebeRadioMapNativeMarker) -> [CLLocationCoordinate2D] {
+        if item.isClusterMarker && !item.children.isEmpty {
+            return item.children.flatMap { markerPositions(for: $0) }
+        }
+        return [CLLocationCoordinate2D(latitude: item.latitude, longitude: item.longitude)]
     }
 
     private func updateSelectedMarkerIcons(previousId: String?, currentId: String?) {
@@ -202,11 +276,21 @@ private final class PhoebeRadioMapNativeContainerView: UIView, GMSMapViewDelegat
     }
 
     private func markerIcon(for item: PhoebeRadioMapNativeMarker) -> UIImage {
-        radioMapMarkerImage(
-            tint: markerTintColor.withAlphaComponent(item.approximate ? 0.7 : 1.0),
+        let key = PhoebeRadioMapIconKey(
+            approximate: item.approximate,
             selected: item.id == selectedStationId,
             count: item.isClusterMarker ? item.countValue : nil
         )
+        if let cached = markerIconCache[key] {
+            return cached
+        }
+        let image = radioMapMarkerImage(
+            tint: markerTintColor.withAlphaComponent(item.approximate ? 0.7 : 1.0),
+            selected: key.selected,
+            count: key.count
+        )
+        markerIconCache[key] = image
+        return image
     }
 
     private func notifyViewportChanged(position: GMSCameraPosition) {
@@ -238,6 +322,30 @@ private final class PhoebeRadioMapNativeContainerView: UIView, GMSMapViewDelegat
             KotlinDouble(value: west),
             KotlinDouble(value: Double(position.zoom))
         )
+    }
+}
+
+private struct PhoebeRadioMapIconKey: Hashable {
+    let approximate: Bool
+    let selected: Bool
+    let count: Int?
+}
+
+private struct PhoebeRadioMapMarkerSignature: Equatable {
+    let latitude: Double
+    let longitude: Double
+    let name: String
+    let approximate: Bool
+    let isCluster: Bool
+    let count: Int
+
+    init(item: PhoebeRadioMapNativeMarker) {
+        latitude = item.latitude
+        longitude = item.longitude
+        name = item.name
+        approximate = item.approximate
+        isCluster = item.isClusterMarker
+        count = item.countValue
     }
 }
 
@@ -294,36 +402,62 @@ private struct PhoebeRadioMapNativeMarker: Decodable, Identifiable, Equatable {
     var countValue: Int { clusterCount ?? 1 }
 }
 
+private struct PhoebeRadioMapClusterKey: Hashable {
+    let latitude: Int
+    let longitude: Int
+}
+
+private struct PhoebeRadioMapCoordinateBounds {
+    let south: Double
+    let north: Double
+    let west: Double
+    let east: Double
+    let coversWorldLongitude: Bool
+
+    func contains(latitude: Double, longitude: Double) -> Bool {
+        guard latitude >= south && latitude <= north else { return false }
+        guard !coversWorldLongitude else { return true }
+        let normalizedLongitude = normalizeLongitude(longitude)
+        if west <= east {
+            return normalizedLongitude >= west && normalizedLongitude <= east
+        }
+        return normalizedLongitude >= west || normalizedLongitude <= east
+    }
+}
+
 private func clusterMarkersForZoom(
     _ markers: [PhoebeRadioMapNativeMarker],
-    zoom: Double
+    zoom: Double,
+    visibleBounds: PhoebeRadioMapCoordinateBounds
 ) -> [PhoebeRadioMapNativeMarker] {
     let leaves = flattenStationMarkers(markers)
     let threshold = radioMapClusterThresholdDegrees(zoom)
     if threshold <= 0 {
-        return leaves
-    }
-
-    var groups: [[PhoebeRadioMapNativeMarker]] = []
-    leaves.forEach { station in
-        if let index = groups.firstIndex(where: { group in
-            guard let first = group.first else { return false }
-            return abs(first.latitude - station.latitude) < threshold &&
-                longitudeDistance(first.longitude, station.longitude) < threshold
-        }) {
-            groups[index].append(station)
-        } else {
-            groups.append([station])
+        return leaves.filter { marker in
+            visibleBounds.contains(latitude: marker.latitude, longitude: marker.longitude)
         }
     }
 
-    return groups.flatMap { group -> [PhoebeRadioMapNativeMarker] in
-        guard group.count > 1 else { return group }
+    var groups: [PhoebeRadioMapClusterKey: [PhoebeRadioMapNativeMarker]] = [:]
+    groups.reserveCapacity(leaves.count)
+    leaves.forEach { station in
+        groups[clusterKey(for: station, threshold: threshold), default: []].append(station)
+    }
+
+    var clusteredMarkers: [PhoebeRadioMapNativeMarker] = []
+    clusteredMarkers.reserveCapacity(groups.count)
+    groups.forEach { key, group in
+        guard group.count > 1 else {
+            if let station = group.first {
+                clusteredMarkers.append(station)
+            }
+            return
+        }
         let latitude = group.reduce(0.0) { $0 + $1.latitude } / Double(group.count)
         let longitude = group.reduce(0.0) { $0 + $1.longitude } / Double(group.count)
-        return [
+        clusteredMarkers.append(
             PhoebeRadioMapNativeMarker(
-                id: "native_cluster_" + compactClusterId(group.map(\.id)),
+                id: "native_cluster_\(Int(threshold * 1_000))_\(key.latitude)_\(key.longitude)",
                 name: "\(group.count) stations",
                 latitude: latitude,
                 longitude: longitude,
@@ -332,8 +466,22 @@ private func clusterMarkersForZoom(
                 clusterCount: group.count,
                 children: group
             )
-        ]
+        )
     }
+
+    return clusteredMarkers.filter { marker in
+        visibleBounds.contains(latitude: marker.latitude, longitude: marker.longitude)
+    }
+}
+
+private func clusterKey(
+    for marker: PhoebeRadioMapNativeMarker,
+    threshold: Double
+) -> PhoebeRadioMapClusterKey {
+    PhoebeRadioMapClusterKey(
+        latitude: Int(floor((marker.latitude + 90.0) / threshold)),
+        longitude: Int(floor((normalizeLongitude(marker.longitude) + 180.0) / threshold))
+    )
 }
 
 private func flattenStationMarkers(_ markers: [PhoebeRadioMapNativeMarker]) -> [PhoebeRadioMapNativeMarker] {
@@ -374,20 +522,54 @@ private func radioMapMarkerImage(tint: UIColor, selected: Bool, count: Int?) -> 
     }
 }
 
-private func compactClusterId(_ ids: [String]) -> String {
-    var hash = UInt64(14_695_981_039_346_656_037)
-    ids.sorted().forEach { id in
-        id.utf8.forEach { byte in
-            hash = (hash ^ UInt64(byte)) &* 1_099_511_628_211
-        }
-        hash = (hash ^ 31) &* 1_099_511_628_211
-    }
-    return String(hash, radix: 36)
+private func radioMapVisibleBounds(
+    for mapView: GMSMapView,
+    paddingRatio: Double
+) -> PhoebeRadioMapCoordinateBounds {
+    let region = mapView.projection.visibleRegion()
+    let latitudes: [Double] = [
+        Double(region.nearLeft.latitude),
+        Double(region.nearRight.latitude),
+        Double(region.farLeft.latitude),
+        Double(region.farRight.latitude)
+    ]
+    let south: Double = latitudes.min() ?? -90.0
+    let north: Double = latitudes.max() ?? 90.0
+    let latitudePadding = Swift.max((north - south) * paddingRatio, 0.01)
+
+    let centerLongitude = normalizeLongitude(Double(mapView.camera.target.longitude))
+    let longitudeOffsets: [Double] = [
+        Double(region.nearLeft.longitude),
+        Double(region.nearRight.longitude),
+        Double(region.farLeft.longitude),
+        Double(region.farRight.longitude)
+    ].map { longitudeOffset(from: centerLongitude, to: normalizeLongitude(Double($0))) }
+    let minLongitudeOffset = longitudeOffsets.min() ?? -180.0
+    let maxLongitudeOffset = longitudeOffsets.max() ?? 180.0
+    let longitudePadding = Swift.max((maxLongitudeOffset - minLongitudeOffset) * paddingRatio, 0.01)
+    let paddedLongitudeSpan = maxLongitudeOffset - minLongitudeOffset + (longitudePadding * 2.0)
+    let coversWorldLongitude = paddedLongitudeSpan >= 360.0
+
+    return PhoebeRadioMapCoordinateBounds(
+        south: Swift.max(-90.0, south - latitudePadding),
+        north: Swift.min(90.0, north + latitudePadding),
+        west: normalizeLongitude(centerLongitude + minLongitudeOffset - longitudePadding),
+        east: normalizeLongitude(centerLongitude + maxLongitudeOffset + longitudePadding),
+        coversWorldLongitude: coversWorldLongitude
+    )
 }
 
-private func longitudeDistance(_ a: Double, _ b: Double) -> Double {
-    let diff = abs(a - b)
-    return diff > 180.0 ? 360.0 - diff : diff
+private func longitudeOffset(from origin: Double, to longitude: Double) -> Double {
+    guard origin.isFinite && longitude.isFinite else { return 0.0 }
+    let offset = longitude - origin
+    let remainder = (offset + 180.0).truncatingRemainder(dividingBy: 360.0)
+    return remainder < 0.0 ? remainder + 180.0 : remainder - 180.0
+}
+
+private func normalizeLongitude(_ longitude: Double) -> Double {
+    guard longitude.isFinite else { return 0.0 }
+    let remainder = (longitude + 180.0).truncatingRemainder(dividingBy: 360.0)
+    return remainder < 0.0 ? remainder + 180.0 : remainder - 180.0
 }
 
 private func radioMapUIColor(fromArgb argb: Int32) -> UIColor {
@@ -408,5 +590,7 @@ private func radioMapClusterThresholdDegrees(_ zoom: Double) -> Double {
     if zoom >= 3.0 { return 2.0 }
     return 3.0
 }
+
+private let RadioMapRenderPaddingRatio = 0.5
 
 #endif
