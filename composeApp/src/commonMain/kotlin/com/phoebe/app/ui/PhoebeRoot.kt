@@ -487,15 +487,14 @@ private fun PhoebeRootStateHolder(
         }
         onPathChange(canonicalNavigationPath, replace)
     }
-    LaunchedEffect(navigationPath, browseFallbackRoutes, pendingPublishedNavigationPath) {
+    LaunchedEffect(navigationPath, browseFallbackRoutes) {
         val path = navigationPath ?: return@LaunchedEffect
         val pendingPath = pendingPublishedNavigationPath
         if (pendingPath != null) {
             if (path == pendingPath) {
                 pendingPublishedNavigationPath = null
-            } else {
-                return@LaunchedEffect
             }
+            return@LaunchedEffect
         }
         val parsedRoutes = phoebeWebRoutesForPath(path)
             .withUnavailableBrowseFallback(browseFallbackRoutes)
@@ -896,6 +895,7 @@ private fun PhoebeRootStateHolder(
         {
             homePosterActionScope.launch {
                 homePosterLoading = homePosterLoading.copy(personalMix = true)
+                val loadingStartedAtMs = currentTimeMs()
                 try {
                     val preferences = personalMixPreferences.value.normalized()
                     state.ensurePersonalMixTracks(preferences.limit)
@@ -912,7 +912,10 @@ private fun PhoebeRootStateHolder(
                         playTracksFromMobile(tracks, 0)
                     }
                 } finally {
-                    delay(700L)
+                    val remainingLoadingMs = HomePosterLoadingMinDurationMs - (currentTimeMs() - loadingStartedAtMs)
+                    if (remainingLoadingMs > 0L) {
+                        delay(remainingLoadingMs)
+                    }
                     homePosterLoading = homePosterLoading.copy(personalMix = false)
                 }
             }
@@ -923,10 +926,14 @@ private fun PhoebeRootStateHolder(
         {
             homePosterActionScope.launch {
                 homePosterLoading = homePosterLoading.copy(popularMix = true)
+                val loadingStartedAtMs = currentTimeMs()
                 try {
                     state.playPopularMix().join()
                 } finally {
-                    delay(700L)
+                    val remainingLoadingMs = HomePosterLoadingMinDurationMs - (currentTimeMs() - loadingStartedAtMs)
+                    if (remainingLoadingMs > 0L) {
+                        delay(remainingLoadingMs)
+                    }
                     homePosterLoading = homePosterLoading.copy(popularMix = false)
                 }
             }
@@ -2674,6 +2681,8 @@ private fun MobilePlayerHost(
         modifier = modifier,
     )
 }
+
+private const val HomePosterLoadingMinDurationMs = 700L
 
 private fun Track?.withRadioNowPlaying(metadata: RadioNowPlayingMetadata?): Track? {
     val track = this ?: return null
