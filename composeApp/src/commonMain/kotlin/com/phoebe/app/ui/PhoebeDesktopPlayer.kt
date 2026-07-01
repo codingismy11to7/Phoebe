@@ -34,6 +34,7 @@ import com.phoebe.app.domain.RadioNowPlayingMetadata
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.isEmbyFamily
 import com.phoebe.app.domain.isNavidrome
+import com.phoebe.app.domain.isPlex
 import com.phoebe.app.feature.auth.AuthWelcomeDesktopRoute
 import com.phoebe.app.feature.auth.AuthWelcomeRouteActions
 import com.phoebe.app.feature.auth.AuthWelcomeRouteState
@@ -712,6 +713,7 @@ internal fun DesktopPlayer(
                                                 decadeMixNotice = decadeMixNotice,
                                                 radioStations = radioStations,
                                                 radioStartingIds = radioStartingIds,
+                                                showPopularMix = shellState.session.isPlex(),
                                             ),
                                             actions = DesktopHomeRouteActions(
                                                 onTrack = onSong,

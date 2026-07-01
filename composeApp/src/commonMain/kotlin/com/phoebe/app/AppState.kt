@@ -122,6 +122,11 @@ data class PendingDuplicatePlaylistAdd(
     val message: String,
 )
 
+data class PlaybackSnackbarNotice(
+    val message: String,
+    val streamUrl: String? = null,
+)
+
 class AppState(
     private val dependencies: AppDependencies,
     private val scope: CoroutineScope,
@@ -276,8 +281,8 @@ class AppState(
     private val mutablePendingDuplicatePlaylistAdd = MutableStateFlow<PendingDuplicatePlaylistAdd?>(null)
     val pendingDuplicatePlaylistAdd: StateFlow<PendingDuplicatePlaylistAdd?> = mutablePendingDuplicatePlaylistAdd.asStateFlow()
 
-    private val mutablePlaybackSnackbar = MutableStateFlow<String?>(null)
-    val playbackSnackbar: StateFlow<String?> = mutablePlaybackSnackbar.asStateFlow()
+    private val mutablePlaybackSnackbar = MutableStateFlow<PlaybackSnackbarNotice?>(null)
+    val playbackSnackbar: StateFlow<PlaybackSnackbarNotice?> = mutablePlaybackSnackbar.asStateFlow()
 
     private val mutableDecadeMixNotice = MutableStateFlow<String?>(null)
     val decadeMixNotice: StateFlow<String?> = mutableDecadeMixNotice
@@ -508,7 +513,7 @@ class AppState(
                     ?: title?.let { "Couldn't play $it." }
                     ?: "Couldn't play that song."
                 mutableMessage.value = notice
-                mutablePlaybackSnackbar.value = notice
+                surfacePlaybackSnackbar(notice, state.currentTrack?.radioPlaybackStreamUrlOrNull())
             }
         }
         scope.launch {
@@ -518,7 +523,7 @@ class AppState(
                 lastSerial = state.playbackNoticeSerial
                 val notice = state.playbackNoticeMessage ?: return@collect
                 mutableMessage.value = notice
-                mutablePlaybackSnackbar.value = notice
+                surfacePlaybackSnackbar(notice)
             }
         }
     }
@@ -533,7 +538,7 @@ class AppState(
                     if (message == "Chromecast requires Chrome with Cast support.") return@collect
                     if (message.startsWith("Sending ") && message.endsWith(" to Chromecast...")) return@collect
                     mutableMessage.value = message
-                    mutablePlaybackSnackbar.value = message
+                    surfacePlaybackSnackbar(message)
                 }
         }
     }
@@ -542,9 +547,19 @@ class AppState(
         mutablePlaybackSnackbar.value = null
     }
 
+    private fun surfacePlaybackSnackbar(message: String, streamUrl: String? = null) {
+        mutablePlaybackSnackbar.value = PlaybackSnackbarNotice(
+            message = message,
+            streamUrl = streamUrl?.takeIf { it.isNotBlank() },
+        )
+    }
+
+    private fun Track.radioPlaybackStreamUrlOrNull(): String? =
+        streamUrl.takeIf { id.startsWith("radio:") && it.isNotBlank() }
+
     private fun surfaceTransientNotice(notice: String) {
         mutableMessage.value = notice
-        mutablePlaybackSnackbar.value = notice
+        surfacePlaybackSnackbar(notice)
     }
 
     /**
@@ -2150,7 +2165,7 @@ class AppState(
         if (station == null) {
             val message = "Radio station not found."
             mutableMessage.value = message
-            mutablePlaybackSnackbar.value = message
+            surfacePlaybackSnackbar(message)
             return@launch
         }
         playInternetRadioStation(station)
@@ -2181,7 +2196,7 @@ class AppState(
                 mutableInternetRadioStartingIds.value = mutableInternetRadioStartingIds.value - station.id
                 val message = error.message ?: "Couldn't start ${station.name}."
                 mutableMessage.value = message
-                mutablePlaybackSnackbar.value = message
+                surfacePlaybackSnackbar(message, station.streamUrl)
                 return@launch
         }
         try {
@@ -2202,7 +2217,7 @@ class AppState(
         dependencies.audioPlayer.stopPlayback()
         val message = "Couldn't start ${station.name}."
         mutableMessage.value = message
-        mutablePlaybackSnackbar.value = message
+        surfacePlaybackSnackbar(message, track.streamUrl.ifBlank { station.streamUrl })
     }
 
     fun prependRecentSearch(item: RecentSearchItem) = scope.launch {
@@ -2260,14 +2275,14 @@ class AppState(
         dependencies.appUpdateService.checkForUpdates { error ->
             val message = error.message ?: "Couldn't check for updates."
             mutableMessage.value = message
-            mutablePlaybackSnackbar.value = message
+            surfacePlaybackSnackbar(message)
         }
     }
 
     fun installAvailableUpdate() = scope.launch {
         dependencies.appUpdateService.installAvailableUpdate { message ->
             mutableMessage.value = message
-            mutablePlaybackSnackbar.value = message
+            surfacePlaybackSnackbar(message)
         }
     }
 
@@ -2447,7 +2462,7 @@ class AppState(
 
     private fun launchDownload(block: suspend () -> DownloadServiceResult): Job {
         cellularDownloadNotice()?.let { notice ->
-            mutablePlaybackSnackbar.value = notice
+            surfacePlaybackSnackbar(notice)
         }
         lateinit var downloadJob: Job
         downloadJob = scope.launch {
@@ -2456,7 +2471,7 @@ class AppState(
                 val result = block()
                 mutableMessage.value = result.message
                 if (result.message.startsWith("Downloads are paused")) {
-                    mutablePlaybackSnackbar.value = result.message
+                    surfacePlaybackSnackbar(result.message)
                 }
                 dependencies.downloadService.notifyDownloadFinishedIfNeeded(result.batch)
             } catch (error: CancellationException) {

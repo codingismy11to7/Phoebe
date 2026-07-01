@@ -230,6 +230,7 @@ import com.phoebe.app.player.CastState
 import com.phoebe.app.domain.isEmbyFamily
 import com.phoebe.app.domain.isJellyfin
 import com.phoebe.app.domain.isNavidrome
+import com.phoebe.app.domain.isPlex
 import com.phoebe.app.domain.isRemoteLibraryTrack
 import com.phoebe.app.domain.supportsPlexPlaylists
 import com.phoebe.app.platform.createPlatformHttpClient
@@ -663,6 +664,7 @@ internal fun MobileBrowseShell(
                         radioStations,
                         radioStartingIds,
                         decadeMixNotice,
+                        session?.providerType,
                     ) {
                         MobileHomeRouteState(
                             homeUiState = homeUiState,
@@ -674,6 +676,7 @@ internal fun MobileBrowseShell(
                             radioStartingIds = radioStartingIds,
                             decadeMixNotice = decadeMixNotice,
                             homeScreenLayoutMode = homeScreenLayoutMode,
+                            showPopularMix = session.isPlex(),
                         )
                     }
                     val mobileHomeCallbacks = remember(

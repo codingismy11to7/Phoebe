@@ -208,6 +208,7 @@ private class DesktopRadioMapBrowserServer(
                 "/", "/radio-map" -> exchange.sendHtml(currentHtml())
                 "/select" -> exchange.handleItemAction(onSelected)
                 "/play" -> exchange.handlePlayAction(onPlay)
+                "/open-url" -> exchange.handleOpenUrl()
                 "/zoom" -> exchange.handleZoom()
                 "/viewport" -> exchange.handleViewport()
                 else -> exchange.sendText("Not found", status = 404)
@@ -236,10 +237,7 @@ private class DesktopRadioMapBrowserServer(
     }
 
     fun openInBrowser() {
-        val desktop = runCatching { if (Desktop.isDesktopSupported()) Desktop.getDesktop() else null }.getOrNull()
-        if (desktop != null && desktop.isSupported(Desktop.Action.BROWSE)) {
-            runCatching { desktop.browse(URI(url)) }
-        }
+        openUrlInBrowser(url)
     }
 
     fun dispose() {
@@ -274,6 +272,14 @@ private class DesktopRadioMapBrowserServer(
         sendText("ok")
     }
 
+    private fun HttpExchange.handleOpenUrl() {
+        val url = queryParameters()["url"].orEmpty().trim()
+        if (url.isRadioMapExternalUrl()) {
+            executor.execute { openUrlInBrowser(url) }
+        }
+        sendText("ok")
+    }
+
     private fun HttpExchange.handleZoom() {
         val zoom = queryParameters()["zoom"]?.toDoubleOrNull()
         if (zoom != null && zoom.isFinite()) {
@@ -296,7 +302,17 @@ private class DesktopRadioMapBrowserServer(
         }
         sendText("ok")
     }
+
+    private fun openUrlInBrowser(url: String) {
+        val desktop = runCatching { if (Desktop.isDesktopSupported()) Desktop.getDesktop() else null }.getOrNull()
+        if (desktop != null && desktop.isSupported(Desktop.Action.BROWSE)) {
+            runCatching { desktop.browse(URI(url)) }
+        }
+    }
 }
+
+private fun String.isRadioMapExternalUrl(): Boolean =
+    startsWith("http://", ignoreCase = true) || startsWith("https://", ignoreCase = true)
 
 private data class DesktopRadioMapSnapshot(
     val url: String,

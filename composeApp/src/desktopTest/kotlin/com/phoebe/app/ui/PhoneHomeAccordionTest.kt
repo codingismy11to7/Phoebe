@@ -104,6 +104,7 @@ class PhoneHomeAccordionTest {
         mainClock.advanceTimeBy(260)
         waitForIdle()
         assertTextExists("PERSONAL\nMIX")
+        assertTextExists("POPULAR")
         assertTextExists("DECADE\nMIX")
         assertTextExists("LIBRARY\nRADIO")
 
@@ -119,6 +120,50 @@ class PhoneHomeAccordionTest {
         assertTextDoesNotExist("ARTIST\nMOOD")
         assertTextExists("Recently Played")
         assertTextExists("Most Played")
+    }
+
+    @OptIn(ExperimentalTestApi::class, ExperimentalComposeUiApi::class)
+    @Test
+    fun phoneHomeMixesHidePopularWhenUnsupported() = runDesktopComposeUiTest(width = 430, height = 932) {
+        setContent {
+            PhoebeTheme {
+                Box(Modifier.size(430.dp, 932.dp)) {
+                    MobileHomeScreen(
+                        state = HomeUiState(),
+                        listState = rememberLazyListState(),
+                        layoutMode = HomeScreenLayoutMode.Compact,
+                        showPopularMix = false,
+                        homeSections = listOf(HomeSection.Mixes),
+                        onArtist = {},
+                        onAlbum = {},
+                        onPlaylist = {},
+                        onRecentSongs = {},
+                        onRecentArtists = {},
+                        onRecentAlbums = {},
+                        onFavoritePlaylists = {},
+                        onFavoriteArtists = {},
+                        onFavoriteAlbums = {},
+                        onCollections = {},
+                        onRecentlyPlayed = {},
+                        onMostPlayed = {},
+                        onRefreshArtists = {},
+                        onRefreshAlbums = {},
+                        onPlayTracks = { _, _ -> },
+                        onAddToUpNext = {},
+                        onDownload = {},
+                    )
+                }
+            }
+        }
+
+        waitForIdle()
+        onNodeWithText("Mixes").performClick()
+        mainClock.advanceTimeBy(260)
+        waitForIdle()
+
+        assertTrue(onAllNodesWithText("PERSONAL\nMIX").fetchSemanticsNodes().isNotEmpty())
+        assertFalse(onAllNodesWithText("POPULAR").fetchSemanticsNodes().isNotEmpty())
+        assertTrue(onAllNodesWithText("DECADE\nMIX").fetchSemanticsNodes().isNotEmpty())
     }
 
     @OptIn(ExperimentalTestApi::class, ExperimentalComposeUiApi::class)

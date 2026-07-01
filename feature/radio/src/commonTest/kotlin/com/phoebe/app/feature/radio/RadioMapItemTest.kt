@@ -271,6 +271,7 @@ class RadioMapItemTest {
             id = "kexp-1",
             name = "KEXP's One",
             streamUrl = "https://stream.example/kexp-1",
+            homepageUrl = "https://kexp.example/",
             countryCode = "US",
             geoLat = 47.608,
             geoLong = -122.335,
@@ -324,6 +325,14 @@ class RadioMapItemTest {
         assertTrue(html.contains("playSelectedRadioMapStation"))
         assertTrue(html.contains("postMapMessage('playItem', station.id, null, null)"))
         assertTrue(html.contains("window.updateRadioMapSelection(station.id);"))
+        assertTrue(html.contains("selectionHomepageLink"))
+        assertTrue(html.contains("selectionStreamLink"))
+        assertTrue(html.contains("copySelectedRadioMapStreamUrl"))
+        assertTrue(html.contains("openExternalRadioMapUrl"))
+        assertTrue(html.contains("overflow-wrap: anywhere"))
+        assertTrue(html.contains("row.style.display = 'grid'"))
+        assertTrue(html.contains("\"streamUrl\": \"https://stream.example/kexp-1\""))
+        assertTrue(html.contains("\"homepageUrl\": \"https://kexp.example/\""))
         assertTrue(html.contains("currentViewportPayload"))
         assertFalse(html.contains("userInteractedWithMap"))
         assertFalse(html.contains("id=\"searchArea\""))

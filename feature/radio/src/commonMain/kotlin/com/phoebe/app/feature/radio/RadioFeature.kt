@@ -54,7 +54,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -62,10 +64,12 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -85,6 +89,7 @@ import com.phoebe.app.ui.PhoebeIconView
 import com.phoebe.app.ui.PhoebeUi
 import com.phoebe.app.ui.SectionLabel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.debounce
@@ -1100,6 +1105,13 @@ private fun RadioMapStationSnackbar(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            RadioStreamUrlBlock(
+                streamUrl = station.streamUrl,
+                homepageUrl = station.homepageUrl,
+                labelColor = snackbarSecondaryText,
+                valueColor = snackbarPrimaryText,
+                actionColor = PhoebeUi.accentLight,
+            )
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1143,6 +1155,99 @@ private fun RadioMapStationSnackbar(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun RadioStreamUrlBlock(
+    streamUrl: String,
+    homepageUrl: String?,
+    labelColor: Color,
+    valueColor: Color,
+    actionColor: Color,
+    modifier: Modifier = Modifier,
+) {
+    if (streamUrl.isBlank()) return
+
+    @Suppress("DEPRECATION")
+    val clipboardManager = LocalClipboardManager.current
+    val uriHandler = LocalUriHandler.current
+    var copied by remember(streamUrl) { mutableStateOf(false) }
+    val streamLink = streamUrl.radioExternalUrlOrNull()
+    val displayStreamUrl = remember(streamUrl) { streamUrl.radioUrlBreakText() }
+    val homepageLink = homepageUrl.radioExternalUrlOrNull()
+
+    LaunchedEffect(copied, streamUrl) {
+        if (copied) {
+            delay(1_600L)
+            copied = false
+        }
+    }
+
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        homepageLink?.let { url ->
+            Text(
+                "Home page",
+                color = labelColor,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                url,
+                color = actionColor,
+                fontSize = 11.sp,
+                lineHeight = 14.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                textDecoration = TextDecoration.Underline,
+                modifier = Modifier.clickable { uriHandler.openUri(url) },
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Stream URL",
+                color = labelColor,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            TextButton(
+                onClick = {
+                    clipboardManager.setText(AnnotatedString(streamUrl))
+                    copied = true
+                },
+                modifier = Modifier.widthIn(min = 72.dp),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                colors = ButtonDefaults.textButtonColors(contentColor = actionColor),
+            ) {
+                Text(
+                    if (copied) "Copied" else "Copy URL",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
+        Text(
+            displayStreamUrl,
+            color = if (streamLink != null) actionColor else valueColor,
+            fontSize = 11.sp,
+            lineHeight = 14.sp,
+            overflow = TextOverflow.Clip,
+            textDecoration = if (streamLink != null) TextDecoration.Underline else null,
+            modifier = streamLink
+                ?.let { url -> Modifier.clickable { uriHandler.openUri(url) } }
+                ?: Modifier,
+        )
     }
 }
 
@@ -1394,44 +1499,82 @@ private fun RadioMapStationPanel(
     starting: Boolean,
     onPlay: () -> Unit,
 ) {
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(PhoebeUi.elevatedFill)
             .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(8.dp))
             .padding(12.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        ArtworkImage(
-            seed = station.name,
-            thumbUrl = station.faviconUrlOrFallback,
-            fallbackThumbUrl = station.fallbackArtworkUrl,
-            modifier = Modifier.size(44.dp),
-            radius = 8.dp,
-            elevated = false,
-        )
-        Column(Modifier.weight(1f)) {
-            Text(station.name, color = PhoebeUi.primaryText, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(
-                if (approximate) "Approximate: $locationLabel" else locationLabel,
-                color = PhoebeUi.secondaryText,
-                fontSize = 12.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ArtworkImage(
+                seed = station.name,
+                thumbUrl = station.faviconUrlOrFallback,
+                fallbackThumbUrl = station.fallbackArtworkUrl,
+                modifier = Modifier.size(44.dp),
+                radius = 8.dp,
+                elevated = false,
             )
-            Text(station.displaySubtitle, color = PhoebeUi.mutedText, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Column(Modifier.weight(1f)) {
+                Text(station.name, color = PhoebeUi.primaryText, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    if (approximate) "Approximate: $locationLabel" else locationLabel,
+                    color = PhoebeUi.secondaryText,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(station.displaySubtitle, color = PhoebeUi.mutedText, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            FilledTonalButton(onClick = onPlay, enabled = !starting) {
+                if (starting) {
+                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = PhoebeUi.accentLight)
+                } else {
+                    Text("Play")
+                }
+            }
         }
-        FilledTonalButton(onClick = onPlay, enabled = !starting) {
-            if (starting) {
-                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = PhoebeUi.accentLight)
-            } else {
-                Text("Play")
+        RadioStreamUrlBlock(
+            streamUrl = station.streamUrl,
+            homepageUrl = station.homepageUrl,
+            labelColor = PhoebeUi.secondaryText,
+            valueColor = PhoebeUi.primaryText,
+            actionColor = PhoebeUi.accentLight,
+        )
+    }
+}
+
+private fun String.radioUrlBreakText(): String =
+    buildString(length + length / 8) {
+        this@radioUrlBreakText.forEach { char ->
+            append(char)
+            if (
+                char == '/' ||
+                char == '?' ||
+                char == '&' ||
+                char == '=' ||
+                char == '.' ||
+                char == ':' ||
+                char == '-'
+            ) {
+                append('\u200B')
             }
         }
     }
-}
+
+private fun String?.radioExternalUrlOrNull(): String? =
+    this
+        ?.trim()
+        ?.takeIf { url ->
+            url.startsWith("http://", ignoreCase = true) ||
+                url.startsWith("https://", ignoreCase = true)
+        }
 
 @Composable
 private fun RadioCountryRow(

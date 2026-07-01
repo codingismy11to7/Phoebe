@@ -436,7 +436,7 @@ class RealAudioPlaybackDesktopTest {
     }
 
     @Test
-    fun remoteNoExtensionMp3StreamUsesSampledStreamFromContentType() {
+    fun remoteNoExtensionMp3StreamUsesJavaFxInsteadOfSampledPlayback() {
         assumeRealAudioTestsEnabled()
 
         val fixture = fixtureBytes("wikimedia-example.mp3")
@@ -465,17 +465,17 @@ class RealAudioPlaybackDesktopTest {
 
             assertTrue(
                 waitUntil(timeoutMs = 25_000L) {
-                    diagnostics.hasEngine(PlaybackEnginePath.SampledStream) &&
-                        player.state.value.isPlaying &&
-                        diagnostics.hasEnergy(PlaybackEnginePath.SampledStream)
+                    diagnostics.hasEngine(PlaybackEnginePath.JavaFxMediaPlayer) &&
+                        player.state.value.isPlaying
                 },
-                "No-extension remote MP3 should use sampled stream after probing Content-Type; " +
+                "No-extension remote MP3 should use JavaFX instead of Java Sound; " +
                     "engines=${diagnostics.engineEvents()} requests=${requestEvents.toList()} " +
                     "errors=${diagnostics.errorEvents()}",
             )
             assertFalse(
-                diagnostics.hasEngine(PlaybackEnginePath.JavaFxMediaPlayer),
-                "No-extension remote MP3 should not fall through to JavaFX once sampled streaming starts.",
+                diagnostics.hasEngine(PlaybackEnginePath.SampledStream) ||
+                    diagnostics.hasEngine(PlaybackEnginePath.SampledClip),
+                "No-extension remote MP3 must not use Java Sound because MP3 decoding can produce static",
             )
         } finally {
             player.releaseForTests()

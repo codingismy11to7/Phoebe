@@ -136,9 +136,11 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.composed
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -155,6 +157,7 @@ import androidx.compose.ui.zIndex
 import kotlin.math.roundToInt
 import com.phoebe.app.AppState
 import com.phoebe.app.PendingDuplicatePlaylistAdd
+import com.phoebe.app.PlaybackSnackbarNotice
 import com.phoebe.app.feature.auth.AuthWelcomeMobileRoute
 import com.phoebe.app.feature.auth.AuthWelcomeRouteActions
 import com.phoebe.app.feature.auth.AuthWelcomeRouteState
@@ -1805,6 +1808,12 @@ private fun PhoebeRootStateHolder(
                 BoxWithConstraints(Modifier.fillMaxSize()) {
                     val screenHeightPx = constraints.maxHeight.toFloat()
                     val dragRangePx = (screenHeightPx - actualBottomBarHeightPx - miniPlayerHeightPx).coerceAtLeast(1f)
+                    val radioMapOcclusionTopPx = if (contentRoute == PhoebeRoute.RadioMap && currentTrack != null) {
+                        dragRangePx * (1f - playerExpansionFraction.value)
+                    } else {
+                        null
+                    }
+                    RadioMapOverlayOcclusionEffect(radioMapOcclusionTopPx)
 
                     if (mobileChromeVisible) {
                         Box(
@@ -2302,7 +2311,7 @@ private fun PhoebeRootStateHolder(
             }
         }
         PlaybackFailureSnackbar(
-            message = playbackSnackbar,
+            notice = playbackSnackbar,
             onDismiss = state::dismissPlaybackSnackbar,
             modifier = Modifier.align(Alignment.BottomCenter),
         )
@@ -2330,12 +2339,23 @@ private fun PhoebeRootStateHolder(
 
 @Composable
 private fun PlaybackFailureSnackbar(
-    message: String?,
+    notice: PlaybackSnackbarNotice?,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    LaunchedEffect(message) {
-        if (message != null) {
+    val message = notice?.message
+    val streamUrl = notice?.streamUrl
+    @Suppress("DEPRECATION")
+    val clipboardManager = LocalClipboardManager.current
+    var copied by remember(notice) { mutableStateOf(false) }
+    val snackbarMessage = if (streamUrl == null) {
+        message.orEmpty()
+    } else {
+        "${message.orEmpty()}\n$streamUrl"
+    }
+
+    LaunchedEffect(notice) {
+        if (notice != null) {
             delay(5_000L)
             onDismiss()
         }
@@ -2350,9 +2370,20 @@ private fun PlaybackFailureSnackbar(
             .zIndex(20f),
     ) {
         PhoebeActionSnackbar(
-            message = message.orEmpty(),
-            actionLabel = "Dismiss",
-            onAction = onDismiss,
+            message = snackbarMessage,
+            actionLabel = when {
+                streamUrl != null && copied -> "Copied"
+                streamUrl != null -> "Copy URL"
+                else -> "Dismiss"
+            },
+            onAction = {
+                if (streamUrl == null) {
+                    onDismiss()
+                } else {
+                    clipboardManager.setText(AnnotatedString(streamUrl))
+                    copied = true
+                }
+            },
         )
     }
 }
@@ -2420,6 +2451,8 @@ private fun PhoebeActionSnackbar(
                 color = PhoebeUi.primaryText,
                 fontSize = 14.sp,
                 lineHeight = 19.sp,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
             TextButton(onClick = onAction) {
