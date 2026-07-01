@@ -136,7 +136,7 @@ class RadioRepository(
         mutableState.value = current.copy(
             globeStations = stations,
             globeLoadedStationCount = stations.size,
-            globeMapLoaded = true,
+            globeMapLoaded = result.isSuccess,
             globeLoading = false,
             globeAutoPrefetching = false,
             globeErrorMessage = result.exceptionOrNull()?.message

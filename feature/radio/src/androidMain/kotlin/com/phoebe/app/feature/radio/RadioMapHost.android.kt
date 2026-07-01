@@ -418,10 +418,9 @@ private fun LatLng.androidSpiderfyLocation(index: Int, count: Int): LatLng {
 }
 
 private fun Double.wrapAndroidRadioMapLongitude(): Double {
-    var wrapped = this
-    while (wrapped > 180.0) wrapped -= 360.0
-    while (wrapped < -180.0) wrapped += 360.0
-    return wrapped
+    if (!isFinite()) return 0.0
+    val wrapped = (this + 180.0) % 360.0
+    return if (wrapped < 0.0) wrapped + 180.0 else wrapped - 180.0
 }
 
 private data class ExpandedRadioMapCluster(

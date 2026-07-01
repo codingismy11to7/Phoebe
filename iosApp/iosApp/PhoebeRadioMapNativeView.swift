@@ -560,17 +560,16 @@ private func radioMapVisibleBounds(
 }
 
 private func longitudeOffset(from origin: Double, to longitude: Double) -> Double {
-    var offset = longitude - origin
-    while offset > 180.0 { offset -= 360.0 }
-    while offset < -180.0 { offset += 360.0 }
-    return offset
+    guard origin.isFinite && longitude.isFinite else { return 0.0 }
+    let offset = longitude - origin
+    let remainder = (offset + 180.0).truncatingRemainder(dividingBy: 360.0)
+    return remainder < 0.0 ? remainder + 180.0 : remainder - 180.0
 }
 
 private func normalizeLongitude(_ longitude: Double) -> Double {
-    var normalized = longitude
-    while normalized > 180.0 { normalized -= 360.0 }
-    while normalized < -180.0 { normalized += 360.0 }
-    return normalized
+    guard longitude.isFinite else { return 0.0 }
+    let remainder = (longitude + 180.0).truncatingRemainder(dividingBy: 360.0)
+    return remainder < 0.0 ? remainder + 180.0 : remainder - 180.0
 }
 
 private func radioMapUIColor(fromArgb argb: Int32) -> UIColor {
