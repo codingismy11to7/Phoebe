@@ -81,6 +81,9 @@ internal fun radioMapHtml(
           <meta name="viewport" content="initial-scale=1, width=device-width" />
           <style>
             html, body, #map { width: 100%; height: 100%; margin: 0; background: $mapBackground; overflow: hidden; }
+            html, body, #map, #selection, button {
+              -webkit-tap-highlight-color: transparent;
+            }
             body.theme-dark {
               --phoebe-map-popup-bg: rgba(13, 18, 29, 0.96);
               --phoebe-map-popup-border: rgba(255, 255, 255, 0.10);
@@ -417,11 +420,6 @@ internal fun radioMapHtml(
                   focusMapOnStation(station);
                   setStatus('Showing ' + targetLabel + '.', true);
                   return;
-                }
-                if (window.parent && window.parent !== window) {
-                  postMapMessage('selectItem', station.id, null, null);
-                } else {
-                  window.PhoebeRadioMap?.selectItem?.(station.id);
                 }
                 postDesktopBridge('select', station.id, null, null);
                 window.webkit?.messageHandlers?.phoebeRadioMap?.postMessage?.(station.id);

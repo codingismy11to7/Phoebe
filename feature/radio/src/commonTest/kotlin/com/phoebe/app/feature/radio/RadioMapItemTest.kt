@@ -323,6 +323,7 @@ class RadioMapItemTest {
         assertTrue(html.contains("postMapMessage('selectItem', station.id, null, null)"))
         assertTrue(html.contains("playSelectedRadioMapStation"))
         assertTrue(html.contains("postMapMessage('playItem', station.id, null, null)"))
+        assertTrue(html.contains("window.updateRadioMapSelection(station.id);"))
         assertTrue(html.contains("currentViewportPayload"))
         assertFalse(html.contains("userInteractedWithMap"))
         assertFalse(html.contains("id=\"searchArea\""))

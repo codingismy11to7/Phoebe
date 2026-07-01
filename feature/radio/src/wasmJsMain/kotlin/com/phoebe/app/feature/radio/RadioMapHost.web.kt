@@ -81,6 +81,10 @@ internal actual fun RadioMapHost(
             html = initialHtml,
             onSelected = { itemId ->
                 val item = currentItems.value.findRadioMapItem(itemId) ?: return@createRadioMapIframe
+                if (item is RadioMapItem.Station) {
+                    // The iframe owns station selection UI on web; forwarding every tap redraws the hidden Compose canvas behind it.
+                    return@createRadioMapIframe
+                }
                 currentOnItemSelected.value(item)
             },
             onPlay = { itemId ->
@@ -176,6 +180,7 @@ private data class RadioMapWebBounds(
       iframe.style.background = "#080b12";
       iframe.style.zIndex = "2";
       iframe.style.pointerEvents = "auto";
+      iframe.style.setProperty("-webkit-tap-highlight-color", "transparent");
       document.body.appendChild(iframe);
       const bridgeHost = typeof window !== "undefined" ? window : globalThis;
       const bridge = bridgeHost.PhoebeRadioMap || {};
