@@ -148,6 +148,7 @@ data class MobileHomeRouteState(
     val radioStartingIds: Set<String>,
     val decadeMixNotice: String?,
     val homeScreenLayoutMode: HomeScreenLayoutMode = HomeScreenLayoutMode.Default,
+    val showPopularMix: Boolean = true,
 )
 
 @Immutable
@@ -213,6 +214,7 @@ fun MobileHomeRoute(
         posterLoading = routeState.posterLoading,
         onPlayPersonalMix = callbacks.onPlayPersonalMix,
         onPlayPopularMix = callbacks.onPlayPopularMix,
+        showPopularMix = routeState.showPopularMix,
         onPlayTracks = callbacks.onPlayTracks,
         onAddToUpNext = callbacks.onAddToUpNext,
         onDownload = callbacks.onDownload,
@@ -269,6 +271,7 @@ fun DesktopHomeScreen(
     posterLoading: HomePosterLoadingState = HomePosterLoadingState(),
     onPlayPersonalMix: () -> Unit = {},
     onPlayPopularMix: () -> Unit = {},
+    showPopularMix: Boolean = true,
     onPlayTracks: (List<Track>, Int) -> Unit,
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
@@ -322,7 +325,7 @@ fun DesktopHomeScreen(
         normalizedHomeSections(homeSections).forEach { section ->
             when (section) {
                 HomeSection.Mixes -> item("mixes") {
-                    DesktopMixesPanel(onPlayPersonalMix, onPlayPopularMix, posterLoading, radioStations, radioStartingIds, onPlayRadioStation, onClearDecadeMixNotice, panelStyle = panelStyle) {
+                    DesktopMixesPanel(onPlayPersonalMix, onPlayPopularMix, showPopularMix, posterLoading, radioStations, radioStartingIds, onPlayRadioStation, onClearDecadeMixNotice, panelStyle = panelStyle) {
                         showDecadeMix = true
                     }
                 }
@@ -406,6 +409,7 @@ fun MobileHomeScreen(
     posterLoading: HomePosterLoadingState = HomePosterLoadingState(),
     onPlayPersonalMix: () -> Unit = {},
     onPlayPopularMix: () -> Unit = {},
+    showPopularMix: Boolean = true,
     onPlayTracks: (List<Track>, Int) -> Unit,
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
@@ -470,6 +474,7 @@ fun MobileHomeScreen(
                 posterLoading = posterLoading,
                 onPlayPersonalMix = onPlayPersonalMix,
                 onPlayPopularMix = onPlayPopularMix,
+                showPopularMix = showPopularMix,
                 radioStations = radioStations,
                 radioStartingIds = radioStartingIds,
                 onPlayRadioStation = onPlayRadioStation,
@@ -513,6 +518,7 @@ fun MobileHomeScreen(
                 posterLoading = posterLoading,
                 onPlayPersonalMix = onPlayPersonalMix,
                 onPlayPopularMix = onPlayPopularMix,
+                showPopularMix = showPopularMix,
                 radioStations = radioStations,
                 radioStartingIds = radioStartingIds,
                 onPlayRadioStation = onPlayRadioStation,
@@ -722,6 +728,7 @@ private fun MobileHomeContent(
     posterLoading: HomePosterLoadingState,
     onPlayPersonalMix: () -> Unit,
     onPlayPopularMix: () -> Unit,
+    showPopularMix: Boolean,
     radioStations: List<PlexRadioStation>,
     radioStartingIds: Set<String>,
     onPlayRadioStation: (PlexRadioStation) -> Unit,
@@ -808,12 +815,13 @@ private fun MobileHomeContent(
                                 posterLoading = posterLoading,
                                 radioStations = radioStations,
                                 radioStartingIds = radioStartingIds,
+                                showPopularMix = showPopularMix,
                                 onPlayRadioStation = onPlayRadioStation,
                                 onClearDecadeMixNotice = onClearDecadeMixNotice,
                                 onShowDecadeMix = onShowDecadeMix,
                             )
                         } else {
-                            MobileMixesSection(onPlayPersonalMix, onPlayPopularMix, posterLoading, radioStations, radioStartingIds, onPlayRadioStation, onClearDecadeMixNotice, onShowDecadeMix)
+                            MobileMixesSection(onPlayPersonalMix, onPlayPopularMix, showPopularMix, posterLoading, radioStations, radioStartingIds, onPlayRadioStation, onClearDecadeMixNotice, onShowDecadeMix)
                         }
                     }
                     HomeSection.Collections -> item(key = "collections", contentType = "collections-section") {
@@ -941,6 +949,7 @@ private fun MobileExpandedHomeContent(
     posterLoading: HomePosterLoadingState,
     onPlayPersonalMix: () -> Unit,
     onPlayPopularMix: () -> Unit,
+    showPopularMix: Boolean,
     radioStations: List<PlexRadioStation>,
     radioStartingIds: Set<String>,
     onPlayRadioStation: (PlexRadioStation) -> Unit,
@@ -1038,6 +1047,7 @@ private fun MobileExpandedHomeContent(
                         ExpandedMixesShelf(
                             onPlayPersonalMix = onPlayPersonalMix,
                             onPlayPopularMix = onPlayPopularMix,
+                            showPopularMix = showPopularMix,
                             posterLoading = posterLoading,
                             radioStations = radioStations,
                             radioStartingIds = radioStartingIds,
@@ -1103,6 +1113,7 @@ private fun ExpandedHomeShelf(
 private fun ExpandedMixesShelf(
     onPlayPersonalMix: () -> Unit,
     onPlayPopularMix: () -> Unit,
+    showPopularMix: Boolean,
     posterLoading: HomePosterLoadingState,
     radioStations: List<PlexRadioStation>,
     radioStartingIds: Set<String>,
@@ -1121,15 +1132,17 @@ private fun ExpandedMixesShelf(
                 onClick = onPlayPersonalMix,
             )
         }
-        item(key = "popular-mix", contentType = "expanded-mix-action") {
-            HomeMixPosterCard(
-                "popular",
-                PhoebeIcon.PlaylistPlay,
-                Res.drawable.mix_popular,
-                Modifier.width(MobileHomePosterCardSize),
-                loading = posterLoading.popularMix,
-                onClick = onPlayPopularMix,
-            )
+        if (showPopularMix) {
+            item(key = "popular-mix", contentType = "expanded-mix-action") {
+                HomeMixPosterCard(
+                    "popular",
+                    PhoebeIcon.PlaylistPlay,
+                    Res.drawable.mix_popular,
+                    Modifier.width(MobileHomePosterCardSize),
+                    loading = posterLoading.popularMix,
+                    onClick = onPlayPopularMix,
+                )
+            }
         }
         item(key = "decade-mix", contentType = "expanded-mix-action") {
             HomeMixPosterCard("Decade Mix", PhoebeIcon.Calendar, Res.drawable.mix_decade, Modifier.width(MobileHomePosterCardSize)) {
@@ -1633,6 +1646,7 @@ private fun PhoneMixesAccordionSection(
     onToggle: () -> Unit,
     onPlayPersonalMix: () -> Unit,
     onPlayPopularMix: () -> Unit,
+    showPopularMix: Boolean,
     posterLoading: HomePosterLoadingState,
     radioStations: List<PlexRadioStation>,
     radioStartingIds: Set<String>,
@@ -1640,24 +1654,26 @@ private fun PhoneMixesAccordionSection(
     onClearDecadeMixNotice: () -> Unit,
     onShowDecadeMix: () -> Unit,
 ) {
-    val actions = listOf(
-        PhoneHomePosterAction(
+    val actions = buildList {
+        add(PhoneHomePosterAction(
             "Personal Mix",
             PhoebeIcon.Person,
             Res.drawable.mix_personal,
             enabled = !posterLoading.personalMix,
             loading = posterLoading.personalMix,
             onClick = onPlayPersonalMix,
-        ),
-        PhoneHomePosterAction(
-            "popular",
-            PhoebeIcon.PlaylistPlay,
-            Res.drawable.mix_popular,
-            enabled = !posterLoading.popularMix,
-            loading = posterLoading.popularMix,
-            onClick = onPlayPopularMix,
-        ),
-        PhoneHomePosterAction(
+        ))
+        if (showPopularMix) {
+            add(PhoneHomePosterAction(
+                "popular",
+                PhoebeIcon.PlaylistPlay,
+                Res.drawable.mix_popular,
+                enabled = !posterLoading.popularMix,
+                loading = posterLoading.popularMix,
+                onClick = onPlayPopularMix,
+            ))
+        }
+        add(PhoneHomePosterAction(
             label = "Decade Mix",
             icon = PhoebeIcon.Calendar,
             artwork = Res.drawable.mix_decade,
@@ -1665,8 +1681,8 @@ private fun PhoneMixesAccordionSection(
                 onClearDecadeMixNotice()
                 onShowDecadeMix()
             },
-        ),
-    ) + radioStations.map { station ->
+        ))
+    } + radioStations.map { station ->
         val starting = station.key in radioStartingIds
         PhoneHomePosterAction(
             label = if (starting) "Starting..." else station.mixTitle(),
@@ -2205,6 +2221,7 @@ private fun MobilePlayedHistoryShortcuts(
 private fun DesktopMixesPanel(
     onPlayPersonalMix: () -> Unit,
     onPlayPopularMix: () -> Unit,
+    showPopularMix: Boolean,
     posterLoading: HomePosterLoadingState,
     radioStations: List<PlexRadioStation>,
     radioStartingIds: Set<String>,
@@ -2229,15 +2246,17 @@ private fun DesktopMixesPanel(
                     onClick = onPlayPersonalMix,
                 )
             }
-            item("popular-mix", contentType = "mix-action") {
-                HomeMixPosterCard(
-                    "popular",
-                    PhoebeIcon.PlaylistPlay,
-                    Res.drawable.mix_popular,
-                    Modifier.width(148.dp),
-                    loading = posterLoading.popularMix,
-                    onClick = onPlayPopularMix,
-                )
+            if (showPopularMix) {
+                item("popular-mix", contentType = "mix-action") {
+                    HomeMixPosterCard(
+                        "popular",
+                        PhoebeIcon.PlaylistPlay,
+                        Res.drawable.mix_popular,
+                        Modifier.width(148.dp),
+                        loading = posterLoading.popularMix,
+                        onClick = onPlayPopularMix,
+                    )
+                }
             }
             item("decade-mix", contentType = "mix-action") {
                 HomeMixPosterCard(
@@ -2284,6 +2303,7 @@ private fun DesktopMixesPanel(
 private fun MobileMixesSection(
     onPlayPersonalMix: () -> Unit,
     onPlayPopularMix: () -> Unit,
+    showPopularMix: Boolean,
     posterLoading: HomePosterLoadingState,
     radioStations: List<PlexRadioStation>,
     radioStartingIds: Set<String>,
@@ -2303,15 +2323,17 @@ private fun MobileMixesSection(
                 onClick = onPlayPersonalMix,
             )
         }
-        item(key = "popular-mix", contentType = "mobile-mix-action") {
-            HomeMixPosterCard(
-                "popular",
-                PhoebeIcon.PlaylistPlay,
-                Res.drawable.mix_popular,
-                Modifier.width(MobileHomePosterCardSize),
-                loading = posterLoading.popularMix,
-                onClick = onPlayPopularMix,
-            )
+        if (showPopularMix) {
+            item(key = "popular-mix", contentType = "mobile-mix-action") {
+                HomeMixPosterCard(
+                    "popular",
+                    PhoebeIcon.PlaylistPlay,
+                    Res.drawable.mix_popular,
+                    Modifier.width(MobileHomePosterCardSize),
+                    loading = posterLoading.popularMix,
+                    onClick = onPlayPopularMix,
+                )
+            }
         }
         item(key = "decade-mix", contentType = "mobile-mix-action") {
             HomeMixPosterCard("Decade Mix", PhoebeIcon.Calendar, Res.drawable.mix_decade, Modifier.width(MobileHomePosterCardSize)) {

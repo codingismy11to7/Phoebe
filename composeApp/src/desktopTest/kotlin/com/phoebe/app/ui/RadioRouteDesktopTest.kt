@@ -200,7 +200,7 @@ class RadioRouteDesktopTest {
             }
 
             waitForIdle()
-            onNodeWithText("Google Maps map").assertIsDisplayed()
+            onNodeWithText("Google Maps map", useUnmergedTree = true).assertIsDisplayed()
             assertFalse(onAllNodesWithText("Search this area").fetchSemanticsNodes().isNotEmpty())
             onNode(hasText("KEXP") and hasClickAction()).performClick()
             assertEquals(

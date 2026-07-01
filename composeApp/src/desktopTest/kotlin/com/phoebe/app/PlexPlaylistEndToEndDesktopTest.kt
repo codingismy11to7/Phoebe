@@ -28,8 +28,11 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.yield
 import org.junit.After
@@ -125,7 +128,11 @@ class PlexPlaylistEndToEndDesktopTest {
 
         val tracks = repo.tracksForPlaylist(testPlexSession(), playlist)
 
-        assertEquals(listOf("plex:t1", "plex:t2"), tracks.map { it.id })
+        val expected = listOf("plex:t1", "plex:t2")
+        assertEquals(
+            expected,
+            tracks.map { it.id }.ifEmpty { waitForPlaylistTrackIds(repo, playlist.id, expected) },
+        )
     }
 
     @Test
@@ -154,7 +161,7 @@ class PlexPlaylistEndToEndDesktopTest {
         assertEquals(null, movedAfterItemId)
         assertEquals(
             listOf("plex:t2", "plex:t1"),
-            repo.catalog.value.tracksByParent[playlist.id].orEmpty().map { it.id },
+            waitForPlaylistTrackIds(repo, playlist.id, listOf("plex:t2", "plex:t1")),
         )
     }
 
@@ -349,7 +356,10 @@ class PlexPlaylistEndToEndDesktopTest {
         repo.warmPlaylistTracks(testPlexSession())
 
         assertFalse(repo.catalogRefreshing.value)
-        assertEquals(listOf("plex:t1", "plex:t2"), repo.catalog.value.tracksByParent[playlist.id].orEmpty().map { it.id })
+        assertEquals(
+            listOf("plex:t1", "plex:t2"),
+            waitForPlaylistTrackIds(repo, playlist.id, listOf("plex:t1", "plex:t2")),
+        )
     }
 
     @Test
@@ -1006,6 +1016,23 @@ class PlexPlaylistEndToEndDesktopTest {
         assertEquals(DownloadState.Failed, downloaded.state)
         assertEquals(failureReason, downloaded.error)
         assertEquals(null, downloaded.localUri)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun TestScope.waitForPlaylistTrackIds(
+        repo: CatalogRepository,
+        playlistId: String,
+        expected: List<String>,
+    ): List<String> {
+        val deadline = System.nanoTime() + 2_000_000_000L
+        var actual = repo.catalog.value.tracksByParent[playlistId].orEmpty().map { it.id }
+        while (actual != expected) {
+            runCurrent()
+            if (System.nanoTime() >= deadline) return actual
+            Thread.sleep(1)
+            actual = repo.catalog.value.tracksByParent[playlistId].orEmpty().map { it.id }
+        }
+        return actual
     }
 
     private fun MockRequestHandleScope.respondJson(content: String) = respond(

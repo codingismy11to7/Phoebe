@@ -23,7 +23,6 @@ internal object DesktopSandboxPlayback {
             }
         }
         return DesktopPlaybackStartupPolicy.sampledPlaybackExtensionFromSuffix(extension)
-            ?: desktopMp3ExtensionFromSuffix(extension)
     }
 
     fun streamingSampledExtensionFromSuffix(extension: String): String? {
@@ -34,12 +33,11 @@ internal object DesktopSandboxPlayback {
             }
         }
         return DesktopPlaybackStartupPolicy.streamingSampledExtensionFromSuffix(extension)
-            ?: desktopMp3ExtensionFromSuffix(extension)
     }
 
     /**
-     * Prefer progressive Java Sound decoding for sampled-friendly remote streams. The desktop
-     * player still falls back to fully buffered playback when streaming setup fails.
+     * Prefer progressive Java Sound decoding for sampled-friendly remote streams. MP3 is intentionally
+     * limited to Flatpak where JavaFX media is unavailable; the Java Sound MP3 SPI can produce static.
      */
     fun shouldStreamRemoteSampledPlayback(uri: String): Boolean {
         if (!DesktopPlaybackStartupPolicy.isRemoteUri(uri)) return false
@@ -83,10 +81,5 @@ internal object DesktopSandboxPlayback {
             return track.streamUrl
         }
         return track.flatpakSandboxTranscodeUrl() ?: track.streamUrl
-    }
-
-    private fun desktopMp3ExtensionFromSuffix(extension: String): String? = when (extension.lowercase()) {
-        "mp3", "mpeg", "mpga" -> "mp3"
-        else -> null
     }
 }

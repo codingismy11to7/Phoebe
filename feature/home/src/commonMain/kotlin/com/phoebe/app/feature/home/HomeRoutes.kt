@@ -27,6 +27,7 @@ data class DesktopHomeRouteState(
     val decadeMixNotice: String? = null,
     val radioStations: List<PlexRadioStation> = emptyList(),
     val radioStartingIds: Set<String> = emptySet(),
+    val showPopularMix: Boolean = true,
 )
 
 @Immutable
@@ -102,6 +103,7 @@ fun DesktopHomeRoute(
         posterLoading = state.posterLoading,
         onPlayPersonalMix = actions.onPlayPersonalMix,
         onPlayPopularMix = actions.onPlayPopularMix,
+        showPopularMix = state.showPopularMix,
         onPlayTracks = actions.onPlayTracks,
         onAddToUpNext = actions.onAddToUpNext,
         onDownload = actions.onDownload,

@@ -49,6 +49,43 @@ test('web chromecast mock connects and loads a remote stream', async ({ page }) 
   expect(results.message).toContain('mock Chromecast connected');
 });
 
+test('web chromecast bootstrap tolerates missing chrome.cast namespace', async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', error => pageErrors.push(error.message));
+  await page.route('https://www.gstatic.com/cv/js/sender/**', route => route.abort());
+  await page.route('**/phoebe.js', route => route.abort());
+
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+
+  const options = await page.evaluate(() => {
+    let observedOptions: { receiverApplicationId?: string; autoJoinPolicy?: string } | null = null;
+    const testWindow = window as unknown as {
+      __onGCastApiAvailable: (isAvailable: boolean) => void;
+      cast: unknown;
+      chrome: unknown;
+    };
+    testWindow.cast = {
+      framework: {
+        CastContext: {
+          getInstance: () => ({
+            setOptions: (nextOptions: { receiverApplicationId?: string; autoJoinPolicy?: string }) => {
+              observedOptions = nextOptions;
+            },
+          }),
+        },
+      },
+    };
+    testWindow.chrome = {};
+
+    testWindow.__onGCastApiAvailable(true);
+
+    return observedOptions;
+  });
+
+  expect(pageErrors).toEqual([]);
+  expect(options).toEqual({ receiverApplicationId: 'CC1AD845' });
+});
+
 test('web local playback regression starts real browser audio after tap', async ({ page }) => {
   await page.goto('/?e2e=localPlaybackRegression', { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(

@@ -248,11 +248,22 @@ private external fun createRadioMapIframe(
       const bottom = Math.min(window.innerHeight || top, top + requestedHeight);
       const clippedWidth = Math.max(0, right - left);
       const clippedHeight = Math.max(0, bottom - top);
+      iframe.dataset.phoebeMapLeft = String(left);
+      iframe.dataset.phoebeMapTop = String(top);
+      iframe.dataset.phoebeMapWidth = String(clippedWidth);
+      iframe.dataset.phoebeMapHeight = String(clippedHeight);
+      const bridgeHost = typeof window !== "undefined" ? window : globalThis;
+      const bridge = bridgeHost.PhoebeRadioMap || {};
+      bridgeHost.PhoebeRadioMap = bridge;
+      globalThis.PhoebeRadioMap = bridge;
+      const occlusionTop = bridge.occlusionTopPx == null ? null : Math.max(0, Number(bridge.occlusionTopPx) / scale);
+      const occludedBottom = Math.min(bottom, occlusionTop == null ? bottom : occlusionTop);
+      const occludedHeight = Math.max(0, occludedBottom - top);
       iframe.style.left = left + "px";
       iframe.style.top = top + "px";
       iframe.style.width = clippedWidth + "px";
-      iframe.style.height = clippedHeight + "px";
-      iframe.style.display = clippedWidth > 0 && clippedHeight > 0 ? "block" : "none";
+      iframe.style.height = occludedHeight + "px";
+      iframe.style.display = clippedWidth > 0 && occludedHeight > 0 ? "block" : "none";
       if (iframe.contentWindow) {
         iframe.contentWindow.dispatchEvent(new Event("resize"));
       }

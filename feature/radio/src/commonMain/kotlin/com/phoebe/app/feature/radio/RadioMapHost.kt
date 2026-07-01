@@ -117,7 +117,7 @@ internal fun radioMapHtml(
               max-width: none;
               display: none;
               gap: 8px;
-              padding: 12px;
+              padding: 14px;
               border-radius: 8px;
               border: 1px solid var(--phoebe-map-popup-border);
               background: var(--phoebe-map-popup-bg);
@@ -129,7 +129,22 @@ internal fun radioMapHtml(
             #selectionName { font-size: 14px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
             #selectionMeta { color: var(--phoebe-map-popup-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
             #selectionSub { color: var(--phoebe-map-popup-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-            #selectionActions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; width: 100%; }
+            #selectionLinks { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+            .selectionLinkRow { display: none; align-items: start; column-gap: 8px; row-gap: 4px; min-width: 0; }
+            #selectionHomepageRow { grid-template-columns: 42px minmax(0, 1fr); }
+            #selectionStreamRow { grid-template-columns: 42px minmax(0, 1fr) auto; }
+            .selectionLinkLabel { color: var(--phoebe-map-popup-muted); font-size: 10px; font-weight: 800; line-height: 16px; }
+            #selection a.selectionUrl {
+              display: block;
+              min-width: 0;
+              color: ${markerTintCssHex.escapeJs()};
+              overflow-wrap: anywhere;
+              white-space: normal;
+              word-break: break-word;
+              text-decoration: underline;
+              cursor: pointer;
+            }
+            #selectionActions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; width: 100%; margin-top: 12px; }
             #selection button {
               border: 0;
               border-radius: 999px;
@@ -146,6 +161,11 @@ internal fun radioMapHtml(
             #selection button.secondary {
               color: var(--phoebe-map-popup-secondary);
               background: var(--phoebe-map-popup-secondary-action);
+            }
+            #selection button.selectionInlineAction {
+              align-self: start;
+              padding: 4px 8px;
+              font-size: 11px;
             }
             #selectionPlaySpinner {
               display: none;
@@ -210,6 +230,60 @@ internal fun radioMapHtml(
               const pieces = [station.country, station.language, station.codec].filter((value) => value && String(value).trim().length > 0);
               return pieces.length > 0 ? pieces.join(' · ') : (station.approximate ? 'Approximate country location' : 'Station location');
             };
+            const externalUrl = (value) => {
+              const url = String(value || '').trim();
+              return /^https?:\/\//i.test(url) ? url : '';
+            };
+            const setSelectionLink = (rowId, linkId, rawUrl) => {
+              const row = document.getElementById(rowId);
+              const link = document.getElementById(linkId);
+              if (!row || !link) return;
+              const url = externalUrl(rawUrl);
+              if (!url) {
+                row.style.display = 'none';
+                link.textContent = '';
+                link.removeAttribute('href');
+                delete link.dataset.url;
+                return;
+              }
+              row.style.display = 'grid';
+              link.textContent = url;
+              link.title = url;
+              link.href = url;
+              link.dataset.url = url;
+            };
+            const resetCopyStreamLabel = () => {
+              const copyLabel = document.getElementById('selectionCopyStreamLabel');
+              if (copyLabel) copyLabel.textContent = 'Copy';
+            };
+            const openExternalRadioMapUrl = (rawUrl) => {
+              const url = externalUrl(rawUrl);
+              if (!url) return;
+              if (desktopBridgeBaseUrl) {
+                postDesktopBridge('open-url', null, null, null, url);
+              } else {
+                window.open(url, '_blank', 'noopener,noreferrer');
+              }
+            };
+            window.openRadioMapLink = (anchor) => {
+              openExternalRadioMapUrl(anchor?.dataset?.url || anchor?.href);
+              return false;
+            };
+            window.copySelectedRadioMapStreamUrl = async () => {
+              const url = String(selectedStationForAction?.streamUrl || '').trim();
+              if (!url) return;
+              try {
+                await navigator.clipboard.writeText(url);
+                const copyLabel = document.getElementById('selectionCopyStreamLabel');
+                if (copyLabel) {
+                  copyLabel.textContent = 'Copied';
+                  window.setTimeout(resetCopyStreamLabel, 1600);
+                }
+              } catch (_error) {
+                const copyLabel = document.getElementById('selectionCopyStreamLabel');
+                if (copyLabel) copyLabel.textContent = 'Copy failed';
+              }
+            };
             const setSelectionStarting = (starting) => {
               const playButton = document.getElementById('selectionPlay');
               const playLabel = document.getElementById('selectionPlayLabel');
@@ -238,6 +312,9 @@ internal fun radioMapHtml(
               document.getElementById('selectionName').textContent = station.name || 'Radio station';
               document.getElementById('selectionMeta').textContent = stationMeta(station);
               document.getElementById('selectionSub').textContent = station.subtitle || (station.approximate ? 'Approximate location' : 'Ready to play');
+              setSelectionLink('selectionHomepageRow', 'selectionHomepageLink', station.homepageUrl);
+              setSelectionLink('selectionStreamRow', 'selectionStreamLink', station.streamUrl);
+              resetCopyStreamLabel();
               setSelectionStarting(sourceStartingStationIds.has(String(station.id)));
               selection.style.display = 'block';
             };
@@ -283,10 +360,11 @@ internal fun radioMapHtml(
                 viewport,
               }, '*');
             };
-            const postDesktopBridge = (action, itemId, zoom, viewport) => {
+            const postDesktopBridge = (action, itemId, zoom, viewport, externalUrl) => {
               if (!desktopBridgeBaseUrl) return;
               const params = new URLSearchParams();
               if (itemId) params.set('id', itemId);
+              if (externalUrl) params.set('url', externalUrl);
               if (Number.isFinite(Number(zoom))) params.set('zoom', String(zoom));
               if (viewport) {
                 params.set('north', String(viewport.north));
@@ -370,7 +448,7 @@ internal fun radioMapHtml(
               return icon;
             };
             const markerDataSignature = (items) => items
-              .map((item) => [item.id, item.lat, item.lng, item.count, item.approximate ? 1 : 0, item.isCluster ? 1 : 0].join('@'))
+              .map((item) => [item.id, item.lat, item.lng, item.count, item.streamUrl || '', item.homepageUrl || '', item.approximate ? 1 : 0, item.isCluster ? 1 : 0].join('@'))
               .join('|');
             const indexStation = (station) => {
               if (!station) return;
@@ -563,6 +641,19 @@ internal fun radioMapHtml(
               <div id="selectionName">Radio station</div>
               <div id="selectionMeta">Station location</div>
               <div id="selectionSub">Ready to play</div>
+              <div id="selectionLinks">
+                <div id="selectionHomepageRow" class="selectionLinkRow">
+                  <span class="selectionLinkLabel">Home</span>
+                  <a id="selectionHomepageLink" class="selectionUrl" href="#" target="_blank" rel="noopener noreferrer" onclick="return window.openRadioMapLink(this)"></a>
+                </div>
+                <div id="selectionStreamRow" class="selectionLinkRow">
+                  <span class="selectionLinkLabel">Stream</span>
+                  <a id="selectionStreamLink" class="selectionUrl" href="#" target="_blank" rel="noopener noreferrer" onclick="return window.openRadioMapLink(this)"></a>
+                  <button id="selectionCopyStream" class="secondary selectionInlineAction" type="button" onclick="window.copySelectedRadioMapStreamUrl()">
+                    <span id="selectionCopyStreamLabel">Copy</span>
+                  </button>
+                </div>
+              </div>
             </div>
             <div id="selectionActions">
               <button id="selectionPlay" type="button" onclick="window.playSelectedRadioMapStation()">
@@ -624,6 +715,8 @@ private fun RadioMapItem.radioMapStationInfoJsonLine(): String =
           "language": "${station.language.orEmpty().escapeJs()}",
           "codec": "${station.codec.orEmpty().escapeJs()}",
           "subtitle": "${station.displaySubtitle.escapeJs()}",
+          "streamUrl": "${station.streamUrl.escapeJs()}",
+          "homepageUrl": "${station.homepageUrl.orEmpty().escapeJs()}",
         """.trimIndent()
         is RadioMapItem.Cluster -> ""
     }
@@ -656,6 +749,8 @@ private fun RadioStation.toRadioMapChildMarkerJson(
           "language": "${language.orEmpty().escapeJs()}",
           "codec": "${codec.orEmpty().escapeJs()}",
           "subtitle": "${displaySubtitle.escapeJs()}",
+          "streamUrl": "${streamUrl.escapeJs()}",
+          "homepageUrl": "${homepageUrl.orEmpty().escapeJs()}",
           "children": []
         }
     """.trimIndent()
