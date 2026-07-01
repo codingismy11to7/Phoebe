@@ -195,6 +195,7 @@ import com.phoebe.app.feature.history.HistoryNowPlayingState
 import com.phoebe.app.feature.history.PlayHistoryRoute
 import com.phoebe.app.feature.history.PlayHistoryRouteState
 import com.phoebe.app.feature.home.HomeUiState
+import com.phoebe.app.feature.home.HomePosterLoadingState
 import com.phoebe.app.feature.home.RecentlyAddedNowPlayingState
 import com.phoebe.app.feature.home.RecentlyAddedRoute
 import com.phoebe.app.feature.home.RecentlyAddedRouteActions
@@ -450,6 +451,7 @@ private fun PhoebeRootStateHolder(
     var selectedPlaylistId by remember { mutableStateOf<String?>(null) }
     var replaceNextNavigationPath by remember { mutableStateOf(navigationPath != null) }
     var lastPublishedNavigationRoute by remember { mutableStateOf<PhoebeRoute?>(null) }
+    var pendingPublishedNavigationPath by remember { mutableStateOf<String?>(null) }
     var suppressNextRadioStationRouteEffect by remember { mutableStateOf(false) }
     fun ensureRadioPlaybackBackStack() {
         if (!radioPlayingFromSignIn) return
@@ -467,8 +469,34 @@ private fun PhoebeRootStateHolder(
             navigator.replaceAll(guardedRoutes)
         }
     }
-    LaunchedEffect(navigationPath, browseFallbackRoutes) {
+    val canonicalNavigationPath = remember(currentRoute, routeResolution) {
+        currentRoute.toPhoebeWebPath(routeResolution)
+    }
+    val currentOnNavigationPathChange by rememberUpdatedState(onNavigationPathChange)
+    LaunchedEffect(canonicalNavigationPath, currentRoute) {
+        val onPathChange = currentOnNavigationPathChange ?: return@LaunchedEffect
+        val routeChanged = lastPublishedNavigationRoute != null &&
+            lastPublishedNavigationRoute != currentRoute
+        val replace = replaceNextNavigationPath || !routeChanged
+        replaceNextNavigationPath = false
+        lastPublishedNavigationRoute = currentRoute
+        if (navigationPath != null && navigationPath != canonicalNavigationPath) {
+            pendingPublishedNavigationPath = canonicalNavigationPath
+        } else if (pendingPublishedNavigationPath == canonicalNavigationPath) {
+            pendingPublishedNavigationPath = null
+        }
+        onPathChange(canonicalNavigationPath, replace)
+    }
+    LaunchedEffect(navigationPath, browseFallbackRoutes, pendingPublishedNavigationPath) {
         val path = navigationPath ?: return@LaunchedEffect
+        val pendingPath = pendingPublishedNavigationPath
+        if (pendingPath != null) {
+            if (path == pendingPath) {
+                pendingPublishedNavigationPath = null
+            } else {
+                return@LaunchedEffect
+            }
+        }
         val parsedRoutes = phoebeWebRoutesForPath(path)
             .withUnavailableBrowseFallback(browseFallbackRoutes)
         if (currentTrack?.id?.startsWith("radio:") == true &&
@@ -488,19 +516,6 @@ private fun PhoebeRootStateHolder(
             currentRoute is PhoebeRoute.PlaylistDetail -> selectedPlaylistId = currentRoute.playlistId
             screen is AppScreen.PlaylistDetail -> selectedPlaylistId = screen.playlist.id
         }
-    }
-    val canonicalNavigationPath = remember(currentRoute, routeResolution) {
-        currentRoute.toPhoebeWebPath(routeResolution)
-    }
-    val currentOnNavigationPathChange by rememberUpdatedState(onNavigationPathChange)
-    LaunchedEffect(canonicalNavigationPath, currentRoute) {
-        val onPathChange = currentOnNavigationPathChange ?: return@LaunchedEffect
-        val routeChanged = lastPublishedNavigationRoute != null &&
-            lastPublishedNavigationRoute != currentRoute
-        val replace = replaceNextNavigationPath || !routeChanged
-        replaceNextNavigationPath = false
-        lastPublishedNavigationRoute = currentRoute
-        onPathChange(canonicalNavigationPath, replace)
     }
     val collapseMobilePlayer: () -> Unit = {
         if (!navigator.pop()) {
@@ -870,28 +885,50 @@ private fun PhoebeRootStateHolder(
     val pendingMobilePlaybackTrackId = pendingMobilePlaybackPreview?.currentTrack?.id
     val mobilePlaybackStarting = pendingMobilePlaybackTrackId != null &&
         pendingMobilePlaybackTrackId != currentTrack?.id
+    var homePosterLoading by remember { mutableStateOf(HomePosterLoadingState()) }
     val personalMixCatalog = rememberUpdatedState(catalog)
     val personalMixHomeUiState = rememberUpdatedState(homeUiState)
     val personalMixPreferences = rememberUpdatedState(libraryUi.personalMix)
     val personalMixPlayHistory = rememberUpdatedState(playHistory)
     var recentPersonalMixKeys by remember { mutableStateOf(emptySet<String>()) }
-    val personalMixScope = rememberCoroutineScope()
-    val playPersonalMix = remember(state, personalMixScope) {
+    val homePosterActionScope = rememberCoroutineScope()
+    val playPersonalMix = remember(state, homePosterActionScope) {
         {
-            personalMixScope.launch {
-                val preferences = personalMixPreferences.value.normalized()
-                state.ensurePersonalMixTracks(preferences.limit)
-                val tracks = personalMix(
-                    catalog = personalMixCatalog.value,
-                    state = personalMixHomeUiState.value,
-                    preferences = preferences,
-                    playHistory = personalMixPlayHistory.value,
-                    recentMixTrackKeys = recentPersonalMixKeys,
-                )
-                if (tracks.isEmpty()) return@launch
-                recentPersonalMixKeys = (recentPersonalMixKeys + tracks.map { it.personalMixIdentityKey() })
-                    .let { keys -> if (keys.size > 100) keys.drop(keys.size - 100).toSet() else keys.toSet() }
-                playTracksFromMobile(tracks, 0)
+            homePosterActionScope.launch {
+                homePosterLoading = homePosterLoading.copy(personalMix = true)
+                try {
+                    val preferences = personalMixPreferences.value.normalized()
+                    state.ensurePersonalMixTracks(preferences.limit)
+                    val tracks = personalMix(
+                        catalog = personalMixCatalog.value,
+                        state = personalMixHomeUiState.value,
+                        preferences = preferences,
+                        playHistory = personalMixPlayHistory.value,
+                        recentMixTrackKeys = recentPersonalMixKeys,
+                    )
+                    if (tracks.isNotEmpty()) {
+                        recentPersonalMixKeys = (recentPersonalMixKeys + tracks.map { it.personalMixIdentityKey() })
+                            .let { keys -> if (keys.size > 100) keys.drop(keys.size - 100).toSet() else keys.toSet() }
+                        playTracksFromMobile(tracks, 0)
+                    }
+                } finally {
+                    delay(700L)
+                    homePosterLoading = homePosterLoading.copy(personalMix = false)
+                }
+            }
+            Unit
+        }
+    }
+    val playPopularMix = remember(state, homePosterActionScope) {
+        {
+            homePosterActionScope.launch {
+                homePosterLoading = homePosterLoading.copy(popularMix = true)
+                try {
+                    state.playPopularMix().join()
+                } finally {
+                    delay(700L)
+                    homePosterLoading = homePosterLoading.copy(popularMix = false)
+                }
             }
             Unit
         }
@@ -901,6 +938,12 @@ private fun PhoebeRootStateHolder(
         if (screen == AppScreen.Home && browseSection == BrowseSection.Home) {
             delay(1_500L)
             state.warmRecentAlbumTracks(cutoffMs = nowMs - RecentlyAddedWindowMs, maxAlbums = 10)
+        }
+    }
+    LaunchedEffect(screen, browseSection, session?.selectedServer?.id, session?.selectedLibrary?.key) {
+        if (screen == AppScreen.Home && browseSection == BrowseSection.Home) {
+            delay(1_200L)
+            state.warmPopularMixTracks()
         }
     }
     LaunchedEffect(screen, browseSection, topMostPlayed, topRecentlyPlayed, session?.selectedServer) {
@@ -969,6 +1012,13 @@ private fun PhoebeRootStateHolder(
     }
     val openCollections: (CollectionEntry) -> Unit = { entry ->
         if (session.supportsCollectionEntry(entry)) {
+            homePosterLoading = homePosterLoading.copy(collectionEntry = entry)
+            homePosterActionScope.launch {
+                delay(700L)
+                if (homePosterLoading.collectionEntry == entry) {
+                    homePosterLoading = homePosterLoading.copy(collectionEntry = null)
+                }
+            }
             selectedPlaylistId = null
             navigator.openBrowse(BrowseSection.Home)
             libraryFilter = when (entry.target) {
@@ -1617,6 +1667,7 @@ private fun PhoebeRootStateHolder(
                         onMostPlayed = openMostPlayed,
                         onCollections = openCollections,
                         supportedCollectionEntries = supportedCollectionEntries,
+                        homePosterLoading = homePosterLoading,
                         onRefreshRandomArtists = homeFeatureState.onRefreshRandomArtists,
                         onRefreshRandomAlbums = homeFeatureState.onRefreshRandomAlbums,
                         onPrefetchHomeArtist = state::prefetchHomeArtistStats,
@@ -1647,7 +1698,7 @@ private fun PhoebeRootStateHolder(
                         onUpdateManualRadioStation = state::updateManualRadioStation,
                         onDeleteManualRadioStation = state::deleteManualRadioStation,
                         onPlayPersonalMix = playPersonalMix,
-                        onPlayPopularMix = state::playPopularMix,
+                        onPlayPopularMix = playPopularMix,
                         onPlayTracks = playTracksFromMobile,
                         onAddToUpNext = state::addToUpNext,
                         onDownload = state::download,
@@ -1981,6 +2032,7 @@ private fun PhoebeRootStateHolder(
                         libraryFilter = libraryFilter,
                         libraryUi = libraryUi,
                         supportedCollectionEntries = supportedCollectionEntries,
+                        homePosterLoading = homePosterLoading,
                         decadeMixNotice = decadeMixNotice,
                         radioStations = radioStations,
                         radioDirectory = radioDirectory,
@@ -2070,7 +2122,7 @@ private fun PhoebeRootStateHolder(
                         onRadioUpdateManualStation = state::updateManualRadioStation,
                         onRadioDeleteManualStation = state::deleteManualRadioStation,
                         onPlayPersonalMix = playPersonalMix,
-                        onPlayPopularMix = state::playPopularMix,
+                        onPlayPopularMix = playPopularMix,
                         onPopDetail = { navigator.pop() },
                         onPlayTracks = playTracks,
                         onPlayAllTracks = playAllTracks,

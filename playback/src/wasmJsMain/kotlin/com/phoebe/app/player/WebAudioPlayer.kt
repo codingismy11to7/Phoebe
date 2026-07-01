@@ -1221,11 +1221,12 @@ private external fun setWebAudioOutputGain(audio: HTMLAudioElement, gain: Double
                     analyser.getByteFrequencyData(data);
                     let sum = 0;
                     const bands = [];
-                    const group = Math.max(1, Math.floor(data.length / 32));
-                    for (let i = 0; i < 32; i++) {
+                    const bandCount = 128;
+                    const group = Math.max(1, Math.floor(data.length / bandCount));
+                    for (let i = 0; i < bandCount; i++) {
                         let peak = 0;
                         const start = i * group;
-                        const end = i === 31 ? data.length : Math.min(data.length, start + group);
+                        const end = i === bandCount - 1 ? data.length : Math.min(data.length, start + group);
                         for (let j = start; j < end; j++) peak = Math.max(peak, data[j] || 0);
                         const v = Math.max(0, Math.min(1, peak / 255));
                         bands.push(v);

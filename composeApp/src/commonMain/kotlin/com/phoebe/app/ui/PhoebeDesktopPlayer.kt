@@ -708,6 +708,7 @@ internal fun DesktopPlayer(
                                                 homeSections = libraryUi.homeSections,
                                                 supportedCollectionEntries = supportedCollectionEntries,
                                                 useBarePanels = appSettings.tintedBackgroundGradient,
+                                                posterLoading = browseState.homePosterLoading,
                                                 decadeMixNotice = decadeMixNotice,
                                                 radioStations = radioStations,
                                                 radioStartingIds = radioStartingIds,

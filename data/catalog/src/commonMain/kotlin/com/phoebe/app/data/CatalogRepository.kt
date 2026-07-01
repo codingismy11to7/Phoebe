@@ -579,6 +579,7 @@ class CatalogRepository(
                     mutableCatalog.value = withSmartPlaylists(
                         restoredShell.copy(
                             tracksByParent = restoredTracks?.tracksByParent.orEmpty(),
+                            popularTracksByLibrary = restoredTracks?.popularTracksByLibrary.orEmpty(),
                             downloads = restoredDownloads,
                         ),
                     )
@@ -2930,6 +2931,7 @@ class CatalogRepository(
             mutableCatalog.value = withSmartPlaylists(
                 cur.copy(
                     tracksByParent = tracks.tracksByParent,
+                    popularTracksByLibrary = tracks.popularTracksByLibrary,
                     downloads = restoredDownloads,
                 ),
             )
@@ -2964,6 +2966,7 @@ class CatalogRepository(
             mutableCatalog.value = withSmartPlaylists(
                 cur.copy(
                     tracksByParent = mergedTracksByParent,
+                    popularTracksByLibrary = cur.popularTracksByLibrary + tracks.popularTracksByLibrary,
                     downloads = restoredDownloads,
                 ),
             )
@@ -3586,11 +3589,24 @@ class CatalogRepository(
         return tracks
     }
 
+    suspend fun cachedPopularTracksForLibrary(session: PlexSession?): List<Track> {
+        val libraryKey = session.libraryPopularTrackCacheKey() ?: return emptyList()
+        mutableCatalog.value.popularTracksByLibrary[libraryKey]
+            ?.takeIf { it.isNotEmpty() }
+            ?.let { return it }
+        val tracks = readPopularTracksForLibraryFromDatabase(libraryKey)
+        if (tracks.isNotEmpty()) {
+            publishLibraryPopularTracks(libraryKey, tracks)
+        }
+        return tracks
+    }
+
     suspend fun popularTracksForLibrary(session: PlexSession?, limit: Int = LibraryPopularTrackLimit): List<Track> {
         val plexSession = session?.takeIf { it.isPlex() } ?: return emptyList()
         val server = plexSession.selectedServer ?: return emptyList()
         val library = plexSession.selectedLibrary ?: return emptyList()
         val token = plexSession.serverAuthToken() ?: return emptyList()
+        val libraryKey = plexSession.libraryPopularTrackCacheKey() ?: return emptyList()
         val tracks = plexClient.popularTracksForLibrary(
             server = server,
             library = library,
@@ -3599,9 +3615,27 @@ class CatalogRepository(
         ).map { it.withPlexPrefix() }
         if (tracks.isNotEmpty()) {
             publishIndexedPlexTracks(tracks)
-            runCatalogDbWrite { persistTrackBatch(tracks) }
+        }
+        publishLibraryPopularTracks(libraryKey, tracks)
+        runCatalogDbWrite {
+            if (tracks.isNotEmpty()) {
+                persistTrackBatch(tracks)
+            }
+            persistLibraryPopularTracks(libraryKey, tracks)
         }
         return tracks
+    }
+
+    private suspend fun publishLibraryPopularTracks(libraryKey: String, tracks: List<Track>) {
+        catalogMergeMutex.withLock {
+            val cur = mutableCatalog.value
+            val popularTracksByLibrary = if (tracks.isEmpty()) {
+                cur.popularTracksByLibrary - libraryKey
+            } else {
+                cur.popularTracksByLibrary + (libraryKey to tracks.distinctBy { it.id })
+            }
+            mutableCatalog.value = cur.copy(popularTracksByLibrary = popularTracksByLibrary)
+        }
     }
 
     suspend fun ensureSimilarArtistsForArtist(session: PlexSession?, artist: Artist): List<Artist> {
@@ -7147,6 +7181,13 @@ class CatalogRepository(
         rows.map { row -> row.toTrack() }
     }
 
+    private suspend fun readPopularTracksForLibraryFromDatabase(libraryKey: String): List<Track> =
+        withContext(Dispatchers.Default) {
+            database.catalogQueries.selectPopularTracksForLibrary(libraryKey)
+                .awaitAsList()
+                .map { row -> row.toTrack() }
+        }
+
     private fun TrackRow.toTrack(): Track =
         Track(
             id = id,
@@ -7188,6 +7229,9 @@ class CatalogRepository(
                     if (mutableCatalog.value.tracksByParent[albumId].isNullOrEmpty()) {
                         snapshot.albums.find { it.id == albumId }?.let { album ->
                             runCatching { tracksForAlbum(session, album) }
+                                .onFailure { error ->
+                                    if (error is CancellationException) throw error
+                                }
                         }
                     }
                 }
@@ -7197,7 +7241,15 @@ class CatalogRepository(
                 if (playlists.isNotEmpty()) {
                     warmPlaylistTracksParallel(session, playlists, updateSyncProgress = false)
                 }
+                runCatching { popularTracksForLibrary(session) }
+                    .onFailure { error ->
+                        if (error is CancellationException) throw error
+                        PhoebeLog.d("CatalogRepository") {
+                            "background popular tracks warm failed: ${error.message}"
+                        }
+                    }
             }.onFailure { error ->
+                if (error is CancellationException) throw error
                 PhoebeLog.d("CatalogRepository") {
                     "background warm failed: ${error.message}"
                 }
@@ -7356,6 +7408,21 @@ class CatalogRepository(
                         playlistItemId = mergedTrack?.playlistItemId,
                     )
                 }
+            }
+        }
+    }
+
+    private suspend fun persistLibraryPopularTracks(libraryKey: String, tracks: List<Track>) {
+        val nowMs = currentTimeMs()
+        database.transaction {
+            database.catalogQueries.deleteLibraryPopularTracksForLibrary(libraryKey)
+            tracks.distinctBy { it.id }.forEachIndexed { index, track ->
+                database.catalogQueries.upsertLibraryPopularTrack(
+                    libraryKey = libraryKey,
+                    trackId = track.id,
+                    position = index.toLong(),
+                    updatedAtMs = nowMs,
+                )
             }
         }
     }
@@ -7914,6 +7981,7 @@ class CatalogRepository(
         val tracks = readTracksFromDatabase()
         return shell.copy(
             tracksByParent = tracks.tracksByParent,
+            popularTracksByLibrary = tracks.popularTracksByLibrary,
             downloads = tracks.downloads,
         )
     }
@@ -8037,9 +8105,17 @@ class CatalogRepository(
                         tracksById[entry.trackId]?.copy(playlistItemId = entry.playlistItemId)
                     }
             }
+        val popularTracksByLibrary: Map<String, List<Track>> = database.catalogQueries.selectLibraryPopularTracks()
+            .awaitAsList()
+            .groupBy { it.libraryKey }
+            .mapValues { (_, entries) ->
+                entries.sortedBy { it.position }
+                    .mapNotNull { entry -> tracksById[entry.trackId] }
+            }
         val downloads = database.downloadsQueries.selectAll().awaitAsList().map { row -> row.toDownloadItem() }
         return CatalogSnapshot(
             tracksByParent = tracksByParent,
+            popularTracksByLibrary = popularTracksByLibrary,
             downloads = downloads,
         )
     }
@@ -8112,6 +8188,12 @@ class CatalogRepository(
      */
     private fun Track.withPlexPrefix(): Track =
         if (id.startsWith("plex:")) this else copy(id = "plex:$id")
+
+    private fun PlexSession?.libraryPopularTrackCacheKey(): String? {
+        val serverId = this?.selectedServer?.id?.takeIf { it.isNotBlank() } ?: return null
+        val libraryKey = selectedLibrary?.key?.takeIf { it.isNotBlank() } ?: return null
+        return "plex:$serverId:$libraryKey"
+    }
 
     private fun publishRadioTracksInBackground(tracks: List<Track>) {
         if (tracks.isEmpty()) return
@@ -8346,6 +8428,8 @@ private fun CatalogSnapshot.withoutProviderShell(prefix: String): CatalogSnapsho
         artists = artists.filterNot { it.id.startsWith(providerPrefix) },
         albums = albums.filterNot { it.id.startsWith(providerPrefix) },
         playlists = playlists.filterNot { it.id.startsWith(providerPrefix) },
+        popularTracksByArtist = popularTracksByArtist.filterKeys { !it.startsWith(providerPrefix) },
+        popularTracksByLibrary = popularTracksByLibrary.filterKeys { !it.startsWith(providerPrefix) },
         collectionTags = collectionTags.filterNot { it.itemId.startsWith(providerPrefix) },
     )
 }

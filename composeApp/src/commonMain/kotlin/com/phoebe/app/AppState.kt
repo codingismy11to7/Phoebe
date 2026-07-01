@@ -306,6 +306,7 @@ class AppState(
     private var recentAlbumWarmSignature: String? = null
     private var playedAlbumWarmSignature: String? = null
     private var mostPlayedWarmSignature: String? = null
+    private var popularMixWarmSignature: String? = null
     private val prefetchedArtistIds = mutableSetOf<String>()
     private val prefetchedAlbumIds = mutableSetOf<String>()
     private var catalogRefreshJob: Job? = null
@@ -1555,6 +1556,26 @@ class AppState(
         }
     }
 
+    fun warmPopularMixTracks() {
+        val currentSession = session.value
+        if (!currentSession.isPlex()) return
+        val signature = currentSession.popularMixSessionSignature() ?: return
+        if (signature == popularMixWarmSignature) return
+        popularMixWarmSignature = signature
+        scope.launch {
+            runCatching {
+                val tracks = dependencies.catalogRepository.popularTracksForLibrary(currentSession)
+                if (tracks.isEmpty()) {
+                    popularMixWarmSignature = null
+                }
+            }.onFailure { error ->
+                if (error is CancellationException) throw error
+                popularMixWarmSignature = null
+                PhoebeLog.d("AppState") { "popular mix warm failed: ${error.message}" }
+            }
+        }
+    }
+
     fun playDecadeMix(decade: Int) = scope.launch {
         mutableDecadeMixNotice.value = "Searching the ${decade}s…"
         val firstTracks = runCatching {
@@ -1590,22 +1611,46 @@ class AppState(
     }
 
     fun playPopularMix() = scope.launch {
-        val popularPool = runCatching {
-            dependencies.catalogRepository.popularTracksForLibrary(session.value)
-        }.getOrElse { error ->
-            val notice = error.message ?: "Couldn't load popular songs."
-            mutableMessage.value = notice
+        val currentSession = session.value
+        val cachedPool = dependencies.catalogRepository.cachedPopularTracksForLibrary(currentSession)
+        val signature = currentSession.popularMixSessionSignature()
+        val popularPool = cachedPool.takeIf { it.isNotEmpty() }
+            ?: if (signature == popularMixWarmSignature) {
+                emptyList()
+            } else {
+                runCatching {
+                    withTimeout(PopularMixInitialLoadTimeoutMs) {
+                        dependencies.catalogRepository.popularTracksForLibrary(currentSession)
+                    }
+                }.getOrElse { error ->
+                    if (error is CancellationException && error !is TimeoutCancellationException) throw error
+                    PhoebeLog.d("AppState") { "popular mix provider load skipped: ${error.message}" }
+                    emptyList()
+                }.also { tracks ->
+                    if (tracks.isNotEmpty()) {
+                        popularMixWarmSignature = signature
+                    }
+                }
+            }
+        if (popularPool.isEmpty()) {
+            warmPopularMixTracks()
+            mutableMessage.value = if (currentSession.isPlex()) {
+                "Popular songs are still loading."
+            } else {
+                "No popular songs found yet."
+            }
             return@launch
         }
-        val tracks = popularPool.weightedPopularMix()
-        if (tracks.isEmpty()) {
-            mutableMessage.value = "No provider top songs found."
+        val mix = popularPool.weightedPopularMix()
+        if (mix.isEmpty()) {
+            mutableMessage.value = "No popular songs found yet."
             return@launch
         }
-        if (playTracks(tracks, 0)) {
+        if (playTracks(mix, 0)) {
             requestNavigation(AppNavigationRequest.Player)
-            mutableMessage.value = "Playing ${tracks.size} popular songs."
+            mutableMessage.value = "Playing ${mix.size} popular songs."
         }
+        warmPopularMixTracks()
     }
 
     fun refreshRadioStations() = scope.launch {
@@ -2792,6 +2837,7 @@ class AppState(
         mostPlayedWarmSignature = null
         recentAlbumWarmSignature = null
         playedAlbumWarmSignature = null
+        popularMixWarmSignature = null
         prefetchedArtistIds.clear()
         prefetchedAlbumIds.clear()
         stopPlayback()
@@ -2882,6 +2928,12 @@ private fun PlexSession?.canUsePlexBackgroundFetches(): Boolean {
         server.connectionUris.isNotEmpty() ||
         server.advertisedConnectionUris.isNotEmpty() ||
         server.localConnectionUris.isNotEmpty()
+}
+
+private fun PlexSession?.popularMixSessionSignature(): String? {
+    val serverId = this?.selectedServer?.id?.takeIf { it.isNotBlank() } ?: return null
+    val libraryKey = selectedLibrary?.key?.takeIf { it.isNotBlank() } ?: return null
+    return "$serverId:$libraryKey"
 }
 
 internal fun List<Track>.withFreshPlaybackUrls(session: PlexSession?): List<Track> {
@@ -3011,6 +3063,7 @@ private data class PopularMixCandidate(
 private const val PlaybackHistoryDedupeWindowMs = 30_000L
 
 private const val PlayHistoryCatalogResolveTimeoutMs = 1_500L
+private const val PopularMixInitialLoadTimeoutMs = 2_500L
 
 private const val ProviderPlayHistoryDebounceMs = 8_000L
 

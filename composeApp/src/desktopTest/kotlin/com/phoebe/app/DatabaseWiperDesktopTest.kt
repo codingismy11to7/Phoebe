@@ -86,6 +86,7 @@ class DatabaseWiperDesktopTest {
                     parentAlbumId = "album",
                 )
                 database.catalogQueries.upsertTrackParent("album", "track", 0L, null)
+                database.catalogQueries.upsertLibraryPopularTrack("plex:server:library", "track", 0L, 1L)
                 database.catalogQueries.upsertCollectionValue("Albums", "Genre", "Rock", "genre=1", null, null, 1L)
                 database.catalogQueries.upsertCollectionTag("Albums", "Genre", "album", "Rock")
                 database.catalogQueries.upsertCollectionValueLoad("Albums", "Genre")
@@ -124,6 +125,7 @@ class DatabaseWiperDesktopTest {
             assertTrue(database.catalogQueries.selectPlaylists().awaitAsList().isEmpty())
             assertTrue(database.catalogQueries.selectAllTracks().awaitAsList().isEmpty())
             assertTrue(database.catalogQueries.selectTrackParents().awaitAsList().isEmpty())
+            assertTrue(database.catalogQueries.selectLibraryPopularTracks().awaitAsList().isEmpty())
             assertTrue(database.catalogQueries.selectCollectionValues().awaitAsList().isEmpty())
             assertTrue(database.catalogQueries.selectCollectionTags().awaitAsList().isEmpty())
             assertTrue(database.catalogQueries.selectCollectionValueLoads().awaitAsList().isEmpty())
