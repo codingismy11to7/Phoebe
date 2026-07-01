@@ -48,12 +48,12 @@ internal actual fun RadioMapHost(
         items.flattenRadioMapStationMarkers().sortedBy { it.id }
     }
     val markerJson = remember(markerItems) { markerItems.toRadioMapMarkerJson() }
-    val selectedItemId: String? = null
+    val selectedItemId = selectedItem?.id
     val startingIdsJson = remember(startingStationIds) { startingStationIds.toRadioMapStartingIdsJson() }
     val initialHtml = remember(googleMapsApiKey, markerTintCssHex, useLightTheme) {
         radioMapHtml(
             items = markerItems,
-            selectedItem = null,
+            selectedItem = selectedItem,
             startingStationIds = startingStationIds,
             googleMapsApiKey = googleMapsApiKey,
             markerTintCssHex = markerTintCssHex,

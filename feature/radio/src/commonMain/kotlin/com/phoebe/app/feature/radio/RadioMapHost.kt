@@ -424,6 +424,7 @@ internal fun radioMapHtml(
                 postDesktopBridge('select', station.id, null, null);
                 window.webkit?.messageHandlers?.phoebeRadioMap?.postMessage?.(station.id);
                 window.AndroidPhoebeRadioMap?.selectStation?.(station.id);
+                window.updateRadioMapSelection(station.id);
                 showSelection(station);
                 setStatus('Selected ' + targetLabel + '.', true);
               };
