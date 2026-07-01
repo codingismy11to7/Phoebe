@@ -23,9 +23,17 @@ data class DesktopHomeRouteState(
     val homeSections: List<HomeSection>,
     val supportedCollectionEntries: Set<CollectionEntry>,
     val useBarePanels: Boolean = false,
+    val posterLoading: HomePosterLoadingState = HomePosterLoadingState(),
     val decadeMixNotice: String? = null,
     val radioStations: List<PlexRadioStation> = emptyList(),
     val radioStartingIds: Set<String> = emptySet(),
+)
+
+@Immutable
+data class HomePosterLoadingState(
+    val personalMix: Boolean = false,
+    val popularMix: Boolean = false,
+    val collectionEntry: CollectionEntry? = null,
 )
 
 data class DesktopHomeRouteActions(
@@ -91,6 +99,7 @@ fun DesktopHomeRoute(
         radioStations = state.radioStations,
         radioStartingIds = state.radioStartingIds,
         onPlayRadioStation = actions.onPlayRadioStation,
+        posterLoading = state.posterLoading,
         onPlayPersonalMix = actions.onPlayPersonalMix,
         onPlayPopularMix = actions.onPlayPopularMix,
         onPlayTracks = actions.onPlayTracks,

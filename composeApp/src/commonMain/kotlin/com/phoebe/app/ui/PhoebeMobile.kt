@@ -188,6 +188,7 @@ import com.phoebe.app.data.ListenBrainzFeedbackTarget
 import com.phoebe.app.data.catalogAlbumsForArtist
 import com.phoebe.app.data.catalogTracksForArtist
 import com.phoebe.app.feature.home.HomeUiState
+import com.phoebe.app.feature.home.HomePosterLoadingState
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.AppSettings
 import com.phoebe.app.domain.AppScreen
@@ -282,6 +283,7 @@ internal fun MobileBrowseShell(
     onMostPlayed: () -> Unit,
     onCollections: (CollectionEntry) -> Unit,
     supportedCollectionEntries: Set<CollectionEntry> = defaultCollectionEntries.toSet(),
+    homePosterLoading: HomePosterLoadingState = HomePosterLoadingState(),
     onRefreshRandomArtists: () -> Unit,
     onRefreshRandomAlbums: () -> Unit,
     onPrefetchHomeArtist: (Artist) -> Unit = {},
@@ -657,6 +659,7 @@ internal fun MobileBrowseShell(
                         catalogRefreshing,
                         libraryUi.homeSections,
                         supportedCollectionEntries,
+                        homePosterLoading,
                         radioStations,
                         radioStartingIds,
                         decadeMixNotice,
@@ -666,6 +669,7 @@ internal fun MobileBrowseShell(
                             catalogRefreshing = catalogRefreshing,
                             homeSections = libraryUi.homeSections,
                             supportedCollectionEntries = supportedCollectionEntries,
+                            posterLoading = homePosterLoading,
                             radioStations = radioStations,
                             radioStartingIds = radioStartingIds,
                             decadeMixNotice = decadeMixNotice,

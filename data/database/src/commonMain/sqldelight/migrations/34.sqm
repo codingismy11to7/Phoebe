@@ -1,0 +1,9 @@
+CREATE TABLE LibraryPopularTrackRow (
+    libraryKey TEXT NOT NULL,
+    trackId TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    updatedAtMs INTEGER NOT NULL,
+    PRIMARY KEY (libraryKey, position)
+);
+
+CREATE INDEX LibraryPopularTrackRow_library_position ON LibraryPopularTrackRow(libraryKey, position);

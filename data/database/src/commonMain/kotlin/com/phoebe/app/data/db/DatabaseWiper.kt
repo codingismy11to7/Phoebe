@@ -21,6 +21,7 @@ suspend fun PhoebeDatabase.clearAllAppData(clearPlayHistory: Boolean = true) = w
         userArtifactsQueries.clearSavedSearches()
         userArtifactsQueries.clearLocalMetadataOverrides()
 
+        catalogQueries.clearLibraryPopularTracks()
         catalogQueries.clearTrackParents()
         catalogQueries.clearTracks()
         catalogQueries.clearCollectionTags()

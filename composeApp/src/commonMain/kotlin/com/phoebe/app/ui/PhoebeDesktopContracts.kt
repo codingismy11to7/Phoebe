@@ -7,6 +7,7 @@ import com.phoebe.app.data.PlayHistoryRankedEntries
 import com.phoebe.app.data.PlayHistorySnapshot
 import com.phoebe.app.data.rankedEntries
 import com.phoebe.app.feature.home.HomeUiState
+import com.phoebe.app.feature.home.HomePosterLoadingState
 import com.phoebe.app.feature.library.LibraryFilterTab
 import com.phoebe.app.feature.radio.RadioRouteMode
 import com.phoebe.app.feature.settings.SettingsCategory
@@ -128,6 +129,7 @@ internal data class BrowseUiState(
     val libraryFilter: LibraryFilterTab,
     val libraryUi: LibraryUiPreferences,
     val supportedCollectionEntries: Set<CollectionEntry> = defaultCollectionEntries.toSet(),
+    val homePosterLoading: HomePosterLoadingState = HomePosterLoadingState(),
     val decadeMixNotice: String? = null,
     val radioStations: List<PlexRadioStation> = emptyList(),
     val radioDirectory: RadioDirectoryState = RadioDirectoryState(),

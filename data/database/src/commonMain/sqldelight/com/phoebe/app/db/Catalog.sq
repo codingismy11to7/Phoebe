@@ -99,6 +99,16 @@ CREATE TABLE TrackParentRow (
 
 CREATE INDEX TrackParentRow_parent_position ON TrackParentRow(parentId, position);
 
+CREATE TABLE LibraryPopularTrackRow (
+    libraryKey TEXT NOT NULL,
+    trackId TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    updatedAtMs INTEGER NOT NULL,
+    PRIMARY KEY (libraryKey, position)
+);
+
+CREATE INDEX LibraryPopularTrackRow_library_position ON LibraryPopularTrackRow(libraryKey, position);
+
 CREATE TABLE CollectionTagRow (
     target TEXT NOT NULL,
     facet TEXT NOT NULL,
@@ -189,6 +199,16 @@ SELECT id, dateAddedMs FROM TrackRow WHERE id IN :ids;
 selectTrackParents:
 SELECT parentId, trackId, position, playlistItemId FROM TrackParentRow ORDER BY parentId, position;
 
+selectLibraryPopularTracks:
+SELECT * FROM LibraryPopularTrackRow ORDER BY libraryKey, position;
+
+selectPopularTracksForLibrary:
+SELECT t.*
+FROM TrackRow t
+INNER JOIN LibraryPopularTrackRow p ON p.trackId = t.id
+WHERE p.libraryKey = ?
+ORDER BY p.position;
+
 selectCollectionTags:
 SELECT * FROM CollectionTagRow;
 
@@ -259,6 +279,9 @@ INSERT OR REPLACE INTO TrackRow(
 upsertTrackParent:
 INSERT OR REPLACE INTO TrackParentRow(parentId, trackId, position, playlistItemId) VALUES (?, ?, ?, ?);
 
+upsertLibraryPopularTrack:
+INSERT OR REPLACE INTO LibraryPopularTrackRow(libraryKey, trackId, position, updatedAtMs) VALUES (?, ?, ?, ?);
+
 upsertCollectionTag:
 INSERT OR REPLACE INTO CollectionTagRow(target, facet, itemId, value) VALUES (?, ?, ?, ?);
 
@@ -270,6 +293,12 @@ INSERT OR REPLACE INTO CollectionValueLoadRow(target, facet) VALUES (?, ?);
 
 deleteTrackParents:
 DELETE FROM TrackParentRow WHERE parentId = ?;
+
+deleteLibraryPopularTracksForLibrary:
+DELETE FROM LibraryPopularTrackRow WHERE libraryKey = ?;
+
+clearLibraryPopularTracks:
+DELETE FROM LibraryPopularTrackRow;
 
 clearCollectionTags:
 DELETE FROM CollectionTagRow;
