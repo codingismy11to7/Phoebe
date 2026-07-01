@@ -15,14 +15,12 @@ internal expect fun RadioMapHost(
     items: List<RadioMapItem>,
     selectedItem: RadioMapItem?,
     startingStationIds: Set<String>,
-    mapLoading: Boolean,
     markerTintColor: Color,
     googleMapsApiKey: String?,
     onItemSelected: (RadioMapItem) -> Unit,
     onItemPlay: (RadioMapItem) -> Unit,
     onMapZoomChanged: (Double) -> Unit,
     onMapViewportChanged: (RadioMapViewport) -> Unit,
-    onMapSearchArea: (RadioMapViewport) -> Unit,
     modifier: Modifier = Modifier,
     fallback: @Composable (Modifier) -> Unit,
 )
@@ -32,6 +30,8 @@ internal expect fun radioMapGoogleMapsApiKey(): String?
 internal expect fun radioMapUsesExternalBrowser(): Boolean
 
 internal expect fun radioMapUsesMinimalEmbeddedChrome(): Boolean
+
+internal expect fun radioMapHostClustersMarkers(): Boolean
 
 internal fun Color.toRadioMapCssHex(): String {
     val r = (red * 255f).toInt().coerceIn(0, 255)
@@ -61,7 +61,6 @@ internal fun radioMapHtml(
     markerTintCssHex: String,
     desktopBridgeBaseUrl: String? = null,
     useLightTheme: Boolean = false,
-    mapLoading: Boolean = false,
     startingStationIds: Set<String> = emptySet(),
 ): String {
     val markerJson = items.toRadioMapMarkerJson(prefix = "", postfix = "")
@@ -102,38 +101,6 @@ internal fun radioMapHtml(
               --phoebe-map-popup-secondary-action: rgba(16, 24, 32, 0.06);
               --phoebe-map-popup-shadow: rgba(16, 24, 32, 0.18);
             }
-            #searchArea {
-              position: fixed;
-              left: 50%;
-              top: 14px;
-              transform: translateX(-50%);
-              z-index: 12;
-              border: 0;
-              border-radius: 999px;
-              padding: 10px 16px;
-              color: #07111e;
-              background: ${markerTintCssHex.escapeJs()};
-              font: 800 13px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-              box-shadow: 0 10px 24px rgba(0, 0, 0, 0.32);
-              cursor: pointer;
-              display: inline-flex;
-              align-items: center;
-              gap: 8px;
-            }
-            #searchArea[disabled] {
-              cursor: default;
-              opacity: 0.84;
-            }
-            #searchAreaSpinner {
-              display: none;
-              width: 12px;
-              height: 12px;
-              border-radius: 50%;
-              border: 2px solid rgba(7, 17, 30, 0.24);
-              border-top-color: #07111e;
-              animation: phoebe-radio-map-spin 0.8s linear infinite;
-            }
-            #searchArea[data-loading="true"] #searchAreaSpinner { display: inline-block; }
             @keyframes phoebe-radio-map-spin {
               to { transform: rotate(360deg); }
             }
@@ -205,7 +172,6 @@ internal fun radioMapHtml(
             const markers = [$markerJson];
             const selectedId = $selected;
             const initialStartingStationIds = new Set($startingIdsJson);
-            const initialSearchLoading = $mapLoading;
             const markerTint = '${markerTintCssHex.escapeJs()}';
             const mapTheme = '$mapTheme';
             const mapBackground = '$mapBackground';
@@ -226,30 +192,17 @@ internal fun radioMapHtml(
             ];
             let map = null;
             let currentMarkers = [];
+            let markersById = new Map();
+            let stationById = new Map();
             let clusterer = null;
             let sourceMarkers = markers;
             let sourceSelectedId = selectedId;
             let sourceStartingStationIds = initialStartingStationIds;
             let selectedStationForAction = null;
-            let searchLoadingFallback = null;
+            let currentMarkerDataSignature = null;
+            const markerIconCache = new Map();
             const desktopBridgeBaseUrl = $desktopBridge;
             const setStatus = () => {};
-            window.setRadioMapSearchLoading = (loading) => {
-              const button = document.getElementById('searchArea');
-              if (!button) return;
-              const isLoading = Boolean(loading);
-              if (searchLoadingFallback) {
-                clearTimeout(searchLoadingFallback);
-                searchLoadingFallback = null;
-              }
-              button.dataset.loading = String(isLoading);
-              button.disabled = isLoading;
-              const label = document.getElementById('searchAreaLabel');
-              if (label) label.textContent = isLoading ? 'Searching this area' : 'Search this area';
-              if (isLoading) {
-                searchLoadingFallback = setTimeout(() => window.setRadioMapSearchLoading(false), 20000);
-              }
-            };
             const stationMeta = (station) => {
               const pieces = [station.country, station.language, station.codec].filter((value) => value && String(value).trim().length > 0);
               return pieces.length > 0 ? pieces.join(' · ') : (station.approximate ? 'Approximate country location' : 'Station location');
@@ -340,17 +293,6 @@ internal fun radioMapHtml(
               }
               fetch(desktopBridgeBaseUrl + '/' + action + '?' + params.toString()).catch(() => {});
             };
-            window.searchCurrentRadioMapArea = () => {
-              const viewport = currentViewportPayload();
-              if (!viewport) return;
-              window.setRadioMapSearchLoading(true);
-              if (window.parent && window.parent !== window) {
-                postMapMessage('searchArea', null, viewport.zoom, viewport);
-              } else {
-                window.PhoebeRadioMap?.searchArea?.(viewport.north, viewport.south, viewport.east, viewport.west, viewport.zoom);
-              }
-              postDesktopBridge('searchArea', null, viewport.zoom, viewport);
-            };
             const visibleMapMarkers = (items) => items.filter((item) =>
               Number.isFinite(Number(item.lat)) && Number.isFinite(Number(item.lng))
             );
@@ -362,11 +304,14 @@ internal fun radioMapHtml(
               const count = Number(marker?.phoebeStation?.count);
               return total + (Number.isFinite(count) && count > 0 ? count : 1);
             }, 0);
+            const representedMarkerPositions = (markers) => (markers || [])
+              .map((marker) => marker?.phoebeStation)
+              .filter((station) => station != null)
+              .flatMap((station) => clusterPositions(station));
             const clusterPositions = (station) => {
               if (station.isCluster && Array.isArray(station.children) && station.children.length > 0) {
                 return station.children
-                  .filter((child) => Number.isFinite(Number(child.lat)) && Number.isFinite(Number(child.lng)))
-                  .map((child) => ({ lat: Number(child.lat), lng: Number(child.lng) }));
+                  .flatMap((child) => clusterPositions(child));
               }
               if (Number.isFinite(Number(station.lat)) && Number.isFinite(Number(station.lng))) {
                 return [{ lat: Number(station.lat), lng: Number(station.lng) }];
@@ -396,6 +341,9 @@ internal fun radioMapHtml(
             const focusMapOnStation = (station) => focusMapOnPositions(clusterPositions(station));
             const markerIcon = (station, selected) => {
               const count = station.isCluster ? String(station.count) : '';
+              const cacheKey = [count, selected ? '1' : '0', station.approximate ? '1' : '0'].join('|');
+              const cached = markerIconCache.get(cacheKey);
+              if (cached) return cached;
               const digitCount = count.length;
               const size = station.isCluster ? Math.max(28, 18 + digitCount * 7) : (selected ? 18 : 14);
               const opacity = station.approximate ? 0.7 : 1;
@@ -410,20 +358,51 @@ internal fun radioMapHtml(
                 '<circle cx="' + (size / 2) + '" cy="' + (size / 2) + '" r="' + radius + '" fill="' + markerTint + '" fill-opacity="' + opacity + '" stroke="' + stroke + '" stroke-opacity="0.75" stroke-width="' + strokeWidth + '"/>' +
                 label +
                 '</svg>';
-              return {
+              const icon = {
                 url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg),
                 scaledSize: new google.maps.Size(size, size),
                 anchor: new google.maps.Point(size / 2, size / 2),
               };
+              markerIconCache.set(cacheKey, icon);
+              return icon;
+            };
+            const markerDataSignature = (items) => items
+              .map((item) => [item.id, item.lat, item.lng, item.count, item.approximate ? 1 : 0, item.isCluster ? 1 : 0].join('@'))
+              .join('|');
+            const indexStation = (station) => {
+              if (!station) return;
+              stationById.set(String(station.id), station);
+              if (Array.isArray(station.children)) {
+                station.children.forEach(indexStation);
+              }
+            };
+            const updateMarkerIcon = (itemId) => {
+              if (itemId == null) return;
+              const marker = markersById.get(String(itemId));
+              const station = marker?.phoebeStation;
+              if (!marker || !station) return;
+              marker.setIcon(markerIcon(station, String(station.id) === String(sourceSelectedId)));
+            };
+            window.updateRadioMapSelection = (selectedId) => {
+              const previousSelectedId = sourceSelectedId == null ? null : String(sourceSelectedId);
+              const nextSelectedId = selectedId == null ? null : String(selectedId);
+              sourceSelectedId = nextSelectedId;
+              if (previousSelectedId !== nextSelectedId) {
+                updateMarkerIcon(previousSelectedId);
+                updateMarkerIcon(nextSelectedId);
+              }
+              if (nextSelectedId == null && selectedStationForAction) {
+                window.dismissRadioMapSelection();
+              }
             };
             const makeMarker = (station) => {
-              const selected = station.id === sourceSelectedId;
+              const selected = sourceSelectedId != null && String(station.id) === String(sourceSelectedId);
               const marker = new google.maps.Marker({
                 map,
                 position: { lat: station.lat, lng: station.lng },
                 title: station.name,
                 icon: markerIcon(station, selected),
-                optimized: false,
+                optimized: true,
               });
               marker.phoebeStation = station;
               const handleClick = () => {
@@ -447,6 +426,7 @@ internal fun radioMapHtml(
                 postDesktopBridge('select', station.id, null, null);
                 window.webkit?.messageHandlers?.phoebeRadioMap?.postMessage?.(station.id);
                 window.AndroidPhoebeRadioMap?.selectStation?.(station.id);
+                window.updateRadioMapSelection(station.id);
                 showSelection(station);
                 setStatus('Selected ' + targetLabel + '.', true);
               };
@@ -456,11 +436,11 @@ internal fun radioMapHtml(
             window.initRadioMap = async () => {
               try {
                 setStatus('Loading radio stations...');
-                const [{ Map }, { MarkerClusterer, SuperClusterAlgorithm }] = await Promise.all([
+                const [{ Map: GoogleMap }, { MarkerClusterer, SuperClusterAlgorithm }] = await Promise.all([
                   google.maps.importLibrary('maps'),
                   import('https://cdn.jsdelivr.net/npm/@googlemaps/markerclusterer/+esm'),
                 ]);
-                map = new Map(document.getElementById('map'), {
+                map = new GoogleMap(document.getElementById('map'), {
                   center: { lat: 20, lng: 0 },
                   zoom: 2,
                   mapTypeId: 'roadmap',
@@ -489,11 +469,27 @@ internal fun radioMapHtml(
                   }
                 });
                 window.updateRadioMapMarkers = (newMarkers, selectedId) => {
-                  window.setRadioMapSearchLoading(false);
-                  sourceMarkers = newMarkers;
-                  sourceSelectedId = selectedId;
-                  currentMarkers.forEach(marker => marker.setMap(null));
-                  currentMarkers = visibleMapMarkers(sourceMarkers).map(station => makeMarker(station));
+                  const visibleMarkers = visibleMapMarkers(newMarkers || []);
+                  const nextSignature = markerDataSignature(visibleMarkers);
+                  if (nextSignature === currentMarkerDataSignature) {
+                    window.updateRadioMapSelection(selectedId);
+                    return;
+                  }
+                  sourceMarkers = newMarkers || [];
+                  sourceSelectedId = selectedId == null ? null : String(selectedId);
+                  currentMarkerDataSignature = nextSignature;
+                  currentMarkers.forEach(marker => {
+                    google.maps.event.clearInstanceListeners(marker);
+                    marker.setMap(null);
+                  });
+                  markersById = new Map();
+                  stationById = new Map();
+                  visibleMarkers.forEach(indexStation);
+                  currentMarkers = visibleMarkers.map(station => {
+                    const marker = makeMarker(station);
+                    markersById.set(String(station.id), marker);
+                    return marker;
+                  });
                   if (clusterer) clusterer.clearMarkers();
                   clusterer = new MarkerClusterer({
                     map,
@@ -506,7 +502,7 @@ internal fun radioMapHtml(
                           position,
                           icon: markerIcon({ isCluster: true, count, approximate: false }, false),
                           title: count + ' stations',
-                          optimized: false,
+                          optimized: true,
                         });
                       },
                     },
@@ -523,16 +519,16 @@ internal fun radioMapHtml(
                         }
                         postDesktopBridge('select', sourceCluster.id, null, null);
                       }
-                      const markerPositions = markers
-                        .map((marker) => marker?.getPosition?.())
-                        .filter((position) => position != null)
-                        .map((position) => ({ lat: position.lat(), lng: position.lng() }));
+                      const markerPositions = representedMarkerPositions(markers);
                       if (!focusMapOnPositions(markerPositions)) {
                         map.setCenter(cluster.position);
                         map.setZoom(Math.min((map.getZoom() || 2) + 2, 18));
                       }
                     },
                   });
+                  if (sourceSelectedId != null && !stationById.has(String(sourceSelectedId))) {
+                    window.updateRadioMapSelection(null);
+                  }
                   setStatus('Loaded ' + representedStationCount(sourceMarkers) + ' radio stations.', true);
                 };
                 const parentMap = window.parent && window.parent.PhoebeRadioMap;
@@ -554,9 +550,7 @@ internal fun radioMapHtml(
                 }
                 window.setRadioMapStartingStationIds(Array.from(startingIdsToLoad));
                 window.updateRadioMapMarkers(markersToLoad, selectedIdToLoad);
-                window.setRadioMapSearchLoading(initialSearchLoading);
               } catch (error) {
-                window.setRadioMapSearchLoading(false);
                 console.error('Phoebe radio map failed to render markers', error);
                 setStatus('Could not render radio markers: ' + (error?.message || error));
               }
@@ -566,10 +560,6 @@ internal fun radioMapHtml(
         </head>
         <body class="$bodyClass">
           <div id="map"></div>
-          <button id="searchArea" type="button" onclick="window.searchCurrentRadioMapArea()">
-            <span id="searchAreaSpinner"></span>
-            <span id="searchAreaLabel">Search this area</span>
-          </button>
           <div id="selection" role="status">
             <div id="selectionText">
               <div id="selectionName">Radio station</div>

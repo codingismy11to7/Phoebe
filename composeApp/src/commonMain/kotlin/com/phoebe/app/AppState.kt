@@ -35,7 +35,6 @@ import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.PersonalMixPreferences
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.RadioDirectoryState
-import com.phoebe.app.domain.RadioMapViewport
 import com.phoebe.app.domain.RadioNowPlayingMetadata
 import com.phoebe.app.domain.RadioStation
 import com.phoebe.app.domain.RadioStationSearchQuery
@@ -2087,15 +2086,11 @@ class AppState(
         query: RadioStationSearchQuery = RadioStationSearchQuery(),
         page: Int = 0,
         countryCode: String? = null,
-        viewport: RadioMapViewport? = null,
-        autoPrefetch: Boolean = page == 0,
     ) = scope.launch {
         dependencies.radioRepository.loadGlobe(
             query = query,
             page = page,
             countryCode = countryCode,
-            viewport = viewport,
-            autoPrefetch = autoPrefetch,
         )
     }
 

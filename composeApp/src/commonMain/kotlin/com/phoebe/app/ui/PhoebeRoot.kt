@@ -1641,9 +1641,6 @@ private fun PhoebeRootStateHolder(
                         onInternetRadioMapCountry = { countryCode ->
                             state.loadFocusedInternetRadioMap(countryCode = countryCode)
                         },
-                        onInternetRadioMapViewport = { viewport ->
-                            state.loadFocusedInternetRadioMap(viewport = viewport, autoPrefetch = false)
-                        },
                         onOpenInternetRadioStation = openInternetRadioStation,
                         onInternetRadioRoot = openRadioRoot,
                         onAddManualRadioStation = state::addManualRadioStation,
@@ -2066,9 +2063,6 @@ private fun PhoebeRootStateHolder(
                         onRadioMapSearch = state::loadInternetRadioMap,
                         onRadioMapCountry = { countryCode ->
                             state.loadFocusedInternetRadioMap(countryCode = countryCode)
-                        },
-                        onRadioMapViewport = { viewport ->
-                            state.loadFocusedInternetRadioMap(viewport = viewport, autoPrefetch = false)
                         },
                         onRadioStation = openInternetRadioStation,
                         onRadioRoot = openRadioRoot,

@@ -71,7 +71,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.phoebe.app.domain.RadioCountry
 import com.phoebe.app.domain.RadioDirectoryState
-import com.phoebe.app.domain.RadioMapViewport
 import com.phoebe.app.domain.RadioStation
 import com.phoebe.app.domain.RadioStationSearchQuery
 import com.phoebe.app.domain.RadioStationSource
@@ -126,7 +125,6 @@ class RadioRouteActions(
     val onGlobeCountry: (String) -> Unit = { countryCode ->
         onGlobeSearch(RadioStationSearchQuery(countryCode = countryCode), 0)
     },
-    val onGlobeViewport: (RadioMapViewport) -> Unit = {},
 )
 
 @OptIn(FlowPreview::class)
@@ -681,8 +679,6 @@ private fun RadioMapRoute(
     var selectedItemId by remember { mutableStateOf<String?>(null) }
     var expandedClusterIds by remember { mutableStateOf(emptySet<String>()) }
     var mapZoom by remember { mutableDoubleStateOf(2.0) }
-    var mapViewport by remember { mutableStateOf<RadioMapViewport?>(null) }
-    var submittedViewport by remember { mutableStateOf<RadioMapViewport?>(null) }
     var mapPresented by remember { mutableStateOf(false) }
 
     LaunchedEffect(directory.globeStations) {
@@ -697,16 +693,22 @@ private fun RadioMapRoute(
 
     val externalBrowserMap = radioMapUsesExternalBrowser()
     val minimalEmbeddedMap = radioMapUsesMinimalEmbeddedChrome()
-    val clusterThresholdDegrees = remember(mapZoom) {
-        radioMapClusterThresholdDegrees(mapZoom)
+    val hostClustersMarkers = radioMapHostClustersMarkers()
+    val clusterThresholdDegrees = remember(mapZoom, hostClustersMarkers) {
+        if (hostClustersMarkers) {
+            0.0
+        } else {
+            radioMapClusterThresholdDegrees(mapZoom)
+        }
     }
+    val activeExpandedClusterIds = if (hostClustersMarkers) emptySet() else expandedClusterIds
     var items by remember { mutableStateOf(emptyList<RadioMapItem>()) }
-    LaunchedEffect(directory.globeStations, expandedClusterIds, clusterThresholdDegrees) {
+    LaunchedEffect(directory.globeStations, activeExpandedClusterIds, clusterThresholdDegrees) {
         items = withContext(Dispatchers.Default) {
             clusterStations(
                 stations = directory.globeStations,
                 clusterThresholdDegrees = clusterThresholdDegrees,
-                expandedClusterIds = expandedClusterIds,
+                expandedClusterIds = activeExpandedClusterIds,
             )
         }
     }
@@ -721,26 +723,26 @@ private fun RadioMapRoute(
     LaunchedEffect(
         items,
         directory.globeLoading,
-        directory.globeAutoPrefetching,
+        directory.globeMapLoaded,
+        directory.globeErrorMessage,
         directory.globeLoadedStationCount,
-        directory.canLoadNextGlobePage,
         minimalEmbeddedMap,
     ) {
-        val presentationTarget = if (minimalEmbeddedMap) {
-            RadioMapEmbeddedDesktopPresentationStationTarget
-        } else {
-            RadioMapInitialPresentationStationTarget
-        }
-        val initialDenseBatchReady = directory.globeLoadedStationCount >= presentationTarget
-        val loadingSettled = !directory.globeAutoPrefetching || !directory.canLoadNextGlobePage
-        val readyForEmbeddedMap = minimalEmbeddedMap && items.isNotEmpty() && !directory.globeLoading
-        if (!mapPresented && items.isNotEmpty() && !directory.globeLoading && (readyForEmbeddedMap || initialDenseBatchReady || loadingSettled)) {
+        if (!mapPresented &&
+            !directory.globeLoading &&
+            (items.isNotEmpty() || directory.globeMapLoaded || directory.globeErrorMessage != null)
+        ) {
             mapPresented = true
         }
     }
+    val mapDataLoading = !directory.globeMapLoaded && directory.globeErrorMessage == null
     val shouldWaitForMapMarkers = !externalBrowserMap &&
         !mapPresented &&
-        (items.isEmpty() || directory.globeLoading || (!minimalEmbeddedMap && directory.globeAutoPrefetching))
+        mapDataLoading
+    val shouldShowMapDataFallback = !externalBrowserMap &&
+        mapPresented &&
+        items.isEmpty() &&
+        (directory.globeMapLoaded || directory.globeErrorMessage != null)
     val submitSearch: () -> Unit = {
         actions.onGlobeSearch(RadioStationSearchQuery(text = queryText.trim()), 0)
     }
@@ -774,21 +776,6 @@ private fun RadioMapRoute(
         }
     }
 
-    val canSearchArea = mapViewport?.let { viewport ->
-        viewport.isValid &&
-            mapPresented
-    } == true
-    val searchArea: () -> Unit = {
-        if (!directory.globeLoading) {
-            mapViewport
-                ?.takeIf { it.isValid }
-                ?.let { viewport ->
-                    submittedViewport = viewport
-                    actions.onGlobeViewport(viewport)
-                }
-        }
-    }
-
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -817,17 +804,20 @@ private fun RadioMapRoute(
                 onSelectedStationDismiss = {
                     selectedItemId = null
                 },
-                canSearchArea = canSearchArea,
-                searchAreaLoading = directory.globeLoading,
-                onSearchArea = searchArea,
                 showStatus = false,
                 modifier = hostModifier,
             ) { mapModifier ->
                 if (shouldWaitForMapMarkers) {
+                    RadioMapInitialLoading(
+                        message = radioMapInitialLoadingText(directory),
+                        modifier = mapModifier,
+                    )
+                } else if (shouldShowMapDataFallback) {
                     RadioMapFallback(
                         items = items,
-                        loading = directory.globeLoading || directory.globeAutoPrefetching,
+                        loading = false,
                         errorMessage = directory.globeErrorMessage,
+                        hostUnavailable = false,
                         onItemSelected = handleItemSelected,
                         onItemPlay = handleItemPlay,
                         modifier = mapModifier,
@@ -837,20 +827,15 @@ private fun RadioMapRoute(
                         items = items,
                         selectedItem = if (externalBrowserMap) null else selectedItem,
                         startingStationIds = startingStationIds,
-                        mapLoading = directory.globeLoading,
                         markerTintColor = PhoebeUi.accentLight,
                         googleMapsApiKey = radioMapGoogleMapsApiKey(),
                         onItemSelected = handleItemSelected,
                         onItemPlay = handleItemPlay,
-                        onMapZoomChanged = { zoom -> mapZoom = zoom },
-                        onMapViewportChanged = { viewport ->
-                            mapZoom = viewport.zoom
-                            mapViewport = viewport
+                        onMapZoomChanged = { zoom ->
+                            if (!hostClustersMarkers) mapZoom = zoom
                         },
-                        onMapSearchArea = { viewport ->
-                            mapViewport = viewport
-                            submittedViewport = viewport
-                            actions.onGlobeViewport(viewport)
+                        onMapViewportChanged = { viewport ->
+                            if (!hostClustersMarkers) mapZoom = viewport.zoom
                         },
                         modifier = mapModifier,
                         fallback = { fallbackModifier ->
@@ -858,6 +843,7 @@ private fun RadioMapRoute(
                                 items = items,
                                 loading = directory.globeLoading || directory.globeAutoPrefetching,
                                 errorMessage = directory.globeErrorMessage,
+                                hostUnavailable = true,
                                 onItemSelected = handleItemSelected,
                                 onItemPlay = handleItemPlay,
                                 modifier = fallbackModifier,
@@ -904,9 +890,6 @@ private fun RadioMapRoute(
             onSelectedStationDismiss = {
                 selectedItemId = null
             },
-            canSearchArea = canSearchArea,
-            searchAreaLoading = directory.globeLoading,
-            onSearchArea = searchArea,
             showStatus = false,
             modifier = Modifier
                 .fillMaxWidth()
@@ -917,20 +900,15 @@ private fun RadioMapRoute(
                 items = items,
                 selectedItem = selectedItem,
                 startingStationIds = startingStationIds,
-                mapLoading = directory.globeLoading,
                 markerTintColor = PhoebeUi.accentLight,
                 googleMapsApiKey = radioMapGoogleMapsApiKey(),
                 onItemSelected = handleItemSelected,
                 onItemPlay = handleItemPlay,
-                onMapZoomChanged = { zoom -> mapZoom = zoom },
-                onMapViewportChanged = { viewport ->
-                    mapZoom = viewport.zoom
-                    mapViewport = viewport
+                onMapZoomChanged = { zoom ->
+                    if (!hostClustersMarkers) mapZoom = zoom
                 },
-                onMapSearchArea = { viewport ->
-                    mapViewport = viewport
-                    submittedViewport = viewport
-                    actions.onGlobeViewport(viewport)
+                onMapViewportChanged = { viewport ->
+                    if (!hostClustersMarkers) mapZoom = viewport.zoom
                 },
                 modifier = mapModifier,
                 fallback = { fallbackModifier ->
@@ -938,6 +916,7 @@ private fun RadioMapRoute(
                         items = items,
                         loading = directory.globeLoading || directory.globeAutoPrefetching,
                         errorMessage = directory.globeErrorMessage,
+                        hostUnavailable = true,
                         onItemSelected = handleItemSelected,
                         onItemPlay = handleItemPlay,
                         modifier = fallbackModifier,
@@ -975,14 +954,10 @@ private fun RadioMapSurface(
     starting: Boolean,
     onSelectedStationPlay: () -> Unit,
     onSelectedStationDismiss: () -> Unit,
-    canSearchArea: Boolean,
-    searchAreaLoading: Boolean,
-    onSearchArea: () -> Unit,
     showStatus: Boolean,
     modifier: Modifier,
     content: @Composable (Modifier) -> Unit,
 ) {
-    var controlsVisible by remember { mutableStateOf(true) }
     val statusText = remember(
         directory.globeLoadedStationCount,
         directory.globeLoading,
@@ -996,7 +971,7 @@ private fun RadioMapSurface(
         content(Modifier.fillMaxSize())
 
         AnimatedVisibility(
-            visible = controlsVisible && showStatus && statusText.isNotBlank(),
+            visible = showStatus && statusText.isNotBlank(),
             enter = fadeIn() + scaleIn(),
             exit = fadeOut() + scaleOut(),
             modifier = Modifier
@@ -1027,48 +1002,6 @@ private fun RadioMapSurface(
                         color = Color(0xFFF4F5F7),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
-                    )
-                }
-            }
-        }
-
-        AnimatedVisibility(
-            visible = controlsVisible && canSearchArea,
-            enter = fadeIn() + scaleIn(),
-            exit = fadeOut() + scaleOut(),
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(16.dp),
-        ) {
-            FloatingActionButton(
-                onClick = {
-                    if (!searchAreaLoading) {
-                        onSearchArea()
-                    }
-                },
-                containerColor = Color(0xF5121722),
-                contentColor = Color(0xFFF4F5F7),
-                shape = RoundedCornerShape(18.dp),
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    if (searchAreaLoading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            strokeWidth = 2.dp,
-                            color = Color(0xFFF4F5F7),
-                        )
-                    } else {
-                        PhoebeIconView(PhoebeIcon.Search, tint = Color(0xFFF4F5F7), modifier = Modifier.size(18.dp))
-                    }
-                    Text(
-                        text = if (searchAreaLoading) "Searching this area" else "Search this area",
-                        color = Color(0xFFF4F5F7),
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
                     )
                 }
             }
@@ -1110,6 +1043,9 @@ private fun radioMapStatusText(directory: RadioDirectoryState): String {
         else -> ""
     }
 }
+
+private fun radioMapInitialLoadingText(directory: RadioDirectoryState): String =
+    radioMapStatusText(directory).ifBlank { "Loading radio map" }
 
 @Composable
 private fun RadioMapStationSnackbar(
@@ -1215,6 +1151,7 @@ private fun RadioMapFallback(
     items: List<RadioMapItem>,
     loading: Boolean,
     errorMessage: String?,
+    hostUnavailable: Boolean,
     onItemSelected: (RadioMapItem) -> Unit,
     onItemPlay: (RadioMapItem) -> Unit,
     modifier: Modifier,
@@ -1232,15 +1169,23 @@ private fun RadioMapFallback(
         ) {
             item(contentType = "map-status") {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Google Maps map", color = PhoebeUi.primaryText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                    val showMessage = !loading || radioMapGoogleMapsApiKey() == null
-                    if (showMessage) {
+                    Text(
+                        if (hostUnavailable) "Google Maps map" else "Radio map",
+                        color = PhoebeUi.primaryText,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    val hostUnavailableMessage = when {
+                        !hostUnavailable -> null
+                        radioMapGoogleMapsApiKey() == null ->
+                            "Set PHOEBE_GOOGLE_MAPS_API_KEY to enable the interactive Google Maps map. Station locations are listed below."
+                        !loading ->
+                            "Google Maps map host is unavailable on this build; station locations are listed below."
+                        else -> null
+                    }
+                    if (hostUnavailableMessage != null) {
                         Text(
-                            if (radioMapGoogleMapsApiKey() == null) {
-                                "Set PHOEBE_GOOGLE_MAPS_API_KEY to enable the interactive Google Maps map. Station locations are listed below."
-                            } else {
-                                "Google Maps map host is unavailable on this build; station locations are listed below."
-                            },
+                            hostUnavailableMessage,
                             color = PhoebeUi.secondaryText,
                             fontSize = 12.sp,
                         )
@@ -1278,6 +1223,34 @@ private fun RadioMapFallback(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun RadioMapInitialLoading(
+    message: String,
+    modifier: Modifier,
+) {
+    Box(
+        modifier = modifier,
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(22.dp),
+                strokeWidth = 2.dp,
+                color = PhoebeUi.accentLight,
+            )
+            Text(
+                text = message,
+                color = PhoebeUi.secondaryText,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
         }
     }
 }
@@ -1632,6 +1605,3 @@ internal fun expandedRadioMapClusterIds(
     } else {
         expandedClusterIds
     }
-
-private const val RadioMapInitialPresentationStationTarget = 2_000
-private const val RadioMapEmbeddedDesktopPresentationStationTarget = 250

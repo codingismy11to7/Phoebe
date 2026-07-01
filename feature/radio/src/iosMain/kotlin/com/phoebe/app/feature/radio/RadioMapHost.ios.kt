@@ -18,14 +18,12 @@ internal actual fun RadioMapHost(
     items: List<RadioMapItem>,
     selectedItem: RadioMapItem?,
     startingStationIds: Set<String>,
-    mapLoading: Boolean,
     markerTintColor: Color,
     googleMapsApiKey: String?,
     onItemSelected: (RadioMapItem) -> Unit,
     onItemPlay: (RadioMapItem) -> Unit,
     onMapZoomChanged: (Double) -> Unit,
     onMapViewportChanged: (RadioMapViewport) -> Unit,
-    onMapSearchArea: (RadioMapViewport) -> Unit,
     modifier: Modifier,
     fallback: @Composable (Modifier) -> Unit,
 ) {
@@ -89,3 +87,5 @@ internal actual fun radioMapGoogleMapsApiKey(): String? =
 internal actual fun radioMapUsesExternalBrowser(): Boolean = false
 
 internal actual fun radioMapUsesMinimalEmbeddedChrome(): Boolean = true
+
+internal actual fun radioMapHostClustersMarkers(): Boolean = true

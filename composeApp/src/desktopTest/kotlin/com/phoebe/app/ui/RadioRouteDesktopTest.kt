@@ -116,6 +116,43 @@ class RadioRouteDesktopTest {
 
     @OptIn(ExperimentalTestApi::class, ExperimentalComposeUiApi::class)
     @Test
+    fun desktopRadioMapInitialLoadDoesNotShowUnavailableFallback() =
+        runDesktopComposeUiTest(width = 900, height = 620) {
+            setContent {
+                PhoebeTheme {
+                    Box(Modifier.size(900.dp, 620.dp)) {
+                        RadioRoute(
+                            state = RadioRouteState(
+                                directory = RadioDirectoryState(),
+                            ),
+                            actions = RadioRouteActions(
+                                onSearch = {},
+                                onLoadMore = {},
+                                onRefreshPopular = {},
+                                onPlay = {},
+                                onAddManualStation = { _, _ -> },
+                                onUpdateManualStation = { _, _, _ -> },
+                                onDeleteManualStation = {},
+                            ),
+                            contentPadding = PaddingValues(20.dp),
+                            mode = RadioRouteMode.Map,
+                        )
+                    }
+                }
+            }
+
+            waitForIdle()
+            onNodeWithText("Loading radio map").assertIsDisplayed()
+            assertFalse(onAllNodesWithText("Google Maps map").fetchSemanticsNodes().isNotEmpty())
+            assertFalse(
+                onAllNodesWithText("Google Maps map host is unavailable on this build; station locations are listed below.")
+                    .fetchSemanticsNodes()
+                    .isNotEmpty(),
+            )
+        }
+
+    @OptIn(ExperimentalTestApi::class, ExperimentalComposeUiApi::class)
+    @Test
     fun desktopRadioMapShowsFallbackAndSelectableStation() =
         runDesktopComposeUiTest(width = 900, height = 620) {
             val stations = listOf(
@@ -164,6 +201,7 @@ class RadioRouteDesktopTest {
 
             waitForIdle()
             onNodeWithText("Google Maps map").assertIsDisplayed()
+            assertFalse(onAllNodesWithText("Search this area").fetchSemanticsNodes().isNotEmpty())
             onNode(hasText("KEXP") and hasClickAction()).performClick()
             assertEquals(
                 false,
@@ -202,7 +240,7 @@ class RadioRouteDesktopTest {
                             state = RadioRouteState(
                                 directory = RadioDirectoryState(
                                     globeStations = stations,
-                                    globeAutoPrefetching = true,
+                                    globeLoading = true,
                                 ),
                             ),
                             actions = RadioRouteActions(
@@ -223,6 +261,7 @@ class RadioRouteDesktopTest {
 
             waitForIdle()
             onNodeWithText("Loading station locations").assertIsDisplayed()
+            assertFalse(onAllNodesWithText("Search this area").fetchSemanticsNodes().isNotEmpty())
             assertFalse(
                 onAllNodesWithText("2 stations").fetchSemanticsNodes().isNotEmpty(),
                 "Loading map fallback should not render cluster rows.",

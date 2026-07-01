@@ -218,7 +218,6 @@ import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.PlexRadioStation
 import com.phoebe.app.domain.RadioDirectoryState
-import com.phoebe.app.domain.RadioMapViewport
 import com.phoebe.app.domain.RadioStation
 import com.phoebe.app.domain.RadioStationSearchQuery
 import com.phoebe.app.domain.RepeatMode
@@ -305,7 +304,6 @@ internal fun MobileBrowseShell(
     onInternetRadioMap: () -> Unit = {},
     onInternetRadioMapSearch: (RadioStationSearchQuery, Int) -> Unit = { _, _ -> },
     onInternetRadioMapCountry: (String) -> Unit = {},
-    onInternetRadioMapViewport: (RadioMapViewport) -> Unit = {},
     onOpenInternetRadioStation: (RadioStation) -> Unit = onPlayInternetRadioStation,
     onInternetRadioRoot: () -> Unit = {},
     onAddManualRadioStation: (String, String) -> Unit = { _, _ -> },
@@ -811,7 +809,6 @@ internal fun MobileBrowseShell(
                         onBrowseGlobe = onInternetRadioMap,
                         onGlobeSearch = onInternetRadioMapSearch,
                         onGlobeCountry = onInternetRadioMapCountry,
-                        onGlobeViewport = onInternetRadioMapViewport,
                         onCountry = { country -> onInternetRadioCountry(country.code) },
                         onStation = onOpenInternetRadioStation,
                         onClearCountry = onInternetRadioRoot,

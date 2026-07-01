@@ -69,6 +69,32 @@ class RadioMapItemTest {
     }
 
     @Test
+    fun zeroThresholdReturnsRawStationMarkers() {
+        val station1 = RadioStation(
+            id = "s2",
+            name = "Station 2",
+            streamUrl = "https://stream.example/2",
+            geoLat = 40.0,
+            geoLong = -100.0,
+        )
+        val station2 = RadioStation(
+            id = "s1",
+            name = "Station 1",
+            streamUrl = "https://stream.example/1",
+            geoLat = 40.0,
+            geoLong = -100.0,
+        )
+
+        val items = clusterStations(
+            stations = listOf(station1, station2),
+            clusterThresholdDegrees = 0.0,
+        )
+
+        assertEquals(listOf("s1", "s2"), items.map { it.id })
+        assertTrue(items.all { it is RadioMapItem.Station })
+    }
+
+    @Test
     fun clusterExpansionWithExpandedIds() {
         val station1 = RadioStation(
             id = "s1",
@@ -263,9 +289,13 @@ class RadioMapItemTest {
         assertFalse(html.contains("id=\"status\""))
         assertFalse(html.contains("#status"))
         assertTrue(html.contains("markerTint = '#22c55e'"))
-        assertTrue(html.contains("new Map(document.getElementById('map')"))
+        assertTrue(html.contains("Map: GoogleMap"))
+        assertTrue(html.contains("new GoogleMap(document.getElementById('map')"))
+        assertFalse(html.contains("new Map(document.getElementById('map')"))
         assertTrue(html.contains("new google.maps.Marker"))
         assertTrue(html.contains("markerIcon"))
+        assertTrue(html.contains("markerIconCache"))
+        assertTrue(html.contains("markerIconCache.set(cacheKey, icon)"))
         assertTrue(html.contains("Math.max(28, 18 + digitCount * 7)"))
         assertTrue(html.contains("fontSize"))
         assertTrue(html.contains("@googlemaps/markerclusterer"))
@@ -274,7 +304,16 @@ class RadioMapItemTest {
         assertFalse(html.contains("flattenStationMarkers"))
         assertTrue(html.contains("representedStationCount"))
         assertTrue(html.contains("representedMarkerCount"))
+        assertTrue(html.contains("representedMarkerPositions"))
+        assertTrue(html.contains(".flatMap((station) => clusterPositions(station))"))
+        assertTrue(html.contains(".flatMap((child) => clusterPositions(child))"))
         assertTrue(html.contains("marker?.phoebeStation?.count"))
+        assertTrue(html.contains("window.updateRadioMapSelection"))
+        assertTrue(html.contains("marker.setIcon(markerIcon(station"))
+        assertTrue(html.contains("currentMarkerDataSignature"))
+        assertTrue(html.contains("google.maps.event.clearInstanceListeners(marker)"))
+        assertTrue(html.contains("optimized: true"))
+        assertFalse(html.contains("optimized: false"))
         assertTrue(html.contains("render: ({ markers, position })"))
         assertTrue(html.contains("' radio stations.'"))
         assertTrue(html.contains("zoom_changed"))
@@ -286,15 +325,15 @@ class RadioMapItemTest {
         assertTrue(html.contains("postMapMessage('playItem', station.id, null, null)"))
         assertTrue(html.contains("currentViewportPayload"))
         assertFalse(html.contains("userInteractedWithMap"))
-        assertTrue(html.contains("id=\"searchArea\""))
-        assertTrue(html.contains("id=\"searchAreaSpinner\""))
-        assertTrue(html.contains("id=\"searchAreaLabel\""))
-        assertTrue(html.contains("Search this area"))
-        assertTrue(html.contains("Searching this area"))
-        assertTrue(html.contains("setRadioMapSearchLoading"))
-        assertTrue(html.contains("searchCurrentRadioMapArea"))
-        assertTrue(html.contains("postMapMessage('searchArea'"))
-        assertTrue(html.contains("postDesktopBridge('searchArea'"))
+        assertFalse(html.contains("id=\"searchArea\""))
+        assertFalse(html.contains("id=\"searchAreaSpinner\""))
+        assertFalse(html.contains("id=\"searchAreaLabel\""))
+        assertFalse(html.contains("Search this area"))
+        assertFalse(html.contains("Searching this area"))
+        assertFalse(html.contains("setRadioMapSearchLoading"))
+        assertFalse(html.contains("searchCurrentRadioMapArea"))
+        assertFalse(html.contains("postMapMessage('searchArea'"))
+        assertFalse(html.contains("postDesktopBridge('searchArea'"))
         assertTrue(html.contains("viewportChanged"))
         assertTrue(html.contains("bounds.getNorthEast()"))
         assertTrue(html.contains("Selected "))

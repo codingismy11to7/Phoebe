@@ -227,7 +227,6 @@ internal fun DesktopPlayer(
     val onRadioMap = browseActions.onRadioMap
     val onRadioMapSearch = browseActions.onRadioMapSearch
     val onRadioMapCountry = browseActions.onRadioMapCountry
-    val onRadioMapViewport = browseActions.onRadioMapViewport
     val onRadioStation = browseActions.onRadioStation
     val onRadioRoot = browseActions.onRadioRoot
     val onRadioAddManualStation = browseActions.onRadioAddManualStation
@@ -914,7 +913,6 @@ internal fun DesktopPlayer(
                                         onRadioMap = onRadioMap,
                                         onRadioMapSearch = onRadioMapSearch,
                                         onRadioMapCountry = onRadioMapCountry,
-                                        onRadioMapViewport = onRadioMapViewport,
                                         onRadioStation = onRadioStation,
                                         onRadioRoot = onRadioRoot,
                                         onRadioAddManualStation = onRadioAddManualStation,

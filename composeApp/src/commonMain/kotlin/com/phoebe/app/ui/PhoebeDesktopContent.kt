@@ -157,7 +157,6 @@ import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.RadioDirectoryState
-import com.phoebe.app.domain.RadioMapViewport
 import com.phoebe.app.domain.RadioStation
 import com.phoebe.app.domain.RadioStationSearchQuery
 import com.phoebe.app.domain.RepeatMode
@@ -218,7 +217,6 @@ internal fun DesktopContent(
     onRadioMap: () -> Unit = {},
     onRadioMapSearch: (RadioStationSearchQuery, Int) -> Unit = { _, _ -> },
     onRadioMapCountry: (String) -> Unit = {},
-    onRadioMapViewport: (RadioMapViewport) -> Unit = {},
     onRadioStation: (RadioStation) -> Unit = onRadioPlay,
     onRadioRoot: () -> Unit = {},
     onRadioAddManualStation: (String, String) -> Unit = { _, _ -> },
@@ -294,7 +292,6 @@ internal fun DesktopContent(
                 onBrowseGlobe = onRadioMap,
                 onGlobeSearch = onRadioMapSearch,
                 onGlobeCountry = onRadioMapCountry,
-                onGlobeViewport = onRadioMapViewport,
                 onStation = onRadioStation,
                 onClearCountry = onRadioRoot,
                 onBrowseCountries = onRadioCountries,
