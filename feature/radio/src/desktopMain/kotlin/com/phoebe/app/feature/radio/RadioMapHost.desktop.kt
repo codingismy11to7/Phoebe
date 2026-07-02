@@ -9,6 +9,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import com.phoebe.app.platform.DesktopInlineRadioMapCoordinator
+import com.phoebe.app.platform.desktopStorageRoot
 import com.phoebe.app.domain.RadioMapViewport
 import com.phoebe.app.ui.LocalPhoebePalette
 import com.sun.net.httpserver.HttpExchange
@@ -731,8 +732,9 @@ private object DesktopRadioMapCef {
         app?.let { return it }
         synchronized(this) {
             app?.let { return it }
+            val storageRoot = desktopStorageRoot()
             val builder = CefAppBuilder().apply {
-                setInstallDir(File(System.getProperty("user.home"), ".phoebe/jcef-maven/146.0.10"))
+                setInstallDir(File(storageRoot, "jcef-maven/146.0.10"))
                 setProgressHandler { progress, value ->
                     val suffix = if (value == EnumProgress.NO_ESTIMATION) "" else " ${value.toInt()}%"
                     println("radio-map desktop browser: jcefmaven $progress$suffix")
@@ -745,8 +747,8 @@ private object DesktopRadioMapCef {
                 }
                 getCefSettings().apply {
                     windowless_rendering_enabled = false
-                    cache_path = File(System.getProperty("user.home"), ".phoebe/jcef-maven-cache").absolutePath
-                    log_file = File(System.getProperty("user.home"), ".phoebe/jcef-maven.log").absolutePath
+                    cache_path = File(storageRoot, "jcef-maven-cache").absolutePath
+                    log_file = File(storageRoot, "jcef-maven.log").absolutePath
                     log_severity = CefSettings.LogSeverity.LOGSEVERITY_WARNING
                 }
             }
