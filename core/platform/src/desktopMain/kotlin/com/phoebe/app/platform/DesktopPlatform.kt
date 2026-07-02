@@ -70,14 +70,17 @@ private val storageRoot: File by lazy {
     desktopStorageRoot()
 }
 
+private val resolvedStorageRoot: File by lazy {
+    System.getProperty("phoebe.storage.root")?.let(::File)?.also { it.mkdirs() }
+        ?: flatpakDesktopStorageRoot()
+        ?: File(System.getProperty("user.home"), desktopDataDirectoryName()).also { it.mkdirs() }
+}
+
 /**
  * Writable desktop data root for SQLite, prefs, and embedded browser caches.
  * Flatpak mounts the host home read-only, so sandboxed builds store data under [XDG_DATA_HOME].
  */
-fun desktopStorageRoot(): File =
-    System.getProperty("phoebe.storage.root")?.let(::File)?.also { it.mkdirs() }
-        ?: flatpakDesktopStorageRoot()
-        ?: File(System.getProperty("user.home"), desktopDataDirectoryName()).also { it.mkdirs() }
+fun desktopStorageRoot(): File = resolvedStorageRoot
 
 private fun flatpakDesktopStorageRoot(): File? {
     if (!File("/.flatpak-info").exists()) return null

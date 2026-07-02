@@ -732,7 +732,7 @@ private object DesktopRadioMapCef {
         app?.let { return it }
         synchronized(this) {
             app?.let { return it }
-            val storageRoot = desktopStorageRoot().also { it.mkdirs() }
+            val storageRoot = desktopStorageRoot()
             val builder = CefAppBuilder().apply {
                 setInstallDir(File(storageRoot, "jcef-maven/146.0.10"))
                 setProgressHandler { progress, value ->
