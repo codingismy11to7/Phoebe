@@ -47,6 +47,7 @@ import kotlin.system.exitProcess
 
 private val desktopAppState = AtomicReference<AppState?>()
 private val desktopShutdownStarted = AtomicBoolean(false)
+private val desktopProcessExitScheduled = AtomicBoolean(false)
 
 fun main(args: Array<String>) {
     configureDesktopApplicationName()
@@ -82,6 +83,7 @@ fun main(args: Array<String>) {
         val closeApplication = {
             requestDesktopShutdown(appState)
             exitApplication()
+            scheduleMacProcessExit()
         }
         Window(
             onCloseRequest = closeApplication,
@@ -145,17 +147,24 @@ private fun installMacQuitHandler() {
         desktop.setQuitHandler { _, response ->
             requestDesktopShutdown(desktopAppState.get())
             response.cancelQuit()
-            thread(name = "Phoebe-mac-quit", isDaemon = false) {
-                thread(name = "Phoebe-mac-quit-halt", isDaemon = true) {
-                    Thread.sleep(2_000L)
-                    Runtime.getRuntime().halt(0)
-                }
-                Thread.sleep(500L)
-                exitProcess(0)
-            }
+            scheduleMacProcessExit()
         }
     }.onFailure { error ->
         PhoebeLog.d("Phoebe") { "macOS quit handler install failed: ${error.message}" }
+    }
+}
+
+private fun scheduleMacProcessExit() {
+    if (!isMacOs()) return
+    if (!desktopProcessExitScheduled.compareAndSet(false, true)) return
+
+    thread(name = "Phoebe-mac-exit", isDaemon = false) {
+        thread(name = "Phoebe-mac-exit-halt", isDaemon = true) {
+            Thread.sleep(2_000L)
+            Runtime.getRuntime().halt(0)
+        }
+        Thread.sleep(500L)
+        exitProcess(0)
     }
 }
 
