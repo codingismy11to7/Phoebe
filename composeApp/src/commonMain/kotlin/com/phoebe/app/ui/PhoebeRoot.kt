@@ -179,6 +179,9 @@ import com.phoebe.app.feature.details.AlbumDetailRouteState
 import com.phoebe.app.feature.details.ArtistDetailRoute
 import com.phoebe.app.feature.details.ArtistDetailRouteActions
 import com.phoebe.app.feature.details.ArtistDetailRouteState
+import com.phoebe.app.feature.details.ArtistEventsRoute
+import com.phoebe.app.feature.details.ArtistEventsRouteActions
+import com.phoebe.app.feature.details.ArtistEventsRouteState
 import com.phoebe.app.feature.details.PlaylistDetailRoute
 import com.phoebe.app.feature.details.PlaylistDetailRouteActions
 import com.phoebe.app.feature.details.PlaylistDetailRouteState
@@ -232,6 +235,7 @@ import com.phoebe.app.data.trackIndexKey
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.AppScreen
 import com.phoebe.app.domain.Artist
+import com.phoebe.app.domain.ArtistEventsLoadState
 import com.phoebe.app.domain.AudioAnalysisFrame
 import com.phoebe.app.domain.CollectionEntry
 import com.phoebe.app.domain.CollectionTarget
@@ -280,6 +284,8 @@ import com.phoebe.app.player.CastState
 import com.phoebe.app.platform.createPlatformHttpClient
 import com.phoebe.app.platform.currentTimeMs
 import com.phoebe.app.platform.isDesktopPlatform
+import com.phoebe.app.platform.isDebugBuild
+import com.phoebe.app.platform.openExternalUrl
 import com.phoebe.app.platform.prefersReducedArtworkEffects
 import com.phoebe.app.platform.supportsPredictiveBack
 import com.phoebe.app.telemetry.Telemetry
@@ -398,6 +404,8 @@ private fun PhoebeRootStateHolder(
     val radioStartingIds by state.radioStartingIds.collectAsState()
     val internetRadioStartingIds by state.internetRadioStartingIds.collectAsState()
     val artistRadioAvailability by state.artistRadioAvailability.collectAsState()
+    val artistEvents by state.artistEvents.collectAsState()
+    val eventsBackendHealth by state.eventsBackendHealth.collectAsState()
     val downloadDirectory by state.downloadDirectory.collectAsState()
     val pin by state.pin.collectAsState()
     val servers by state.servers.collectAsState()
@@ -421,6 +429,7 @@ private fun PhoebeRootStateHolder(
     val topMostPlayed by state.topMostPlayed.collectAsState()
     val topRecentlyPlayed by state.topRecentlyPlayed.collectAsState()
     val upNext = playerQueue.upNext
+    var showEventsDebugMenu by remember { mutableStateOf(false) }
     val currentTrack = remember(shellPlayback.currentTrack, radioNowPlaying) {
         shellPlayback.currentTrack.withRadioNowPlaying(radioNowPlaying)
     }
@@ -1299,6 +1308,16 @@ private fun PhoebeRootStateHolder(
         LocalSearchHistory provides searchHistory,
         LocalSavedSearchActions provides savedSearchActions,
     ) {
+    if (showEventsDebugMenu && isDebugBuild()) {
+        EventsDebugMenuDialog(
+            settings = appSettings.events,
+            resolvedUrl = state.resolvedEventsBackendBaseUrl(appSettings.events),
+            healthState = eventsBackendHealth,
+            onSettings = state::setEventSettings,
+            onTestConnection = state::checkEventsBackendHealth,
+            onDismiss = { showEventsDebugMenu = false },
+        )
+    }
     createPlaylistFor?.let { seedTracks ->
         CreatePlaylistDialog(
             initialTracks = seedTracks,
@@ -1477,34 +1496,58 @@ private fun PhoebeRootStateHolder(
                         ),
                         modifier = Modifier.fillMaxSize(),
                     )
-                    is AppScreen.ArtistDetail -> ArtistDetailRoute(
-                        state = ArtistDetailRouteState(
-                            artist = scr.artist,
-                            catalog = catalog,
-                            libraryUi = libraryUi,
-                            catalogRefreshing = catalogRefreshing,
-                            searchQuery = searchQuery,
-                            artistRadioAvailability = artistRadioAvailability[scr.artist.id],
-                            artistRadioStarting = scr.artist.id in radioStartingIds,
-                            fullBleedArtwork = appSettings.fullBleedDetailArtwork,
-                        ),
-                        actions = ArtistDetailRouteActions(
-                            onBack = { navigator.pop() },
-                            onAlbum = { navigator.open(it.route()) },
-                            onPlayTracks = playTracksFromMobile,
-                            onPlayAllTracks = playAllTracksFromMobile,
-                            onShuffleAllTracks = shuffleAllTracksFromMobile,
-                            onAddToUpNext = state::addToUpNext,
-                            onDownload = state::download,
-                            onDownloadArtist = state::download,
-                            onProbeArtistRadio = state::probeArtistRadio,
-                            onPlayArtistRadio = state::playArtistRadio,
-                            onArtist = { navigator.open(it.route()) },
-                            onLibraryColumns = state::setLibraryColumns,
-                            onCollectionItems = openCollectionValue,
-                        ),
-                        modifier = Modifier.fillMaxSize(),
-                    )
+                    is AppScreen.ArtistDetail -> {
+                        LaunchedEffect(scr.artist.id, appSettings.events) {
+                            state.loadArtistEventAvailability(scr.artist)
+                        }
+                        ArtistDetailRoute(
+                            state = ArtistDetailRouteState(
+                                artist = scr.artist,
+                                catalog = catalog,
+                                libraryUi = libraryUi,
+                                catalogRefreshing = catalogRefreshing,
+                                searchQuery = searchQuery,
+                                artistRadioAvailability = artistRadioAvailability[scr.artist.id],
+                                artistRadioStarting = scr.artist.id in radioStartingIds,
+                                artistEventsAvailable = artistEvents[scr.artist.id]?.hasEvents == true,
+                                fullBleedArtwork = appSettings.fullBleedDetailArtwork,
+                            ),
+                            actions = ArtistDetailRouteActions(
+                                onBack = { navigator.pop() },
+                                onAlbum = { navigator.open(it.route()) },
+                                onPlayTracks = playTracksFromMobile,
+                                onPlayAllTracks = playAllTracksFromMobile,
+                                onShuffleAllTracks = shuffleAllTracksFromMobile,
+                                onAddToUpNext = state::addToUpNext,
+                                onDownload = state::download,
+                                onDownloadArtist = state::download,
+                                onProbeArtistRadio = state::probeArtistRadio,
+                                onPlayArtistRadio = state::playArtistRadio,
+                                onArtistEvents = { navigator.open(PhoebeRoute.ArtistEvents(it.id)) },
+                                onArtist = { navigator.open(it.route()) },
+                                onLibraryColumns = state::setLibraryColumns,
+                                onCollectionItems = openCollectionValue,
+                            ),
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                    is AppScreen.ArtistEvents -> {
+                        LaunchedEffect(scr.artist.id, appSettings.events) {
+                            state.loadArtistEvents(scr.artist, force = true)
+                        }
+                        ArtistEventsRoute(
+                            state = ArtistEventsRouteState(
+                                artist = scr.artist,
+                                events = artistEvents[scr.artist.id] ?: ArtistEventsLoadState(loading = true),
+                            ),
+                            actions = ArtistEventsRouteActions(
+                                onBack = { navigator.pop() },
+                                onRetry = { artist -> state.loadArtistEvents(artist, force = true) },
+                                onOpenUrl = ::openExternalUrl,
+                            ),
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
                     is AppScreen.AlbumDetail -> AlbumDetailRoute(
                         state = AlbumDetailRouteState(
                             album = scr.album,
@@ -1791,6 +1834,7 @@ private fun PhoebeRootStateHolder(
                             searchQuery = newQuery
                             val scopedScreen = screen
                             val scoped = scopedScreen is AppScreen.ArtistDetail ||
+                                scopedScreen is AppScreen.ArtistEvents ||
                                 scopedScreen is AppScreen.AlbumDetail ||
                                 scopedScreen is AppScreen.SongDetail ||
                                 scopedScreen is AppScreen.Lyrics ||
@@ -1936,10 +1980,16 @@ private fun PhoebeRootStateHolder(
                         onDisconnectLastFm = state::disconnectLastFm,
                         onLastFmSubmitNowPlaying = state::setLastFmSubmitNowPlaying,
                         onLastFmSubmitScrobbles = state::setLastFmSubmitScrobbles,
+                        onEventSettings = state::setEventSettings,
                         appUpdateState = appUpdateState,
                         onCheckForUpdates = state::checkForUpdates,
                         routeViewModelFactory = state.routeViewModelFactory,
                         onInstallUpdate = state::installAvailableUpdate,
+                        onOpenEventsDebugMenu = if (isDebugBuild()) {
+                            { showEventsDebugMenu = true }
+                        } else {
+                            null
+                        },
                         showBottomChrome = false,
                     )
                     }
@@ -2217,6 +2267,7 @@ private fun PhoebeRootStateHolder(
                         radioDirectory = radioDirectory,
                         radioRouteMode = radioRouteMode,
                         artistRadioAvailability = artistRadioAvailability,
+                        artistEvents = artistEvents,
                         radioStartingIds = radioStartingIds,
                         internetRadioStartingIds = effectiveInternetRadioStartingIds,
                     ),
@@ -2231,6 +2282,7 @@ private fun PhoebeRootStateHolder(
                             // Stay in any scoped context (playlist, detail, or library tab)
                             // and let that view filter its own contents by the query.
                             val scoped = screen is AppScreen.ArtistDetail ||
+                                screen is AppScreen.ArtistEvents ||
                                 screen is AppScreen.AlbumDetail ||
                                 screen is AppScreen.SongDetail ||
                                 screen is AppScreen.Lyrics ||
@@ -2317,6 +2369,9 @@ private fun PhoebeRootStateHolder(
                         onDownloadArtist = state::download,
                         onProbeArtistRadio = state::probeArtistRadio,
                         onPlayArtistRadio = state::playArtistRadio,
+                        onLoadArtistEventAvailability = state::loadArtistEventAvailability,
+                        onLoadArtistEvents = { artist -> state.loadArtistEvents(artist, force = true) },
+                        onArtistEvents = { artist -> navigator.open(PhoebeRoute.ArtistEvents(artist.id)) },
                         onDownloadAlbum = state::download,
                         onDownloadPlaylist = state::download,
                         onLibrarySortBy = state::setLibrarySortBy,
@@ -2423,9 +2478,15 @@ private fun PhoebeRootStateHolder(
                         onDisconnectLastFm = state::disconnectLastFm,
                         onLastFmSubmitNowPlaying = state::setLastFmSubmitNowPlaying,
                         onLastFmSubmitScrobbles = state::setLastFmSubmitScrobbles,
+                        onEventSettings = state::setEventSettings,
                         onCheckForUpdates = state::checkForUpdates,
                         onInstallUpdate = state::installAvailableUpdate,
                     ),
+                    onOpenEventsDebugMenu = if (isDebugBuild()) {
+                        { showEventsDebugMenu = true }
+                    } else {
+                        null
+                    },
                 )
             }
             metadataEditorTrack?.let { editing ->
@@ -2712,6 +2773,7 @@ private fun catalogHasContentForSurface(
         is AppScreen.AlbumDetail -> catalog.tracksByParent[screen.album.id].orEmpty().isNotEmpty()
         is AppScreen.ArtistDetail -> catalogAlbumsForArtist(catalog, screen.artist.title).isNotEmpty() ||
             catalogTracksForArtist(catalog, screen.artist.title).isNotEmpty()
+        is AppScreen.ArtistEvents -> true
         is AppScreen.PlaylistDetail -> catalog.tracksByParent[screen.playlist.id].orEmpty().isNotEmpty()
         is AppScreen.SongDetail -> true
         is AppScreen.Lyrics -> true

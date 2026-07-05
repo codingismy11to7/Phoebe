@@ -192,7 +192,9 @@ private fun PredictiveBackNavDisplay(
                 entry<PhoebeRoute.Collections> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
                 entry<PhoebeRoute.CollectionItems> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
                 entry<PhoebeRoute.ArtistDetail> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
+                entry<PhoebeRoute.ArtistEvents> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
                 entry<PhoebeRoute.ArtistSlugDetail> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
+                entry<PhoebeRoute.ArtistSlugEvents> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
                 entry<PhoebeRoute.AlbumDetail> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
                 entry<PhoebeRoute.ArtistAlbumSlugDetail> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
                 entry<PhoebeRoute.SongDetail> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
@@ -437,7 +439,9 @@ private fun SwipeBackNavDisplay(
                         entry<PhoebeRoute.Collections> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
                         entry<PhoebeRoute.CollectionItems> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
                         entry<PhoebeRoute.ArtistDetail> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
+                        entry<PhoebeRoute.ArtistEvents> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
                         entry<PhoebeRoute.ArtistSlugDetail> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
+                        entry<PhoebeRoute.ArtistSlugEvents> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
                         entry<PhoebeRoute.AlbumDetail> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
                         entry<PhoebeRoute.ArtistAlbumSlugDetail> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }
                         entry<PhoebeRoute.SongDetail> { route -> PhoebeNavEntryContent(route, opaqueSceneBackgrounds, content) }

@@ -1,6 +1,7 @@
 package com.phoebe.app
 
 import com.phoebe.app.data.AppSettingsRepository
+import com.phoebe.app.data.ArtistEventsRepository
 import com.phoebe.app.data.CatalogItemMutationService
 import com.phoebe.app.data.CatalogRepository
 import com.phoebe.app.data.CatalogSyncService
@@ -66,6 +67,7 @@ class AppDependencies(
     val radioRepository: RadioRepository,
     val radioNowPlayingRepository: RadioNowPlayingRepository,
     val appSettingsRepository: AppSettingsRepository,
+    val artistEventsRepository: ArtistEventsRepository,
     val searchHistoryRepository: SearchHistoryRepository,
     val userArtifactsRepository: UserArtifactsRepository,
     val importExportService: ImportExportService,
@@ -158,6 +160,7 @@ class AppDependencies(
                 radioRepository = radioRepository,
                 radioNowPlayingRepository = services.radioNowPlayingRepository,
                 appSettingsRepository = services.appSettingsRepository,
+                artistEventsRepository = services.artistEventsRepository,
                 searchHistoryRepository = searchHistoryRepository,
                 userArtifactsRepository = userArtifactsRepository,
                 importExportService = services.importExportService,

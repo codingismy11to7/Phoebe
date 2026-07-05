@@ -6,6 +6,7 @@ import com.phoebe.app.data.JellyfinClient
 import com.phoebe.app.data.JellyfinProviderAdapter
 import com.phoebe.app.data.JellyfinPlayHistorySyncer
 import com.phoebe.app.data.AppSettingsRepository
+import com.phoebe.app.data.ArtistEventsRepository
 import com.phoebe.app.data.CatalogItemMutationService
 import com.phoebe.app.data.CatalogRepository
 import com.phoebe.app.data.CatalogSyncService
@@ -107,6 +108,7 @@ data class AppGraphServices(
     val radioRepository: RadioRepository,
     val radioNowPlayingRepository: RadioNowPlayingRepository,
     val appSettingsRepository: AppSettingsRepository,
+    val artistEventsRepository: ArtistEventsRepository,
     val searchHistoryRepository: SearchHistoryRepository,
     val userArtifactsRepository: UserArtifactsRepository,
     val importExportService: ImportExportService,
@@ -165,6 +167,7 @@ interface AppGraphContributions {
     val radioRepository: RadioRepository
     val radioNowPlayingRepository: RadioNowPlayingRepository
     val appSettingsRepository: AppSettingsRepository
+    val artistEventsRepository: ArtistEventsRepository
     val searchHistoryRepository: SearchHistoryRepository
     val userArtifactsRepository: UserArtifactsRepository
     val importExportService: ImportExportService
@@ -222,6 +225,7 @@ interface AppGraphProviders {
         radioRepository: RadioRepository,
         radioNowPlayingRepository: RadioNowPlayingRepository,
         appSettingsRepository: AppSettingsRepository,
+        artistEventsRepository: ArtistEventsRepository,
         searchHistoryRepository: SearchHistoryRepository,
         userArtifactsRepository: UserArtifactsRepository,
         importExportService: ImportExportService,
@@ -265,6 +269,7 @@ interface AppGraphProviders {
             radioRepository = radioRepository,
             radioNowPlayingRepository = radioNowPlayingRepository,
             appSettingsRepository = appSettingsRepository,
+            artistEventsRepository = artistEventsRepository,
             searchHistoryRepository = searchHistoryRepository,
             userArtifactsRepository = userArtifactsRepository,
             importExportService = importExportService,

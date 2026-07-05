@@ -59,7 +59,7 @@ phoebe.versionName=1.2.3
 phoebe.versionCode=1002003
 ```
 
-The release workflow requires the pushed tag to match `phoebe.versionName`, so `phoebe.versionName=1.2.3` must be released with tag `release/1.2.3`. It validates that the version is plain semver, then starts the Android, Linux, Windows, macOS, iOS, and web deploy jobs in parallel. Native package jobs use `phoebe.versionCode` for Android, rename the generated binaries to include `phoebe.versionName`, then create a draft GitHub release with the generated APK, AAB, DEB, Flatpak bundle, MSI, and DMG assets attached as soon as those jobs finish. The iOS IPA is built on its own macOS runner and is uploaded to the same release afterward, so a slow iOS build no longer blocks publishing the other platform artifacts.
+The release workflow requires the pushed tag to match `phoebe.versionName`, so `phoebe.versionName=1.2.3` must be released with tag `release/1.2.3`. It validates that the version is plain semver, deploys the production events backend to Vercel, then starts the Android, Linux, Windows, macOS, iOS, and web deploy jobs. Native package jobs use `phoebe.versionCode` for Android, rename the generated binaries to include `phoebe.versionName`, then create a draft GitHub release with the generated APK, AAB, DEB, Flatpak bundle, MSI, and DMG assets attached as soon as those jobs finish. The iOS IPA is built on its own macOS runner and is uploaded to the same release afterward, so a slow iOS build no longer blocks publishing the other platform artifacts.
 
 The web deploy job builds the Wasm distribution and deploys it to this repository's GitHub Pages site independently of the draft GitHub release.
 
@@ -141,6 +141,20 @@ git push origin gh-pages
 ## Secrets And Variables
 
 Production GitHub Pages deploys do not need repository secrets. The release workflow uses `GITHUB_TOKEN` with `pages: write` and `id-token: write`.
+
+Events backend release deploys need these repository secrets:
+
+- `PHOEBE_EVENTS_BACKEND_URL`: production events backend URL embedded into release builds
+- `VERCEL_TOKEN`: Vercel token allowed to deploy the production backend project
+- `VERCEL_ORG_ID`
+- `VERCEL_PROJECT_ID_EVENTS_PROD`
+
+Configure these environment variables in the Vercel production project:
+
+- `TICKETMASTER_API_KEY`
+- `SEATGEEK_CLIENT_ID`
+- `ALLOWED_ORIGINS`, optional comma-separated allowlist
+- `EVENTS_CACHE_TTL_MINUTES`, optional cache TTL override
 
 Preview deploys need two repository secrets in this repository:
 

@@ -2,6 +2,7 @@ package com.phoebe.app.data
 
 import com.phoebe.app.domain.NowPlayingVisualizerPreset
 import com.phoebe.app.domain.RecentSearchItem
+import com.phoebe.app.domain.EventSettings
 import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
@@ -63,5 +64,9 @@ class SettingsService(
 
     suspend fun setTintedBackgroundGradient(enabled: Boolean) {
         appSettingsRepository.setTintedBackgroundGradient(enabled)
+    }
+
+    suspend fun setEventSettings(settings: EventSettings) {
+        appSettingsRepository.setEventSettings(settings)
     }
 }

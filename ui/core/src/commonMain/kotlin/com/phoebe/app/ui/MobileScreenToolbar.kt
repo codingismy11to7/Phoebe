@@ -1,7 +1,9 @@
 package com.phoebe.app.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -32,6 +34,7 @@ import androidx.compose.ui.tooling.preview.PreviewScreenSizes
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MobileScreenToolbar(
     title: String,
@@ -41,6 +44,7 @@ fun MobileScreenToolbar(
     menuContent: @Composable () -> Unit,
     showMenu: Boolean = true,
     menuTint: Color = PhoebeUi.primaryText,
+    onMenuLongClick: (() -> Unit)? = null,
 ) {
     Row(
         Modifier
@@ -81,7 +85,16 @@ fun MobileScreenToolbar(
                 Modifier
                     .size(44.dp)
                     .clip(CircleShape)
-                    .clickable { onMenuExpandedChange(true) },
+                    .then(
+                        if (onMenuLongClick != null) {
+                            Modifier.combinedClickable(
+                                onClick = { onMenuExpandedChange(true) },
+                                onLongClick = onMenuLongClick,
+                            )
+                        } else {
+                            Modifier.clickable { onMenuExpandedChange(true) }
+                        },
+                    ),
                 contentAlignment = Alignment.Center,
             ) {
                 PhoebeIconView(

@@ -17,6 +17,7 @@ import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.AppSettings
 import com.phoebe.app.domain.AppScreen
 import com.phoebe.app.domain.Artist
+import com.phoebe.app.domain.ArtistEventsLoadState
 import com.phoebe.app.domain.ArtistRadioAvailability
 import com.phoebe.app.domain.AudioAnalysisFrame
 import com.phoebe.app.domain.AudioProcessingCapabilities
@@ -139,6 +140,7 @@ internal data class BrowseUiState(
     val radioDirectory: RadioDirectoryState = RadioDirectoryState(),
     val radioRouteMode: RadioRouteMode = RadioRouteMode.Home,
     val artistRadioAvailability: Map<String, ArtistRadioAvailability> = emptyMap(),
+    val artistEvents: Map<String, ArtistEventsLoadState> = emptyMap(),
     val radioStartingIds: Set<String> = emptySet(),
     val internetRadioStartingIds: Set<String> = emptySet(),
 )
@@ -200,6 +202,9 @@ internal data class BrowseActions(
     val onDownloadArtist: (Artist) -> Unit,
     val onProbeArtistRadio: (Artist) -> Unit = {},
     val onPlayArtistRadio: (Artist) -> Unit,
+    val onLoadArtistEventAvailability: (Artist) -> Unit = {},
+    val onLoadArtistEvents: (Artist) -> Unit = {},
+    val onArtistEvents: (Artist) -> Unit = {},
     val onDownloadAlbum: (Album) -> Unit,
     val onDownloadPlaylist: (Playlist) -> Unit,
     val onLibrarySortBy: (LibrarySortBy) -> Unit,
@@ -306,6 +311,7 @@ internal data class SettingsActions(
     val onDisconnectLastFm: () -> Unit = {},
     val onLastFmSubmitNowPlaying: (Boolean) -> Unit = {},
     val onLastFmSubmitScrobbles: (Boolean) -> Unit = {},
+    val onEventSettings: (com.phoebe.app.domain.EventSettings) -> Unit = {},
     val onCheckForUpdates: () -> Unit = {},
     val onInstallUpdate: () -> Unit = {},
 )

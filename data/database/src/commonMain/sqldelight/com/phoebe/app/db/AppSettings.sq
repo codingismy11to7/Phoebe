@@ -18,7 +18,8 @@ CREATE TABLE AppSettingsRow (
     listenBrainzSettings TEXT NOT NULL DEFAULT '{"enabled":false,"username":null,"submitNowPlaying":true,"submitListens":true,"submitCurrentTrackFeedback":true,"storageStatus":"Unknown","connectedAtMs":null,"lastValidatedAtMs":null,"lastSubmittedAtMs":null,"lastNowPlayingSubmittedAtMs":null,"lastListenSubmittedAtMs":null,"lastListenError":null,"lastError":null}',
     lastFmSettings TEXT NOT NULL DEFAULT '{"enabled":false,"username":null,"apiKey":null,"submitNowPlaying":true,"submitScrobbles":true,"storageStatus":"Unknown","connectedAtMs":null,"lastValidatedAtMs":null,"lastSubmittedAtMs":null,"lastNowPlayingSubmittedAtMs":null,"lastScrobbleSubmittedAtMs":null,"lastScrobbleError":null,"lastError":null}',
     downloadPolicySettings TEXT NOT NULL DEFAULT '{"quality":"Original","maxConcurrentDownloads":3,"autoRetryFailedDownloads":true,"wifiOnly":false,"wifiOnlyConfigured":false,"notifyOnCompletion":true}',
-    audioProcessingSettings TEXT NOT NULL DEFAULT '{"gaplessEnabled":true,"crossfeedEnabled":false,"crossfeedAmount":0.35,"selectedOutputDeviceId":null,"exclusiveMode":false,"bitPerfectPreference":false}'
+    audioProcessingSettings TEXT NOT NULL DEFAULT '{"gaplessEnabled":true,"crossfeedEnabled":false,"crossfeedAmount":0.35,"selectedOutputDeviceId":null,"exclusiveMode":false,"bitPerfectPreference":false}',
+    eventSettings TEXT NOT NULL DEFAULT '{"provider":"Ticketmaster","backendTarget":"Production","localBackendUrl":null}'
 );
 
 selectCurrent:
@@ -43,8 +44,9 @@ INSERT OR REPLACE INTO AppSettingsRow(
     listenBrainzSettings,
     lastFmSettings,
     downloadPolicySettings,
-    audioProcessingSettings
-) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    audioProcessingSettings,
+    eventSettings
+) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 clear:
 DELETE FROM AppSettingsRow;

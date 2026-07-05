@@ -56,6 +56,9 @@ import com.phoebe.app.feature.details.AlbumDetailRouteState
 import com.phoebe.app.feature.details.ArtistDetailRoute
 import com.phoebe.app.feature.details.ArtistDetailRouteActions
 import com.phoebe.app.feature.details.ArtistDetailRouteState
+import com.phoebe.app.feature.details.ArtistEventsRoute
+import com.phoebe.app.feature.details.ArtistEventsRouteActions
+import com.phoebe.app.feature.details.ArtistEventsRouteState
 import com.phoebe.app.feature.details.SongDetailRoute
 import com.phoebe.app.feature.details.SongDetailRouteActions
 import com.phoebe.app.feature.details.SongDetailRouteState
@@ -99,6 +102,7 @@ import com.phoebe.app.feature.settings.SettingsDesktopRoute
 import com.phoebe.app.feature.settings.SettingsCategory
 import com.phoebe.app.feature.settings.SettingsRouteActions
 import com.phoebe.app.feature.settings.SettingsRouteState
+import com.phoebe.app.platform.openExternalUrl
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -121,6 +125,7 @@ internal fun DesktopPlayer(
     authSetupActions: AuthSetupActions,
     settingsState: SettingsUiState,
     settingsActions: SettingsActions,
+    onOpenEventsDebugMenu: (() -> Unit)? = null,
 ) {
     val screen = shellState.screen
     val routes = shellState.routes
@@ -179,6 +184,7 @@ internal fun DesktopPlayer(
     val radioDirectory = browseState.radioDirectory
     val radioRouteMode = browseState.radioRouteMode
     val artistRadioAvailability = browseState.artistRadioAvailability
+    val artistEvents = browseState.artistEvents
     val radioStartingIds = browseState.radioStartingIds
     val internetRadioStartingIds = browseState.internetRadioStartingIds
     val appMessage = authSetupState.appMessage
@@ -256,6 +262,9 @@ internal fun DesktopPlayer(
     val onDownloadArtist = browseActions.onDownloadArtist
     val onProbeArtistRadio = browseActions.onProbeArtistRadio
     val onPlayArtistRadio = browseActions.onPlayArtistRadio
+    val onLoadArtistEventAvailability = browseActions.onLoadArtistEventAvailability
+    val onLoadArtistEvents = browseActions.onLoadArtistEvents
+    val onArtistEvents = browseActions.onArtistEvents
     val onDownloadAlbum = browseActions.onDownloadAlbum
     val onDownloadPlaylist = browseActions.onDownloadPlaylist
     val onLibrarySortBy = browseActions.onLibrarySortBy
@@ -373,6 +382,7 @@ internal fun DesktopPlayer(
                         tintedBackgroundGradient = appSettings.tintedBackgroundGradient,
                         appUpdateState = shellState.updateState,
                         onInstallUpdate = browseActions.onInstallUpdate,
+                        onOpenEventsDebugMenu = onOpenEventsDebugMenu,
                     )
                     Column(Modifier.weight(1f).fillMaxHeight()) {
                         Row(Modifier.weight(1f).fillMaxWidth()) {
@@ -491,6 +501,9 @@ internal fun DesktopPlayer(
                                     modifier = Modifier.fillMaxSize(),
                                 )
                                 is AppScreen.ArtistDetail -> Box(Modifier.fillMaxSize()) {
+                                    LaunchedEffect(targetScreen.artist.id, appSettings.events) {
+                                        onLoadArtistEventAvailability(targetScreen.artist)
+                                    }
                                     ArtistDetailRoute(
                                         state = ArtistDetailRouteState(
                                             artist = targetScreen.artist,
@@ -500,6 +513,7 @@ internal fun DesktopPlayer(
                                             searchQuery = searchQuery,
                                             artistRadioAvailability = artistRadioAvailability[targetScreen.artist.id],
                                             artistRadioStarting = targetScreen.artist.id in radioStartingIds,
+                                            artistEventsAvailable = artistEvents[targetScreen.artist.id]?.hasEvents == true,
                                             fullBleedArtwork = appSettings.fullBleedDetailArtwork,
                                         ),
                                         actions = ArtistDetailRouteActions(
@@ -513,10 +527,29 @@ internal fun DesktopPlayer(
                                             onDownloadArtist = onDownloadArtist,
                                             onProbeArtistRadio = onProbeArtistRadio,
                                             onPlayArtistRadio = onPlayArtistRadio,
+                                            onArtistEvents = onArtistEvents,
                                             onArtist = onArtist,
                                             onLibraryColumns = onLibraryColumns,
                                             onCollectionItems = onCollectionValue,
                                             onSearchQuery = onSearchQuery,
+                                        ),
+                                        modifier = Modifier.fillMaxSize(),
+                                    )
+                                }
+                                is AppScreen.ArtistEvents -> Box(Modifier.fillMaxSize()) {
+                                    LaunchedEffect(targetScreen.artist.id, appSettings.events) {
+                                        onLoadArtistEvents(targetScreen.artist)
+                                    }
+                                    ArtistEventsRoute(
+                                        state = ArtistEventsRouteState(
+                                            artist = targetScreen.artist,
+                                            events = artistEvents[targetScreen.artist.id]
+                                                ?: com.phoebe.app.domain.ArtistEventsLoadState(loading = true),
+                                        ),
+                                        actions = ArtistEventsRouteActions(
+                                            onBack = onPopDetail,
+                                            onRetry = onLoadArtistEvents,
+                                            onOpenUrl = ::openExternalUrl,
                                         ),
                                         modifier = Modifier.fillMaxSize(),
                                     )
@@ -923,6 +956,7 @@ internal fun DesktopPlayer(
                                             onDisconnectLastFm = settingsActions.onDisconnectLastFm,
                                             onLastFmSubmitNowPlaying = settingsActions.onLastFmSubmitNowPlaying,
                                             onLastFmSubmitScrobbles = settingsActions.onLastFmSubmitScrobbles,
+                                            onEventSettings = settingsActions.onEventSettings,
                                             onCheckForUpdates = settingsActions.onCheckForUpdates,
                                             onInstallUpdate = settingsActions.onInstallUpdate,
                                         ),
@@ -1076,7 +1110,9 @@ private fun PhoebeRoute.hasDesktopSharedElements(): Boolean = when (this) {
     is PhoebeRoute.AlbumDetail,
     is PhoebeRoute.ArtistAlbumSlugDetail,
     is PhoebeRoute.ArtistDetail,
+    is PhoebeRoute.ArtistEvents,
     is PhoebeRoute.ArtistSlugDetail,
+    is PhoebeRoute.ArtistSlugEvents,
     is PhoebeRoute.CollectionItems,
     is PhoebeRoute.PlayHistory,
     PhoebeRoute.FavoritePlaylists,
@@ -1118,6 +1154,7 @@ private fun previewRoutesFor(screen: AppScreen, section: BrowseSection): List<Ph
         is AppScreen.CollectionItems -> PhoebeRoute.CollectionItems(screen.entry, screen.value)
         is AppScreen.AlbumDetail -> PhoebeRoute.AlbumDetail(screen.album.id)
         is AppScreen.ArtistDetail -> PhoebeRoute.ArtistDetail(screen.artist.id)
+        is AppScreen.ArtistEvents -> PhoebeRoute.ArtistEvents(screen.artist.id)
         is AppScreen.SongDetail -> PhoebeRoute.SongDetail(screen.track.id)
         is AppScreen.Lyrics -> PhoebeRoute.Lyrics(screen.track?.id)
         is AppScreen.RecentlyAdded -> PhoebeRoute.RecentlyAdded(screen.kind)

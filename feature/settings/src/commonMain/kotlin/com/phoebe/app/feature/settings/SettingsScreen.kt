@@ -69,6 +69,8 @@ import com.phoebe.app.domain.AudioProcessingSettings
 import com.phoebe.app.domain.DownloadItem
 import com.phoebe.app.domain.DownloadPolicySettings
 import com.phoebe.app.domain.DownloadState
+import com.phoebe.app.domain.EventDataProvider
+import com.phoebe.app.domain.EventSettings
 import com.phoebe.app.domain.FeatureCapability
 import com.phoebe.app.domain.HomeSection
 import com.phoebe.app.domain.ListenBrainzCredentialStorageStatus
@@ -107,6 +109,7 @@ enum class SettingsCategory(
     Downloads("Downloads", "Manage downloads", PhoebeIcon.Download),
     Appearance("Appearance", "Theme and visuals", PhoebeIcon.Grid),
     Notifications("Notifications", "Manage alerts", PhoebeIcon.Bell),
+    Events("Events", "Concert providers", PhoebeIcon.Calendar),
     About("About", "Version and links", PhoebeIcon.Settings),
     Advanced("Advanced", "Developer and advanced", PhoebeIcon.More),
 }
@@ -172,6 +175,7 @@ fun SettingsDesktopView(
     onDisconnectLastFm: () -> Unit = {},
     onLastFmSubmitNowPlaying: (Boolean) -> Unit = {},
     onLastFmSubmitScrobbles: (Boolean) -> Unit = {},
+    onEventSettings: (EventSettings) -> Unit = {},
     appUpdateState: AppUpdateState = AppUpdateState.Idle,
     onCheckForUpdates: () -> Unit = {},
     onInstallUpdate: () -> Unit = {},
@@ -298,6 +302,10 @@ fun SettingsDesktopView(
                         settings = appSettings,
                         onNotifyWhenDownloadFinishes = onNotifyWhenDownloadFinishes,
                     )
+                    SettingsCategory.Events -> EventsSettingsCard(
+                        settings = appSettings.events,
+                        onEventSettings = onEventSettings,
+                    )
                     SettingsCategory.About -> AboutSettingsCard(
                         updateState = appUpdateState,
                         onCheckForUpdates = onCheckForUpdates,
@@ -370,6 +378,7 @@ fun SettingsMobileView(
     onDisconnectLastFm: () -> Unit = {},
     onLastFmSubmitNowPlaying: (Boolean) -> Unit = {},
     onLastFmSubmitScrobbles: (Boolean) -> Unit = {},
+    onEventSettings: (EventSettings) -> Unit = {},
     appUpdateState: AppUpdateState = AppUpdateState.Idle,
     onCheckForUpdates: () -> Unit = {},
     onInstallUpdate: () -> Unit = {},
@@ -472,6 +481,12 @@ fun SettingsMobileView(
         NotificationsSettingsCard(
             settings = appSettings,
             onNotifyWhenDownloadFinishes = onNotifyWhenDownloadFinishes,
+        )
+        SectionLabel("EVENTS", PhoebeUi.accentLight)
+        EventsSettingsCard(
+            settings = appSettings.events,
+            onEventSettings = onEventSettings,
+            compact = true,
         )
         SectionLabel("ABOUT", PhoebeUi.accentLight)
         AboutSettingsCard(
@@ -845,6 +860,62 @@ private fun NotificationsSettingsCard(
             checked = settings.notifyWhenDownloadFinishes,
             onCheckedChange = onNotifyWhenDownloadFinishes,
         )
+    }
+}
+
+@Composable
+private fun EventsSettingsCard(
+    settings: EventSettings,
+    onEventSettings: (EventSettings) -> Unit,
+    compact: Boolean = false,
+) {
+    val normalized = settings.normalized()
+    SettingsCard {
+        Text("Events", color = PhoebeUi.primaryText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Text("Artist concert data", color = PhoebeUi.mutedText, fontSize = 12.sp, modifier = Modifier.padding(bottom = 14.dp))
+        Text("Provider", color = PhoebeUi.secondaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        Text("Choose the source used for artist events.", color = PhoebeUi.secondaryText, fontSize = 12.sp, modifier = Modifier.padding(top = 3.dp, bottom = 10.dp))
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .background(PhoebeUi.subtleFill)
+                .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(10.dp))
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            EventDataProvider.entries.forEach { provider ->
+                val selected = normalized.provider == provider
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(if (compact) 36.dp else 38.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable {
+                            onEventSettings(normalized.copy(provider = provider))
+                        }
+                        .background(if (selected) PhoebeUi.accent.copy(alpha = 0.16f) else Color.Transparent)
+                        .border(
+                            BorderStroke(
+                                1.dp,
+                                if (selected) PhoebeUi.accent.copy(alpha = 0.32f) else Color.Transparent,
+                            ),
+                            RoundedCornerShape(8.dp),
+                        ),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    Text(
+                        provider.label,
+                        color = if (selected) PhoebeUi.accentLight else PhoebeUi.secondaryText,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -1869,6 +1940,12 @@ private fun normalizedHomeSections(sections: List<HomeSection>): List<HomeSectio
 
 private fun normalizedBottomTabs(tabs: List<MobileBottomTab>): List<MobileBottomTab> =
     (tabs + MobileBottomTab.defaultOrder).distinct()
+
+private val EventDataProvider.label: String
+    get() = when (this) {
+        EventDataProvider.Ticketmaster -> "Ticketmaster"
+        EventDataProvider.SeatGeek -> "SeatGeek"
+    }
 
 @Composable
 private fun SettingsSwitchRow(

@@ -42,6 +42,9 @@ import com.phoebe.app.feature.details.AlbumDetailRouteState
 import com.phoebe.app.feature.details.ArtistDetailRoute
 import com.phoebe.app.feature.details.ArtistDetailRouteActions
 import com.phoebe.app.feature.details.ArtistDetailRouteState
+import com.phoebe.app.feature.details.ArtistEventsRoute
+import com.phoebe.app.feature.details.ArtistEventsRouteActions
+import com.phoebe.app.feature.details.ArtistEventsRouteState
 import com.phoebe.app.feature.details.PlaylistDetailRoute
 import com.phoebe.app.feature.details.PlaylistDetailRouteActions
 import com.phoebe.app.feature.details.PlaylistDetailRouteState
@@ -187,12 +190,18 @@ import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.AppSettings
 import com.phoebe.app.domain.AppScreen
 import com.phoebe.app.domain.Artist
+import com.phoebe.app.domain.ArtistEvent
+import com.phoebe.app.domain.ArtistEventDate
+import com.phoebe.app.domain.ArtistEventPrice
+import com.phoebe.app.domain.ArtistEventVenue
+import com.phoebe.app.domain.ArtistEventsLoadState
 import com.phoebe.app.domain.ArtistRadioAvailability
 import com.phoebe.app.domain.CollectionEntry
 import com.phoebe.app.domain.CollectionFacet
 import com.phoebe.app.domain.CollectionTarget
 import com.phoebe.app.domain.DownloadItem
 import com.phoebe.app.domain.DownloadState
+import com.phoebe.app.domain.EventDataProvider
 import com.phoebe.app.domain.HomeSection
 import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.LibrarySortBy
@@ -249,6 +258,8 @@ internal enum class PhoebeScreenshotScenario {
     Radio,
     Playlist,
     Artist,
+    ArtistWithEvents,
+    ArtistEvents,
     ArtistOldLayout,
     ArtistRadio,
     Album,
@@ -392,9 +403,11 @@ internal fun PhoebeDesktopScreenshotScenario(
         PhoebeScreenshotScenario.FavoriteArtists -> AppScreen.FavoriteArtists
         PhoebeScreenshotScenario.FavoriteAlbums -> AppScreen.FavoriteAlbums
         PhoebeScreenshotScenario.Artist,
+        PhoebeScreenshotScenario.ArtistWithEvents,
         PhoebeScreenshotScenario.ArtistOldLayout,
         PhoebeScreenshotScenario.ArtistRadio,
         -> AppScreen.ArtistDetail(fixture.artist)
+        PhoebeScreenshotScenario.ArtistEvents -> AppScreen.ArtistEvents(fixture.artist)
         PhoebeScreenshotScenario.Album,
         PhoebeScreenshotScenario.AlbumOldLayout,
         -> AppScreen.AlbumDetail(fixture.album)
@@ -520,6 +533,11 @@ internal fun PhoebeDesktopScreenshotScenario(
             } else {
                 emptyMap()
             },
+            artistEvents = if (scenario == PhoebeScreenshotScenario.ArtistWithEvents || scenario == PhoebeScreenshotScenario.ArtistEvents) {
+                mapOf(fixture.artist.id to fixture.artistEvents)
+            } else {
+                emptyMap()
+            },
         ),
         browseActions = BrowseActions(
             onNavigate = {},
@@ -631,12 +649,15 @@ internal fun PhoebeMobileScreenshotScenario(
     val isPlayer = scenario.name.startsWith("Player", ignoreCase = true)
     val isSignIn = scenario.name.startsWith("SignIn", ignoreCase = true)
     val showChrome = !isPlayer && !isSignIn
+    val showMiniPlayerChrome = showChrome && !scenario.hidesMobilePlayerChrome()
     val routeViewModelFactory = rememberScreenshotRouteViewModelFactory()
 
     val chromePadding = if (showChrome) {
         MobileChromePadding(
             top = MobileToolbarChromeHeight + MobileChromeScrollGap,
-            bottom = MobileBottomNavChromeHeight + MobileChromeScrollGap + MobileMiniPlayerChromeHeight,
+            bottom = MobileBottomNavChromeHeight +
+                MobileChromeScrollGap +
+                if (showMiniPlayerChrome) MobileMiniPlayerChromeHeight else 0.dp,
         )
     } else {
         LocalMobileChromePadding.current
@@ -708,6 +729,7 @@ internal fun PhoebeMobileScreenshotScenario(
                 modifier = Modifier.fillMaxSize(),
             )
             PhoebeScreenshotScenario.Artist,
+            PhoebeScreenshotScenario.ArtistWithEvents,
             PhoebeScreenshotScenario.ArtistOldLayout,
             PhoebeScreenshotScenario.ArtistRadio,
             -> ArtistDetailRoute(
@@ -720,6 +742,8 @@ internal fun PhoebeMobileScreenshotScenario(
                     } else {
                         null
                     },
+                    artistEventsAvailable = scenario == PhoebeScreenshotScenario.ArtistWithEvents,
+                    fullBleedArtwork = scenario != PhoebeScreenshotScenario.ArtistWithEvents,
                 ),
                 actions = ArtistDetailRouteActions(
                     onBack = {},
@@ -729,8 +753,21 @@ internal fun PhoebeMobileScreenshotScenario(
                     onDownload = {},
                     onDownloadArtist = {},
                     onPlayArtistRadio = {},
+                    onArtistEvents = {},
                     onArtist = {},
                     onLibraryColumns = {},
+                ),
+                modifier = Modifier.fillMaxSize(),
+            )
+            PhoebeScreenshotScenario.ArtistEvents -> ArtistEventsRoute(
+                state = ArtistEventsRouteState(
+                    artist = fixture.artist,
+                    events = fixture.artistEvents,
+                ),
+                actions = ArtistEventsRouteActions(
+                    onBack = {},
+                    onRetry = {},
+                    onOpenUrl = {},
                 ),
                 modifier = Modifier.fillMaxSize(),
             )
@@ -888,9 +925,9 @@ internal fun PhoebeMobileScreenshotScenario(
                 searchQuery = if (scenario == PhoebeScreenshotScenario.Search) "moon" else "",
                 libraryFilter = LibraryFilterTab.Artists,
                 libraryUi = libraryUi,
-                currentTrack = fixture.currentTrack,
+                currentTrack = fixture.currentTrack.takeUnless { scenario.hidesMobilePlayerChrome() },
                 homeUiState = deriveHomeUiState(catalog, fixture.playHistory, randomArtistSeed = 7, randomAlbumSeed = 11, nowMs = fixture.nowMs),
-                isPlaying = true,
+                isPlaying = !scenario.hidesMobilePlayerChrome(),
                 routeViewModelFactory = routeViewModelFactory,
                 homeScreenLayoutMode = if (scenario == PhoebeScreenshotScenario.HomeExpanded) {
                     HomeScreenLayoutMode.Expanded
@@ -961,31 +998,33 @@ internal fun PhoebeMobileScreenshotScenario(
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
         ) {
-            MobilePlayer(
-                track = fixture.currentTrack,
-                upNext = fixture.upNext,
-                isPlaying = true,
-                shuffle = true,
-                repeat = RepeatMode.All,
-                positionMs = 96_000L,
-                bufferedPositionMs = 172_000L,
-                currentIndex = 0,
-                visualizerPreset = NowPlayingVisualizerPreset.Default,
-                audioAnalysis = AudioAnalysisFrame.Empty,
-                blurredArtworkAppearance = true,
-                onToggle = {},
-                onPrevious = {},
-                onNext = {},
-                onShuffle = {},
-                onRepeat = {},
-                onSeek = {},
-                onPlayQueue = {},
-                onMoveUpNext = { _, _ -> },
-                onRemoveUpNext = {},
-                onBack = {},
-                onSwipeDismiss = {},
-                expansionFraction = 0f,
-            )
+            if (showMiniPlayerChrome) {
+                MobilePlayer(
+                    track = fixture.currentTrack,
+                    upNext = fixture.upNext,
+                    isPlaying = true,
+                    shuffle = true,
+                    repeat = RepeatMode.All,
+                    positionMs = 96_000L,
+                    bufferedPositionMs = 172_000L,
+                    currentIndex = 0,
+                    visualizerPreset = NowPlayingVisualizerPreset.Default,
+                    audioAnalysis = AudioAnalysisFrame.Empty,
+                    blurredArtworkAppearance = true,
+                    onToggle = {},
+                    onPrevious = {},
+                    onNext = {},
+                    onShuffle = {},
+                    onRepeat = {},
+                    onSeek = {},
+                    onPlayQueue = {},
+                    onMoveUpNext = { _, _ -> },
+                    onRemoveUpNext = {},
+                    onBack = {},
+                    onSwipeDismiss = {},
+                    expansionFraction = 0f,
+                )
+            }
             MobileBottomNavigation(
                 section = when (scenario) {
                     PhoebeScreenshotScenario.Library,
@@ -998,7 +1037,7 @@ internal fun PhoebeMobileScreenshotScenario(
                     else -> BrowseSection.Home
                 },
                 onSection = {},
-                attachedToMiniPlayer = true,
+                attachedToMiniPlayer = showMiniPlayerChrome,
             )
         }
     }
@@ -1014,6 +1053,9 @@ private fun CatalogSnapshot.withFiveColumnGridArtists(nowMs: Long): CatalogSnaps
             Artist(id = "artist-silver", title = "Silver Atlas", albumCount = 2, songCount = 5, dateAddedMs = nowMs - 518_400_000L),
         ),
     )
+
+private fun PhoebeScreenshotScenario.hidesMobilePlayerChrome(): Boolean =
+    this == PhoebeScreenshotScenario.ArtistWithEvents || this == PhoebeScreenshotScenario.ArtistEvents
 
 private fun screenshotAuthActions(): AuthWelcomeRouteActions =
     AuthWelcomeRouteActions(
@@ -1174,6 +1216,7 @@ internal data class PhoebeScreenshotFixtureData(
     val servers: List<PlexServer>,
     val libraries: List<MusicLibrary>,
     val artist: Artist,
+    val artistEvents: ArtistEventsLoadState,
     val album: Album,
     val playlist: Playlist,
     val currentTrack: Track,
@@ -1198,6 +1241,51 @@ internal val PhoebeScreenshotFixture = run {
         Track("plex:track-harbor", "Harbor Lights", secondArtist.title, thirdAlbum.title, 208_000L, "https://stream.example/harbor", "https://download.example/harbor", year = 2025, genre = "Indie", filepath = "/music/Echo Harbor/Harbor Static/01 Harbor Lights.mp3", audioCodec = "MP3", bitrateKbps = 320, dateAddedMs = nowMs - 259_200_000L),
         Track("plex:track-quartet", "Quartz Quartet", secondArtist.title, thirdAlbum.title, 198_000L, "https://stream.example/quartet", "https://download.example/quartet", year = 2025, genre = "Indie", filepath = "/music/Echo Harbor/Harbor Static/02 Quartz Quartet.mp3", audioCodec = "MP3", bitrateKbps = 320, dateAddedMs = nowMs - 266_200_000L),
         Track("local:track-field", "Field Recording No. 7", thirdArtist.title, fourthAlbum.title, 314_000L, "file:///field", "", localUri = "file:///Users/music/Field Notes/field-7.flac", year = 2023, genre = "Ambient", filepath = "/Users/music/Field Notes/field-7.flac", audioCodec = "FLAC", bitrateKbps = 773, dateAddedMs = nowMs - 345_600_000L),
+    )
+    val artistEvents = ArtistEventsLoadState(
+        events = listOf(
+            ArtistEvent(
+                id = "tm-luna-1",
+                provider = EventDataProvider.Ticketmaster,
+                title = "Luna North with Echo Harbor",
+                url = "https://tickets.example/luna-north",
+                status = "onsale",
+                date = ArtistEventDate(
+                    localDate = "2026-08-21",
+                    localTime = "20:00:00",
+                    dateTimeUtc = "2026-08-22T01:00:00Z",
+                    timezone = "America/New_York",
+                ),
+                venue = ArtistEventVenue(
+                    name = "The Meridian Room",
+                    city = "Chicago",
+                    region = "IL",
+                    country = "US",
+                    address = "1420 W Lake St",
+                ),
+                price = ArtistEventPrice(min = 42.0, max = 42.0, currency = "USD", display = "$42"),
+            ),
+            ArtistEvent(
+                id = "sg-luna-2",
+                provider = EventDataProvider.SeatGeek,
+                title = "Moonlit Signals Tour",
+                url = "https://tickets.example/moonlit-signals",
+                status = "available",
+                date = ArtistEventDate(
+                    localDate = "2026-09-05",
+                    localTime = "19:30:00",
+                    dateTimeUtc = "2026-09-06T00:30:00Z",
+                    timezone = "America/Chicago",
+                ),
+                venue = ArtistEventVenue(
+                    name = "North Pier Hall",
+                    city = "Milwaukee",
+                    region = "WI",
+                    country = "US",
+                ),
+                price = ArtistEventPrice(min = 35.0, max = 68.0, currency = "USD", display = "$35-$68"),
+            ),
+        ),
     )
     val playlist = Playlist(id = "plex:playlist-night", title = "Night Drive Mix", trackCount = 5, rating = 4f, favorite = true)
     val secondPlaylist = Playlist(id = "plex:playlist-focus", title = "Focus Room", trackCount = 4, favorite = true)
@@ -1320,6 +1408,7 @@ internal val PhoebeScreenshotFixture = run {
         servers = listOf(server),
         libraries = listOf(library),
         artist = artist,
+        artistEvents = artistEvents,
         album = album,
         playlist = playlist,
         currentTrack = tracks[1],

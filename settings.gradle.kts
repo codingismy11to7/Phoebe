@@ -21,6 +21,7 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "Phoebe"
+include(":backend:events")
 include(":androidApp")
 include(":composeApp")
 include(":domain")
@@ -34,6 +35,7 @@ include(":data:providers:jellyfin")
 include(":data:providers:subsonic")
 include(":data:providers:musicassistant")
 include(":data:catalog")
+include(":data:events")
 include(":data:session")
 include(":data:play-history")
 include(":data:settings")

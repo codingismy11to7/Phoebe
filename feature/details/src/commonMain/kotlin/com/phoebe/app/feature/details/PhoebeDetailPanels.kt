@@ -151,6 +151,10 @@ import com.phoebe.app.data.sortAlbumsForLibrary
 import com.phoebe.app.data.sortTracksForLibrary
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.Artist
+import com.phoebe.app.domain.ArtistEvent
+import com.phoebe.app.domain.ArtistEventPrice
+import com.phoebe.app.domain.ArtistEventVenue
+import com.phoebe.app.domain.ArtistEventsLoadState
 import com.phoebe.app.domain.ArtistRadioAvailability
 import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.CollectionEntry
@@ -1022,12 +1026,14 @@ private fun MobileArtistDetailHeader(
     songWord: String,
     artistRadioAvailability: ArtistRadioAvailability?,
     artistRadioStarting: Boolean,
+    artistEventsAvailable: Boolean,
     favoriteActions: FavoriteActions,
     onBack: () -> Unit,
     onArtworkClick: () -> Unit,
     onPlayAllTracks: (List<Track>) -> Unit,
     onShuffleAllTracks: (List<Track>) -> Unit,
     onPlayArtistRadio: (Artist) -> Unit,
+    onArtistEvents: (Artist) -> Unit,
     onDownloadArtist: (Artist) -> Unit,
     contentPadding: PaddingValues = PaddingValues(horizontal = 20.dp),
     topBarTopPadding: Dp = 0.dp,
@@ -1067,13 +1073,29 @@ private fun MobileArtistDetailHeader(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.sharedBoundsTransition("artist:${artist.id}:title"),
                 )
-                Text(
-                    "${albumsCount} $albumWord · ${tracks.size} $songWord",
-                    color = PhoebeUi.secondaryText,
-                    fontSize = 14.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "${albumsCount} $albumWord · ${tracks.size} $songWord",
+                        color = PhoebeUi.secondaryText,
+                        fontSize = 14.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (artistEventsAvailable) {
+                        Text(" · ", color = PhoebeUi.mutedText, fontSize = 14.sp)
+                        Text(
+                            "Events",
+                            color = PhoebeUi.accentLight,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable { onArtistEvents(artist) }
+                                .padding(horizontal = 2.dp, vertical = 1.dp),
+                        )
+                    }
+                }
             }
             Row(
                 Modifier.fillMaxWidth().padding(contentPadding).padding(top = 18.dp),
@@ -1396,12 +1418,14 @@ private fun DesktopArtistDetailHeader(
     songWord: String,
     artistRadioAvailability: ArtistRadioAvailability?,
     artistRadioStarting: Boolean,
+    artistEventsAvailable: Boolean,
     favoriteActions: FavoriteActions,
     onBack: () -> Unit,
     onArtworkClick: () -> Unit,
     onPlayAllTracks: (List<Track>) -> Unit,
     onShuffleAllTracks: (List<Track>) -> Unit,
     onPlayArtistRadio: (Artist) -> Unit,
+    onArtistEvents: (Artist) -> Unit,
     onDownloadArtist: (Artist) -> Unit,
     searchQuery: String,
     onSearchQuery: (String) -> Unit,
@@ -1413,6 +1437,11 @@ private fun DesktopArtistDetailHeader(
         title = artist.title,
         eyebrow = "Artist",
         meta = listOf("${albumsCount} $albumWord", "${tracks.size} $songWord"),
+        metaContent = {
+            if (artistEventsAvailable) {
+                DesktopDetailMetaLink("Events") { onArtistEvents(artist) }
+            }
+        },
         onBack = onBack,
         immersive = immersive,
         modifier = modifier,
@@ -1562,6 +1591,7 @@ private fun DesktopDetailHero(
     title: String,
     eyebrow: String,
     meta: List<String>,
+    metaContent: @Composable () -> Unit = {},
     onBack: () -> Unit,
     artwork: @Composable () -> Unit,
     modifier: Modifier = Modifier,
@@ -1720,6 +1750,7 @@ private fun DesktopDetailHero(
                     meta.filter { it.isNotBlank() }.forEach { item ->
                         DesktopDetailMetaChip(item)
                     }
+                    metaContent()
                 }
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1777,6 +1808,7 @@ private fun DesktopDetailHero(
                         meta.filter { it.isNotBlank() }.forEach { item ->
                             DesktopDetailMetaChip(item)
                         }
+                        metaContent()
                     }
                 }
                 Spacer(Modifier.height(28.dp))
@@ -1828,6 +1860,24 @@ private fun DesktopDetailMetaChip(label: String) {
 }
 
 @Composable
+private fun DesktopDetailMetaLink(label: String, onClick: () -> Unit) {
+    Text(
+        label,
+        color = PhoebeUi.accentLight,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.SemiBold,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .clickable(onClick = onClick)
+            .background(PhoebeUi.accentLight.copy(alpha = 0.12f))
+            .border(BorderStroke(1.dp, PhoebeUi.accentLight.copy(alpha = 0.22f)), RoundedCornerShape(999.dp))
+            .padding(horizontal = 11.dp, vertical = 6.dp),
+    )
+}
+
+@Composable
 private fun DesktopDetailIconSurface(content: @Composable () -> Unit) {
     Box(
         Modifier
@@ -1870,7 +1920,9 @@ private fun ArtistStatsPanel(
     tracks: List<Track>,
     artistRadioAvailability: ArtistRadioAvailability?,
     artistRadioStarting: Boolean,
+    artistEventsAvailable: Boolean = false,
     onPlayArtistRadio: () -> Unit,
+    onArtistEvents: (Artist) -> Unit = {},
     onAlbum: (Album) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
@@ -1946,6 +1998,14 @@ private fun ArtistStatsPanel(
                 onClick = onPlayArtistRadio,
             )
         }
+        if (artistEventsAvailable) {
+            TextButton(
+                onClick = { onArtistEvents(artist) },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Events", color = PhoebeUi.accentLight, fontWeight = FontWeight.SemiBold)
+            }
+        }
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             ArtistDetailStatRow(PhoebeIcon.Library, "${albums.size} $albumWord", "Albums")
             ArtistDetailStatRow(PhoebeIcon.Music, "${tracks.size} $songWord", "Songs")
@@ -2014,8 +2074,10 @@ fun ArtistDetailPanel(
     onDownloadArtist: (Artist) -> Unit,
     artistRadioAvailability: ArtistRadioAvailability? = null,
     artistRadioStarting: Boolean = false,
+    artistEventsAvailable: Boolean = false,
     onProbeArtistRadio: (Artist) -> Unit = {},
     onPlayArtistRadio: (Artist) -> Unit,
+    onArtistEvents: (Artist) -> Unit = {},
     onArtist: (Artist) -> Unit,
     onCollectionItems: (CollectionEntry, String) -> Unit = { _, _ -> },
     onLibraryColumns: (LibraryColumnVisibility) -> Unit,
@@ -2097,7 +2159,7 @@ fun ArtistDetailPanel(
         val listStartPadding = 0.dp
         val listEndPadding = 0.dp
         val listTopPadding = if (useTable) 0.dp else 0.dp
-        val mobileArtworkHeight = maxWidth
+        val mobileArtworkHeight = if (fullBleedArtwork) 360.dp else 220.dp
         val contentPaddingModifier = if (useTable) {
             Modifier.padding(start = startPadding, end = endPadding)
         } else {
@@ -2124,7 +2186,9 @@ fun ArtistDetailPanel(
                 tracks = tracks,
                 artistRadioAvailability = artistRadioAvailability,
                 artistRadioStarting = artistRadioStarting,
+                artistEventsAvailable = artistEventsAvailable,
                 onPlayArtistRadio = { onPlayArtistRadio(artist) },
+                onArtistEvents = onArtistEvents,
                 onAlbum = onAlbum,
                 onBack = { showStats = false },
                 edgePadding = startPadding,
@@ -2138,7 +2202,7 @@ fun ArtistDetailPanel(
                         seed = artist.title,
                         thumbUrl = artistThumbUrl,
                         sharedKey = "artist:${artist.id}",
-                        height = 360.dp,
+                        height = mobileArtworkHeight,
                         alignment = Alignment.TopCenter,
                         onClick = { showStats = true },
                     )
@@ -2167,12 +2231,14 @@ fun ArtistDetailPanel(
                                     songWord = songWord,
                                     artistRadioAvailability = artistRadioAvailability,
                                     artistRadioStarting = artistRadioStarting,
+                                    artistEventsAvailable = artistEventsAvailable,
                                     favoriteActions = favoriteActions,
                                     onBack = onBack,
                                     onArtworkClick = { showStats = true },
                                     onPlayAllTracks = onPlayAllTracks,
                                     onShuffleAllTracks = onShuffleAllTracks,
                                     onPlayArtistRadio = onPlayArtistRadio,
+                                    onArtistEvents = onArtistEvents,
                                     onDownloadArtist = onDownloadArtist,
                                     searchQuery = searchQuery,
                                     onSearchQuery = onSearchQuery,
@@ -2221,15 +2287,18 @@ fun ArtistDetailPanel(
                                     songWord = songWord,
                                     artistRadioAvailability = artistRadioAvailability,
                                     artistRadioStarting = artistRadioStarting,
+                                    artistEventsAvailable = artistEventsAvailable,
                                     favoriteActions = favoriteActions,
                                     onBack = onBack,
                                     onArtworkClick = { showStats = true },
                                     onPlayAllTracks = onPlayAllTracks,
                                     onShuffleAllTracks = onShuffleAllTracks,
                                     onPlayArtistRadio = onPlayArtistRadio,
+                                    onArtistEvents = onArtistEvents,
                                     onDownloadArtist = onDownloadArtist,
                                     contentPadding = PaddingValues(horizontal = startPadding),
                                     topBarTopPadding = mobileContentTopPadding(topPadding),
+                                    artworkHeight = mobileArtworkHeight,
                                 )
                                 if (popularTracks.isNotEmpty() && searchQuery.isBlank()) {
                                     PopularTracksSection(
@@ -2933,6 +3002,328 @@ fun ArtistAlbumGrid(albums: List<Album>, albumGridItemSizeDp: Int, onAlbum: (Alb
         }
     }
 }
+
+@Composable
+fun ArtistEventsPanel(
+    artist: Artist,
+    events: ArtistEventsLoadState,
+    onBack: () -> Unit,
+    onRetry: () -> Unit,
+    onOpenUrl: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val mobileChromeBottom = LocalMobileChromePadding.current.bottom
+    val errorMessage = events.error
+    BoxWithConstraints(modifier.fillMaxSize()) {
+        val useWideLayout = maxWidth >= 760.dp
+        val startPadding = if (useWideLayout) PhoebeDesktopLayout.contentStart else 20.dp
+        val endPadding = if (useWideLayout) PhoebeDesktopLayout.contentEnd else 20.dp
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = startPadding,
+                end = endPadding,
+                top = if (useWideLayout) PhoebeDesktopLayout.contentTop else mobileContentTopPadding(16.dp),
+                bottom = maxOf(mobileChromeBottom + 24.dp, 32.dp),
+            ),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            item(contentType = "events-header") {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    DetailSectionIntro(
+                        onBack = onBack,
+                        label = "Events",
+                        alignBackIconToContentStart = true,
+                    )
+                    Text(
+                        artist.title,
+                        color = PhoebeUi.primaryText,
+                        fontSize = if (useWideLayout) 44.sp else 34.sp,
+                        lineHeight = if (useWideLayout) 46.sp else 36.sp,
+                        fontWeight = FontWeight.Black,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        eventsHeaderSubtitle(events),
+                        color = PhoebeUi.secondaryText,
+                        fontSize = 14.sp,
+                    )
+                }
+            }
+            if (events.loading && events.events.isEmpty()) {
+                item(contentType = "events-loading") {
+                    EventsStatusPanel("Loading events...", showProgress = true)
+                }
+            } else if (errorMessage != null && events.events.isEmpty()) {
+                item(contentType = "events-error") {
+                    EventsStatusPanel(
+                        message = errorMessage,
+                        actionLabel = "Retry",
+                        onAction = onRetry,
+                    )
+                }
+            } else if (events.events.isEmpty()) {
+                item(contentType = "events-empty") {
+                    EventsStatusPanel("No upcoming events found.")
+                }
+            } else {
+                items(events.events, key = { it.provider.name + ":" + it.id }, contentType = { "artist-event" }) { event ->
+                    ArtistEventCard(
+                        event = event,
+                        wide = useWideLayout,
+                        onOpenUrl = onOpenUrl,
+                    )
+                }
+                if (errorMessage != null) {
+                    item(contentType = "events-inline-error") {
+                        Text(
+                            errorMessage,
+                            color = PhoebeUi.secondaryText,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EventsStatusPanel(
+    message: String,
+    showProgress: Boolean = false,
+    actionLabel: String? = null,
+    onAction: () -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(PhoebeUi.subtleFill)
+            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(12.dp))
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        if (showProgress) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(18.dp),
+                color = PhoebeUi.accentLight,
+                strokeWidth = 2.dp,
+            )
+        } else {
+            PhoebeIconView(PhoebeIcon.Calendar, tint = PhoebeUi.secondaryText, modifier = Modifier.size(18.dp))
+        }
+        Text(
+            message,
+            color = PhoebeUi.secondaryText,
+            fontSize = 13.sp,
+            modifier = Modifier.weight(1f),
+        )
+        if (actionLabel != null) {
+            Text(
+                actionLabel,
+                color = PhoebeUi.accentLight,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable(onClick = onAction)
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ArtistEventCard(
+    event: ArtistEvent,
+    wide: Boolean,
+    onOpenUrl: (String) -> Unit,
+) {
+    var rawExpanded by remember(event.id) { mutableStateOf(false) }
+    val imageUrl = remember(event.images) { bestEventImageUrl(event) }
+    val venueLine = event.venue?.displayLine()
+    val dateLine = eventDateLine(event)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(PhoebeUi.panel.copy(alpha = 0.72f))
+            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(14.dp))
+            .animateContentSize()
+            .padding(if (wide) 18.dp else 14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            ArtworkImage(
+                seed = event.title,
+                thumbUrl = imageUrl,
+                modifier = Modifier.size(if (wide) 132.dp else 92.dp),
+                radius = 12.dp,
+                elevated = false,
+            )
+            Column(
+                Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
+                Text(
+                    event.title,
+                    color = PhoebeUi.primaryText,
+                    fontSize = if (wide) 20.sp else 17.sp,
+                    lineHeight = if (wide) 23.sp else 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                EventInfoRow(PhoebeIcon.Calendar, dateLine)
+                if (!venueLine.isNullOrBlank()) {
+                    EventInfoRow(PhoebeIcon.Music, venueLine)
+                }
+                event.price?.displayLine()?.let { price ->
+                    EventInfoRow(PhoebeIcon.Book, price)
+                }
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(top = 2.dp),
+                ) {
+                    EventPill(event.provider.label)
+                    event.status?.takeIf { it.isNotBlank() }?.let { EventPill(it) }
+                    event.date.timezone?.takeIf { it.isNotBlank() }?.let { EventPill(it) }
+                }
+            }
+        }
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (event.raw != null) {
+                TextButton(onClick = { rawExpanded = !rawExpanded }) {
+                    Text(
+                        if (rawExpanded) "Hide raw" else "Raw details",
+                        color = PhoebeUi.secondaryText,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+            event.url?.takeIf { it.isNotBlank() }?.let { url ->
+                TextButton(onClick = { onOpenUrl(url) }) {
+                    Text("Tickets", color = PhoebeUi.accentLight, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+        if (rawExpanded && event.raw != null) {
+            Text(
+                event.raw.toString(),
+                color = PhoebeUi.secondaryText,
+                fontSize = 11.sp,
+                lineHeight = 15.sp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(PhoebeUi.subtleFill)
+                    .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(10.dp))
+                    .padding(12.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun EventInfoRow(icon: PhoebeIcon, text: String) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        PhoebeIconView(icon, tint = PhoebeUi.secondaryText, modifier = Modifier.size(14.dp))
+        Text(
+            text,
+            color = PhoebeUi.secondaryText,
+            fontSize = 13.sp,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun EventPill(label: String) {
+    Text(
+        label,
+        color = PhoebeUi.secondaryText,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.SemiBold,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(Color.White.copy(alpha = 0.06f))
+            .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)), RoundedCornerShape(999.dp))
+            .padding(horizontal = 9.dp, vertical = 5.dp),
+    )
+}
+
+private val com.phoebe.app.domain.EventDataProvider.label: String
+    get() = when (this) {
+        com.phoebe.app.domain.EventDataProvider.Ticketmaster -> "Ticketmaster"
+        com.phoebe.app.domain.EventDataProvider.SeatGeek -> "SeatGeek"
+    }
+
+private fun eventsHeaderSubtitle(events: ArtistEventsLoadState): String =
+    when {
+        events.loading && events.events.isEmpty() -> "Checking upcoming shows"
+        events.events.size == 1 -> "1 upcoming event"
+        events.events.isNotEmpty() -> "${events.events.size} upcoming events"
+        events.error != null -> "Events unavailable"
+        else -> "Upcoming concerts and ticket links"
+    }
+
+private fun bestEventImageUrl(event: ArtistEvent): String? =
+    event.images
+        .filter { it.url.isNotBlank() }
+        .maxByOrNull { (it.width ?: 0) * (it.height ?: 0) }
+        ?.url
+
+private fun eventDateLine(event: ArtistEvent): String {
+    val local = listOfNotNull(event.date.localDate, event.date.localTime).joinToString(" ")
+    return local.ifBlank { event.date.dateTimeUtc.orEmpty() }.ifBlank { "Date TBA" }
+}
+
+private fun ArtistEventVenue.displayLine(): String =
+    listOfNotNull(
+        name?.takeIf { it.isNotBlank() },
+        city?.takeIf { it.isNotBlank() },
+        region?.takeIf { it.isNotBlank() },
+        country?.takeIf { it.isNotBlank() },
+    ).joinToString(" · ")
+
+private fun ArtistEventPrice.displayLine(): String? {
+    val displayPrice = display?.takeIf { it.isNotBlank() }
+    val minPrice = min
+    val maxPrice = max
+    return displayPrice
+        ?: when {
+            minPrice != null && maxPrice != null -> {
+                if (minPrice == maxPrice) {
+                    "${currency.orEmpty()} ${minPrice.displayPriceValue()}".trim()
+                } else {
+                    "${currency.orEmpty()} ${minPrice.displayPriceValue()}-${maxPrice.displayPriceValue()}".trim()
+                }
+            }
+            minPrice != null -> "${currency.orEmpty()} ${minPrice.displayPriceValue()}+".trim()
+            maxPrice != null -> "Up to ${currency.orEmpty()} ${maxPrice.displayPriceValue()}".trim()
+            else -> null
+        }
+}
+
+private fun Double.displayPriceValue(): String =
+    if (isFinite() && this % 1.0 == 0.0) toLong().toString() else toString()
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
