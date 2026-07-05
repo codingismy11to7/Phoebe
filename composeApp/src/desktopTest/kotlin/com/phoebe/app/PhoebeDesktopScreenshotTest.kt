@@ -71,6 +71,25 @@ class PhoebeDesktopScreenshotTest {
 
     @OptIn(ExperimentalTestApi::class, ExperimentalComposeUiApi::class)
     @Test
+    fun desktopArtistEventsDark() = runDesktopComposeUiTest(width = 1365, height = 900) {
+        listOf(
+            PhoebeScreenshotScenario.ArtistWithEvents to "artist-events-link",
+            PhoebeScreenshotScenario.ArtistEvents to "artist-events",
+        ).forEach { (scenario, slug) ->
+            setContent {
+                Box(Modifier.size(1365.dp, 900.dp)) {
+                    PhoebeScreenshotApp(scenario = scenario)
+                }
+            }
+            waitForIdle()
+            onRoot().captureRoboImage(
+                filePath = "src/screenshotTest/roborazzi/desktop-$slug-dark.png",
+            )
+        }
+    }
+
+    @OptIn(ExperimentalTestApi::class, ExperimentalComposeUiApi::class)
+    @Test
     fun desktopRadioDark() = runDesktopComposeUiTest(width = 1365, height = 900) {
         setContent {
             Box(Modifier.size(1365.dp, 900.dp)) {

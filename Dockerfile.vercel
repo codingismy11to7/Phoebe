@@ -1,0 +1,12 @@
+FROM eclipse-temurin:22-jdk AS build
+WORKDIR /workspace
+COPY . .
+RUN cp settings.backend.gradle.kts settings.gradle.kts
+RUN ./gradlew --no-daemon :backend:events:installDist
+
+FROM eclipse-temurin:22-jre
+WORKDIR /app
+COPY --from=build /workspace/backend/events/build/install/events /app
+ENV PORT=80
+EXPOSE 80
+CMD ["/app/bin/events"]

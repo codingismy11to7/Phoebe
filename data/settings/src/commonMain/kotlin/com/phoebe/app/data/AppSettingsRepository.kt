@@ -6,6 +6,7 @@ import com.phoebe.app.domain.AppSettings
 import com.phoebe.app.domain.AudioProcessingSettings
 import com.phoebe.app.domain.DownloadPolicySettings
 import com.phoebe.app.domain.EqualizerProfile
+import com.phoebe.app.domain.EventSettings
 import com.phoebe.app.domain.LastFmSettings
 import com.phoebe.app.domain.ListenBrainzSettings
 import com.phoebe.app.domain.NowPlayingVisualizerPreset
@@ -161,6 +162,12 @@ class AppSettingsRepository(
         }
     }
 
+    suspend fun setEventSettings(settings: EventSettings) {
+        updateAndSave { current ->
+            current.copy(events = settings.normalized())
+        }
+    }
+
     suspend fun updateListenBrainzSettings(transform: (ListenBrainzSettings) -> ListenBrainzSettings) {
         updateAndSave { current ->
             current.copy(listenBrainz = transform(current.listenBrainz).normalized())
@@ -200,6 +207,7 @@ class AppSettingsRepository(
                     lastFmSettings = json.encodeToString(persisted.lastFm),
                     downloadPolicySettings = json.encodeToString(persisted.downloadPolicy),
                     audioProcessingSettings = json.encodeToString(persisted.audioProcessing),
+                    eventSettings = json.encodeToString(persisted.events),
                 )
                 mutableState.value = normalized
             }
@@ -225,6 +233,7 @@ class AppSettingsRepository(
             lastFm = decodeLastFmSettings(lastFmSettings),
             downloadPolicy = decodeDownloadPolicySettings(downloadPolicySettings),
             audioProcessing = decodeAudioProcessingSettings(audioProcessingSettings),
+            events = decodeEventSettings(eventSettings),
         ).normalized()
 
     private fun AppSettings.withoutSessionSettings(): AppSettings =
@@ -273,6 +282,13 @@ class AppSettingsRepository(
             AudioProcessingSettings()
         } catch (_: IllegalArgumentException) {
             AudioProcessingSettings()
+        }
+
+    private fun decodeEventSettings(value: String): EventSettings =
+        try {
+            json.decodeFromString<EventSettings>(value).normalized()
+        } catch (_: Exception) {
+            EventSettings()
         }
 }
 

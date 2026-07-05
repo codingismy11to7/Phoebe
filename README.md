@@ -209,6 +209,71 @@ export PHOEBE_GOOGLE_MAPS_WEB_API_KEY=your-web-key
 
 Platform-specific keys take precedence over the shared `phoebe.googleMaps.apiKey` / `PHOEBE_GOOGLE_MAPS_API_KEY` fallback. Desktop environment variables are checked before build-time keys so you can override a packaged/local key for one run. Keep these values out of git; release keys are configured separately as GitHub secrets in [docs/github-actions.md](docs/github-actions.md).
 
+### Events backend
+
+Artist event search is served by the Ktor backend in `:backend:events`. Release builds call the production backend URL from `PHOEBE_EVENTS_BACKEND_URL` / `phoebe.events.backendUrl`; debug builds can switch between production and localhost from the hidden debug menu.
+
+Run it locally on port `8088`:
+
+```bash
+export TICKETMASTER_API_KEY=your-ticketmaster-consumer-key
+export SEATGEEK_CLIENT_ID=your-seatgeek-client-id
+./gradlew :backend:events:run
+```
+
+The VS Code and Codex `Events Backend` run configs also load optional local secrets from `.env.events.local`:
+
+```bash
+TICKETMASTER_API_KEY=your-ticketmaster-consumer-key
+SEATGEEK_CLIENT_ID=your-seatgeek-client-id
+```
+
+Check it:
+
+```bash
+curl http://127.0.0.1:8088/health
+curl "http://127.0.0.1:8088/v1/artist-events?provider=ticketmaster&artist=Taylor%20Swift&limit=1"
+```
+
+For Vercel, create/link the project from the repository root because the deployment uses `Dockerfile.vercel`:
+
+```bash
+npm install --global vercel
+vercel login
+vercel link
+```
+
+In the Vercel project, add these Production environment variables:
+
+- `TICKETMASTER_API_KEY`
+- `SEATGEEK_CLIENT_ID`
+- `ALLOWED_ORIGINS`, optional comma-separated allowed origins
+- `EVENTS_CACHE_TTL_MINUTES`, optional cache TTL override, default `240`
+
+Deploy manually using the backend-only context script:
+
+```bash
+scripts/deploy-events-backend-vercel.sh --prod --yes
+```
+
+Use the script from this repository. It creates a temporary Vercel context containing only the backend service, `:domain`, Gradle metadata, and build logic, then deploys that directory with archive upload enabled. Plain `vercel deploy --prod` from the repo root can upload the wrong context, deploy no container, or fail with `Request body too large. Limit: 10mb`.
+
+After deploy, copy the production URL into local app builds:
+
+```properties
+# local.properties
+phoebe.events.backendUrl=https://your-events-backend.vercel.app
+```
+
+For release CI, add these GitHub Actions repository secrets:
+
+- `PHOEBE_EVENTS_BACKEND_URL`: the Vercel production backend URL
+- `VERCEL_TOKEN`: Vercel access token
+- `VERCEL_ORG_ID`: from `.vercel/project.json`
+- `VERCEL_PROJECT_ID_EVENTS_PROD`: from `.vercel/project.json`
+
+The release workflow runs on every push to `main`, so merging to `main` triggers a release. Its `events-backend` job deploys the production backend with `scripts/deploy-events-backend-vercel.sh --prod --yes`, checks `/health`, and runs a Ticketmaster smoke lookup before app packaging jobs continue.
+
 **iOS debug build:**
 
 ```bash
@@ -218,7 +283,7 @@ xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp -configuration Debug 
 
 ## Releases
 
-Tagged releases (`release/x.y.z` matching `phoebe.versionName` in `gradle.properties`) build signed Android APK/AAB, Linux DEB and Flatpak, Windows MSI, and macOS DMG artifacts as draft GitHub releases. Signing secrets and setup are documented in [docs/github-actions.md](docs/github-actions.md) and `docs/release-signing-setup.md`.
+Every push to `main` runs the release workflow. It bumps `gradle.properties`, tags `release/x.y.z`, deploys the events backend to Vercel, then builds signed Android APK/AAB, Linux DEB and Flatpak, Windows MSI, macOS DMG, web, and iOS artifacts as draft GitHub releases. Signing secrets and setup are documented in [docs/github-actions.md](docs/github-actions.md) and `docs/release-signing-setup.md`.
 
 ## Debug logging
 

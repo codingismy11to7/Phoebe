@@ -3,9 +3,11 @@ package com.phoebe.app
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.AudioAnalysisFrame
 import com.phoebe.app.domain.AppSettings
+import com.phoebe.app.domain.ArtistEventsLoadState
 import com.phoebe.app.domain.AudioProcessingCapabilities
 import com.phoebe.app.domain.AudioProcessingSettings
 import com.phoebe.app.domain.DownloadPolicySettings
+import com.phoebe.app.domain.EventSettings
 import com.phoebe.app.domain.Artist
 import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.CollectionFacet
@@ -132,6 +134,12 @@ data class PendingDuplicatePlaylistAdd(
 data class PlaybackSnackbarNotice(
     val message: String,
     val streamUrl: String? = null,
+)
+
+data class EventsBackendHealthState(
+    val checking: Boolean = false,
+    val message: String? = null,
+    val success: Boolean? = null,
 )
 
 class AppState(
@@ -310,6 +318,10 @@ class AppState(
 
     private val mutableArtistRadioAvailability = MutableStateFlow<Map<String, ArtistRadioAvailability>>(emptyMap())
     val artistRadioAvailability: StateFlow<Map<String, ArtistRadioAvailability>> = mutableArtistRadioAvailability
+    private val mutableArtistEvents = MutableStateFlow<Map<String, ArtistEventsLoadState>>(emptyMap())
+    val artistEvents: StateFlow<Map<String, ArtistEventsLoadState>> = mutableArtistEvents.asStateFlow()
+    private val mutableEventsBackendHealth = MutableStateFlow(EventsBackendHealthState())
+    val eventsBackendHealth: StateFlow<EventsBackendHealthState> = mutableEventsBackendHealth.asStateFlow()
 
     private val mutableDownloadDirectory = MutableStateFlow<String?>(null)
     val downloadDirectory: StateFlow<String?> = mutableDownloadDirectory
@@ -351,6 +363,7 @@ class AppState(
     private val activeDownloadJobs = mutableSetOf<Job>()
     private var lastPlaybackHistoryRecord = PlaybackHistoryRecord()
     private var pendingLastFmAuth: PendingLastFmAuth? = null
+    private val artistEventJobs = mutableMapOf<String, Job>()
     private var disposed = false
 
     fun dispose() {
@@ -536,6 +549,7 @@ class AppState(
                 mutablePersistEqualizerSettings.value = settings.persistEqualizerSettings
                 dependencies.audioPlayer.setCrossfadeDurationMs(settings.crossfadeSeconds * 1_000L)
                 dependencies.audioPlayer.setAudioProcessing(settings.audioProcessing)
+                mutableArtistEvents.value = emptyMap()
                 if (settings.persistEqualizerSettings) {
                     val profile = settings.equalizerProfile.normalized()
                     if (mutableEqualizerProfile.value != profile) {
@@ -3028,6 +3042,65 @@ class AppState(
 
     fun setDownloadPolicySettings(settings: DownloadPolicySettings) = scope.launch {
         dependencies.appSettingsRepository.setDownloadPolicySettings(settings)
+    }
+
+    fun setEventSettings(settings: EventSettings) = scope.launch {
+        dependencies.settingsService.setEventSettings(settings)
+    }
+
+    fun loadArtistEventAvailability(artist: Artist) {
+        val existing = mutableArtistEvents.value[artist.id]
+        if (existing != null && !existing.loading) return
+        loadArtistEvents(artist = artist, limit = 1, force = false)
+    }
+
+    fun loadArtistEvents(artist: Artist, limit: Int = 50, force: Boolean = false) {
+        val existing = mutableArtistEvents.value[artist.id]
+        if (!force && existing != null && !existing.loading) return
+        if (artistEventJobs[artist.id]?.isActive == true) return
+        val settings = appSettings.value.events.normalized()
+        mutableArtistEvents.update { current ->
+            current + (artist.id to ArtistEventsLoadState(loading = true, events = existing?.events.orEmpty()))
+        }
+        artistEventJobs[artist.id] = scope.launch {
+            try {
+                val response = dependencies.artistEventsRepository.fetchArtistEvents(
+                    artist = artist.title,
+                    limit = limit,
+                    settings = settings,
+                )
+                mutableArtistEvents.update { current ->
+                    current + (artist.id to ArtistEventsLoadState(events = response.events))
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                mutableArtistEvents.update { current ->
+                    current + (artist.id to ArtistEventsLoadState(error = error.message ?: "Couldn't load events."))
+                }
+            } finally {
+                artistEventJobs.remove(artist.id)
+            }
+        }
+    }
+
+    fun resolvedEventsBackendBaseUrl(settings: EventSettings = appSettings.value.events): String? =
+        dependencies.artistEventsRepository.resolvedBackendBaseUrl(settings)
+
+    fun checkEventsBackendHealth(settings: EventSettings = appSettings.value.events) {
+        mutableEventsBackendHealth.value = EventsBackendHealthState(checking = true)
+        scope.launch {
+            val result = dependencies.artistEventsRepository.checkHealth(settings)
+            mutableEventsBackendHealth.value = result.fold(
+                onSuccess = { EventsBackendHealthState(message = "Connected to events backend.", success = true) },
+                onFailure = { error ->
+                    EventsBackendHealthState(
+                        message = error.message ?: "Couldn't reach events backend.",
+                        success = false,
+                    )
+                },
+            )
+        }
     }
 
     fun checkForUpdates() = scope.launch {

@@ -102,7 +102,13 @@ sealed interface PhoebeRoute : NavKey {
     data class ArtistDetail(val artistId: String) : PhoebeRoute
 
     @Serializable
+    data class ArtistEvents(val artistId: String) : PhoebeRoute
+
+    @Serializable
     data class ArtistSlugDetail(val artistSlug: String) : PhoebeRoute
+
+    @Serializable
+    data class ArtistSlugEvents(val artistSlug: String) : PhoebeRoute
 
     @Serializable
     data class AlbumDetail(val albumId: String) : PhoebeRoute
@@ -164,7 +170,9 @@ val phoebeRouteSerializersModule = SerializersModule {
         subclass(PhoebeRoute.Collections::class, PhoebeRoute.Collections.serializer())
         subclass(PhoebeRoute.CollectionItems::class, PhoebeRoute.CollectionItems.serializer())
         subclass(PhoebeRoute.ArtistDetail::class, PhoebeRoute.ArtistDetail.serializer())
+        subclass(PhoebeRoute.ArtistEvents::class, PhoebeRoute.ArtistEvents.serializer())
         subclass(PhoebeRoute.ArtistSlugDetail::class, PhoebeRoute.ArtistSlugDetail.serializer())
+        subclass(PhoebeRoute.ArtistSlugEvents::class, PhoebeRoute.ArtistSlugEvents.serializer())
         subclass(PhoebeRoute.AlbumDetail::class, PhoebeRoute.AlbumDetail.serializer())
         subclass(PhoebeRoute.ArtistAlbumSlugDetail::class, PhoebeRoute.ArtistAlbumSlugDetail.serializer())
         subclass(PhoebeRoute.SongDetail::class, PhoebeRoute.SongDetail.serializer())
@@ -236,8 +244,16 @@ fun resolvePhoebeRoute(
     is PhoebeRoute.ArtistDetail -> catalog.findArtist(route.artistId)
         ?.let { route.resolved(AppScreen.ArtistDetail(it)) }
         ?: route.missing("Artist not found", "This artist is no longer available in the current library.")
+    is PhoebeRoute.ArtistEvents -> catalog.findArtist(route.artistId)
+        ?.let { route.resolved(AppScreen.ArtistEvents(it)) }
+        ?: route.missing("Artist not found", "This artist is no longer available in the current library.")
     is PhoebeRoute.ArtistSlugDetail -> when (val match = catalog.findArtistBySlug(route.artistSlug)) {
         is SlugMatch.Found -> route.resolved(AppScreen.ArtistDetail(match.value))
+        SlugMatch.Ambiguous -> route.missing("Artist name is ambiguous", "More than one artist matches this URL.")
+        SlugMatch.Missing -> route.missing("Artist not found", "No artist in the current library matches this URL.")
+    }
+    is PhoebeRoute.ArtistSlugEvents -> when (val match = catalog.findArtistBySlug(route.artistSlug)) {
+        is SlugMatch.Found -> route.resolved(AppScreen.ArtistEvents(match.value))
         SlugMatch.Ambiguous -> route.missing("Artist name is ambiguous", "More than one artist matches this URL.")
         SlugMatch.Missing -> route.missing("Artist not found", "No artist in the current library matches this URL.")
     }
@@ -320,7 +336,9 @@ val PhoebeRoute.telemetryName: String
         is PhoebeRoute.AlbumDetail -> "album_detail"
         is PhoebeRoute.ArtistAlbumSlugDetail -> "album_detail"
         is PhoebeRoute.ArtistDetail -> "artist_detail"
+        is PhoebeRoute.ArtistEvents -> "artist_events"
         is PhoebeRoute.ArtistSlugDetail -> "artist_detail"
+        is PhoebeRoute.ArtistSlugEvents -> "artist_events"
         is PhoebeRoute.SongDetail -> "song_detail"
         is PhoebeRoute.Lyrics -> "lyrics"
         is PhoebeRoute.RecentlyAdded -> "recently_added"

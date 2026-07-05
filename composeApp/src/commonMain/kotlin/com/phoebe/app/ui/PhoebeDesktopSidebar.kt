@@ -172,6 +172,7 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.yield
 import kotlin.math.max
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun Sidebar(
     catalog: CatalogSnapshot,
@@ -191,6 +192,7 @@ internal fun Sidebar(
     tintedBackgroundGradient: Boolean,
     appUpdateState: AppUpdateState = AppUpdateState.Idle,
     onInstallUpdate: () -> Unit = {},
+    onOpenEventsDebugMenu: (() -> Unit)? = null,
 ) {
     val pickLocalFolder = rememberPickLocalFolder(onPicked = onAddLocalFolder)
     val playlistActions = LocalPlaylistActions.current
@@ -227,7 +229,20 @@ internal fun Sidebar(
         verticalArrangement = Arrangement.spacedBy(26.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            BrandMark(size = 28.dp)
+            Box(
+                modifier = if (onOpenEventsDebugMenu != null) {
+                    Modifier
+                        .clip(CircleShape)
+                        .combinedClickable(
+                            onClick = {},
+                            onLongClick = onOpenEventsDebugMenu,
+                        )
+                } else {
+                    Modifier
+                },
+            ) {
+                BrandMark(size = 28.dp)
+            }
             Text("Phoebe", color = PhoebeUi.primaryText, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
             if (availableUpdate != null) {
                 Box(

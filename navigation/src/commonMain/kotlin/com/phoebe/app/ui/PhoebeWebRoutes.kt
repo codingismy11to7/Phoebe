@@ -61,7 +61,9 @@ private fun PhoebeRoute?.requiresBrowseSource(): Boolean = when (this) {
     is PhoebeRoute.AlbumDetail,
     is PhoebeRoute.ArtistAlbumSlugDetail,
     is PhoebeRoute.ArtistDetail,
+    is PhoebeRoute.ArtistEvents,
     is PhoebeRoute.ArtistSlugDetail,
+    is PhoebeRoute.ArtistSlugEvents,
     is PhoebeRoute.CollectionItems,
     is PhoebeRoute.Collections,
     is PhoebeRoute.PlayHistory,
@@ -120,7 +122,11 @@ fun PhoebeRoute.toPhoebeWebPath(
             title = null,
             id = artistId,
         )
+    is PhoebeRoute.ArtistEvents -> routeResolution.resolvedScreen<AppScreen.ArtistEvents>()
+        ?.let { "/artist/${phoebePathSlug(it.artist.title)}/events" }
+        ?: "/artist/${encodePhoebePathSegment(artistId)}/events"
     is PhoebeRoute.ArtistSlugDetail -> "/artist/$artistSlug"
+    is PhoebeRoute.ArtistSlugEvents -> "/artist/$artistSlug/events"
     is PhoebeRoute.AlbumDetail -> routeResolution.resolvedScreen<AppScreen.AlbumDetail>()
         ?.let { "/artist/${phoebePathSlug(it.album.artist)}/album/${phoebePathSlug(it.album.title)}" }
         ?: detailPath(
@@ -217,6 +223,16 @@ private fun parseArtistPath(segments: List<String>): List<PhoebeRoute> = when {
             artistSlug = normalizedSlugSegment(segments[1]),
             albumSlug = normalizedSlugSegment(segments[3]),
         ),
+    )
+    segments.size >= 3 && segments[2] == "events" -> listOf(
+        PhoebeRoute.Browse(BrowseSection.Home),
+        decodePhoebePathSegment(segments[1]).let { value ->
+            if (value.looksLikeProviderId()) {
+                PhoebeRoute.ArtistEvents(value)
+            } else {
+                PhoebeRoute.ArtistSlugEvents(normalizedSlugSegment(segments[1]))
+            }
+        },
     )
     segments.size >= 3 -> listOf(
         PhoebeRoute.Browse(BrowseSection.Home),

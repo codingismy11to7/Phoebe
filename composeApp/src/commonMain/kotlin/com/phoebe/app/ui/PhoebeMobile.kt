@@ -208,6 +208,7 @@ import com.phoebe.app.domain.CollectionEntry
 import com.phoebe.app.domain.DownloadItem
 import com.phoebe.app.domain.DownloadPolicySettings
 import com.phoebe.app.domain.EqualizerProfile
+import com.phoebe.app.domain.EventSettings
 import com.phoebe.app.domain.LocalFolderMediaSourceConfig
 import com.phoebe.app.domain.MediaSourcesState
 import com.phoebe.app.domain.MobileBottomTab
@@ -236,6 +237,7 @@ import com.phoebe.app.domain.supportsPlexPlaylists
 import com.phoebe.app.platform.createPlatformHttpClient
 import com.phoebe.app.platform.currentTimeMs
 import com.phoebe.app.platform.isDesktopPlatform
+import com.phoebe.app.platform.isDebugBuild
 import com.phoebe.app.platform.prefersReducedArtworkEffects
 import com.phoebe.app.platform.SecureCredentialAvailability
 import com.phoebe.app.updates.AppUpdateState
@@ -392,6 +394,8 @@ internal fun MobileBrowseShell(
     onDisconnectLastFm: () -> Unit = {},
     onLastFmSubmitNowPlaying: (Boolean) -> Unit = {},
     onLastFmSubmitScrobbles: (Boolean) -> Unit = {},
+    onEventSettings: (EventSettings) -> Unit = {},
+    onOpenEventsDebugMenu: (() -> Unit)? = null,
     appUpdateState: AppUpdateState = AppUpdateState.Idle,
     onCheckForUpdates: () -> Unit = {},
     routeViewModelFactory: RouteViewModelFactory,
@@ -449,6 +453,9 @@ internal fun MobileBrowseShell(
             section == BrowseSection.Playlists ||
             section == BrowseSection.Radio)
     val browseTopBar: @Composable () -> Unit = {
+        val debugEventsMenu = onOpenEventsDebugMenu.takeIf {
+            isDebugBuild() && section == BrowseSection.Settings && selectedPlaylistId == null
+        }
         MobileScreenToolbar(
             title = toolbarTitle,
             onBack = if (section == BrowseSection.Settings && selectedPlaylistId == null) {
@@ -460,8 +467,11 @@ internal fun MobileBrowseShell(
             },
             menuExpanded = menuExpanded,
             onMenuExpandedChange = { menuExpanded = it },
-            showMenu = availableUpdate != null || !(section == BrowseSection.Settings && selectedPlaylistId == null),
+            showMenu = availableUpdate != null ||
+                debugEventsMenu != null ||
+                !(section == BrowseSection.Settings && selectedPlaylistId == null),
             menuTint = if (availableUpdate != null) PhoebeUpdateBlue else PhoebeUi.primaryText,
+            onMenuLongClick = debugEventsMenu,
             menuContent = {
                 if (section == BrowseSection.Library && selectedPlaylistId == null) {
                     DropdownMenuItem(
@@ -655,6 +665,7 @@ internal fun MobileBrowseShell(
                         onDisconnectLastFm = onDisconnectLastFm,
                         onLastFmSubmitNowPlaying = onLastFmSubmitNowPlaying,
                         onLastFmSubmitScrobbles = onLastFmSubmitScrobbles,
+                        onEventSettings = onEventSettings,
                         onCheckForUpdates = onCheckForUpdates,
                         onInstallUpdate = onInstallUpdate,
                     ),

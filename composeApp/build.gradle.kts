@@ -218,6 +218,7 @@ kotlin {
             implementation(project(":data:artwork"))
             implementation(project(":data:catalog"))
             implementation(project(":data:database"))
+            implementation(project(":data:events"))
             implementation(project(":data:listenbrainz"))
             implementation(project(":data:local-media"))
             implementation(project(":data:lyrics"))

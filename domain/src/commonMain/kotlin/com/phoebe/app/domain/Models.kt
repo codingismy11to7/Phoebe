@@ -3,6 +3,7 @@ package com.phoebe.app.domain
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
+import kotlinx.serialization.json.JsonElement
 import kotlin.math.round
 
 @Serializable
@@ -1089,6 +1090,7 @@ data class AppSettings(
     val lastFm: LastFmSettings = LastFmSettings(),
     val downloadPolicy: DownloadPolicySettings = DownloadPolicySettings(),
     val audioProcessing: AudioProcessingSettings = AudioProcessingSettings(),
+    val events: EventSettings = EventSettings(),
 ) {
     fun normalized(): AppSettings =
         copy(
@@ -1099,6 +1101,7 @@ data class AppSettings(
             lastFm = lastFm.normalized(),
             downloadPolicy = downloadPolicy.normalized(),
             audioProcessing = audioProcessing.normalized(),
+            events = events.normalized(),
         )
 
     companion object {
@@ -1110,6 +1113,103 @@ data class AppSettings(
         const val DefaultSavedVolume = 0.7f
     }
 }
+
+@Serializable
+enum class EventDataProvider {
+    Ticketmaster,
+    SeatGeek,
+}
+
+@Serializable
+enum class EventsBackendTarget {
+    Production,
+    Localhost,
+}
+
+@Serializable
+data class EventSettings(
+    val provider: EventDataProvider = EventDataProvider.Ticketmaster,
+    val backendTarget: EventsBackendTarget = EventsBackendTarget.Production,
+    val localBackendUrl: String? = null,
+) {
+    fun normalized(): EventSettings =
+        copy(
+            localBackendUrl = localBackendUrl
+                ?.trim()
+                ?.trimEnd('/')
+                ?.takeIf { it.startsWith("http://") || it.startsWith("https://") },
+        )
+}
+
+@Serializable
+data class ArtistEventsResponse(
+    val provider: EventDataProvider,
+    val artist: String,
+    val events: List<ArtistEvent> = emptyList(),
+)
+
+data class ArtistEventsLoadState(
+    val loading: Boolean = false,
+    val events: List<ArtistEvent> = emptyList(),
+    val error: String? = null,
+) {
+    val hasEvents: Boolean
+        get() = events.isNotEmpty()
+
+    companion object {
+        val Idle = ArtistEventsLoadState()
+    }
+}
+
+@Serializable
+data class ArtistEvent(
+    val id: String,
+    val provider: EventDataProvider,
+    val title: String,
+    val url: String? = null,
+    val status: String? = null,
+    val date: ArtistEventDate = ArtistEventDate(),
+    val images: List<ArtistEventImage> = emptyList(),
+    val venue: ArtistEventVenue? = null,
+    val price: ArtistEventPrice? = null,
+    val raw: JsonElement? = null,
+)
+
+@Serializable
+data class ArtistEventDate(
+    val localDate: String? = null,
+    val localTime: String? = null,
+    val dateTimeUtc: String? = null,
+    val timezone: String? = null,
+)
+
+@Serializable
+data class ArtistEventImage(
+    val url: String,
+    val width: Int? = null,
+    val height: Int? = null,
+    val ratio: String? = null,
+    val attribution: String? = null,
+)
+
+@Serializable
+data class ArtistEventVenue(
+    val name: String? = null,
+    val city: String? = null,
+    val region: String? = null,
+    val country: String? = null,
+    val address: String? = null,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+)
+
+@Serializable
+data class ArtistEventPrice(
+    val min: Double? = null,
+    val max: Double? = null,
+    val currency: String? = null,
+    val display: String? = null,
+)
 
 @Serializable
 data class DownloadPolicySettings(
@@ -1671,6 +1771,7 @@ sealed interface AppScreen {
     data class CollectionItems(val entry: CollectionEntry, val value: String) : AppScreen
     data class AlbumDetail(val album: Album) : AppScreen
     data class ArtistDetail(val artist: Artist) : AppScreen
+    data class ArtistEvents(val artist: Artist) : AppScreen
     data class SongDetail(val track: Track) : AppScreen
     data class Lyrics(val track: Track? = null) : AppScreen
     data class RecentlyAdded(val kind: RecentlyAddedKind) : AppScreen
@@ -1694,6 +1795,7 @@ val AppScreen.telemetryName: String
         is AppScreen.CollectionItems -> "collection_items"
         is AppScreen.AlbumDetail -> "album_detail"
         is AppScreen.ArtistDetail -> "artist_detail"
+        is AppScreen.ArtistEvents -> "artist_events"
         is AppScreen.SongDetail -> "song_detail"
         is AppScreen.Lyrics -> "lyrics"
         is AppScreen.RecentlyAdded -> "recently_added"

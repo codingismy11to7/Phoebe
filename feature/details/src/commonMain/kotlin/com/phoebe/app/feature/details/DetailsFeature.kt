@@ -5,6 +5,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.ui.Modifier
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.Artist
+import com.phoebe.app.domain.ArtistEventsLoadState
 import com.phoebe.app.domain.ArtistRadioAvailability
 import com.phoebe.app.domain.CatalogSnapshot
 import com.phoebe.app.domain.LibraryColumnVisibility
@@ -22,6 +23,7 @@ data class ArtistDetailRouteState(
     val searchQuery: String = "",
     val artistRadioAvailability: ArtistRadioAvailability? = null,
     val artistRadioStarting: Boolean = false,
+    val artistEventsAvailable: Boolean = false,
     val fullBleedArtwork: Boolean = true,
 )
 
@@ -33,6 +35,7 @@ class ArtistDetailRouteActions(
     val onDownload: (Track) -> Unit,
     val onDownloadArtist: (Artist) -> Unit,
     val onPlayArtistRadio: (Artist) -> Unit,
+    val onArtistEvents: (Artist) -> Unit = {},
     val onArtist: (Artist) -> Unit,
     val onLibraryColumns: (LibraryColumnVisibility) -> Unit,
     val onPlayAllTracks: (List<Track>) -> Unit = { tracks -> onPlayTracks(tracks, 0) },
@@ -40,6 +43,18 @@ class ArtistDetailRouteActions(
     val onProbeArtistRadio: (Artist) -> Unit = {},
     val onCollectionItems: (CollectionEntry, String) -> Unit = { _, _ -> },
     val onSearchQuery: (String) -> Unit = {},
+)
+
+@Immutable
+data class ArtistEventsRouteState(
+    val artist: Artist,
+    val events: ArtistEventsLoadState = ArtistEventsLoadState.Idle,
+)
+
+class ArtistEventsRouteActions(
+    val onBack: () -> Unit,
+    val onRetry: (Artist) -> Unit = {},
+    val onOpenUrl: (String) -> Unit = {},
 )
 
 @Immutable
@@ -123,12 +138,30 @@ fun ArtistDetailRoute(
         onDownloadArtist = actions.onDownloadArtist,
         artistRadioAvailability = state.artistRadioAvailability,
         artistRadioStarting = state.artistRadioStarting,
+        artistEventsAvailable = state.artistEventsAvailable,
         onProbeArtistRadio = actions.onProbeArtistRadio,
         onPlayArtistRadio = actions.onPlayArtistRadio,
+        onArtistEvents = actions.onArtistEvents,
         onArtist = actions.onArtist,
         onLibraryColumns = actions.onLibraryColumns,
         onCollectionItems = actions.onCollectionItems,
         onSearchQuery = actions.onSearchQuery,
+    )
+}
+
+@Composable
+fun ArtistEventsRoute(
+    state: ArtistEventsRouteState,
+    actions: ArtistEventsRouteActions,
+    modifier: Modifier = Modifier,
+) {
+    ArtistEventsPanel(
+        artist = state.artist,
+        events = state.events,
+        onBack = actions.onBack,
+        onRetry = { actions.onRetry(state.artist) },
+        onOpenUrl = actions.onOpenUrl,
+        modifier = modifier,
     )
 }
 

@@ -14,6 +14,7 @@ kotlin {
                 implementation(project(":feature:library"))
                 implementation(project(":ui:media"))
                 implementation(libs.ktor.client.core)
+                implementation(libs.serialization.json)
             }
         }
     }

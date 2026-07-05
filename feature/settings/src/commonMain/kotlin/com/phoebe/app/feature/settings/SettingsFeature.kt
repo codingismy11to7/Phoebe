@@ -8,6 +8,7 @@ import com.phoebe.app.domain.AudioProcessingCapabilities
 import com.phoebe.app.domain.AudioProcessingSettings
 import com.phoebe.app.domain.DownloadItem
 import com.phoebe.app.domain.DownloadPolicySettings
+import com.phoebe.app.domain.EventSettings
 import com.phoebe.app.domain.HomeSection
 import com.phoebe.app.domain.LibraryUiPreferences
 import com.phoebe.app.domain.MobileBottomTab
@@ -94,6 +95,7 @@ class SettingsRouteActions(
     val onDisconnectLastFm: () -> Unit = {},
     val onLastFmSubmitNowPlaying: (Boolean) -> Unit = {},
     val onLastFmSubmitScrobbles: (Boolean) -> Unit = {},
+    val onEventSettings: (EventSettings) -> Unit = {},
     val onCheckForUpdates: () -> Unit = {},
     val onInstallUpdate: () -> Unit = {},
 )
@@ -164,6 +166,7 @@ fun SettingsDesktopRoute(
         onDisconnectLastFm = actions.onDisconnectLastFm,
         onLastFmSubmitNowPlaying = actions.onLastFmSubmitNowPlaying,
         onLastFmSubmitScrobbles = actions.onLastFmSubmitScrobbles,
+        onEventSettings = actions.onEventSettings,
         appUpdateState = state.appUpdateState,
         onCheckForUpdates = actions.onCheckForUpdates,
         onInstallUpdate = actions.onInstallUpdate,
@@ -237,6 +240,7 @@ fun SettingsMobileRoute(
         onDisconnectLastFm = actions.onDisconnectLastFm,
         onLastFmSubmitNowPlaying = actions.onLastFmSubmitNowPlaying,
         onLastFmSubmitScrobbles = actions.onLastFmSubmitScrobbles,
+        onEventSettings = actions.onEventSettings,
         appUpdateState = state.appUpdateState,
         onCheckForUpdates = actions.onCheckForUpdates,
         onInstallUpdate = actions.onInstallUpdate,

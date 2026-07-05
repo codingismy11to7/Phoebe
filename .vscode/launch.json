@@ -41,6 +41,18 @@
       "cwd": "${workspaceFolder}"
     },
     {
+      "name": "Events Backend",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-lc",
+        "set -a; [ ! -f .env.events.local ] || . ./.env.events.local; set +a; ./gradlew :backend:events:run"
+      ],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}"
+    },
+    {
       "name": "Screenshots",
       "type": "node",
       "request": "launch",
