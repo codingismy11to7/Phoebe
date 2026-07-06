@@ -438,3 +438,43 @@ jobs:
 
       - name: Build and test backend
         run: ./gradlew :backend:app:test :backend:app:installDist
+
+  backend-production-config:
+    name: Backend production config
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_PHOEBE_BACKEND_PROD || secrets.VERCEL_PROJECT_ID_EVENTS_PROD }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate Vercel access secrets
+        shell: bash
+        run: |
+          missing=()
+          [[ -n "${VERCEL_TOKEN}" ]] || missing+=("VERCEL_TOKEN")
+          [[ -n "${VERCEL_ORG_ID}" ]] || missing+=("VERCEL_ORG_ID")
+          [[ -n "${VERCEL_PROJECT_ID}" ]] || missing+=("VERCEL_PROJECT_ID_PHOEBE_BACKEND_PROD")
+          if (( ${#missing[@]} > 0 )); then
+            echo "::error::Missing required Phoebe backend Vercel access secrets: ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Validate production backend env
+        shell: bash
+        run: |
+          set -euo pipefail
+          vercel pull --yes --environment=production --token "${VERCEL_TOKEN}"
+          scripts/validate-phoebe-backend-production-env.sh .vercel/.env.production.local
