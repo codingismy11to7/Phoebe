@@ -16,7 +16,8 @@ fi
 missing=()
 require_non_empty() {
   local name="$1"
-  if [[ -z "${!name:-}" ]]; then
+  local value="${!name-}"
+  if [[ -z "${value:-}" ]]; then
     missing+=("${name}")
   fi
 }
@@ -29,6 +30,7 @@ is_truthy() {
 }
 
 require_non_empty "TICKETMASTER_API_KEY"
+require_non_empty "SEATGEEK_CLIENT_ID"
 require_non_empty "GENIUS_ACCESS_TOKEN"
 
 if [[ -z "${ALLOWED_ORIGINS:-}" ]] && ! is_truthy "${BACKEND_ALLOW_ANY_ORIGIN:-}"; then
