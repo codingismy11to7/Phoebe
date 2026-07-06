@@ -1,6 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ "${1:-}" == "--vercel-production" ]]; then
+  env_json="$(vercel env ls production --format json)"
+  ENV_JSON="${env_json}" node <<'NODE'
+const payload = JSON.parse(process.env.ENV_JSON || "{}");
+const keys = new Set((payload.envs || []).map((env) => env.key));
+const missing = [
+  "TICKETMASTER_API_KEY",
+  "SEATGEEK_CLIENT_ID",
+  "GENIUS_ACCESS_TOKEN",
+  "ALLOWED_ORIGINS",
+].filter((name) => !keys.has(name));
+
+if (missing.length > 0) {
+  console.error(`::error::Missing required Phoebe backend production env values: ${missing.join(" ")}`);
+  process.exit(1);
+}
+
+console.log("Phoebe backend production env includes the values required by release smoke tests.");
+NODE
+  exit 0
+fi
+
 env_file="${1:-.vercel/.env.production.local}"
 
 if [[ -f "${env_file}" ]]; then
