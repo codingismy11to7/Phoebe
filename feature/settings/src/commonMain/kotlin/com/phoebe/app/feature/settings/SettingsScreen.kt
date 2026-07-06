@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -87,6 +88,7 @@ import com.phoebe.app.platform.openExternalUrl
 import com.phoebe.app.platform.rememberPickDownloadDirectory
 import com.phoebe.app.ui.HomeScreenLayoutMode
 import com.phoebe.app.ui.LocalNowMs
+import com.phoebe.app.ui.PhoebeDesignSystem
 import com.phoebe.app.ui.PhoebeIcon
 import com.phoebe.app.ui.PhoebeIconView
 import com.phoebe.app.ui.PhoebeTintOption
@@ -118,6 +120,8 @@ enum class SettingsCategory(
 fun SettingsDesktopView(
     isLightMode: Boolean,
     onLightModeChange: (Boolean) -> Unit,
+    designId: String = PhoebeDesignSystem.Default.id,
+    onDesignChange: (String) -> Unit = {},
     tintId: String,
     onTintChange: (String) -> Unit,
     downloadDirectory: String?,
@@ -146,6 +150,7 @@ fun SettingsDesktopView(
     onAudioProcessingSettings: (AudioProcessingSettings) -> Unit = {},
     onVisualizerPreset: (NowPlayingVisualizerPreset) -> Unit = {},
     onShowVisualizerInTvFrame: (Boolean) -> Unit = {},
+    onShowUltimateGuitarButton: (Boolean) -> Unit = {},
     onBlurredArtworkAppearance: (Boolean) -> Unit = {},
     onFullBleedDetailArtwork: (Boolean) -> Unit = {},
     onTintedBackgroundGradient: (Boolean) -> Unit = {},
@@ -222,6 +227,8 @@ fun SettingsDesktopView(
                     SettingsCategory.Appearance -> AppearanceSettingsCard(
                         isLightMode,
                         onLightModeChange,
+                        designId,
+                        onDesignChange,
                         tintId,
                         onTintChange,
                         homeScreenLayoutMode,
@@ -247,6 +254,7 @@ fun SettingsDesktopView(
                         onPersistEqualizerSettings = onPersistEqualizerSettings,
                         onPersistVolumeSettings = onPersistVolumeSettings,
                         onAudioProcessingSettings = onAudioProcessingSettings,
+                        onShowUltimateGuitarButton = onShowUltimateGuitarButton,
                     )
                     SettingsCategory.Account -> AccountSettingsCard(
                         session = session,
@@ -322,6 +330,8 @@ fun SettingsDesktopView(
 fun SettingsMobileView(
     isLightMode: Boolean,
     onLightModeChange: (Boolean) -> Unit,
+    designId: String = PhoebeDesignSystem.Default.id,
+    onDesignChange: (String) -> Unit = {},
     tintId: String,
     onTintChange: (String) -> Unit,
     downloadDirectory: String?,
@@ -350,6 +360,7 @@ fun SettingsMobileView(
     onAudioProcessingSettings: (AudioProcessingSettings) -> Unit = {},
     onVisualizerPreset: (NowPlayingVisualizerPreset) -> Unit = {},
     onShowVisualizerInTvFrame: (Boolean) -> Unit = {},
+    onShowUltimateGuitarButton: (Boolean) -> Unit = {},
     onBlurredArtworkAppearance: (Boolean) -> Unit = {},
     onTintedBackgroundGradient: (Boolean) -> Unit = {},
     onHomeSections: (List<HomeSection>) -> Unit,
@@ -412,6 +423,8 @@ fun SettingsMobileView(
         AppearanceSettingsCard(
             isLightMode,
             onLightModeChange,
+            designId,
+            onDesignChange,
             tintId,
             onTintChange,
             homeScreenLayoutMode,
@@ -454,6 +467,7 @@ fun SettingsMobileView(
             onPersistEqualizerSettings = onPersistEqualizerSettings,
             onPersistVolumeSettings = onPersistVolumeSettings,
             onAudioProcessingSettings = onAudioProcessingSettings,
+            onShowUltimateGuitarButton = onShowUltimateGuitarButton,
             compact = true,
         )
         SectionLabel("DOWNLOADS", PhoebeUi.accentLight)
@@ -537,6 +551,8 @@ private fun SettingsCategoryRow(
 private fun AppearanceSettingsCard(
     isLightMode: Boolean,
     onLightModeChange: (Boolean) -> Unit,
+    designId: String,
+    onDesignChange: (String) -> Unit,
     tintId: String,
     onTintChange: (String) -> Unit,
     homeScreenLayoutMode: HomeScreenLayoutMode,
@@ -554,9 +570,20 @@ private fun AppearanceSettingsCard(
     showFullBleedDetailArtwork: Boolean = false,
     compact: Boolean = false,
 ) {
+    val selectedDesign = PhoebeDesignSystem.fromId(designId)
+    val tintOptions = PhoebeTintOption.optionsForDesign(selectedDesign)
     SettingsCard {
         Text("Appearance", color = PhoebeUi.primaryText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
         Text("Theme and visuals", color = PhoebeUi.mutedText, fontSize = 12.sp, modifier = Modifier.padding(bottom = 14.dp))
+        Text("Design", color = PhoebeUi.primaryText, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+        Text("Choose the visual system used across Phoebe", color = PhoebeUi.secondaryText, fontSize = 12.sp)
+        Spacer(Modifier.height(10.dp))
+        DesignSystemControl(
+            selected = selectedDesign,
+            onSelected = { onDesignChange(it.id) },
+            compact = compact,
+        )
+        Spacer(Modifier.height(18.dp))
         Row(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -662,18 +689,134 @@ private fun AppearanceSettingsCard(
         )
         Spacer(Modifier.height(18.dp))
         Text("Tint", color = PhoebeUi.primaryText, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-        Text("Choose the accent color for controls and active states", color = PhoebeUi.secondaryText, fontSize = 12.sp)
+        Text("Choose a curated accent for ${selectedDesign.label}", color = PhoebeUi.secondaryText, fontSize = 12.sp)
         Spacer(Modifier.height(10.dp))
         FlowRow(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            PhoebeTintOption.Options.forEach { option ->
+            tintOptions.forEach { option ->
                 TintSwatch(
                     option = option,
                     selected = option.id == tintId,
                     onClick = { onTintChange(option.id) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DesignSystemControl(
+    selected: PhoebeDesignSystem,
+    onSelected: (PhoebeDesignSystem) -> Unit,
+    compact: Boolean,
+) {
+    val containerShape = RoundedCornerShape(if (compact) 10.dp else 12.dp)
+    val optionShape = RoundedCornerShape(
+        if (PhoebeUi.design == PhoebeDesignSystem.Brutalist) 0.dp else if (compact) 8.dp else 9.dp,
+    )
+    val containerModifier = Modifier
+        .fillMaxWidth()
+        .clip(containerShape)
+        .background(PhoebeUi.subtleFill)
+        .border(BorderStroke(1.dp, PhoebeUi.border), containerShape)
+        .padding(if (compact) 4.dp else 5.dp)
+
+    if (compact) {
+        FlowRow(
+            modifier = containerModifier,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            PhoebeDesignSystem.Options.forEach { design ->
+                DesignSystemOption(
+                    design = design,
+                    selected = design == selected,
+                    onSelected = onSelected,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = optionShape,
+                    compact = true,
+                )
+            }
+        }
+    } else {
+        BoxWithConstraints(modifier = containerModifier) {
+            val optionGap = 6.dp
+            val columnCount = when {
+                maxWidth >= 720.dp -> 5
+                maxWidth >= 390.dp -> 3
+                else -> 2
+            }
+            val optionWidth = (maxWidth - optionGap * columnCount) / columnCount
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(optionGap),
+                verticalArrangement = Arrangement.spacedBy(optionGap),
+            ) {
+                PhoebeDesignSystem.Options.forEach { design ->
+                    DesignSystemOption(
+                        design = design,
+                        selected = design == selected,
+                        onSelected = onSelected,
+                        modifier = Modifier.width(optionWidth),
+                        shape = optionShape,
+                        compact = false,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DesignSystemOption(
+    design: PhoebeDesignSystem,
+    selected: Boolean,
+    onSelected: (PhoebeDesignSystem) -> Unit,
+    modifier: Modifier,
+    shape: RoundedCornerShape,
+    compact: Boolean,
+) {
+    Row(
+        modifier = Modifier
+            .then(modifier)
+            .height(if (compact) 42.dp else 56.dp)
+            .clip(shape)
+            .clickable { onSelected(design) }
+            .testTag("settings:design:${design.id}")
+            .background(if (selected) PhoebeUi.accent.copy(alpha = 0.16f) else Color.Transparent)
+            .border(
+                BorderStroke(
+                    1.dp,
+                    if (selected) PhoebeUi.accent.copy(alpha = 0.32f) else Color.Transparent,
+                ),
+                shape,
+            )
+            .padding(horizontal = if (compact) 10.dp else 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                design.label,
+                color = if (selected) PhoebeUi.accentLight else PhoebeUi.primaryText,
+                fontSize = 13.sp,
+                lineHeight = 17.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (!compact) {
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    design.description,
+                    color = PhoebeUi.mutedText,
+                    fontSize = 10.sp,
+                    lineHeight = 13.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
@@ -738,6 +881,7 @@ private fun TintSwatch(
             .size(34.dp)
             .clip(shape)
             .clickable(onClick = onClick)
+            .testTag("settings:tint:${option.id}")
             .background(option.color.copy(alpha = 0.18f))
             .border(
                 BorderStroke(1.dp, if (selected) PhoebeUi.primaryText else PhoebeUi.border),
@@ -768,12 +912,14 @@ private fun AudioPlaybackSettingsCard(
     onPersistEqualizerSettings: (Boolean) -> Unit,
     onPersistVolumeSettings: (Boolean) -> Unit = {},
     onAudioProcessingSettings: (AudioProcessingSettings) -> Unit,
+    onShowUltimateGuitarButton: (Boolean) -> Unit = {},
     compact: Boolean = false,
 ) {
     var localCrossfade by remember(settings.crossfadeSeconds) { mutableIntStateOf(settings.crossfadeSeconds) }
-        val audio = settings.audioProcessing.normalized()
-        SettingsCard {
-            Text("Audio Playback", color = PhoebeUi.primaryText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+    var localAudio by remember(settings.audioProcessing) { mutableStateOf(settings.audioProcessing.normalized()) }
+    val audio = localAudio.normalized()
+    SettingsCard {
+        Text("Audio Playback", color = PhoebeUi.primaryText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
         Text("Transitions and library scan", color = PhoebeUi.mutedText, fontSize = 12.sp, modifier = Modifier.padding(bottom = 14.dp))
         Text("Crossfade", color = PhoebeUi.secondaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
         Slider(
@@ -781,11 +927,23 @@ private fun AudioPlaybackSettingsCard(
             onValueChange = {
                 val seconds = it.roundToInt().coerceIn(AppSettings.MinCrossfadeSeconds, AppSettings.MaxCrossfadeSeconds)
                 localCrossfade = seconds
+                if (seconds > 0 && audio.gaplessEnabled) {
+                    val nextAudio = audio.copy(gaplessEnabled = false).normalized()
+                    localAudio = nextAudio
+                    onAudioProcessingSettings(nextAudio)
+                }
                 if (seconds != settings.crossfadeSeconds) {
                     onCrossfadeSeconds(seconds)
                 }
             },
-            onValueChangeFinished = { onCrossfadeSeconds(localCrossfade) },
+            onValueChangeFinished = {
+                if (localCrossfade > 0 && audio.gaplessEnabled) {
+                    val nextAudio = audio.copy(gaplessEnabled = false).normalized()
+                    localAudio = nextAudio
+                    onAudioProcessingSettings(nextAudio)
+                }
+                onCrossfadeSeconds(localCrossfade)
+            },
             valueRange = AppSettings.MinCrossfadeSeconds.toFloat()..AppSettings.MaxCrossfadeSeconds.toFloat(),
             steps = AppSettings.MaxCrossfadeSeconds - AppSettings.MinCrossfadeSeconds - 1,
             modifier = Modifier.padding(vertical = 4.dp),
@@ -805,13 +963,29 @@ private fun AudioPlaybackSettingsCard(
             subtitle = capabilitySubtitle(capabilities.gapless, "Keep album playback continuous when the engine supports it"),
             checked = audio.gaplessEnabled && capabilities.gapless.isSupported,
             enabled = capabilities.gapless.isSupported,
-            onCheckedChange = { checked -> onAudioProcessingSettings(audio.copy(gaplessEnabled = checked)) },
+            onCheckedChange = { checked ->
+                if (checked) {
+                    localCrossfade = 0
+                    if (settings.crossfadeSeconds != 0) {
+                        onCrossfadeSeconds(0)
+                    }
+                }
+                val nextAudio = audio.copy(gaplessEnabled = checked).normalized()
+                localAudio = nextAudio
+                onAudioProcessingSettings(nextAudio)
+            },
         )
         SettingsSwitchRow(
             title = "Keep Playing",
             subtitle = "Add related songs before the queue ends",
             checked = settings.keepPlayingEnabled,
             onCheckedChange = onKeepPlayingEnabled,
+        )
+        SettingsSwitchRow(
+            title = "Ultimate Guitar",
+            subtitle = "Show the current-track guitar lookup in the player",
+            checked = settings.showUltimateGuitarButton,
+            onCheckedChange = onShowUltimateGuitarButton,
         )
         Spacer(Modifier.height(12.dp))
         SettingsSwitchRow(
@@ -2747,12 +2921,13 @@ private val UnsplashImageCredits = listOf(
 
 @Composable
 private fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
+    val shape = RoundedCornerShape(PhoebeUi.shapes.panelRadius)
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
+            .clip(shape)
             .background(PhoebeUi.panel)
-            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(16.dp))
+            .border(BorderStroke(1.dp, PhoebeUi.border), shape)
             .padding(20.dp),
         content = content,
     )

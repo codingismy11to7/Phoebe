@@ -16,12 +16,14 @@ import com.phoebe.app.domain.NowPlayingVisualizerPreset
 import com.phoebe.app.domain.PersonalMixPreferences
 import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.platform.SecureCredentialAvailability
+import com.phoebe.app.ui.PhoebeDesignSystem
 import com.phoebe.app.ui.HomeScreenLayoutMode
 import com.phoebe.app.updates.AppUpdateState
 
 @Immutable
 data class SettingsRouteState(
     val isLightMode: Boolean,
+    val designId: String = PhoebeDesignSystem.Default.id,
     val tintId: String,
     val downloadDirectory: String?,
     val downloadCount: Int,
@@ -50,6 +52,7 @@ data class DownloadManagerUiSummary(
 @Immutable
 class SettingsRouteActions(
     val onLightModeChange: (Boolean) -> Unit,
+    val onDesignChange: (String) -> Unit = {},
     val onTintChange: (String) -> Unit,
     val onDownloadDirectory: (String?) -> Unit,
     val onDeleteAllDownloads: () -> Unit,
@@ -69,6 +72,7 @@ class SettingsRouteActions(
     val onAudioProcessingSettings: (AudioProcessingSettings) -> Unit = {},
     val onVisualizerPreset: (NowPlayingVisualizerPreset) -> Unit = {},
     val onShowVisualizerInTvFrame: (Boolean) -> Unit = {},
+    val onShowUltimateGuitarButton: (Boolean) -> Unit = {},
     val onBlurredArtworkAppearance: (Boolean) -> Unit = {},
     val onFullBleedDetailArtwork: (Boolean) -> Unit = {},
     val onTintedBackgroundGradient: (Boolean) -> Unit = {},
@@ -109,6 +113,8 @@ fun SettingsDesktopRoute(
     SettingsDesktopView(
         isLightMode = state.isLightMode,
         onLightModeChange = actions.onLightModeChange,
+        designId = state.designId,
+        onDesignChange = actions.onDesignChange,
         tintId = state.tintId,
         onTintChange = actions.onTintChange,
         downloadDirectory = state.downloadDirectory,
@@ -137,6 +143,7 @@ fun SettingsDesktopRoute(
         onAudioProcessingSettings = actions.onAudioProcessingSettings,
         onVisualizerPreset = actions.onVisualizerPreset,
         onShowVisualizerInTvFrame = actions.onShowVisualizerInTvFrame,
+        onShowUltimateGuitarButton = actions.onShowUltimateGuitarButton,
         onBlurredArtworkAppearance = actions.onBlurredArtworkAppearance,
         onFullBleedDetailArtwork = actions.onFullBleedDetailArtwork,
         onTintedBackgroundGradient = actions.onTintedBackgroundGradient,
@@ -184,6 +191,8 @@ fun SettingsMobileRoute(
     SettingsMobileView(
         isLightMode = state.isLightMode,
         onLightModeChange = actions.onLightModeChange,
+        designId = state.designId,
+        onDesignChange = actions.onDesignChange,
         tintId = state.tintId,
         onTintChange = actions.onTintChange,
         downloadDirectory = state.downloadDirectory,
@@ -212,6 +221,7 @@ fun SettingsMobileRoute(
         onAudioProcessingSettings = actions.onAudioProcessingSettings,
         onVisualizerPreset = actions.onVisualizerPreset,
         onShowVisualizerInTvFrame = actions.onShowVisualizerInTvFrame,
+        onShowUltimateGuitarButton = actions.onShowUltimateGuitarButton,
         onBlurredArtworkAppearance = actions.onBlurredArtworkAppearance,
         onTintedBackgroundGradient = actions.onTintedBackgroundGradient,
         onHomeSections = actions.onHomeSections,
