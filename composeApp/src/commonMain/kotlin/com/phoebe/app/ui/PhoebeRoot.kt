@@ -707,16 +707,28 @@ private fun PhoebeRootStateHolder(
         initialValue = if (lyricsTrack == null) LyricsLoadState.Idle else LyricsLoadState.Loading,
         lyricsTrack?.id,
         lyricsRefreshNonce,
+        appSettings.events.backendTarget,
+        appSettings.events.localBackendUrl,
     ) {
         val target = lyricsTrack
         if (target == null) {
             value = LyricsLoadState.Idle
         } else {
+            val forceRefresh = lyricsRefreshNonce > 0 && lyricsRefreshTrackId == target.id
             value = LyricsLoadState.Loading
             value = state.loadLyrics(
                 target,
-                forceRefresh = lyricsRefreshNonce > 0 && lyricsRefreshTrackId == target.id,
+                forceRefresh = forceRefresh,
+                includeRemoteAnnotations = false,
             )
+            if (value is LyricsLoadState.Loaded) {
+                value = state.loadLyrics(
+                    target,
+                    forceRefresh = false,
+                    includeRemoteAnnotations = true,
+                    forceRemoteAnnotationsRefresh = forceRefresh,
+                )
+            }
         }
     }
     val retryLyrics = {
