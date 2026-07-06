@@ -413,3 +413,28 @@ jobs:
               git push origin gh-pages
             fi
           )
+
+  backend-test:
+    name: Backend tests and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Configure backend-only settings
+        shell: bash
+        run: cp settings.backend.gradle.kts settings.gradle.kts
+
+      - name: Build and test backend
+        run: ./gradlew :backend:app:test :backend:app:installDist
