@@ -141,6 +141,7 @@ jobs:
         run: |
           set -euo pipefail
           vercel pull --yes --environment=production --token "${VERCEL_TOKEN}"
+          scripts/validate-phoebe-backend-production-env.sh --vercel-production
           deploy_log="${RUNNER_TEMP}/vercel-phoebe-backend-deploy.log"
           scripts/deploy-phoebe-backend-vercel.sh --prod --yes --token "${VERCEL_TOKEN}" | tee "${deploy_log}"
           deployment_url="$(grep -Eo 'https://[^[:space:]"]+\.vercel\.app' "${deploy_log}" | tail -n 1)"
