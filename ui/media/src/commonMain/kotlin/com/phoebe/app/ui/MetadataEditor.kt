@@ -326,9 +326,9 @@ private fun TechnicalMetadata(track: Track) {
 private fun MetadataReadOnlyCell(label: String, value: String, modifier: Modifier = Modifier) {
     Column(
         modifier
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(PhoebeUi.shapes.controlRadius))
             .background(PhoebeUi.subtleFill)
-            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(8.dp))
+            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(PhoebeUi.shapes.controlRadius))
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {

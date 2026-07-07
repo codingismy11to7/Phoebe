@@ -4055,7 +4055,7 @@ private fun HomePlayedTrackRow(
         modifier = Modifier
             .fillMaxWidth()
             .height(rowHeight)
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(PhoebeUi.shapes.controlRadius))
             .combinedClickable(onClick = onPlay, onLongClick = { menuExpanded = true })
             .background(
                 if (isNowPlaying) PhoebeUi.librarySelectedRow else PhoebeUi.subtleFill,

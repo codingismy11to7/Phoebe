@@ -252,7 +252,7 @@ fun Modifier.phoebeShellBackground(
     radius: Float = 960f,
     radialTintStrength: Float = 1f,
 ): Modifier =
-    if (PhoebeUi.design == PhoebeDesignSystem.Minimalist) {
+    if (PhoebeUi.design == PhoebeDesignSystem.Minimalist && !tintedGradient) {
         background(Brush.verticalGradient(listOf(PhoebeUi.shellTop, PhoebeUi.shellBottom)))
     } else if (tintedGradient && PhoebeUi.design != PhoebeDesignSystem.Brutalist) {
         val shellTint = PhoebeUi.shellRadialTint

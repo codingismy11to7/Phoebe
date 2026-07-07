@@ -1966,7 +1966,7 @@ private fun ArtistDetailStatRow(icon: PhoebeIcon, value: String, label: String) 
         Box(
             Modifier
                 .size(32.dp)
-                .clip(RoundedCornerShape(8.dp))
+                .clip(RoundedCornerShape(PhoebeUi.shapes.controlRadius))
                 .background(PhoebeUi.subtleFill),
             contentAlignment = Alignment.Center,
         ) {
@@ -3298,7 +3298,7 @@ private fun SimilarArtistCard(
     val thumbUrl = remember(artist.thumbUrl, albums) { artist.thumbUrl ?: albums.firstNotNullOfOrNull { it.thumbUrl } }
     Column(
         modifier
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(PhoebeUi.shapes.controlRadius))
             .clickable(onClick = onClick)
             .background(PhoebeUi.subtleFill)
             .padding(12.dp),
@@ -3323,7 +3323,7 @@ private fun SimilarArtistRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(PhoebeUi.shapes.controlRadius))
             .clickable(onClick = onClick)
             .background(PhoebeUi.subtleFill)
             .padding(10.dp),

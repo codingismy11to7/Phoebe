@@ -1022,7 +1022,7 @@ internal fun SearchSongResultRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(10.dp))
+                .clip(RoundedCornerShape(PhoebeUi.shapes.controlRadius))
                 .openContextMenuOnSecondaryClick { menuExpanded = true }
                 .combinedClickable(onClick = { onPlayTracks(tracks, trackIndex) }, onLongClick = { menuExpanded = true })
                 .background(if (index == 0) PhoebeUi.librarySelectedRow else PhoebeUi.subtleFill)
@@ -1050,7 +1050,7 @@ internal fun SearchSongResultRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(38.dp)
-                .clip(RoundedCornerShape(8.dp))
+                .clip(RoundedCornerShape(PhoebeUi.shapes.controlRadius))
                 .openContextMenuOnSecondaryClick { menuExpanded = true }
                 .combinedClickable(onClick = { onPlayTracks(tracks, trackIndex) }, onLongClick = { menuExpanded = true })
                 .background(if (index == 0) PhoebeUi.librarySelectedRow else PhoebeUi.subtleFill)
@@ -1214,7 +1214,7 @@ internal fun SearchArtistTile(artist: Artist, catalog: CatalogSnapshot, onArtist
     val songCount = catalogTrackCountForArtist(catalog, artist)
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(PhoebeUi.shapes.panelRadius))
             .clickable { onArtist(artist) }
             .background(PhoebeUi.subtleFill)
             .padding(12.dp),
@@ -1233,7 +1233,7 @@ internal fun SearchArtistRow(artist: Artist, catalog: CatalogSnapshot, onArtist:
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(PhoebeUi.shapes.controlRadius))
             .clickable { onArtist(artist) }
             .background(PhoebeUi.subtleFill)
             .padding(horizontal = 8.dp, vertical = if (compact) 8.dp else 10.dp),
