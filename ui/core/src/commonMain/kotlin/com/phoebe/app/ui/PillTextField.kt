@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -24,7 +25,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -50,12 +50,13 @@ fun PillTextField(
     if (value != fieldValue.text) {
         fieldValue = fieldValue.copy(text = value, selection = TextRange(value.length))
     }
+    val shape = RoundedCornerShape(PhoebeUi.shapes.controlRadius)
     Row(
         modifier
             .height(40.dp)
-            .clip(CircleShape)
-            .background(Color.Black.copy(alpha = 0.16f))
-            .border(BorderStroke(1.dp, PhoebeUi.border), CircleShape)
+            .clip(shape)
+            .background(if (PhoebeUi.design == PhoebeDesignSystem.Minimalist) PhoebeUi.modalField else PhoebeUi.subtleFill)
+            .border(BorderStroke(1.dp, PhoebeUi.border), shape)
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),

@@ -3241,13 +3241,14 @@ private fun DecadeMixDialog(
                 .padding(horizontal = 20.dp, vertical = 24.dp),
             contentAlignment = Alignment.Center,
         ) {
+            val dialogShape = RoundedCornerShape(PhoebeUi.shapes.sheetTopRadius)
             Column(
                 Modifier
                     .widthIn(min = 300.dp, max = 420.dp)
                     .heightIn(max = maxHeight)
-                    .clip(RoundedCornerShape(18.dp))
+                    .clip(dialogShape)
                     .background(PhoebeUi.modalSurface)
-                    .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(18.dp))
+                    .border(BorderStroke(1.dp, PhoebeUi.border), dialogShape)
                     .padding(18.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
@@ -4057,7 +4058,7 @@ private fun HomePlayedTrackRow(
             .clip(RoundedCornerShape(10.dp))
             .combinedClickable(onClick = onPlay, onLongClick = { menuExpanded = true })
             .background(
-                if (isNowPlaying) PhoebeUi.accent.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.045f),
+                if (isNowPlaying) PhoebeUi.librarySelectedRow else PhoebeUi.subtleFill,
             )
             .padding(horizontal = 12.dp, vertical = verticalPadding),
         verticalAlignment = Alignment.CenterVertically,

@@ -64,6 +64,7 @@ import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.hasPlayableSource
 import com.phoebe.app.ui.ArtworkImage
 import com.phoebe.app.ui.PhoebeDesktopLayout
+import com.phoebe.app.ui.PhoebeDesignSystem
 import com.phoebe.app.ui.PhoebeIcon
 import com.phoebe.app.ui.PhoebeIconView
 import com.phoebe.app.ui.PhoebeUi
@@ -582,8 +583,8 @@ private fun MixBuilderEntityRow(
     Row(
         modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(Color.White.copy(alpha = 0.035f))
+            .clip(RoundedCornerShape(PhoebeUi.shapes.controlRadius))
+            .background(PhoebeUi.subtleFill)
             .padding(horizontal = 10.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -616,7 +617,7 @@ private fun MixBuilderIconButton(
             .size(32.dp)
             .clip(CircleShape)
             .clickable(enabled = enabled, onClick = onClick)
-            .background(if (enabled) Color.White.copy(alpha = 0.06f) else Color.White.copy(alpha = 0.025f))
+            .background(if (enabled) PhoebeUi.subtleFill else PhoebeUi.subtleFill.copy(alpha = 0.55f))
             .border(BorderStroke(1.dp, if (enabled) PhoebeUi.border else PhoebeUi.border.copy(alpha = 0.45f)), CircleShape)
             .semantics { this.contentDescription = contentDescription },
         contentAlignment = Alignment.Center,
@@ -635,16 +636,15 @@ private fun MixBuilderBuildButton(
     enabled: Boolean,
     onClick: () -> Unit,
 ) {
+    val fill = when {
+        enabled && PhoebeUi.design == PhoebeDesignSystem.Minimalist -> Brush.linearGradient(listOf(PhoebeUi.accent, PhoebeUi.accent))
+        enabled -> Brush.linearGradient(listOf(PhoebeUi.accentLight, PhoebeUi.accent))
+        else -> Brush.linearGradient(listOf(PhoebeUi.mutedText.copy(alpha = 0.24f), PhoebeUi.mutedText.copy(alpha = 0.18f)))
+    }
     Row(
         Modifier
-            .clip(RoundedCornerShape(8.dp))
-            .background(
-                if (enabled) {
-                    Brush.linearGradient(listOf(PhoebeUi.accentLight, PhoebeUi.accent))
-                } else {
-                    Brush.linearGradient(listOf(PhoebeUi.mutedText.copy(alpha = 0.24f), PhoebeUi.mutedText.copy(alpha = 0.18f)))
-                },
-            )
+            .clip(RoundedCornerShape(PhoebeUi.shapes.controlRadius))
+            .background(fill)
             .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -664,8 +664,8 @@ private fun MixBuilderEmptyState(message: String, modifier: Modifier = Modifier)
         lineHeight = 17.sp,
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(Color.White.copy(alpha = 0.035f))
+            .clip(RoundedCornerShape(PhoebeUi.shapes.controlRadius))
+            .background(PhoebeUi.subtleFill)
             .padding(14.dp),
     )
 }

@@ -75,6 +75,7 @@ import com.phoebe.app.ui.LocalMobileChromePadding
 import com.phoebe.app.ui.PhoebeIcon
 import com.phoebe.app.ui.PhoebeIconView
 import com.phoebe.app.ui.PhoebeDesktopLayout
+import com.phoebe.app.ui.PhoebeDesignSystem
 import com.phoebe.app.ui.PhoebeTheme
 import com.phoebe.app.ui.PhoebeUi
 import com.phoebe.app.ui.SearchPill
@@ -771,12 +772,13 @@ internal fun SearchTopAlbumCard(
     onPlayTracks: (List<Track>, Int) -> Unit,
     compact: Boolean,
 ) {
+    val cardShape = RoundedCornerShape(PhoebeUi.shapes.panelRadius)
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(Color.Black.copy(alpha = 0.16f))
-            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(14.dp))
+            .clip(cardShape)
+            .background(PhoebeUi.elevatedFill)
+            .border(BorderStroke(1.dp, PhoebeUi.border), cardShape)
             .clickable { onAlbum(album) }
             .padding(if (compact) 12.dp else 16.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -809,12 +811,13 @@ internal fun SearchTopTrackCard(
     onPlayTracks: (List<Track>, Int) -> Unit,
     compact: Boolean,
 ) {
+    val cardShape = RoundedCornerShape(PhoebeUi.shapes.panelRadius)
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(Color.Black.copy(alpha = 0.16f))
-            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(14.dp))
+            .clip(cardShape)
+            .background(PhoebeUi.elevatedFill)
+            .border(BorderStroke(1.dp, PhoebeUi.border), cardShape)
             .clickable { onPlayTracks(tracks, tracks.indexOfFirst { it.id == track.id }.coerceAtLeast(0)) }
             .padding(if (compact) 12.dp else 16.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -848,12 +851,13 @@ internal fun SearchTopArtistCard(
     compact: Boolean,
 ) {
     val songCount = catalogTrackCountForArtist(catalog, artist)
+    val cardShape = RoundedCornerShape(PhoebeUi.shapes.panelRadius)
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(Color.Black.copy(alpha = 0.16f))
-            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(14.dp))
+            .clip(cardShape)
+            .background(PhoebeUi.elevatedFill)
+            .border(BorderStroke(1.dp, PhoebeUi.border), cardShape)
             .clickable { onArtist(artist) }
             .padding(if (compact) 12.dp else 16.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -1021,7 +1025,7 @@ internal fun SearchSongResultRow(
                 .clip(RoundedCornerShape(10.dp))
                 .openContextMenuOnSecondaryClick { menuExpanded = true }
                 .combinedClickable(onClick = { onPlayTracks(tracks, trackIndex) }, onLongClick = { menuExpanded = true })
-                .background(if (index == 0) PhoebeUi.accent.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.035f))
+                .background(if (index == 0) PhoebeUi.librarySelectedRow else PhoebeUi.subtleFill)
                 .padding(horizontal = 8.dp, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -1049,7 +1053,7 @@ internal fun SearchSongResultRow(
                 .clip(RoundedCornerShape(8.dp))
                 .openContextMenuOnSecondaryClick { menuExpanded = true }
                 .combinedClickable(onClick = { onPlayTracks(tracks, trackIndex) }, onLongClick = { menuExpanded = true })
-                .background(if (index == 0) PhoebeUi.accent.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.032f))
+                .background(if (index == 0) PhoebeUi.librarySelectedRow else PhoebeUi.subtleFill)
                 .padding(horizontal = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -1212,7 +1216,7 @@ internal fun SearchArtistTile(artist: Artist, catalog: CatalogSnapshot, onArtist
         modifier = modifier
             .clip(RoundedCornerShape(14.dp))
             .clickable { onArtist(artist) }
-            .background(Color.White.copy(alpha = 0.035f))
+            .background(PhoebeUi.subtleFill)
             .padding(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -1231,7 +1235,7 @@ internal fun SearchArtistRow(artist: Artist, catalog: CatalogSnapshot, onArtist:
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
             .clickable { onArtist(artist) }
-            .background(Color.White.copy(alpha = 0.035f))
+            .background(PhoebeUi.subtleFill)
             .padding(horizontal = 8.dp, vertical = if (compact) 8.dp else 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -1372,10 +1376,15 @@ internal fun SearchSectionHeader(label: String, showSeeAll: Boolean, onSeeAll: (
 
 @Composable
 internal fun SearchPlayChip(enabled: Boolean, onClick: () -> Unit) {
+    val fill = when {
+        enabled && PhoebeUi.design == PhoebeDesignSystem.Minimalist -> Brush.linearGradient(listOf(PhoebeUi.accent, PhoebeUi.accent))
+        enabled -> Brush.linearGradient(listOf(PhoebeUi.accentLight, PhoebeUi.accent))
+        else -> Brush.linearGradient(listOf(PhoebeUi.mutedText.copy(alpha = 0.28f), PhoebeUi.mutedText.copy(alpha = 0.22f)))
+    }
     Row(
         modifier = Modifier
             .clip(RoundedCornerShape(8.dp))
-            .background(if (enabled) Brush.linearGradient(listOf(PhoebeUi.accentLight, PhoebeUi.accent)) else Brush.linearGradient(listOf(PhoebeUi.mutedText.copy(alpha = 0.28f), PhoebeUi.mutedText.copy(alpha = 0.22f))))
+            .background(fill)
             .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -1388,11 +1397,16 @@ internal fun SearchPlayChip(enabled: Boolean, onClick: () -> Unit) {
 
 @Composable
 internal fun SearchRoundPlayButton(enabled: Boolean, onClick: () -> Unit) {
+    val fill = when {
+        enabled && PhoebeUi.design == PhoebeDesignSystem.Minimalist -> Brush.linearGradient(listOf(PhoebeUi.accent, PhoebeUi.accent))
+        enabled -> Brush.linearGradient(listOf(PhoebeUi.accentLight, PhoebeUi.accent))
+        else -> Brush.linearGradient(listOf(PhoebeUi.mutedText.copy(alpha = 0.24f), PhoebeUi.mutedText.copy(alpha = 0.18f)))
+    }
     Box(
         modifier = Modifier
             .size(34.dp)
             .clip(CircleShape)
-            .background(if (enabled) Brush.linearGradient(listOf(PhoebeUi.accentLight, PhoebeUi.accent)) else Brush.linearGradient(listOf(PhoebeUi.mutedText.copy(alpha = 0.24f), PhoebeUi.mutedText.copy(alpha = 0.18f))))
+            .background(fill)
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
@@ -1410,7 +1424,7 @@ internal fun SearchEmptyCard(message: String) {
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(Color.White.copy(alpha = 0.035f))
+            .background(PhoebeUi.subtleFill)
             .padding(14.dp),
     )
 }

@@ -1575,13 +1575,14 @@ private fun DeleteDownloadsDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
+        val dialogShape = RoundedCornerShape(PhoebeUi.shapes.sheetTopRadius)
         Column(
             modifier = Modifier
                 .padding(horizontal = 24.dp, vertical = 24.dp)
                 .widthIn(min = 300.dp, max = 420.dp)
-                .clip(RoundedCornerShape(18.dp))
+                .clip(dialogShape)
                 .background(PhoebeUi.modalSurface)
-                .border(BorderStroke(1.dp, PhoebeUi.accentLight.copy(alpha = 0.18f)), RoundedCornerShape(18.dp))
+                .border(BorderStroke(1.dp, PhoebeUi.accentLight.copy(alpha = 0.18f)), dialogShape)
                 .padding(horizontal = 22.dp, vertical = 22.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {

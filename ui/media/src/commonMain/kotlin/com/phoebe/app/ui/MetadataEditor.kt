@@ -297,9 +297,9 @@ private fun MetadataTextField(
             modifier = Modifier
                 .fillMaxWidth()
                 .trackDesktopTextInputFocus()
-                .clip(RoundedCornerShape(9.dp))
-                .background(Color.White.copy(alpha = 0.035f))
-                .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(9.dp))
+                .clip(RoundedCornerShape(PhoebeUi.shapes.controlRadius))
+                .background(PhoebeUi.modalField)
+                .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(PhoebeUi.shapes.controlRadius))
                 .padding(horizontal = 12.dp, vertical = 10.dp),
         )
     }
@@ -327,7 +327,7 @@ private fun MetadataReadOnlyCell(label: String, value: String, modifier: Modifie
     Column(
         modifier
             .clip(RoundedCornerShape(8.dp))
-            .background(Color.White.copy(alpha = 0.028f))
+            .background(PhoebeUi.subtleFill)
             .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(8.dp))
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(3.dp),
@@ -347,7 +347,7 @@ private fun MetadataEditorButton(
     val background = when {
         primary && enabled -> PhoebeUi.accent
         primary -> PhoebeUi.accent.copy(alpha = 0.35f)
-        else -> Color.White.copy(alpha = 0.045f)
+        else -> PhoebeUi.subtleFill
     }
     val textColor = if (enabled) PhoebeUi.primaryText else PhoebeUi.secondaryText
     Box(

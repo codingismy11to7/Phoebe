@@ -414,9 +414,9 @@ internal fun LibraryRow(
     Row(
         modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(PhoebeUi.shapes.controlRadius))
             .clickable(onClick = onClick)
-            .background(Color.White.copy(alpha = 0.045f))
+            .background(PhoebeUi.subtleFill)
             .padding(10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),

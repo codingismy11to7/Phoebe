@@ -129,7 +129,7 @@ internal fun KeepPlayingQueueToggle(
     val containerColor = if (enabled) {
         PhoebeUi.accent.copy(alpha = 0.18f)
     } else {
-        PhoebeUi.primaryText.copy(alpha = 0.06f)
+        PhoebeUi.subtleFill
     }
     val trackColor = if (enabled) {
         activeColor.copy(alpha = 0.48f)
@@ -137,10 +137,11 @@ internal fun KeepPlayingQueueToggle(
         PhoebeUi.progressTrack
     }
     val thumbColor = if (enabled) Color.White else PhoebeUi.mutedText.copy(alpha = 0.82f)
+    val containerShape = RoundedCornerShape(PhoebeUi.shapes.controlRadius)
     Row(
         modifier = modifier
             .heightIn(min = 28.dp)
-            .clip(RoundedCornerShape(999.dp))
+            .clip(containerShape)
             .background(containerColor)
             .clickable(
                 onClickLabel = if (enabled) "Disable Keep Playing" else "Enable Keep Playing",
@@ -422,15 +423,16 @@ internal fun UpNextRow(
     onLongPress: (() -> Unit)? = null,
     detailAction: (() -> Unit)? = null,
 ) {
+    val rowShape = RoundedCornerShape(PhoebeUi.shapes.controlRadius)
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .height(rowHeight)
             .then(if (active) Modifier else Modifier.playTrackTarget(track))
-            .clip(RoundedCornerShape(10.dp))
+            .clip(rowShape)
             .background(
                 if (active) PhoebeUi.accent.copy(alpha = 0.10f)
-                else if (backgroundAlpha > 0f) Color.Black.copy(alpha = backgroundAlpha)
+                else if (backgroundAlpha > 0f) PhoebeUi.subtleFill
                 else Color.Transparent,
             )
             .combinedClickable(

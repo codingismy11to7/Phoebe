@@ -750,11 +750,12 @@ private fun LibraryToolbarRow(
 
 @Composable
 private fun LibraryTabsPill(filter: LibraryFilterTab, onFilter: (LibraryFilterTab) -> Unit) {
+    val shape = RoundedCornerShape(PhoebeUi.shapes.controlRadius)
     Row(
         Modifier
-            .clip(RoundedCornerShape(10.dp))
-            .background(Color.White.copy(alpha = 0.04f))
-            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(10.dp))
+            .clip(shape)
+            .background(PhoebeUi.subtleFill)
+            .border(BorderStroke(1.dp, PhoebeUi.border), shape)
             .padding(4.dp),
         horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
@@ -786,13 +787,14 @@ fun LibraryDropdown(
     content: @Composable (close: () -> Unit) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(PhoebeUi.shapes.controlRadius)
     Box {
         Row(
             Modifier
-                .clip(RoundedCornerShape(8.dp))
+                .clip(shape)
                 .phoebeClickable { expanded = true }
-                .background(Color.White.copy(alpha = 0.04f))
-                .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(8.dp))
+                .background(PhoebeUi.subtleFill)
+                .border(BorderStroke(1.dp, PhoebeUi.border), shape)
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1465,13 +1467,14 @@ fun LibraryResponsiveGrid(
 @Composable
 fun ColumnsPickerButton(columns: LibraryColumnVisibility, onColumns: (LibraryColumnVisibility) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(PhoebeUi.shapes.controlRadius)
     Box {
         Row(
             Modifier
-                .clip(RoundedCornerShape(8.dp))
+                .clip(shape)
                 .phoebeClickable { expanded = true }
-                .background(Color.White.copy(alpha = 0.04f))
-                .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(8.dp))
+                .background(PhoebeUi.subtleFill)
+                .border(BorderStroke(1.dp, PhoebeUi.border), shape)
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1645,15 +1648,16 @@ private fun PlaylistEditRemoveButton(
 ) {
     val enabled = selectedCount > 0
     val label = if (selectedCount > 0) "Remove ($selectedCount)" else "Remove"
+    val shape = RoundedCornerShape(if (compact) PhoebeUi.shapes.controlRadius else PhoebeUi.shapes.buttonRadius)
     Row(
         Modifier
-            .clip(RoundedCornerShape(if (compact) 8.dp else 999.dp))
+            .clip(shape)
             .background(
-                if (enabled) PhoebeUi.accent.copy(alpha = 0.92f) else Color.White.copy(alpha = 0.06f),
+                if (enabled) PhoebeUi.accent.copy(alpha = 0.92f) else PhoebeUi.subtleFill,
             )
             .border(
                 BorderStroke(1.dp, if (enabled) PhoebeUi.accentLight.copy(alpha = 0.35f) else PhoebeUi.border),
-                RoundedCornerShape(if (compact) 8.dp else 999.dp),
+                shape,
             )
             .phoebeClickable(enabled = enabled, onClick = onRemove)
             .padding(
@@ -1688,7 +1692,7 @@ fun LibraryLoadingStrip(modifier: Modifier = Modifier) {
                 .height(3.dp)
                 .clip(RoundedCornerShape(999.dp)),
             color = PhoebeUi.accentLight,
-            trackColor = Color.White.copy(alpha = 0.08f),
+            trackColor = PhoebeUi.progressTrack,
         )
     }
 }
