@@ -3587,17 +3587,7 @@ private fun RandomPanelHeader(
         Row(
             Modifier.weight(1f),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Box(
-                Modifier
-                    .size(26.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(PhoebeUi.elevatedFill),
-                contentAlignment = Alignment.Center,
-            ) {
-                PhoebeIconView(PhoebeIcon.InterwovenArrows, tint = PhoebeUi.accentLight, modifier = Modifier.size(14.dp))
-            }
             Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
                 Text(title, color = PhoebeUi.primaryText, fontSize = 13.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text("A fresh pick from your library", color = PhoebeUi.mutedText, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
