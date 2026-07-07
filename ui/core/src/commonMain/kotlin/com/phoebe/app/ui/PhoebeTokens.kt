@@ -184,11 +184,11 @@ data class PhoebeShapeTokens(
             buttonRadius = 0.dp,
         )
         val Minimalist = PhoebeShapeTokens(
-            panelRadius = 4.dp,
-            controlRadius = 6.dp,
-            mediaRadius = 8.dp,
-            sheetTopRadius = 18.dp,
-            buttonRadius = 999.dp,
+            panelRadius = 8.dp,
+            controlRadius = 8.dp,
+            mediaRadius = 10.dp,
+            sheetTopRadius = 24.dp,
+            buttonRadius = 8.dp,
         )
     }
 }
@@ -432,13 +432,13 @@ val PhoebeBrutalistPaletteLight = PhoebeVisualPalette(
 
 val PhoebeMinimalistPaletteLight = PhoebeVisualPalette(
     canvasBackground = Color(0xFFF7F6F3),
-    shellRadialTint = Color(0x262F6F92),
+    shellRadialTint = Color(0x102F6F92),
     shellTop = Color(0xFFFBFAF7),
     shellBottom = Color(0xFFF7F6F3),
     navBar = Color(0xFFFFFFFF),
     sidebar = Color(0xFFFBFAF7),
     panel = Color(0xFFFFFFFF),
-    glass = Color(0xF5FFFFFF),
+    glass = Color(0xFFFFFFFF),
     border = Color(0xFFEAE6DE),
     primaryText = Color(0xFF111111),
     secondaryText = Color(0xFF2F3437),
@@ -446,10 +446,10 @@ val PhoebeMinimalistPaletteLight = PhoebeVisualPalette(
     accent = Color(0xFF2F6F92),
     accentLight = Color(0xFF2F6F92),
     librarySelectedRow = Color(0xFFE1F3FE),
-    libraryHoverRow = Color(0x1A2F6F92),
+    libraryHoverRow = Color(0x142F6F92),
     libraryDivider = Color(0xFFEAE6DE),
-    subtleFill = Color(0x80FBFAF7),
-    elevatedFill = Color(0xB8FFFFFF),
+    subtleFill = Color(0xFFFBFAF7),
+    elevatedFill = Color(0xFFFFFFFF),
     progressTrack = Color(0x332F3437),
     modalSurface = Color(0xFFFFFFFF),
     modalField = Color(0xFFFBFAF7),
@@ -460,24 +460,24 @@ val PhoebeMinimalistPaletteLight = PhoebeVisualPalette(
 
 val PhoebeMinimalistPaletteDark = PhoebeVisualPalette(
     canvasBackground = Color(0xFF111111),
-    shellRadialTint = Color(0x26A8CEE2),
+    shellRadialTint = Color(0x12A8CEE2),
     shellTop = Color(0xFF181818),
     shellBottom = Color(0xFF111111),
     navBar = Color(0xFF181818),
     sidebar = Color(0xFF111111),
-    panel = Color(0xE6181818),
-    glass = Color(0xD9181818),
+    panel = Color(0xFF181818),
+    glass = Color(0xFF181818),
     border = Color(0x1AFFFFFF),
     primaryText = Color(0xFFF7F6F3),
     secondaryText = Color(0xFFB8B2A8),
     mutedText = Color(0xFF7E786F),
     accent = Color(0xFFA8CEE2),
     accentLight = Color(0xFFC5E0EE),
-    librarySelectedRow = Color(0x26A8CEE2),
-    libraryHoverRow = Color(0x0FFFFFFF),
+    librarySelectedRow = Color(0x1FA8CEE2),
+    libraryHoverRow = Color(0x0DFFFFFF),
     libraryDivider = Color(0x14FFFFFF),
-    subtleFill = Color(0x0FFFFFFF),
-    elevatedFill = Color(0x17FFFFFF),
+    subtleFill = Color(0x0DFFFFFF),
+    elevatedFill = Color(0x14FFFFFF),
     progressTrack = Color(0x24FFFFFF),
     modalSurface = Color(0xFF181818),
     modalField = Color(0xFF111111),
@@ -539,14 +539,22 @@ internal fun PhoebeVisualPalette.withTint(
     val accent = if (useLightAppearance) tint.lightColor else tint.color
     val selectedAlpha = when {
         design == PhoebeDesignSystem.Brutalist -> if (useLightAppearance) 0.12f else 0.14f
+        design == PhoebeDesignSystem.Minimalist -> if (useLightAppearance) 0.12f else 0.14f
         useLightAppearance -> 0.10f
         else -> 0.18f
     }
+    val shellAlpha = when {
+        design == PhoebeDesignSystem.Minimalist && useLightAppearance -> 0.06f
+        design == PhoebeDesignSystem.Minimalist -> 0.08f
+        useLightAppearance -> 0.20f
+        else -> 0.32f
+    }
     return copy(
-        shellRadialTint = accent.copy(alpha = if (useLightAppearance) 0.20f else 0.32f),
+        shellRadialTint = accent.copy(alpha = shellAlpha),
         accent = accent,
         accentLight = accent,
         librarySelectedRow = accent.copy(alpha = selectedAlpha),
+        libraryHoverRow = if (design == PhoebeDesignSystem.Minimalist) accent.copy(alpha = 0.08f) else libraryHoverRow,
     )
 }
 

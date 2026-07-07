@@ -206,18 +206,19 @@ fun ContentTrackRow(
     val playlistDragEnabled = LocalPlaylistDragEnabled.current
     val rowDragEnabled = playlistDragEnabled && leadingHandle == null && !selectionMode
     val dragHandleVisible = rowDragEnabled && showPlaylistDragHandle
+    val rowShape = RoundedCornerShape(PhoebeUi.shapes.controlRadius)
     Box(if (rowDragEnabled) modifier.draggableSong(track, immediate = !dragHandleVisible) else modifier) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .playTrackTarget(track)
-                .clip(RoundedCornerShape(10.dp))
+                .clip(rowShape)
                 .combinedClickable(onClick = onPlay, onLongClick = if (selectionMode) null else ({ menuExpanded = true }))
                 .background(
                     when {
                         selectionMode && selected -> PhoebeUi.accent.copy(alpha = 0.12f)
                         isNowPlaying -> PhoebeUi.accent.copy(alpha = 0.12f)
-                        else -> Color.White.copy(alpha = 0.045f)
+                        else -> PhoebeUi.subtleFill
                     },
                 )
                 .padding(horizontal = 10.dp, vertical = 8.dp),
@@ -394,14 +395,16 @@ fun CreatePlaylistDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
+        val dialogShape = RoundedCornerShape(PhoebeUi.shapes.sheetTopRadius)
+        val dialogElevation = if (PhoebeUi.design == PhoebeDesignSystem.Minimalist) 8.dp else 30.dp
         Box(
             modifier = Modifier
                 .padding(horizontal = 24.dp, vertical = 24.dp)
                 .widthIn(min = 320.dp, max = 440.dp)
-                .shadow(elevation = 30.dp, shape = RoundedCornerShape(18.dp), clip = false)
-                .clip(RoundedCornerShape(18.dp))
+                .shadow(elevation = dialogElevation, shape = dialogShape, clip = false)
+                .clip(dialogShape)
                 .background(PhoebeUi.modalSurface)
-                .border(BorderStroke(1.dp, PhoebeUi.accentLight.copy(alpha = 0.18f)), RoundedCornerShape(18.dp))
+                .border(BorderStroke(1.dp, PhoebeUi.accentLight.copy(alpha = 0.18f)), dialogShape)
                 .padding(horizontal = 22.dp, vertical = 22.dp),
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {

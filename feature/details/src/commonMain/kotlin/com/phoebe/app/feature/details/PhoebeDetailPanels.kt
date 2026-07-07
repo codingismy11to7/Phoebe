@@ -794,9 +794,9 @@ private fun LibraryRow(
     Row(
         modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(PhoebeUi.shapes.controlRadius))
             .clickable(onClick = onClick)
-            .background(Color.White.copy(alpha = 0.045f))
+            .background(PhoebeUi.subtleFill)
             .padding(10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -874,7 +874,7 @@ private fun MobileDetailPrimaryPlayButton(
     onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null,
 ) {
-    val shape = RoundedCornerShape(999.dp)
+    val shape = RoundedCornerShape(PhoebeUi.shapes.buttonRadius)
     Row(
         modifier
             .height(48.dp)
@@ -884,8 +884,8 @@ private fun MobileDetailPrimaryPlayButton(
                 onClick = onClick,
                 onLongClick = onLongClick,
             )
-            .background(Color.White.copy(alpha = if (enabled) 0.08f else 0.04f))
-            .border(BorderStroke(1.dp, Color.White.copy(alpha = if (enabled) 0.10f else 0.05f)), shape)
+            .background(if (enabled) PhoebeUi.elevatedFill else PhoebeUi.subtleFill)
+            .border(BorderStroke(1.dp, PhoebeUi.border), shape)
             .padding(horizontal = 18.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
@@ -914,14 +914,14 @@ private fun MobileDetailSecondaryButton(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
-    val shape = RoundedCornerShape(999.dp)
+    val shape = RoundedCornerShape(PhoebeUi.shapes.buttonRadius)
     Row(
         modifier
             .height(48.dp)
             .clip(shape)
             .clickable(enabled = enabled, onClick = onClick)
-            .background(Color.White.copy(alpha = 0.08f))
-            .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)), shape)
+            .background(PhoebeUi.subtleFill)
+            .border(BorderStroke(1.dp, PhoebeUi.border), shape)
             .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
@@ -951,8 +951,8 @@ private fun MobileDetailIconSurface(
         modifier
             .size(48.dp)
             .clip(CircleShape)
-            .background(Color.White.copy(alpha = 0.08f))
-            .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)), CircleShape),
+            .background(PhoebeUi.subtleFill)
+            .border(BorderStroke(1.dp, PhoebeUi.border), CircleShape),
         contentAlignment = Alignment.Center,
     ) {
         content()
@@ -1921,9 +1921,9 @@ private fun DesktopDetailMetaChip(label: String) {
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
         modifier = Modifier
-            .clip(RoundedCornerShape(999.dp))
-            .background(Color.White.copy(alpha = 0.07f))
-            .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)), RoundedCornerShape(999.dp))
+            .clip(RoundedCornerShape(PhoebeUi.shapes.buttonRadius))
+            .background(PhoebeUi.subtleFill)
+            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(PhoebeUi.shapes.buttonRadius))
             .padding(horizontal = 11.dp, vertical = 6.dp),
     )
 }
@@ -1966,8 +1966,8 @@ private fun ArtistDetailStatRow(icon: PhoebeIcon, value: String, label: String) 
         Box(
             Modifier
                 .size(32.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(Color.White.copy(alpha = 0.04f)),
+                .clip(RoundedCornerShape(PhoebeUi.shapes.controlRadius))
+                .background(PhoebeUi.subtleFill),
             contentAlignment = Alignment.Center,
         ) {
             PhoebeIconView(icon, tint = PhoebeUi.accentLight, modifier = Modifier.size(15.dp))
@@ -3298,9 +3298,9 @@ private fun SimilarArtistCard(
     val thumbUrl = remember(artist.thumbUrl, albums) { artist.thumbUrl ?: albums.firstNotNullOfOrNull { it.thumbUrl } }
     Column(
         modifier
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(PhoebeUi.shapes.controlRadius))
             .clickable(onClick = onClick)
-            .background(Color.White.copy(alpha = 0.045f))
+            .background(PhoebeUi.subtleFill)
             .padding(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -3323,9 +3323,9 @@ private fun SimilarArtistRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(PhoebeUi.shapes.controlRadius))
             .clickable(onClick = onClick)
-            .background(Color.White.copy(alpha = 0.045f))
+            .background(PhoebeUi.subtleFill)
             .padding(10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -3658,9 +3658,9 @@ private fun EventPill(label: String) {
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
         modifier = Modifier
-            .clip(RoundedCornerShape(999.dp))
-            .background(Color.White.copy(alpha = 0.06f))
-            .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)), RoundedCornerShape(999.dp))
+            .clip(RoundedCornerShape(PhoebeUi.shapes.buttonRadius))
+            .background(PhoebeUi.subtleFill)
+            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(PhoebeUi.shapes.buttonRadius))
             .padding(horizontal = 9.dp, vertical = 5.dp),
     )
 }

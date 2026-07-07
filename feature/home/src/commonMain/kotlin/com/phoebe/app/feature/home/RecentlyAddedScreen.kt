@@ -306,13 +306,13 @@ private fun RecentlyAddedTrackRow(
     onDownload: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val rowShape = RoundedCornerShape(10.dp)
+    val rowShape = RoundedCornerShape(PhoebeUi.shapes.controlRadius)
     Row(
         modifier
             .fillMaxWidth()
             .clip(rowShape)
             .clickable(onClick = onPlay)
-            .background(if (isNowPlaying) PhoebeUi.accent.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.045f))
+            .background(if (isNowPlaying) PhoebeUi.librarySelectedRow else PhoebeUi.subtleFill)
             .border(BorderStroke(1.dp, if (isNowPlaying) PhoebeUi.accent.copy(alpha = 0.45f) else PhoebeUi.border), rowShape)
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,

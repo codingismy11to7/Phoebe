@@ -19,7 +19,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -47,7 +46,7 @@ fun CatalogLoadingStrip(modifier: Modifier = Modifier) {
                     .height(3.dp)
                     .clip(RoundedCornerShape(999.dp)),
                 color = PhoebeUi.accentLight,
-                trackColor = Color.White.copy(alpha = 0.08f),
+                trackColor = PhoebeUi.progressTrack,
             )
         } else {
             LinearProgressIndicator(
@@ -56,7 +55,7 @@ fun CatalogLoadingStrip(modifier: Modifier = Modifier) {
                     .height(3.dp)
                     .clip(RoundedCornerShape(999.dp)),
                 color = PhoebeUi.accentLight,
-                trackColor = Color.White.copy(alpha = 0.08f),
+                trackColor = PhoebeUi.progressTrack,
             )
         }
         AnimatedContent(

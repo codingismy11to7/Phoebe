@@ -35,16 +35,17 @@ fun LibraryToolbarButton(
     onLongClick: (() -> Unit)? = null,
     leadingContent: (@Composable () -> Unit)? = null,
 ) {
+    val shape = RoundedCornerShape(PhoebeUi.shapes.controlRadius)
     Row(
         modifier
-            .clip(RoundedCornerShape(8.dp))
+            .clip(shape)
             .combinedClickable(
                 enabled = enabled,
                 onClick = onClick,
                 onLongClick = onLongClick,
             )
-            .background(Color.White.copy(alpha = 0.04f))
-            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(8.dp))
+            .background(PhoebeUi.subtleFill)
+            .border(BorderStroke(1.dp, PhoebeUi.border), shape)
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),

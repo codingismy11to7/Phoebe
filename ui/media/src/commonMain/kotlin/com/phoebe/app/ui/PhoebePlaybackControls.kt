@@ -59,11 +59,12 @@ private const val TimelineBufferFallbackAdvanceMs = 2_000L
 
 @Composable
 fun GlassIcon(icon: PhoebeIcon, description: String) {
+    val shape = RoundedCornerShape(PhoebeUi.shapes.controlRadius)
     Box(
         Modifier
             .size(36.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(Color.Black.copy(alpha = 0.16f))
+            .clip(shape)
+            .background(if (PhoebeUi.design == PhoebeDesignSystem.Minimalist) PhoebeUi.subtleFill else Color.Black.copy(alpha = 0.16f))
             .semantics { contentDescription = description },
         contentAlignment = Alignment.Center,
     ) {
@@ -109,7 +110,9 @@ fun PlayButton(
         label = "play-button-scale",
     )
     val scale = if (motionEnabled) scaleState.value else targetScale
-    val gradient = if (enabled) {
+    val gradient = if (enabled && PhoebeUi.design == PhoebeDesignSystem.Minimalist) {
+        Brush.linearGradient(listOf(PhoebeUi.accent, PhoebeUi.accent))
+    } else if (enabled) {
         Brush.linearGradient(listOf(PhoebeUi.accentLight, PhoebeUi.accent))
     } else {
         Brush.linearGradient(listOf(PhoebeUi.mutedText.copy(alpha = 0.28f), PhoebeUi.mutedText.copy(alpha = 0.38f)))
@@ -129,7 +132,7 @@ fun PlayButton(
                 scaleY = scale
             }
             .then(
-                if (enabled) {
+                if (enabled && PhoebeUi.design != PhoebeDesignSystem.Minimalist) {
                     Modifier.shadow(18.dp, CircleShape, ambientColor = PhoebeUi.accent.copy(alpha = 0.4f), spotColor = PhoebeUi.accent.copy(alpha = 0.38f))
                 } else {
                     Modifier
