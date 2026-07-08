@@ -78,6 +78,7 @@ import com.phoebe.app.platform.PhoebeLog
 import com.phoebe.app.platform.catalogTrackIndexParallelism
 import com.phoebe.app.platform.currentTimeMs
 import com.phoebe.app.platform.downloadParallelism
+import com.phoebe.app.platform.isDesktopPlatform
 import com.phoebe.app.platform.platformStreamHttpDownloadToStorage
 import com.phoebe.app.sources.CatalogMerge
 import com.phoebe.app.sources.LocalFolderMusicSourcePlugin
@@ -1032,8 +1033,62 @@ class CatalogRepository(
                 remotePageInfo = prefixed.remotePageInfo.takeIf { it.hasAny } ?: base.remotePageInfo,
             )
         }
-        return merged.withPlaylistUserStateFrom(previous)
+        return merged
+            .withRemoteArtworkFrom(previous)
+            .withPlaylistUserStateFrom(previous)
     }
+
+    private fun CatalogSnapshot.withRemoteArtworkFrom(source: CatalogSnapshot): CatalogSnapshot {
+        val sourceArtists = source.artists.associateBy { it.id }
+        val sourceAlbums = source.albums.associateBy { it.id }
+        val sourcePlaylists = source.playlists.associateBy { it.id }
+        return copy(
+            artists = artists.map { artist ->
+                artist.withPreservedArtwork(
+                    preserveAuthenticatedPlexArtwork(
+                        incoming = artist.thumbUrl,
+                        previous = sourceArtists[artist.id]?.thumbUrl,
+                    ),
+                )
+            },
+            albums = albums.map { album ->
+                album.withPreservedArtwork(
+                    preserveAuthenticatedPlexArtwork(
+                        incoming = album.thumbUrl,
+                        previous = sourceAlbums[album.id]?.thumbUrl,
+                    ),
+                )
+            },
+            playlists = playlists.map { playlist ->
+                playlist.withPreservedArtwork(
+                    preserveAuthenticatedPlexArtwork(
+                        incoming = playlist.thumbUrl,
+                        previous = sourcePlaylists[playlist.id]?.thumbUrl,
+                    ),
+                )
+            },
+        )
+    }
+
+    private fun Artist.withPreservedArtwork(thumbUrl: String?): Artist =
+        if (this.thumbUrl == thumbUrl) this else copy(thumbUrl = thumbUrl)
+
+    private fun Album.withPreservedArtwork(thumbUrl: String?): Album =
+        if (this.thumbUrl == thumbUrl) this else copy(thumbUrl = thumbUrl)
+
+    private fun Playlist.withPreservedArtwork(thumbUrl: String?): Playlist =
+        if (this.thumbUrl == thumbUrl) this else copy(thumbUrl = thumbUrl)
+
+    private fun preserveAuthenticatedPlexArtwork(incoming: String?, previous: String?): String? {
+        if (incoming.isNullOrBlank()) return previous
+        if (previous.isNullOrBlank()) return incoming
+        if (incoming.plexTokenQueryValue() != null) return incoming
+        if (previous.plexTokenQueryValue() == null) return incoming
+        return if (incoming.artworkUrlWithoutQuery() == previous.artworkUrlWithoutQuery()) previous else incoming
+    }
+
+    private fun String.artworkUrlWithoutQuery(): String =
+        substringBefore("?").substringBefore("#")
 
     private inline fun <T> mergeItemsById(
         existing: List<T>,
@@ -7388,6 +7443,7 @@ class CatalogRepository(
 
     private fun warmLikelyClickedContent(session: PlexSession?, snapshot: CatalogSnapshot) {
         if (session?.isPlex() != true) return
+        if (!isDesktopPlatform()) return
         persistenceScope.launch {
             runCatching {
                 val albumIds = buildList {

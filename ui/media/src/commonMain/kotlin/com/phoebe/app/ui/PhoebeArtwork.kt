@@ -39,16 +39,19 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import coil3.ImageLoader
+import coil3.PlatformContext
+import coil3.annotation.ExperimentalCoilApi
 import coil3.compose.AsyncImagePainter
 import coil3.compose.LocalPlatformContext
 import coil3.compose.rememberAsyncImagePainter
-import coil3.compose.rememberConstraintsSizeResolver
+import coil3.network.ConcurrentRequestStrategy
 import coil3.network.NetworkHeaders
 import coil3.network.httpHeaders
+import coil3.network.ktor3.KtorNetworkFetcherFactory
 import coil3.request.ImageRequest
 import com.phoebe.app.data.applyEmbyFamilyArtworkAuth
 import com.phoebe.app.data.cachedArtworkPathForUrl
@@ -132,17 +135,16 @@ private fun CoilArtworkImage(
     var candidateIndex by remember(candidates) { mutableIntStateOf(0) }
     val candidate = candidates.getOrNull(candidateIndex)
     val platformContext = LocalPlatformContext.current
-    val sizeResolver = rememberConstraintsSizeResolver()
-    val request = remember(platformContext, candidate, sizeResolver) {
+    val request = remember(platformContext, candidate) {
         candidate?.let {
             ImageRequest.Builder(platformContext)
                 .data(it.fetchUrl)
-                .size(sizeResolver)
                 .applyArtworkHeaders(it.fetchUrl)
                 .build()
         }
     }
-    val painter = rememberAsyncImagePainter(model = request)
+    val imageLoader = remember(platformContext) { phoebeArtworkImageLoader(platformContext) }
+    val painter = rememberAsyncImagePainter(model = request, imageLoader = imageLoader)
     val painterState by painter.state.collectAsState()
 
     LaunchedEffect(painterState) {
@@ -156,11 +158,11 @@ private fun CoilArtworkImage(
         }
     }
 
-    val success = painterState is AsyncImagePainter.State.Success
     val visualState = when {
         candidate == null -> RemoteArtworkVisualState.Missing
-        success -> RemoteArtworkVisualState.Image
-        painterState is AsyncImagePainter.State.Error && candidateIndex >= candidates.lastIndex -> RemoteArtworkVisualState.Missing
+        painterState is AsyncImagePainter.State.Success -> RemoteArtworkVisualState.Image
+        painterState is AsyncImagePainter.State.Error && candidateIndex >= candidates.lastIndex ->
+            RemoteArtworkVisualState.Missing
         else -> RemoteArtworkVisualState.Loading
     }
 
@@ -170,11 +172,7 @@ private fun CoilArtworkImage(
             contentDescription = null,
             contentScale = contentScale,
             alignment = alignment,
-            modifier = Modifier
-                .matchParentSize()
-                .then(artworkSurfaceModifier(shape, elevated))
-                .then(sizeResolver)
-                .graphicsLayer { alpha = if (success) 1f else 0f },
+            modifier = artworkSurfaceModifier(Modifier.matchParentSize(), shape, elevated),
         )
         Crossfade(
             targetState = visualState,
@@ -193,6 +191,14 @@ private fun CoilArtworkImage(
         }
     }
 }
+
+@OptIn(ExperimentalCoilApi::class)
+private fun phoebeArtworkImageLoader(context: PlatformContext): ImageLoader =
+    ImageLoader.Builder(context)
+        .components {
+            add(KtorNetworkFetcherFactory(createPlatformHttpClient(), ConcurrentRequestStrategy.UNCOORDINATED))
+        }
+        .build()
 
 private data class ArtworkImageCandidate(
     val sourceUrl: String,
@@ -227,10 +233,10 @@ private fun ImageRequest.Builder.applyArtworkHeaders(fetchUrl: String): ImageReq
     return httpHeaders(networkHeaders)
 }
 
-private fun artworkSurfaceModifier(shape: Shape, elevated: Boolean): Modifier =
+private fun artworkSurfaceModifier(modifier: Modifier, shape: Shape, elevated: Boolean): Modifier =
     when {
-        !elevated || prefersReducedArtworkEffects() -> Modifier.clip(shape)
-        else -> Modifier
+        !elevated || prefersReducedArtworkEffects() -> modifier.clip(shape)
+        else -> modifier
             .shadow(18.dp, shape, ambientColor = Color.Black.copy(alpha = 0.38f))
             .clip(shape)
     }
