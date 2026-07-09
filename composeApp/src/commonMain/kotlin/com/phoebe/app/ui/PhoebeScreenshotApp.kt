@@ -1293,8 +1293,8 @@ internal val PhoebeScreenshotFixture = run {
                 price = ArtistEventPrice(min = 42.0, max = 42.0, currency = "USD", display = "$42"),
             ),
             ArtistEvent(
-                id = "sg-luna-2",
-                provider = EventDataProvider.SeatGeek,
+                id = "tm-luna-2",
+                provider = EventDataProvider.Ticketmaster,
                 title = "Moonlit Signals Tour",
                 url = "https://tickets.example/moonlit-signals",
                 status = "available",

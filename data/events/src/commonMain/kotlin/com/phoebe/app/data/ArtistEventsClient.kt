@@ -42,7 +42,9 @@ class ArtistEventsClient(
 }
 
 internal val EventDataProvider.queryValue: String
+    @Suppress("DEPRECATION")
     get() = when (this) {
-        EventDataProvider.Ticketmaster -> "ticketmaster"
-        EventDataProvider.SeatGeek -> "seatgeek"
+        EventDataProvider.Ticketmaster,
+        EventDataProvider.SeatGeek,
+        -> "ticketmaster"
     }

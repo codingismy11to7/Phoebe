@@ -8,7 +8,6 @@ const payload = JSON.parse(process.env.ENV_JSON || "{}");
 const keys = new Set((payload.envs || []).map((env) => env.key));
 const missing = [
   "TICKETMASTER_API_KEY",
-  "SEATGEEK_CLIENT_ID",
   "GENIUS_ACCESS_TOKEN",
   "ALLOWED_ORIGINS",
 ].filter((name) => !keys.has(name));
@@ -52,7 +51,6 @@ is_truthy() {
 }
 
 require_non_empty "TICKETMASTER_API_KEY"
-require_non_empty "SEATGEEK_CLIENT_ID"
 require_non_empty "GENIUS_ACCESS_TOKEN"
 
 if [[ -z "${ALLOWED_ORIGINS:-}" ]] && ! is_truthy "${BACKEND_ALLOW_ANY_ORIGIN:-}"; then

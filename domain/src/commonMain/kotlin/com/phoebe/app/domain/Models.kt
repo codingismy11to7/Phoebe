@@ -1123,6 +1123,8 @@ data class AppSettings(
 @Serializable
 enum class EventDataProvider {
     Ticketmaster,
+
+    @Deprecated("Legacy backup compatibility only. SeatGeek now resolves to Ticketmaster.")
     SeatGeek,
 }
 
@@ -1138,8 +1140,14 @@ data class EventSettings(
     val backendTarget: EventsBackendTarget = EventsBackendTarget.Production,
     val localBackendUrl: String? = null,
 ) {
+    @Suppress("DEPRECATION")
     fun normalized(): EventSettings =
         copy(
+            provider = when (provider) {
+                EventDataProvider.Ticketmaster,
+                EventDataProvider.SeatGeek,
+                -> EventDataProvider.Ticketmaster
+            },
             localBackendUrl = localBackendUrl
                 ?.trim()
                 ?.trimEnd('/')

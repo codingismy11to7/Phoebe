@@ -13,9 +13,6 @@ tasks.named<JavaExec>("run") {
     backendSecret("TICKETMASTER_API_KEY", "phoebe.backend.ticketmasterApiKey")?.let {
         environment("TICKETMASTER_API_KEY", it)
     }
-    backendSecret("SEATGEEK_CLIENT_ID", "phoebe.backend.seatGeekClientId")?.let {
-        environment("SEATGEEK_CLIENT_ID", it)
-    }
     backendSecret("GENIUS_ACCESS_TOKEN", "phoebe.backend.geniusAccessToken")?.let {
         environment("GENIUS_ACCESS_TOKEN", it)
     }

@@ -49,10 +49,6 @@ class ArtistEventsBackendFeature : PhoebeBackendFeature {
                     environment.httpClient,
                     environment.config.ticketmasterApiKey,
                 ),
-                EventDataProvider.SeatGeek to SeatGeekEventsAdapter(
-                    environment.httpClient,
-                    environment.config.seatGeekClientId,
-                ),
             ),
             cache = ArtistEventsCache(environment.config.cacheTtlMinutes * 60_000L, environment.clockMs),
         )
@@ -71,9 +67,8 @@ class ArtistEventsBackendFeature : PhoebeBackendFeature {
 
 private fun ApplicationCall.providerParameter(): EventDataProvider =
     when (optionalBackendQueryParameter("provider")?.lowercase(Locale.US)) {
-        "ticketmaster" -> EventDataProvider.Ticketmaster
-        "seatgeek" -> EventDataProvider.SeatGeek
-        else -> throw BadRequestException("provider must be ticketmaster or seatgeek.")
+        "ticketmaster", null -> EventDataProvider.Ticketmaster
+        else -> throw BadRequestException("provider must be ticketmaster.")
     }
 
 class ArtistEventsService(
@@ -180,32 +175,6 @@ class TicketmasterEventsAdapter(
                 ?: return@mapNotNull null
             dto.toArtistEvent(raw)
         }
-    }
-}
-
-class SeatGeekEventsAdapter(
-    private val httpClient: HttpClient,
-    private val clientId: String?,
-) : ArtistEventsAdapter {
-    override suspend fun searchArtistEvents(artist: String, limit: Int): List<ArtistEvent> {
-        val id = clientId ?: throw MissingProviderCredentialException("SEATGEEK_CLIENT_ID is not configured.")
-        val response = httpClient.get("https://api.seatgeek.com/2/events") {
-            parameter("client_id", id)
-            parameter("q", artist)
-            parameter("type", "concert")
-            parameter("per_page", limit.coerceIn(1, 50))
-            parameter("sort", "datetime_utc.asc")
-        }
-        response.requireProviderSuccess("SeatGeek")
-        val payload: JsonObject = response.body()
-        return payload["events"]
-            ?.jsonArray
-            .orEmpty()
-            .mapNotNull { raw ->
-                val dto = runCatching { phoebeBackendJson.decodeFromJsonElement(SeatGeekEvent.serializer(), raw) }.getOrNull()
-                    ?: return@mapNotNull null
-                dto.toArtistEvent(raw)
-            }
     }
 }
 
@@ -335,95 +304,7 @@ private fun TicketmasterVenue.toArtistEventVenue(): ArtistEventVenue =
         longitude = location?.longitude?.toDoubleOrNull(),
     )
 
-@Serializable
-private data class SeatGeekEvent(
-    val id: Long,
-    val title: String,
-    val url: String? = null,
-    val status: String? = null,
-    val datetime_utc: String? = null,
-    val datetime_local: String? = null,
-    val venue: SeatGeekVenue? = null,
-    val performers: List<SeatGeekPerformer> = emptyList(),
-    val stats: SeatGeekStats? = null,
-    val lowest_price: Double? = null,
-    val average_price: Double? = null,
-    val highest_price: Double? = null,
-)
 
-@Serializable
-private data class SeatGeekVenue(
-    val name: String? = null,
-    val city: String? = null,
-    val state: String? = null,
-    val country: String? = null,
-    val address: String? = null,
-    val location: SeatGeekLocation? = null,
-)
-
-@Serializable
-private data class SeatGeekLocation(
-    val lat: Double? = null,
-    val lon: Double? = null,
-)
-
-@Serializable
-private data class SeatGeekPerformer(
-    val image: String? = null,
-    val images: JsonObject? = null,
-)
-
-@Serializable
-private data class SeatGeekStats(
-    val lowest_price: Double? = null,
-    val average_price: Double? = null,
-    val highest_price: Double? = null,
-)
-
-private fun SeatGeekEvent.toArtistEvent(raw: JsonElement): ArtistEvent {
-    val min = lowest_price ?: stats?.lowest_price
-    val max = highest_price ?: stats?.highest_price
-    return ArtistEvent(
-        id = id.toString(),
-        provider = EventDataProvider.SeatGeek,
-        title = title,
-        url = url,
-        status = status,
-        date = ArtistEventDate(
-            localDate = datetime_local?.substringBefore('T'),
-            localTime = datetime_local?.substringAfter('T')?.takeIf { it != datetime_local },
-            dateTimeUtc = datetime_utc,
-        ),
-        images = performers.flatMap { it.toImages() }.distinctBy { it.url },
-        venue = venue?.let {
-            ArtistEventVenue(
-                name = it.name,
-                city = it.city,
-                region = it.state,
-                country = it.country,
-                address = it.address,
-                latitude = it.location?.lat,
-                longitude = it.location?.lon,
-            )
-        },
-        price = ArtistEventPrice(
-            min = min,
-            max = max,
-            currency = "USD",
-            display = formatPriceRange(min, max, "USD"),
-        ).takeIf { it.min != null || it.max != null },
-        raw = raw,
-    )
-}
-
-private fun SeatGeekPerformer.toImages(): List<ArtistEventImage> {
-    val direct = image?.takeIf { it.isNotBlank() }?.let { ArtistEventImage(url = it) }
-    val nested = images?.values
-        ?.mapNotNull { element -> (element as? JsonPrimitive)?.contentOrNull?.takeIf { it.startsWith("http") } }
-        ?.map { ArtistEventImage(url = it) }
-        .orEmpty()
-    return listOfNotNull(direct) + nested
-}
 
 private fun formatPriceRange(min: Double?, max: Double?, currency: String?): String? {
     val symbol = when (currency?.uppercase(Locale.US)) {
