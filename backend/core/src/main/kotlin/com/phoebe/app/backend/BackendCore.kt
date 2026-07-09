@@ -35,7 +35,6 @@ data class PhoebeBackendEnvironment(
 
 data class PhoebeBackendConfig(
     val ticketmasterApiKey: String?,
-    val seatGeekClientId: String?,
     val geniusAccessToken: String?,
     val musicBrainzUserAgent: String,
     val allowedOrigins: List<String>,
@@ -58,7 +57,6 @@ data class PhoebeBackendConfig(
             val isProduction = vercelEnvironment.equals("production", ignoreCase = true)
             return PhoebeBackendConfig(
                 ticketmasterApiKey = System.getenv("TICKETMASTER_API_KEY")?.takeIf { it.isNotBlank() },
-                seatGeekClientId = System.getenv("SEATGEEK_CLIENT_ID")?.takeIf { it.isNotBlank() },
                 geniusAccessToken = System.getenv("GENIUS_ACCESS_TOKEN")?.takeIf { it.isNotBlank() },
                 musicBrainzUserAgent = System.getenv("MUSICBRAINZ_USER_AGENT")
                     ?.trim()

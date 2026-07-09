@@ -60,7 +60,7 @@ class PhoebeBackendApplicationTest {
     }
 
     @Test
-    fun artistEventsNormalizesTicketmasterAndKeepsRawPayload() = testApplication {
+    fun artistEventsDefaultsToTicketmasterAndKeepsRawPayload() = testApplication {
         var providerUrl = ""
         var providerQuery = ""
         val providerClient = mockProviderClient(ticketmasterPayload()) { url, query ->
@@ -80,7 +80,7 @@ class PhoebeBackendApplicationTest {
             }
         }
 
-        val response = routeClient.get("/v1/artist-events?provider=ticketmaster&artist=Phoebe%20Bridgers&limit=5")
+        val response = routeClient.get("/v1/artist-events?artist=Phoebe%20Bridgers&limit=5")
 
         assertEquals(HttpStatusCode.OK, response.status)
         assertTrue(providerUrl.contains("ticketmaster.com/discovery/v2/events.json"))
@@ -117,21 +117,6 @@ class PhoebeBackendApplicationTest {
         assertTrue(response.bodyAsText().contains("Ticketmaster API returned HTTP 401"))
     }
 
-    @Test
-    fun artistEventsReturnsBadGatewayWhenSeatGeekReturnsError() = testApplication {
-        application {
-            phoebeBackendModule(
-                config = testConfig(seatGeekClientId = "sg-id"),
-                httpClient = mockProviderClient("""{"error":"rate limited"}""", status = HttpStatusCode.TooManyRequests),
-                features = testFeatures,
-            )
-        }
-
-        val response = client.get("/v1/artist-events?provider=seatgeek&artist=Phoebe&limit=1")
-
-        assertEquals(HttpStatusCode.BadGateway, response.status)
-        assertTrue(response.bodyAsText().contains("SeatGeek API returned HTTP 429"))
-    }
 
     @Test
     fun artistEventsReturnsServiceUnavailableWhenCredentialsAreMissing() = testApplication {
@@ -1053,7 +1038,6 @@ class PhoebeBackendApplicationTest {
 
     private fun testConfig(
         ticketmasterApiKey: String? = "tm-key",
-        seatGeekClientId: String? = "sg-id",
         geniusAccessToken: String? = "genius-token",
         allowedOrigins: List<String> = emptyList(),
         allowAnyOrigin: Boolean = false,
@@ -1065,7 +1049,6 @@ class PhoebeBackendApplicationTest {
     ): PhoebeBackendConfig =
         PhoebeBackendConfig(
             ticketmasterApiKey = ticketmasterApiKey,
-            seatGeekClientId = seatGeekClientId,
             geniusAccessToken = geniusAccessToken,
             musicBrainzUserAgent = musicBrainzUserAgent,
             allowedOrigins = allowedOrigins,

@@ -3666,9 +3666,11 @@ private fun EventPill(label: String) {
 }
 
 private val com.phoebe.app.domain.EventDataProvider.label: String
+    @Suppress("DEPRECATION")
     get() = when (this) {
-        com.phoebe.app.domain.EventDataProvider.Ticketmaster -> "Ticketmaster"
-        com.phoebe.app.domain.EventDataProvider.SeatGeek -> "SeatGeek"
+        com.phoebe.app.domain.EventDataProvider.Ticketmaster,
+        com.phoebe.app.domain.EventDataProvider.SeatGeek,
+        -> "Ticketmaster"
     }
 
 private fun eventsHeaderSubtitle(events: ArtistEventsLoadState): String =

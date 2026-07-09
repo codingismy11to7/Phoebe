@@ -217,7 +217,6 @@ Run it locally on port `8088`:
 
 ```bash
 export TICKETMASTER_API_KEY=your-ticketmaster-consumer-key
-export SEATGEEK_CLIENT_ID=your-seatgeek-client-id
 export GENIUS_ACCESS_TOKEN=your-genius-client-access-token
 ./gradlew :backend:app:run
 ```
@@ -226,7 +225,6 @@ Or put local-only backend secrets in `~/.gradle/gradle.properties`; the `:backen
 
 ```properties
 TICKETMASTER_API_KEY=your-ticketmaster-consumer-key
-SEATGEEK_CLIENT_ID=your-seatgeek-client-id
 GENIUS_ACCESS_TOKEN=your-genius-client-access-token
 ```
 
@@ -234,7 +232,6 @@ The VS Code and Codex `Phoebe Backend` run configs also load optional local secr
 
 ```bash
 TICKETMASTER_API_KEY=your-ticketmaster-consumer-key
-SEATGEEK_CLIENT_ID=your-seatgeek-client-id
 GENIUS_ACCESS_TOKEN=your-genius-client-access-token
 ```
 
@@ -260,7 +257,6 @@ If the backend lives in another Vercel team or account, add `--scope <team-slug-
 In the Vercel project, add these Production environment variables:
 
 - `TICKETMASTER_API_KEY`
-- `SEATGEEK_CLIENT_ID`
 - `GENIUS_ACCESS_TOKEN`: Genius client access token used only by the backend
 - `ALLOWED_ORIGINS`: comma-separated browser origins allowed to call the backend, required in Production unless `BACKEND_ALLOW_ANY_ORIGIN=true`
 - `BACKEND_ALLOW_ANY_ORIGIN`, optional explicit escape hatch for permissive browser CORS

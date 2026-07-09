@@ -149,7 +149,6 @@ The legacy `PHOEBE_EVENTS_BACKEND_URL` and `VERCEL_PROJECT_ID_EVENTS_PROD` secre
 Configure these environment variables in the Vercel production project:
 
 - `TICKETMASTER_API_KEY`
-- `SEATGEEK_CLIENT_ID`
 - `GENIUS_ACCESS_TOKEN`: Genius client access token used only by the backend
 - `ALLOWED_ORIGINS`: comma-separated browser origin allowlist, required in Production unless `BACKEND_ALLOW_ANY_ORIGIN=true`
 - `BACKEND_ALLOW_ANY_ORIGIN`, optional explicit escape hatch for permissive browser CORS

@@ -154,6 +154,21 @@ class UserArtifactsRepositoryDesktopTest {
     }
 
     @Test
+    fun backupPreviewAcceptsLegacySeatGeekEventProvider() = runTest {
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        val settingsRepository = AppSettingsRepository(db)
+        val artifactsRepository = UserArtifactsRepository(db)
+        val service = ImportExportService(settingsRepository, artifactsRepository)
+        artifactsRepository.upsertSmartPlaylist(smartPlaylist("legacy-events"))
+
+        val payload = service.exportBackupPackage()
+            .replace("\"provider\":\"Ticketmaster\"", "\"provider\":\"SeatGeek\"")
+
+        assertEquals(1, service.previewBackupPackage(payload).smartPlaylistCount)
+    }
+
+    @Test
     fun invalidArtifactJsonIsSkippedDuringRestore() = runTest {
         val (db, d) = newInMemoryPhoebeDatabase()
         driver = d
