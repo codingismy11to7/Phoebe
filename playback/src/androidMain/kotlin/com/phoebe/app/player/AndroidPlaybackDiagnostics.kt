@@ -108,11 +108,14 @@ internal object PhoebeLoadControlConfig {
                 profile.minBufferMs,
                 profile.maxBufferMs,
                 BufferForPlaybackMs,
-                BufferForPlaybackAfterRebufferMs,
+                bufferForPlaybackAfterRebufferMs(profile),
             )
             .setTargetBufferBytes(profile.targetBufferBytes)
             .setPrioritizeTimeOverSizeThresholds(false)
             .build()
+
+    internal fun bufferForPlaybackAfterRebufferMs(profile: PhoebeLoadControlProfile): Int =
+        minOf(BufferForPlaybackAfterRebufferMs, profile.minBufferMs)
 }
 
 internal data class PhoebeLoadControlProfile(

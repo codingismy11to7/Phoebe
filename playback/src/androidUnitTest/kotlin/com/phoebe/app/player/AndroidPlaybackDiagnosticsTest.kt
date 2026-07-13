@@ -88,9 +88,20 @@ class AndroidPlaybackDiagnosticsTest {
         )
 
         profiles.forEach { profile ->
-            assertTrue(profile.minBufferMs >= PhoebeLoadControlConfig.BufferForPlaybackAfterRebufferMs)
+            assertTrue(
+                PhoebeLoadControlConfig.bufferForPlaybackAfterRebufferMs(profile) <= profile.minBufferMs,
+            )
             assertTrue(profile.maxBufferMs >= profile.minBufferMs)
             assertTrue(profile.targetBufferBytes > 0)
         }
+
+        assertEquals(
+            PhoebeLoadControlConfig.BufferForPlaybackAfterRebufferMs,
+            PhoebeLoadControlConfig.bufferForPlaybackAfterRebufferMs(profiles.first()),
+        )
+        assertEquals(
+            PhoebeLoadControlConfig.CrossfadeMinBufferMs,
+            PhoebeLoadControlConfig.bufferForPlaybackAfterRebufferMs(profiles.last()),
+        )
     }
 }
