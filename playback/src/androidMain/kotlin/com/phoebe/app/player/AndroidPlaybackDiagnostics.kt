@@ -59,16 +59,16 @@ internal object PhoebeLoadControlConfig {
     const val RelaxedMainMinBufferMs = 15_000
     const val RelaxedMainMaxBufferMs = 75_000
     const val RelaxedMainTargetBufferBytes = 6 * 1024 * 1024
-    const val MainMinBufferMs = 12_000
-    const val MainMaxBufferMs = 45_000
-    const val MainTargetBufferBytes = 4 * 1024 * 1024
-    const val ConstrainedMainMaxBufferMs = 30_000
-    const val ConstrainedMainTargetBufferBytes = 2 * 1024 * 1024
+    // A metered network is often also the least reliable one. Keeping a modestly larger
+    // runway here avoids a cycle of short re-buffers when reception briefly drops.
+    const val ConstrainedMainMinBufferMs = 20_000
+    const val ConstrainedMainMaxBufferMs = 90_000
+    const val ConstrainedMainTargetBufferBytes = 4 * 1024 * 1024
     const val CrossfadeMinBufferMs = 2_000
     const val CrossfadeMaxBufferMs = 12_000
     const val CrossfadeTargetBufferBytes = 1 * 1024 * 1024
     const val BufferForPlaybackMs = 750
-    const val BufferForPlaybackAfterRebufferMs = 2_000
+    const val BufferForPlaybackAfterRebufferMs = 5_000
 
     fun create(
         engine: PlaybackEnginePath,
@@ -90,7 +90,7 @@ internal object PhoebeLoadControlConfig {
             )
         } else if (!uiVisible || constrainedNetwork) {
             PhoebeLoadControlProfile(
-                minBufferMs = MainMinBufferMs,
+                minBufferMs = ConstrainedMainMinBufferMs,
                 maxBufferMs = ConstrainedMainMaxBufferMs,
                 targetBufferBytes = ConstrainedMainTargetBufferBytes,
             )
@@ -108,11 +108,14 @@ internal object PhoebeLoadControlConfig {
                 profile.minBufferMs,
                 profile.maxBufferMs,
                 BufferForPlaybackMs,
-                BufferForPlaybackAfterRebufferMs,
+                bufferForPlaybackAfterRebufferMs(profile),
             )
             .setTargetBufferBytes(profile.targetBufferBytes)
             .setPrioritizeTimeOverSizeThresholds(false)
             .build()
+
+    internal fun bufferForPlaybackAfterRebufferMs(profile: PhoebeLoadControlProfile): Int =
+        minOf(BufferForPlaybackAfterRebufferMs, profile.minBufferMs)
 }
 
 internal data class PhoebeLoadControlProfile(

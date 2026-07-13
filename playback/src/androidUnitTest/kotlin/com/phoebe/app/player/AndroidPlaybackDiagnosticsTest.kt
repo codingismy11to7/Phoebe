@@ -19,7 +19,7 @@ class AndroidPlaybackDiagnosticsTest {
     }
 
     @Test
-    fun media3LoadControlTightensBuffersOnConstrainedNetwork() {
+    fun media3LoadControlBuildsMoreRunwayOnConstrainedNetwork() {
         val wifi = PhoebeLoadControlConfig.profileFor(
             engine = PlaybackEnginePath.Media3,
             constrainedNetwork = false,
@@ -31,14 +31,16 @@ class AndroidPlaybackDiagnosticsTest {
             uiVisible = true,
         )
 
-        assertTrue(cellular.maxBufferMs < wifi.maxBufferMs)
+        assertTrue(cellular.minBufferMs > wifi.minBufferMs)
+        assertTrue(cellular.maxBufferMs > wifi.maxBufferMs)
         assertTrue(cellular.targetBufferBytes < wifi.targetBufferBytes)
+        assertEquals(PhoebeLoadControlConfig.ConstrainedMainMinBufferMs, cellular.minBufferMs)
         assertEquals(PhoebeLoadControlConfig.ConstrainedMainMaxBufferMs, cellular.maxBufferMs)
         assertEquals(PhoebeLoadControlConfig.ConstrainedMainTargetBufferBytes, cellular.targetBufferBytes)
     }
 
     @Test
-    fun media3LoadControlTightensBuffersWhenUiIsHidden() {
+    fun media3LoadControlUsesResilientBufferWhenUiIsHidden() {
         val foreground = PhoebeLoadControlConfig.profileFor(
             engine = PlaybackEnginePath.Media3,
             constrainedNetwork = false,
@@ -50,8 +52,10 @@ class AndroidPlaybackDiagnosticsTest {
             uiVisible = false,
         )
 
-        assertTrue(background.maxBufferMs < foreground.maxBufferMs)
+        assertTrue(background.minBufferMs > foreground.minBufferMs)
+        assertTrue(background.maxBufferMs > foreground.maxBufferMs)
         assertTrue(background.targetBufferBytes < foreground.targetBufferBytes)
+        assertEquals(PhoebeLoadControlConfig.ConstrainedMainMinBufferMs, background.minBufferMs)
         assertEquals(PhoebeLoadControlConfig.ConstrainedMainMaxBufferMs, background.maxBufferMs)
         assertEquals(PhoebeLoadControlConfig.ConstrainedMainTargetBufferBytes, background.targetBufferBytes)
     }
@@ -84,9 +88,20 @@ class AndroidPlaybackDiagnosticsTest {
         )
 
         profiles.forEach { profile ->
-            assertTrue(profile.minBufferMs >= PhoebeLoadControlConfig.BufferForPlaybackAfterRebufferMs)
+            assertTrue(
+                PhoebeLoadControlConfig.bufferForPlaybackAfterRebufferMs(profile) <= profile.minBufferMs,
+            )
             assertTrue(profile.maxBufferMs >= profile.minBufferMs)
             assertTrue(profile.targetBufferBytes > 0)
         }
+
+        assertEquals(
+            PhoebeLoadControlConfig.BufferForPlaybackAfterRebufferMs,
+            PhoebeLoadControlConfig.bufferForPlaybackAfterRebufferMs(profiles.first()),
+        )
+        assertEquals(
+            PhoebeLoadControlConfig.CrossfadeMinBufferMs,
+            PhoebeLoadControlConfig.bufferForPlaybackAfterRebufferMs(profiles.last()),
+        )
     }
 }
