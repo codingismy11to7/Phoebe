@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -262,16 +263,41 @@ fun UpNextList(
                 )
             }
         }
-        upNext.forEachIndexed { index, track ->
-            if (dividerUpNextIndex == index && upNextDivider != null) {
-                item(
-                    key = "keep-playing-divider-${upNextDivider.beforeQueueIndex}",
-                    contentType = "keep-playing-divider",
-                ) {
-                    KeepPlayingDivider(upNextDivider.label)
+        val dividerItemIndex = dividerUpNextIndex ?: -1
+        val dividerMarker = upNextDivider
+        val hasDivider = dividerItemIndex in 0 until upNext.size && dividerMarker != null
+        val totalCount = upNext.size + if (hasDivider) 1 else 0
+        items(
+            count = totalCount,
+            key = { itemIndex ->
+                if (hasDivider) {
+                    when {
+                        itemIndex < dividerItemIndex -> upNext[itemIndex].id
+                        itemIndex == dividerItemIndex ->
+                            "keep-playing-divider-${requireNotNull(dividerMarker).beforeQueueIndex}"
+                        else -> upNext[itemIndex - 1].id
+                    }
+                } else {
+                    upNext[itemIndex].id
                 }
-            }
-            item(key = track.id, contentType = "up-next") {
+            },
+            contentType = { itemIndex ->
+                if (hasDivider && itemIndex == dividerItemIndex) {
+                    "keep-playing-divider"
+                } else {
+                    "up-next"
+                }
+            },
+        ) { itemIndex ->
+            if (hasDivider && itemIndex == dividerItemIndex) {
+                KeepPlayingDivider(requireNotNull(dividerMarker).label)
+            } else {
+                val index = if (hasDivider && itemIndex > dividerItemIndex) {
+                    itemIndex - 1
+                } else {
+                    itemIndex
+                }
+                val track = upNext[index]
                 val isDragging = draggingTrackId == track.id
                 val draggingId = draggingTrackId
                 val startIndex = dragStartIndex
