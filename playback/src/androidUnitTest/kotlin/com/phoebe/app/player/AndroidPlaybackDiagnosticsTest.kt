@@ -1,10 +1,23 @@
 package com.phoebe.app.player
 
+import com.phoebe.app.domain.RepeatMode
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class AndroidPlaybackDiagnosticsTest {
+    @Test
+    fun platformQueueWindowKeepsUpcomingSkipsOnTheExistingMedia3Player() {
+        assertEquals(24, AndroidPlatformQueueWindowSize)
+        assertEquals(24, platformQueueWindowEndExclusive(0, 50, RepeatMode.Off))
+        assertEquals(50, platformQueueWindowEndExclusive(42, 50, RepeatMode.All))
+    }
+
+    @Test
+    fun platformQueueWindowKeepsRepeatOneOnTheCurrentTrack() {
+        assertEquals(43, platformQueueWindowEndExclusive(42, 50, RepeatMode.One))
+    }
+
     @Test
     fun media3LoadControlUsesRelaxedProfileForForegroundUnmeteredPlayback() {
         val profile = PhoebeLoadControlConfig.profileFor(
