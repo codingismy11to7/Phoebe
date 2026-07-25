@@ -175,7 +175,7 @@ PR CI runs desktop tests, Wasm tests, Roborazzi screenshot verification, Playwri
 ./gradlew :androidApp:assembleDebug
 ```
 
-The Android SDK path is set in `local.properties` for this machine and ignored by git.
+The Android SDK path is set in `local.properties` for this machine and ignored by git. On NixOS, skip `local.properties` entirely and use the Nix flake dev shell instead, which provides the SDK (and JDK 21) via environment variables — see `docs/nixos-dev-setup.md`.
 
 ### Google Maps key for local development
 

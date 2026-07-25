@@ -27,7 +27,7 @@ build:
 | Decision | Choice | Rationale |
 | --- | --- | --- |
 | JDK 22 problem | Move the project to JDK 21 | 21 is LTS and already what CI installs, so CI stops downloading a second JDK. Pinning an old nixpkgs for 22 was rejected as building on an EOL JDK. |
-| SDK source | nixpkgs `androidenv.composeAndroidPackages` | No extra flake inputs; binaries patched for NixOS; nixpkgs already carries platform 36, build-tools 36.1.0, and an API 36 system image. |
+| SDK source | nixpkgs `androidenv.composeAndroidPackages` | No extra flake inputs; binaries patched for NixOS; nixpkgs already carries platform 36, build-tools 36.0.0, and an API 36 system image. |
 | Shell scope | Android build path plus emulator | Enough to build, install, and run without a physical device. |
 | Systems | `x86_64-linux` only | Nix is not used on a Mac here. Darwin can be added later in a few lines. |
 | System image | `36 / google_apis / x86_64` | The app uses Google Maps and Cast, which need Play services. `google_apis` supplies them while keeping `adb root` available, unlike `google_apis_playstore`. |
@@ -42,7 +42,10 @@ A single `nixpkgs` input, `x86_64-linux` only, with `allowUnfree` and
 The Android SDK is composed with:
 
 - `platformVersions = [ "36" ]` — matches `compileSdk = 36`
-- `buildToolsVersions = [ "36.1.0" ]`
+- `buildToolsVersions = [ "36.0.0" ]` — not the newer `36.1.0` nixpkgs also
+  carries: AGP 9.2.1 defaults to build-tools `"<compileSdk>.0.0"` when no
+  version is set explicitly in Gradle, so provisioning anything else makes
+  AGP try (and fail) to install `36.0.0` into the read-only Nix store
 - `systemImageTypes = [ "google_apis" ]`, `abiVersions = [ "x86_64" ]`
 - emulator, platform-tools, and cmdline-tools included
 
@@ -69,7 +72,7 @@ already active on this machine, so shell entry is cached after the first load.
 
 ### JDK 22 to 21 migration
 
-Ten Kotlin sites across four files, plus one Dockerfile. Each is either a
+Nine Kotlin sites across four files, plus one Dockerfile. Each is either a
 toolchain declaration (`jvmToolchain(22)`), a bytecode target
 (`JvmTarget.JVM_22`), or a launcher selection (`JavaLanguageVersion.of(22)`):
 
@@ -103,6 +106,8 @@ tooling can be added to the same shell later.
 
 - AGP 9.2.1's default `buildToolsVersion` may not be 36.1.0. If it differs,
   either install the version AGP wants or pin `buildToolsVersion` explicitly.
+  (Resolved during implementation: AGP's default is `36.0.0`, not `36.1.0`;
+  `buildToolsVersion` was pinned to `36.0.0` accordingly — see Task 3.)
 - `android.aapt2FromMavenOverride` may have been renamed or dropped in AGP 9.
   If so, find the current override mechanism.
 - KMP's iOS targets may misbehave during Gradle configuration on Linux.
