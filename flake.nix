@@ -49,7 +49,7 @@
         # avdmanager, sdkmanager, emulator, d8, r8 and friends, so no PATH
         # manipulation is needed here.
         shellHook = ''
-          echo "Phoebe dev shell: JDK $(java -version 2>&1 | head -n1 | cut -d'\"' -f2), Android SDK ${platformVersion}"
+          echo "Phoebe dev shell: JDK $(java -version 2>&1 | head -n1 | awk -F'"' '{print $2}'), Android SDK ${platformVersion}"
         '';
       };
     };
