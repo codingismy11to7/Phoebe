@@ -69,14 +69,21 @@ already active on this machine, so shell entry is cached after the first load.
 
 ### JDK 22 to 21 migration
 
-Five source sites plus one Dockerfile:
+Ten Kotlin sites across four files, plus one Dockerfile. Each is either a
+toolchain declaration (`jvmToolchain(22)`), a bytecode target
+(`JvmTarget.JVM_22`), or a launcher selection (`JavaLanguageVersion.of(22)`):
 
-- `build-logic/convention/src/main/kotlin/phoebe/ConventionHelpers.kt:71`
-- `build-logic/convention/src/main/kotlin/phoebe.backend.gradle.kts:11`
-- `build-logic/convention/src/main/kotlin/phoebe.backend.library.gradle.kts:10`
-- `composeApp/build.gradle.kts:52` (`desktopJavaLanguageVersion`)
-- `composeApp/build.gradle.kts:149` (`jvmToolchain`)
+- `build-logic/convention/src/main/kotlin/phoebe/ConventionHelpers.kt:71,78`
+- `build-logic/convention/src/main/kotlin/phoebe.backend.gradle.kts:11,13`
+- `build-logic/convention/src/main/kotlin/phoebe.backend.library.gradle.kts:10,12`
+- `composeApp/build.gradle.kts:52` (`desktopJavaLanguageVersion`), `:149`
+  (`jvmToolchain`), `:177` (desktop `jvmTarget`)
 - `Dockerfile.vercel` — `temurin:22-jdk` and `temurin:22-jre` become 21
+
+**The Android target is unaffected.** It already compiles to
+`JvmTarget.JVM_17` (`composeApp/build.gradle.kts:161`), so only the desktop
+and backend JVM targets change bytecode level. For Android, the toolchain
+version is the only thing that mattered, and it is what blocked the build.
 
 CI needs no change: `JAVA_VERSION` is already 21 and every workflow installs
 Temurin 21. The bump removes the foojay JDK download from CI as a side effect.
@@ -99,6 +106,12 @@ tooling can be added to the same shell later.
 - `android.aapt2FromMavenOverride` may have been renamed or dropped in AGP 9.
   If so, find the current override mechanism.
 - KMP's iOS targets may misbehave during Gradle configuration on Linux.
+  Library modules can be opted out with `-PphoebeIosTargets=false`, which the
+  build already supports, or with `ORG_GRADLE_PROJECT_phoebeIosTargets=false`
+  in the dev shell. Note that `composeApp` declares `iosArm64()` and
+  `iosSimulatorArm64()` unconditionally, so the flag is only a partial
+  mitigation. Kotlin/Native distribution downloads are harmless here because
+  no iOS compilation runs on Linux.
 - Emulator GPU mode is unverified. Try `-gpu host` first, since `/dev/dri`
   is present, and fall back to swiftshader.
 
