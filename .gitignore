@@ -25,3 +25,6 @@ test-results/
 iosApp/Vendor/GoogleCastSDK/
 .vercel
 .env*
+!.envrc
+
+.direnv/
