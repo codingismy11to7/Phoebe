@@ -17,8 +17,11 @@
       };
 
       # Must match compileSdk / targetSdk in androidApp/build.gradle.kts.
+      # AGP defaults to build-tools "<compileSdk>.0.0" unless a
+      # buildToolsVersion is set explicitly in Gradle, so this must track
+      # that default (36.0.0), not just the latest 36.x release.
       platformVersion = "36";
-      buildToolsVersion = "36.1.0";
+      buildToolsVersion = "36.0.0";
 
       androidComposition = pkgs.androidenv.composeAndroidPackages {
         platformVersions = [ platformVersion ];
