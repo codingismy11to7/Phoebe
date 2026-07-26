@@ -1,6 +1,7 @@
 package com.phoebe.app.player
 
 import android.net.Uri
+import com.phoebe.app.AndroidContextHolder
 
 enum class ArtworkType(val segment: String) {
     ALBUM("album"),
@@ -27,6 +28,9 @@ fun artworkUri(packageName: String, type: ArtworkType, id: String): Uri =
         .appendPath(type.segment)
         .appendPath(id)
         .build()
+
+/** Application id of the running process, for building artwork authorities. */
+internal fun runningPackageName(): String = AndroidContextHolder.application.packageName
 
 fun parseArtworkUri(uri: Uri): Pair<ArtworkType, String>? {
     if (uri.scheme != "content") return null

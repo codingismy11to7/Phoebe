@@ -79,7 +79,14 @@ internal class AndroidAutoBrowseTree(
             else -> browseFolderItem(
                 mediaId = mediaId,
                 title = title,
-                artworkUri = thumbUrl?.let { Uri.parse(it) },
+                // Individual albums, artists and playlists: serve their artwork
+                // through the provider, since the car cannot fetch remote URLs.
+                artworkUri = thumbUrl?.takeIf { it.isNotBlank() }?.let {
+                    val entity = BrowseMediaIds.parseAlbumId(mediaId)?.let { id -> ArtworkType.ALBUM to id }
+                        ?: BrowseMediaIds.parseArtistId(mediaId)?.let { id -> ArtworkType.ARTIST to id }
+                        ?: BrowseMediaIds.parsePlaylistId(mediaId)?.let { id -> ArtworkType.PLAYLIST to id }
+                    entity?.let { (type, id) -> artworkUri(runningPackageName(), type, id) }
+                },
             )
         }
 
