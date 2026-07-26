@@ -12,6 +12,10 @@ permissions:
 jobs:
   backend-production-config:
     name: Backend production config
+    # Skipped on forks: this validates the upstream project's live Vercel
+    # production environment and requires VERCEL_* secrets a fork does not
+    # inherit, so it can only ever fail there.
+    if: github.event.repository.fork == false
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
