@@ -51,7 +51,11 @@ internal fun browseTrackItem(track: Track): MediaItem {
                 .setIsBrowsable(false)
                 .setIsPlayable(true)
                 .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
-                .apply { track.thumbUrl?.let { setArtworkUri(it.toAndroidUri()) } }
+                .apply {
+                    track.thumbUrl?.takeIf { it.isNotBlank() }?.let {
+                        setArtworkUri(artworkUri(runningPackageName(), ArtworkType.TRACK, track.id))
+                    }
+                }
                 .build(),
         )
         .build()
@@ -87,21 +91,24 @@ internal fun Artist.toBrowseItem(): MediaItem =
     browseFolderItem(
         mediaId = BrowseMediaIds.artist(id),
         title = title,
-        artworkUri = thumbUrl?.toAndroidUri(),
+        artworkUri = thumbUrl?.takeIf { it.isNotBlank() }
+            ?.let { artworkUri(runningPackageName(), ArtworkType.ARTIST, id) },
     )
 
 internal fun Album.toBrowseItem(): MediaItem =
     browseFolderItem(
         mediaId = BrowseMediaIds.album(id),
         title = title,
-        artworkUri = thumbUrl?.toAndroidUri(),
+        artworkUri = thumbUrl?.takeIf { it.isNotBlank() }
+            ?.let { artworkUri(runningPackageName(), ArtworkType.ALBUM, id) },
     )
 
 internal fun Playlist.toBrowseItem(): MediaItem =
     browseFolderItem(
         mediaId = BrowseMediaIds.playlist(id),
         title = title,
-        artworkUri = thumbUrl?.toAndroidUri(),
+        artworkUri = thumbUrl?.takeIf { it.isNotBlank() }
+            ?.let { artworkUri(runningPackageName(), ArtworkType.PLAYLIST, id) },
     )
 
 internal const val InAppPlaybackExtra: String = "com.phoebe.app.IN_APP_PLAYBACK"

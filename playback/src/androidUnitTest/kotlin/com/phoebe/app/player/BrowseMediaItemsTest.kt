@@ -55,6 +55,12 @@ class BrowseMediaItemsTest {
         assertTrue(metadata.isPlayable == true)
         assertFalse(metadata.isBrowsable == true)
         assertEquals(MediaMetadata.MEDIA_TYPE_MUSIC, metadata.mediaType)
+        // Artwork points at the provider, not the remote URL: the car has no
+        // HTTP stack and could not load https://example.test/art.jpg.
+        assertEquals(
+            "content://${runningPackageName()}.artwork/track/track-1",
+            metadata.artworkUri.toString(),
+        )
     }
 
     @Test
