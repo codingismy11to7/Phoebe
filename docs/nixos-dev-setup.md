@@ -145,8 +145,12 @@ acceleration — typically membership in the `kvm` group. Without it, the
 emulator either fails to start or falls back to software CPU emulation slow
 enough to be unusable.
 
-`phoebe-avd` creates an AVD named `phoebe-api36` (API 36, `google_apis`,
-`x86_64`) if it doesn't already exist; it's safe to run repeatedly:
+The emulator runs **Android Automotive OS**, which is the app's real target
+in the car, not a phone image.
+
+`phoebe-avd` creates an AVD named `phoebe-aaos-api33` (API 33,
+`android-automotive`, `x86_64`, on the `automotive_1080p_landscape` device
+profile) if it doesn't already exist; it's safe to run repeatedly:
 
 ```bash
 nix develop --command phoebe-avd
@@ -159,6 +163,49 @@ through to the underlying `emulator` binary:
 nix develop --command phoebe-emulator
 ```
 
+### Why the emulator is API 33 while `compileSdk` is 36
+
+nixpkgs carries no `android-automotive` system image at API 36 — the newest
+are 33 and `35x`, and only 33 is verified here. So `flake.nix` provisions
+**two** platforms: 36 to compile against, 33 for the emulator to run. `minSdk`
+is 26, so the app runs fine on the older platform. Expect the emulator to be
+a slightly older Android than a current production vehicle.
+
+Under software rendering the AAOS UI is noticeably heavier than a phone
+image; first boot takes minutes and the emulator logs `Your GPU drivers may
+have a bug` before falling back to SwiftShader/lavapipe. That's expected.
+
+### Simulating a moving car
+
+Distraction-optimization restrictions only engage when the car thinks it's
+driving. `cmd car_service enable-uxr` is gated behind a platform signature
+and won't work from a shell even as root, but injecting vehicle properties
+does:
+
+```bash
+# start driving
+adb shell cmd car_service inject-vhal-event 0x11400400 8    # gear -> DRIVE
+adb shell cmd car_service inject-vhal-event 0x11600207 30   # speed -> 30
+
+# park again
+adb shell cmd car_service inject-vhal-event 0x11400400 4    # gear -> PARK
+adb shell cmd car_service inject-vhal-event 0x11600207 0    # speed -> 0
+```
+
+Verify via the transition log, **not** `get-property-value` — that reads the
+VHAL's backing value and does not reflect injected events, which makes it
+look like the injection silently failed:
+
+```bash
+adb shell dumpsys car_service | grep "DO changed" | tail -3
+```
+
+While "driving", Phoebe's own UI is blocked with "You can't use this feature
+while driving", because it declares no distraction-optimized activities
+(`cmd car_service get-do-activities com.phoebe.app.debug` reports none). That
+is correct for a media app: the rich UI is a parked experience, and the
+system-rendered browse tree is the driving surface.
+
 ### Why both scripts pin `ANDROID_AVD_HOME`
 
 `avdmanager` (used by `phoebe-avd`) honors `$XDG_CONFIG_HOME` when it's set
@@ -170,7 +217,7 @@ mismatch means `avdmanager` and `emulator` disagree about where the AVD
 lives, and `phoebe-emulator` fails immediately with:
 
 ```
-ERROR | Unknown AVD name [phoebe-api36], use -list-avds to see valid list.
+ERROR | Unknown AVD name [phoebe-aaos-api33], use -list-avds to see valid list.
 ```
 
 Both `phoebe-avd` and `phoebe-emulator` export `ANDROID_AVD_HOME="$HOME/.android/avd"`
@@ -237,9 +284,9 @@ nix develop --command adb emu kill
   you're reaching into the SDK directly instead of using the `bin/`
   wrappers.
 - `build-tools` contains exactly the one pinned version (`36.0.0`).
-- `platforms` contains `android-36`.
-- `system-images` contains `android-36` (`google_apis`/`x86_64`) once the
-  emulator packages have been fetched.
+- `platforms` contains both `android-33` and `android-36`.
+- `system-images` contains `android-33` (`android-automotive`/`x86_64`) once
+  the emulator packages have been fetched.
 
 ## Quick reference
 

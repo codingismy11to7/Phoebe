@@ -36,14 +36,21 @@
       # AGP defaults to build-tools "<compileSdk>.0.0" unless a
       # buildToolsVersion is set explicitly in Gradle, so this must track
       # that default (36.0.0), not just the latest 36.x release.
-      platformVersion = "36";
+      compileSdkVersion = "36";
       buildToolsVersion = "36.0.0";
-      systemImageType = "google_apis";
+
+      # The emulator runs Android Automotive OS, the actual target for this
+      # app. nixpkgs carries no automotive system image at API 36, so the
+      # emulator platform and the compile platform differ deliberately. minSdk
+      # is 26, so API 33 runs the app fine.
+      emulatorSdkVersion = "33";
+      systemImageType = "android-automotive";
       abiVersion = "x86_64";
-      avdName = "phoebe-api${platformVersion}";
+      avdDevice = "automotive_1080p_landscape";
+      avdName = "phoebe-aaos-api${emulatorSdkVersion}";
 
       androidComposition = pkgs.androidenv.composeAndroidPackages {
-        platformVersions = [ platformVersion ];
+        platformVersions = [ emulatorSdkVersion compileSdkVersion ];
         buildToolsVersions = [ buildToolsVersion ];
         systemImageTypes = [ systemImageType ];
         abiVersions = [ abiVersion ];
@@ -83,7 +90,8 @@
         fi
         echo "no" | "${avdmanager}" create avd \
           --name "${avdName}" \
-          --package "system-images;android-${platformVersion};${systemImageType};${abiVersion}"
+          --device "${avdDevice}" \
+          --package "system-images;android-${emulatorSdkVersion};${systemImageType};${abiVersion}"
         echo "Created AVD '${avdName}'."
       '';
 
@@ -117,7 +125,7 @@
         # manipulation is needed here.
         shellHook = ''
           ${avdHomeExport}
-          echo "Phoebe dev shell: JDK $(java -version 2>&1 | head -n1 | awk -F'"' '{print $2}'), Android SDK ${platformVersion}" >&2
+          echo "Phoebe dev shell: JDK $(java -version 2>&1 | head -n1 | awk -F'"' '{print $2}'), Android SDK ${compileSdkVersion}" >&2
         '';
       };
     };

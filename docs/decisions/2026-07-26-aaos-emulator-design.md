@@ -123,23 +123,50 @@ later increment.
 
 - The AAOS emulator is heavier than the phone emulator and this machine has
   no working GPU acceleration — the emulator logs "Your GPU drivers may have
-  a bug" and falls back to SwiftShader/lavapipe. Boot may be slow enough to
-  need a longer timeout than the phone emulator's ~25 seconds.
+  a bug" and falls back to SwiftShader/lavapipe. Boot is slower than the
+  phone emulator's ~25 seconds.
 - `automotive_1080p_landscape` is confirmed present in `avdmanager list
-  device`, but AVD creation against the automotive image is unverified.
-- Whether Phoebe appears in the AAOS media app list without the automotive
-  feature declaration is genuinely unknown. Both outcomes are informative and
-  neither blocks this increment.
+  device`. (Resolved: AVD creation against the automotive image works.)
+
+## Findings
+
+All of the following were established on the emulator built by this flake.
+
+**The app runs on AAOS unmodified**, and its layout adapts correctly to
+automotive landscape — sidebar navigation, provider picker, transport bar.
+No automotive-specific UI work was needed.
+
+**Sign-in works without a browser.** Plex uses a PIN flow (`plex.tv/api/v2/pins`
+then polling); the UI displays the code for approval on a phone and never
+tries to launch a browser. Subsonic/Navidrome is a credentials form, typeable
+while parked.
+
+**Two app-side changes were required** to appear in the car's media source
+list. They are not part of this increment and ship separately:
+
+1. AAOS needs `androidx.car.app.launchable` on the `MediaBrowserService`. The
+   Android Auto opt-in the app already had is a *different* declaration, so
+   AAOS logged "No opt-in info found" and skipped the service as belonging to
+   a "non media template app".
+2. Browse artwork URIs must use the resource *name* form. The numeric-id form
+   made AAOS call `getDrawable(0)`, throwing
+   `Resources$NotFoundException: Resource ID #0x0` and killing the entire
+   `com.android.car.media` process.
+
+With those, the browse tree renders in the AAOS media template with real
+library content, and browse, search and playback all work. **Per-item album
+and artist artwork does not render** — that remains open.
+
+**Drive-mode blocking behaves correctly.** The app declares no
+distraction-optimized activities, so its own UI is blocked while driving and
+the system-rendered browse tree serves the driver. That is the right shape
+for a media app.
 
 ## Verification
 
-1. `nix develop` provides an SDK containing `system-images/android-33` and
-   platforms for both 33 and 36.
-2. `phoebe-avd` creates `phoebe-aaos-api33` and is idempotent on re-run.
-3. The emulator boots headless to `sys.boot_completed=1`.
-4. `adb install` of the existing debug APK succeeds.
-5. Recorded observation: whether Phoebe appears in the car's media app list,
-   in the general launcher, or nowhere — and if it appears, what happens when
-   it is opened.
-
-Item 5 is the deliverable that defines increment 2.
+1. `nix develop` provides an SDK containing `system-images/android-33`
+   (`android-automotive`) and platforms for both 33 and 36. ✅
+2. `phoebe-avd` creates `phoebe-aaos-api33` and is idempotent on re-run. ✅
+3. The emulator boots to `sys.boot_completed=1`. ✅
+4. `adb install` of the debug APK succeeds. ✅
+5. Recorded observation of what AAOS does with the app — see Findings. ✅
