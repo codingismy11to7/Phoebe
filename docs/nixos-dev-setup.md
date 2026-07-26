@@ -6,8 +6,7 @@ SDK**. Everything comes from a Nix flake dev shell (`flake.nix` at the repo
 root) plus `direnv`. If you've forgotten why any of this exists, read the
 "why" callouts below before changing anything.
 
-Design record: `docs/superpowers/specs/2026-07-25-nix-android-dev-env-design.md`
-Implementation plan: `docs/superpowers/plans/2026-07-25-nix-android-dev-env.md`
+Design record: `docs/decisions/2026-07-25-nix-android-dev-env-design.md`
 
 ## What `direnv allow` sets up
 
