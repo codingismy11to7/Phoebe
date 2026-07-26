@@ -94,6 +94,7 @@ import io.ktor.client.request.header
 import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.Url
 import io.ktor.http.contentLength
+import io.ktor.http.isSuccess
 import io.ktor.utils.io.readAvailable
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.CancellationException
@@ -7277,9 +7278,19 @@ class CatalogRepository(
         if (!thumbUrl.isRemoteArtworkUrl()) return null
         return runCatching {
             withTimeoutOrNull(DownloadArtworkTimeoutMs) {
-                val bytes = httpClient.get(thumbUrl) {
+                val response = httpClient.get(thumbUrl) {
                     applyEmbyFamilyArtworkAuth(thumbUrl)
-                }.body<ByteArray>()
+                }
+                // An error page is still a body. Caching it would serve HTML as
+                // artwork forever, and the car cannot decode it into a
+                // placeholder — it just renders nothing.
+                if (!response.status.isSuccess()) {
+                    PhoebeLog.d("CatalogRepository") {
+                        "artwork fetch got ${response.status} for '$thumbUrl'"
+                    }
+                    return@withTimeoutOrNull null
+                }
+                val bytes = response.body<ByteArray>()
                 storage.writeBytes(cachePath, bytes)
                 bytes
             }
