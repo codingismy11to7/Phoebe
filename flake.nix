@@ -39,22 +39,27 @@
       androidSdk = "${androidComposition.androidsdk}/libexec/android-sdk";
 
       # Use the wrappers in the package's bin/ rather than reaching into
-      # cmdline-tools, whose directory is versioned ("19.0") and not "latest".
+      # cmdline-tools, whose directory is versioned (not "latest").
       avdmanager = "${androidComposition.androidsdk}/bin/avdmanager";
+
+      # avdmanager honors $XDG_CONFIG_HOME and would otherwise write the AVD
+      # to ~/.config/.android/avd, while the emulator binary's own default
+      # search order never looks there. Pin both tools to the same
+      # ~/.android/avd so they agree regardless of the host's XDG settings.
+      # Shared by the shellHook (so avdmanager/emulator invoked directly in
+      # the dev shell also agree) and both helper scripts below (so they
+      # still work when invoked outside the dev shell).
+      avdHomeExport = ''export ANDROID_AVD_HOME="$HOME/.android/avd"'';
 
       phoebe-avd = pkgs.writeShellScriptBin "phoebe-avd" ''
         set -euo pipefail
         export ANDROID_HOME="${androidSdk}"
         export ANDROID_SDK_ROOT="${androidSdk}"
         export JAVA_HOME="${pkgs.jdk21}"
-        # avdmanager honors $XDG_CONFIG_HOME and would otherwise write the AVD
-        # to ~/.config/.android/avd, while the emulator binary's own default
-        # search order never looks there. Pin both tools to the same
-        # ~/.android/avd so they agree regardless of the host's XDG settings.
+        ${avdHomeExport}
         # avdmanager only respects ANDROID_AVD_HOME if the directory already
         # exists, silently falling back to the XDG path otherwise, so create
         # it first.
-        export ANDROID_AVD_HOME="$HOME/.android/avd"
         mkdir -p "$ANDROID_AVD_HOME"
         if "${avdmanager}" list avd -c | grep -qx "${avdName}"; then
           echo "AVD '${avdName}' already exists."
@@ -70,8 +75,7 @@
         set -euo pipefail
         export ANDROID_HOME="${androidSdk}"
         export ANDROID_SDK_ROOT="${androidSdk}"
-        # Must match phoebe-avd's AVD location; see comment there.
-        export ANDROID_AVD_HOME="$HOME/.android/avd"
+        ${avdHomeExport}
         exec "${androidComposition.androidsdk}/bin/emulator" -avd "${avdName}" "$@"
       '';
     in
@@ -96,7 +100,8 @@
         # avdmanager, sdkmanager, emulator, d8, r8 and friends, so no PATH
         # manipulation is needed here.
         shellHook = ''
-          echo "Phoebe dev shell: JDK $(java -version 2>&1 | head -n1 | awk -F'"' '{print $2}'), Android SDK ${platformVersion}"
+          ${avdHomeExport}
+          echo "Phoebe dev shell: JDK $(java -version 2>&1 | head -n1 | awk -F'"' '{print $2}'), Android SDK ${platformVersion}" >&2
         '';
       };
     };

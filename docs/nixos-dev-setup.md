@@ -11,12 +11,16 @@ Implementation plan: `docs/superpowers/plans/2026-07-25-nix-android-dev-env.md`
 
 ## What `direnv allow` sets up
 
-`.envrc` at the repo root contains a single line, `use flake`. Running
-`direnv allow` once (per repo, or after `.envrc`/`flake.nix` change) lets
-direnv load `flake.nix`'s `devShells.x86_64-linux.default` automatically
-every time you `cd` into the repo — no manual `nix develop` needed. This
-machine has `nix-direnv` active, so after the first load the shell is cached
-and reappears almost instantly on later `cd`s.
+`.envrc` at the repo root guards `use flake` behind `has nix`, so contributors
+without Nix (this repo also has macOS/Windows contributors) get a no-op
+instead of a failure on every `cd`. On a machine with Nix, running `direnv
+allow` once lets direnv load `flake.nix`'s `devShells.x86_64-linux.default`
+automatically every time you `cd` into the repo — no manual `nix develop`
+needed. direnv re-prompts for `direnv allow` only when `.envrc` itself
+changes; this machine has `nix-direnv` active, which also reloads the shell
+automatically when `flake.nix`/`flake.lock` change (no re-allow needed for
+those), and after the first load the shell is cached and reappears almost
+instantly on later `cd`s.
 
 If you'd rather not use direnv, `nix develop --command <cmd>` (or
 `nix develop` for an interactive shell) gives you the identical environment
@@ -55,8 +59,9 @@ a standard Linux distribution's dynamic loader path (`/lib64/ld-linux-*.so`);
 NixOS doesn't have one there, so the Maven binary cannot execute.
 
 `nixpkgs`'s `androidenv` ships an `aapt2` inside its `build-tools` directory
-that has been **patched** (via Nix's `autoPatchelf` machinery) to use the
-Nix store's dynamic loader instead, so it actually runs on NixOS. The
+that has been **patched** (via Nix's `autoPatchelf` machinery — see
+`pkgs/development/mobile/androidenv/build-tools.nix:18,41` in nixpkgs) to use
+the Nix store's dynamic loader instead, so it actually runs on NixOS. The
 `GRADLE_OPTS` line tells AGP, via the `android.aapt2FromMavenOverride`
 Gradle property, to use that patched binary instead of fetching its own.
 
@@ -131,6 +136,11 @@ your own commands.)
 
 ## Creating and booting the emulator
 
+**Prerequisite:** the emulator needs access to `/dev/kvm` for CPU
+acceleration — typically membership in the `kvm` group. Without it, the
+emulator either fails to start or falls back to software CPU emulation slow
+enough to be unusable.
+
 `phoebe-avd` creates an AVD named `phoebe-api36` (API 36, `google_apis`,
 `x86_64`) if it doesn't already exist; it's safe to run repeatedly:
 
@@ -185,10 +195,10 @@ the usual fallback. This doc only covers the emulator running headless
 (verified below); a windowed run is a separate thing to confirm on your own
 display setup.
 
-### Headless boot (what was actually verified)
+### Headless boot
 
 ```bash
-nohup nix develop --command phoebe-emulator -no-window -no-audio -no-snapshot > emulator.log 2>&1 &
+nohup nix develop --command phoebe-emulator -no-window -no-audio -no-snapshot > /tmp/emulator.log 2>&1 &
 nix develop --command adb wait-for-device
 ```
 
@@ -217,12 +227,11 @@ nix develop --command adb emu kill
 
 ## Miscellaneous SDK layout notes
 
-- `cmdline-tools` inside the composed SDK is a **version directory**
-  (currently `21.0` on this machine — `flake.nix`'s own comment says `19.0`,
-  which was apparently never actually verified; trust `ls
-  "$ANDROID_HOME/cmdline-tools"` over that comment), not `latest` — don't
-  assume `cmdline-tools/latest` exists if you're reaching into the SDK
-  directly instead of using the `bin/` wrappers.
+- `cmdline-tools` inside the composed SDK is a **version directory**, not
+  `latest` — check `ls "$ANDROID_HOME/cmdline-tools"` for the current version
+  rather than assuming one; don't assume `cmdline-tools/latest` exists if
+  you're reaching into the SDK directly instead of using the `bin/`
+  wrappers.
 - `build-tools` contains exactly the one pinned version (`36.0.0`).
 - `platforms` contains `android-36`.
 - `system-images` contains `android-36` (`google_apis`/`x86_64`) once the
