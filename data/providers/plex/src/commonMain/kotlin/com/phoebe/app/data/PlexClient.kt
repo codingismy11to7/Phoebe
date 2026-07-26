@@ -1868,6 +1868,7 @@ class PlexClient(
 
     private suspend fun <T> withReachableBase(
         server: PlexServer,
+        token: String? = null,
         block: suspend (base: String) -> T,
     ): T {
         apiBaseCache[server.id]?.let { cached ->
@@ -1883,6 +1884,21 @@ class PlexClient(
                     return@withLock block(cached)
                 } catch (error: Throwable) {
                     if (error is CancellationException) throw error
+                }
+            }
+            // Probe candidates in parallel with a cheap /identity call before
+            // falling back to replaying the real request against each one. The
+            // fallback pays a full connect timeout per unreachable candidate,
+            // which on a large payload costs tens of seconds.
+            if (token != null) {
+                val fastest = runCatching { resolveFastestBase(server, token) }.getOrNull()
+                if (fastest != null) {
+                    try {
+                        return@withLock block(fastest)
+                    } catch (error: Throwable) {
+                        if (error is CancellationException) throw error
+                        apiBaseCache.remove(server.id)
+                    }
                 }
             }
             var lastError: Throwable? = null
@@ -1901,7 +1917,7 @@ class PlexClient(
     }
 
     private suspend inline fun <reified T> plexGet(server: PlexServer, token: String, path: String): T =
-        withReachableBase(server) { base ->
+        withReachableBase(server, token) { base ->
             val response = httpClient.get("$base$path") {
                 plexServerAuth(token)
                 header(HttpHeaders.Accept, "application/json")
