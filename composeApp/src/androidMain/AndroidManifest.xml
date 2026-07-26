@@ -51,6 +51,18 @@
                 android:resource="@xml/phoebe_update_file_paths" />
         </provider>
 
+        <!--
+          Serves artwork to the car's media UI, which can only load
+          android.resource:// and content:// URIs. Exported because
+          MediaBrowser clients are arbitrary processes; read-only, and the
+          URIs carry catalog ids rather than provider credentials.
+        -->
+        <provider
+            android:name="com.phoebe.app.PhoebeArtworkProvider"
+            android:authorities="${applicationId}.artwork"
+            android:exported="true"
+            android:grantUriPermissions="true" />
+
         <service
             android:name=".player.PlaybackService"
             android:exported="true"
