@@ -38,6 +38,15 @@ object AndroidPlaybackRuntime {
             catalogRepository = dependencies.catalogRepository,
             cacheDir = File(AndroidContextHolder.application.cacheDir, "aaos-artwork"),
         )
+        // The car starts this service in a process where Compose may never run,
+        // so nothing else calls warmServerConnection(). Without it the first
+        // request falls into withReachableBase's sequential fallback, which
+        // replays the whole request against each candidate base URL and costs
+        // tens of seconds on a large playlist. Browsing reads the local
+        // database, so this has time to finish before the first playback.
+        installScope.launch {
+            runCatching { dependencies.sessionRepository.warmServerConnection() }
+        }
     }
 
     /** Warm the browse tree before Compose starts (Android Auto can connect first). */
