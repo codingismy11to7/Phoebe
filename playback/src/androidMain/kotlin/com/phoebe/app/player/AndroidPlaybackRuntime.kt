@@ -1,11 +1,13 @@
 package com.phoebe.app.player
 
+import com.phoebe.app.AndroidContextHolder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.io.File
 
 object AndroidPlaybackRuntime {
     private val installScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -13,6 +15,10 @@ object AndroidPlaybackRuntime {
 
     @Volatile
     var catalogBrowseSource: CatalogBrowseSource? = null
+        private set
+
+    @Volatile
+    var artworkFileResolver: ArtworkFileResolver? = null
         private set
 
     private var dependenciesFactory: (suspend () -> PlaybackRuntimeDependencies)? = null
@@ -26,6 +32,11 @@ object AndroidPlaybackRuntime {
             database = dependencies.database,
             catalogRepository = dependencies.catalogRepository,
             sessionRepository = dependencies.sessionRepository,
+        )
+        artworkFileResolver = ArtworkFileResolver(
+            database = dependencies.database,
+            catalogRepository = dependencies.catalogRepository,
+            cacheDir = File(AndroidContextHolder.application.cacheDir, "aaos-artwork"),
         )
     }
 
@@ -45,5 +56,10 @@ object AndroidPlaybackRuntime {
             install(factory())
             checkNotNull(catalogBrowseSource)
         }
+    }
+
+    suspend fun ensureArtworkResolver(): ArtworkFileResolver {
+        ensureInstalledNow()
+        return checkNotNull(artworkFileResolver)
     }
 }

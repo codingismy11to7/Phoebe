@@ -191,6 +191,21 @@ SELECT * FROM TrackRow;
 selectTrackById:
 SELECT * FROM TrackRow WHERE id = ? LIMIT 1;
 
+-- Artwork-only lookups for the Android artwork ContentProvider. The car asks
+-- for one artwork per visible browse item, so these seek the primary key and
+-- return a single column rather than materialising a whole row.
+selectArtistThumbUrlById:
+SELECT thumbUrl FROM ArtistRow WHERE id = ? LIMIT 1;
+
+selectAlbumThumbUrlById:
+SELECT thumbUrl FROM AlbumRow WHERE id = ? LIMIT 1;
+
+selectPlaylistThumbUrlById:
+SELECT thumbUrl FROM PlaylistRow WHERE id = ? LIMIT 1;
+
+selectTrackThumbUrlById:
+SELECT thumbUrl FROM TrackRow WHERE id = ? LIMIT 1;
+
 selectTracksByIds:
 SELECT * FROM TrackRow WHERE id IN :ids;
 

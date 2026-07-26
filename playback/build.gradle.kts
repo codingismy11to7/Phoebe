@@ -29,6 +29,7 @@ kotlin {
         commonMain {
             dependencies {
                 implementation(project(":core:platform"))
+                implementation(project(":data:artwork"))
                 implementation(project(":data:database"))
                 implementation(project(":data:catalog"))
                 implementation(project(":data:listenbrainz"))
