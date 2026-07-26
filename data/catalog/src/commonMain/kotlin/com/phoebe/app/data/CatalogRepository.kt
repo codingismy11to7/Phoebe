@@ -7262,6 +7262,33 @@ class CatalogRepository(
         }.getOrNull()
     }
 
+    /**
+     * Artwork bytes for a remote URL, from the on-disk cache when present and
+     * otherwise fetched and cached.
+     *
+     * Public because the Android artwork ContentProvider serves the car's
+     * media UI, which cannot fetch remote URLs itself and cannot supply the
+     * per-provider auth that Emby and Jellyfin require.
+     */
+    suspend fun artworkBytes(thumbUrl: String): ByteArray? {
+        if (thumbUrl.isBlank()) return null
+        val cachePath = cachedArtworkPathForUrl(thumbUrl)
+        storage.readBytes(cachePath)?.let { return it }
+        if (!thumbUrl.isRemoteArtworkUrl()) return null
+        return runCatching {
+            withTimeoutOrNull(DownloadArtworkTimeoutMs) {
+                val bytes = httpClient.get(thumbUrl) {
+                    applyEmbyFamilyArtworkAuth(thumbUrl)
+                }.body<ByteArray>()
+                storage.writeBytes(cachePath, bytes)
+                bytes
+            }
+        }.onFailure { error ->
+            if (error is CancellationException) throw error
+            PhoebeLog.d("CatalogRepository") { "artwork fetch failed for '$thumbUrl': ${error.message}" }
+        }.getOrNull()
+    }
+
     private suspend fun updateTracksOfflineInfo(
         offlineTracks: List<Track>,
         persistRows: Boolean = true,
