@@ -65,6 +65,19 @@ kotlin {
                 implementation(libs.sqldelight.sqlite.driver)
             }
         }
+        // The AGP KMP plugin's host-test source set is androidHostTest, but
+        // this module's Android unit tests live in src/androidUnitTest. Map the
+        // directory in (as composeApp does) so they are actually compiled and
+        // run; without this they are silently skipped.
+        val androidHostTest by getting {
+            kotlin.srcDir("src/androidUnitTest/kotlin")
+            dependencies {
+                implementation(kotlin("test"))
+                implementation(libs.junit)
+                implementation(libs.coroutines.test)
+                implementation(libs.robolectric)
+            }
+        }
         androidMain {
             dependencies {
                 implementation(libs.androidx.media3.cast)
