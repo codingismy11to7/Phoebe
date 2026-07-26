@@ -335,7 +335,13 @@ jobs:
 
   web-preview-deploy:
     name: Deploy web preview to GitHub Pages
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    # Skipped on forks: this job needs PAGES_PREVIEW_* secrets and a configured
+    # Pages site, neither of which a fork inherits, so it can only ever fail
+    # there. The second condition additionally skips PRs opened from someone
+    # else's fork, where secrets are unavailable for security reasons.
+    if: >-
+      github.event.repository.fork == false &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
