@@ -62,6 +62,17 @@
                 <action android:name="android.media.browse.MediaBrowserService" />
                 <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH" />
             </intent-filter>
+            <!--
+              Android Automotive OS opt-in. Distinct from the Android Auto
+              opt-in (the com.google.android.gms.car.application meta-data on
+              <application> plus automotive_app_desc.xml): without this, AAOS
+              logs "No opt-in info found" and skips the MediaBrowserService as
+              "belonging to non media template app", so the app never appears
+              in the car's media source list.
+            -->
+            <meta-data
+                android:name="androidx.car.app.launchable"
+                android:value="true" />
             <meta-data
                 android:name="androidx.car.app.TintableAttributionIcon"
                 android:resource="@drawable/ic_media_attribution" />
