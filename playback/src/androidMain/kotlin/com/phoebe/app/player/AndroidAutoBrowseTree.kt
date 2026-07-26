@@ -1,5 +1,6 @@
 package com.phoebe.app.player
 
+import android.content.res.Resources
 import android.net.Uri
 import com.phoebe.app.AndroidContextHolder
 import com.phoebe.app.db.PhoebeDatabase
@@ -82,7 +83,25 @@ internal class AndroidAutoBrowseTree(
             )
         }
 
-    private fun drawableArtUri(drawableRes: Int): Uri {
-        return Uri.parse("android.resource://android/$drawableRes")
-    }
+}
+
+/**
+ * Builds an `android.resource://` URI for a framework drawable in the *name*
+ * form (`android.resource://android/drawable/ic_menu_gallery`) rather than the
+ * numeric-id form (`android.resource://android/17301566`).
+ *
+ * Android Auto resolves both, but Android Automotive OS resolves only the name
+ * form. AAOS's `UriUtils.getIconResource` rebuilds a resource name as
+ * `authority + path.replaceFirst("/", ":")` and hands it to
+ * `Resources.getIdentifier`, which returns 0 for a numeric path. AAOS then
+ * calls `getDrawable(0)` on a background thread, throws
+ * `Resources$NotFoundException: Resource ID #0x0`, and the uncaught crash kills
+ * the whole Media Center process — so a bad URI here takes down the car's media
+ * UI, not just our icon.
+ */
+internal fun drawableArtUri(drawableRes: Int): Uri {
+    val resources = Resources.getSystem()
+    val type = resources.getResourceTypeName(drawableRes)
+    val entry = resources.getResourceEntryName(drawableRes)
+    return Uri.parse("android.resource://android/$type/$entry")
 }
