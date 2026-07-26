@@ -26,7 +26,7 @@ build:
 
 | Decision | Choice | Rationale |
 | --- | --- | --- |
-| JDK 22 problem | Move the project to JDK 21 | 21 is LTS and already what CI installs, so CI stops downloading a second JDK. Pinning an old nixpkgs for 22 was rejected as building on an EOL JDK. |
+| JDK 22 problem | ~~Move the project to JDK 21~~ → **Supply JDK 22 from a pinned `nixos-24.05` input** | **Reversed during implementation.** Moving to 21 was chosen on the incorrect premise that nothing required 22. In fact `feature:playback` → `filament-compose` → `filament-ffm` uses the Foreign Function & Memory API finalized in JDK 22 and publishes metadata requiring "JVM runtime version 22 or newer", so JDK 21 breaks desktop dependency resolution outright (all four desktop CI jobs red; Android/backend/wasm unaffected). The 22→21 commit was reverted and the flake now pins an old nixpkgs solely for `jdk22`. |
 | SDK source | nixpkgs `androidenv.composeAndroidPackages` | No extra flake inputs; binaries patched for NixOS; nixpkgs already carries platform 36, build-tools 36.0.0, and an API 36 system image. |
 | Shell scope | Android build path plus emulator | Enough to build, install, and run without a physical device. |
 | Systems | `x86_64-linux` only | Nix is not used on a Mac here. Darwin can be added later in a few lines. |
@@ -94,6 +94,14 @@ Temurin 21. The bump removes the foojay JDK download from CI as a side effect.
 The repo contains only two Java files, both desktop-only
 (`DesktopSpaceKeyHandler.java`, `MacMediaSession.java`), and neither uses
 Java 22 language or API features, so this is a safe bytecode downgrade.
+
+> **This section is superseded.** The reasoning above checked only the
+> repo's *own* source for Java 22 usage and never checked its
+> *dependencies*. `filament-ffm` requires JVM 22+, so the downgrade was not
+> safe: it broke desktop dependency resolution and was reverted. The project
+> stays on JDK 22, supplied by the flake. The lesson worth keeping: when
+> lowering a JVM target, grep the dependency graph's metadata, not just
+> first-party sources.
 
 ## Out of Scope
 

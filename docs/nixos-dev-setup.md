@@ -28,7 +28,7 @@ on demand.
 
 The shell exports:
 
-- `JAVA_HOME` — `pkgs.jdk21` (JDK 21).
+- `JAVA_HOME` — JDK 22, from the pinned `nixpkgs-jdk22` input (see "JDK version" below).
 - `ANDROID_HOME` and `ANDROID_SDK_ROOT` — both point at the same
   Nix-composed, NixOS-patched Android SDK (`androidenv.composeAndroidPackages`
   output), ending in `/libexec/android-sdk`.
@@ -43,7 +43,7 @@ The shell exports:
   bare.
 - Two helper commands, `phoebe-avd` and `phoebe-emulator` (see below).
 
-Entering the shell prints a banner: `Phoebe dev shell: JDK 21.0.12, Android
+Entering the shell prints a banner: `Phoebe dev shell: JDK 22, Android
 SDK 36`.
 
 `local.properties` is never created or read in this workflow. The Android
@@ -82,34 +82,39 @@ so the two can't drift apart.
 
 ## JDK version
 
-The project's Gradle toolchain is pinned to **JDK 21** (an LTS release
-nixpkgs actually ships as `pkgs.jdk21`). It was previously pinned to JDK 22,
-which reached end of life and was removed from nixpkgs; nixpkgs currently
-carries 21, 23, 24, and 25, and Gradle toolchains require an exact
-major-version match, so no other available JDK would have satisfied
-`jvmToolchain(22)`.
+The project's Gradle toolchain is pinned to **JDK 22**, and the dev shell
+supplies it from a second flake input pinned to `nixos-24.05`:
 
-The migration touched 9 Kotlin call sites across 4 files, plus one
-Dockerfile:
+```nix
+nixpkgs-jdk22.url = "github:NixOS/nixpkgs/nixos-24.05";
+```
 
-- `build-logic/convention/src/main/kotlin/phoebe/ConventionHelpers.kt` (2 sites)
-- `build-logic/convention/src/main/kotlin/phoebe.backend.gradle.kts` (2 sites)
-- `build-logic/convention/src/main/kotlin/phoebe.backend.library.gradle.kts` (2 sites)
-- `composeApp/build.gradle.kts` (3 sites: `desktopJavaLanguageVersion`,
-  `jvmToolchain`, and desktop's `jvmTarget`)
-- `Dockerfile.vercel` (`eclipse-temurin:22-*` → `21-*`)
+**Why an old nixpkgs instead of a current JDK.** JDK 22 reached end of life
+and was removed from current nixpkgs, which ships 21, 23, 24, and 25. Gradle
+toolchains require an exact major-version match, so none of those satisfy
+`jvmToolchain(22)`. The obvious move — lower the project to JDK 21 — was
+tried and **reverted**, because the pin turns out to be load-bearing:
 
-**The Android target's bytecode level was deliberately left alone.** It
-already compiles to `JvmTarget.JVM_17` (`composeApp/build.gradle.kts:161`),
-and only the desktop and backend JVM targets moved to 21 — the toolchain
-version (which JDK builds the project) is a separate axis from the bytecode
-target (what `.class` file version Android gets), and only the former
-needed to change for Android builds to work at all.
+```
+Dependency resolution is looking for a library compatible with JVM runtime
+version 21, but 'io.github.erkko68.filament-ffm:filament-ffm:0.1.3-beta02'
+is only compatible with JVM runtime version 22 or newer.
+```
 
-If you ever need to raise the JDK version again, check `nix search` (or
-browse nixpkgs) first to confirm nixpkgs actually ships that major version as
-a package — pinning an old nixpkgs revision just to keep an EOL JDK around is
-not the intended path here.
+`feature:playback` depends on `filament-compose`, which pulls in
+`filament-ffm`. That artifact uses the Foreign Function & Memory API,
+finalized in JDK 22, and publishes Gradle metadata demanding JVM 22+. On
+JDK 21 the desktop target fails dependency resolution before compiling a
+single file — all four desktop CI jobs go red while Android, backend, and
+wasm stay green (Android is unaffected because it targets `JVM_17`).
+
+So the JDK 22 pin is a real constraint, not an accident. Do not "modernize"
+it without first checking whether the Filament dependency still requires 22.
+
+The old-nixpkgs closure costs roughly 470 MB and is fully cached — it
+substitutes, nothing builds from source. This is the same EOL JDK that CI
+already uses via foojay auto-provisioning; the flake just makes it explicit
+and runnable on NixOS, where the foojay-downloaded Temurin cannot execute.
 
 ## Building the debug APK
 

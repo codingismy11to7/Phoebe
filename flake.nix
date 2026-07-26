@@ -1,10 +1,21 @@
 {
   description = "Phoebe Android development environment";
 
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+
+    # JDK 22 reached end of life and was removed from current nixpkgs, but the
+    # project genuinely requires it: the desktop target pulls in
+    # io.github.erkko68.filament:filament-compose, whose filament-ffm artifact
+    # uses the Foreign Function & Memory API finalized in JDK 22 and publishes
+    # metadata requiring "JVM runtime version 22 or newer". Building against
+    # JDK 21 fails dependency resolution outright. This older nixpkgs exists
+    # solely to supply that JDK.
+    nixpkgs-jdk22.url = "github:NixOS/nixpkgs/nixos-24.05";
+  };
 
   outputs =
-    { self, nixpkgs }:
+    { self, nixpkgs, nixpkgs-jdk22 }:
     let
       system = "x86_64-linux";
 
@@ -15,6 +26,11 @@
           android_sdk.accept_license = true;
         };
       };
+
+      jdk = (import nixpkgs-jdk22 {
+        inherit system;
+        config.allowUnfree = true;
+      }).jdk22;
 
       # Must match compileSdk / targetSdk in androidApp/build.gradle.kts.
       # AGP defaults to build-tools "<compileSdk>.0.0" unless a
@@ -55,7 +71,7 @@
         set -euo pipefail
         export ANDROID_HOME="${androidSdk}"
         export ANDROID_SDK_ROOT="${androidSdk}"
-        export JAVA_HOME="${pkgs.jdk21}"
+        export JAVA_HOME="${jdk.home}"
         ${avdHomeExport}
         # avdmanager only respects ANDROID_AVD_HOME if the directory already
         # exists, silently falling back to the XDG path otherwise, so create
@@ -82,13 +98,13 @@
     {
       devShells.${system}.default = pkgs.mkShell {
         packages = [
-          pkgs.jdk21
+          jdk
           androidComposition.androidsdk
           phoebe-avd
           phoebe-emulator
         ];
 
-        JAVA_HOME = "${pkgs.jdk21}";
+        JAVA_HOME = "${jdk.home}";
         ANDROID_HOME = androidSdk;
         ANDROID_SDK_ROOT = androidSdk;
 
