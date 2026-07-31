@@ -4,7 +4,6 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -21,10 +20,15 @@ import com.phoebe.app.platform.isDesktopPlatform
 /**
  * A [basicMarquee] running forever redraws the whole window at display refresh
  * rate for as long as it's on screen. On desktop — where a static list of tracks
- * nobody is pointing at is the common case — the marquee only engages on hover
- * (mouse) or focus (keyboard). Touch platforms have neither, so they keep the
- * unconditional behavior: the only way to read an overflowing title there is
- * to let it scroll on its own.
+ * nobody is pointing at is the common case — the marquee only engages on hover.
+ * Touch platforms keep the unconditional behavior: the only way to read an
+ * overflowing title there is to let it scroll on its own.
+ *
+ * Keyboard / row focus is intentionally not handled here. Making this text
+ * [androidx.compose.foundation.focusable] would insert a tab stop for every
+ * title/artist/album cell in dense lists. Callers that own a focusable row
+ * should pass [marqueeEnabled] from their row focus state when they want
+ * keyboard-driven marquees.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -40,11 +44,10 @@ fun AutoScrollingText(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isHovered by interactionSource.collectIsHoveredAsState()
-    val isFocused by interactionSource.collectIsFocusedAsState()
     val requiresInteraction = isDesktopPlatform()
     val active = marqueeEnabled &&
         LocalContinuousMotionEnabled.current &&
-        (!requiresInteraction || isHovered || isFocused)
+        (!requiresInteraction || isHovered)
     val hoverableModifier = if (requiresInteraction) {
         modifier.hoverable(interactionSource)
     } else {

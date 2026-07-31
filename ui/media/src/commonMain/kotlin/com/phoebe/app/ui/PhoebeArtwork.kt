@@ -1081,19 +1081,20 @@ fun PhoebeLoadingBorder(
     strokeWidth: Dp = 2.dp,
     label: String = "loading-border",
 ) {
-    val progress = if (LocalContinuousMotionEnabled.current) {
-        val animatedProgress by rememberInfiniteTransition(label = label)
-            .animateFloat(
-                initialValue = 0f,
-                targetValue = 1f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(durationMillis = 1500, easing = LinearEasing),
-                ),
-                label = "$label-progress",
-            )
-        animatedProgress
+    // Keep the State (no `by`) so frame ticks invalidate draw only. Reading the
+    // value in composition would recompose every frame and rebuild the cached path.
+    val motionEnabled = LocalContinuousMotionEnabled.current
+    val animatedProgress = if (motionEnabled) {
+        rememberInfiniteTransition(label = label).animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 1500, easing = LinearEasing),
+            ),
+            label = "$label-progress",
+        )
     } else {
-        0f
+        null
     }
     Spacer(
         modifier.drawWithCache {
@@ -1118,6 +1119,7 @@ fun PhoebeLoadingBorder(
             val segmentLength = perimeter * 0.28f
             val gapLength = (perimeter - segmentLength).coerceAtLeast(0f)
             onDrawBehind {
+                val progress = animatedProgress?.value ?: 0f
                 drawPath(path, trackColor, style = trackStroke)
                 if (perimeter > 0f) {
                     drawPath(
