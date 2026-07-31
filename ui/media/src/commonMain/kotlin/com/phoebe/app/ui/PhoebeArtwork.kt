@@ -143,7 +143,7 @@ private fun CoilArtworkImage(
                 .build()
         }
     }
-    val imageLoader = remember(platformContext) { phoebeArtworkImageLoader(platformContext) }
+    val imageLoader = rememberPhoebeArtworkImageLoader(platformContext)
     val painter = rememberAsyncImagePainter(model = request, imageLoader = imageLoader)
     val painterState by painter.state.collectAsState()
 
@@ -192,11 +192,46 @@ private fun CoilArtworkImage(
     }
 }
 
+/**
+ * One shared loader for every artwork composable.
+ *
+ * Building a loader per call site also built an HTTP client per call site — on
+ * desktop that is an OkHttp client with its own connection pool and dispatcher
+ * threads, so a screen full of list rows spun up dozens of them. A single loader
+ * also means one shared memory cache, so the same album art decodes once rather
+ * than once per widget.
+ *
+ * Keyed by a lifecycle-stable context ([stableArtworkImageLoaderContext]) so
+ * Android configuration changes do not retain old Activities and their caches.
+ * Non-Android platforms still key by the supplied context for tests and previews.
+ */
+private val artworkImageLoaders = mutableMapOf<PlatformContext, ImageLoader>()
+private val artworkImageLoaderLock = ArtworkCacheLock()
+
+internal fun phoebeArtworkImageLoader(context: PlatformContext): ImageLoader {
+    val loaderContext = stableArtworkImageLoaderContext(context)
+    return artworkImageLoaderLock.withCacheLock {
+        artworkImageLoaders.getOrPut(loaderContext) { buildArtworkImageLoader(loaderContext) }
+    }
+}
+
+@Composable
+private fun rememberPhoebeArtworkImageLoader(context: PlatformContext): ImageLoader {
+    val loaderContext = stableArtworkImageLoaderContext(context)
+    return remember(loaderContext) { phoebeArtworkImageLoader(context) }
+}
+
 @OptIn(ExperimentalCoilApi::class)
-private fun phoebeArtworkImageLoader(context: PlatformContext): ImageLoader =
+private fun buildArtworkImageLoader(context: PlatformContext): ImageLoader =
     ImageLoader.Builder(context)
         .components {
-            add(KtorNetworkFetcherFactory(createPlatformHttpClient(), ConcurrentRequestStrategy.UNCOORDINATED))
+            // Shares RemoteArtworkCache's client rather than minting another one.
+            add(
+                KtorNetworkFetcherFactory(
+                    RemoteArtworkCache.httpClient,
+                    ConcurrentRequestStrategy.UNCOORDINATED,
+                ),
+            )
         }
         .build()
 
