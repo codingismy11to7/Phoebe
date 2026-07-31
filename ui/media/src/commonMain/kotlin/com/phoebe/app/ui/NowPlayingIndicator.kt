@@ -1,20 +1,20 @@
 package com.phoebe.app.ui
 
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 
 /**
  * Three-bar animated equalizer used as a "this track is currently playing" indicator.
@@ -41,43 +41,49 @@ fun NowPlayingIndicator(
     }
 }
 
+/**
+ * Bar heights are stepped on a fixed [IndicatorStepIntervalMs] ticker rather than
+ * animated continuously — a continuous [androidx.compose.animation.core.Animatable]
+ * here forces a full-window redraw at display refresh rate for as long as anything
+ * is playing anywhere in the list. Stepping the target values instead drops that to
+ * ~11 redraws/sec, which reads identically for a 20px equalizer blip.
+ */
 @Composable
 fun AnimatedNowPlayingIndicator(
     isPlaying: Boolean,
     modifier: Modifier = Modifier,
     barColor: Color = PhoebeUi.accentLight,
 ) {
-    val bar1 = remember { Animatable(0.25f) }
-    val bar2 = remember { Animatable(0.6f) }
-    val bar3 = remember { Animatable(0.4f) }
+    val motionEnabled = LocalContinuousMotionEnabled.current
+    var bar1 by remember { mutableFloatStateOf(0.25f) }
+    var bar2 by remember { mutableFloatStateOf(0.6f) }
+    var bar3 by remember { mutableFloatStateOf(0.4f) }
 
-    LaunchedEffect(isPlaying) {
-        if (!isPlaying) return@LaunchedEffect
-        launch {
-            while (true) {
-                bar1.animateTo(1f, tween(durationMillis = 520, easing = FastOutSlowInEasing))
-                bar1.animateTo(0.25f, tween(durationMillis = 520, easing = FastOutSlowInEasing))
-            }
-        }
-        launch {
-            while (true) {
-                bar2.animateTo(0.35f, tween(durationMillis = 600, easing = FastOutSlowInEasing))
-                bar2.animateTo(0.6f, tween(durationMillis = 600, easing = FastOutSlowInEasing))
-            }
-        }
-        launch {
-            while (true) {
-                bar3.animateTo(0.85f, tween(durationMillis = 460, easing = FastOutSlowInEasing))
-                bar3.animateTo(0.4f, tween(durationMillis = 460, easing = FastOutSlowInEasing))
-            }
+    LaunchedEffect(isPlaying, motionEnabled) {
+        if (!isPlaying || !motionEnabled) return@LaunchedEffect
+        var elapsedMs = 0L
+        while (true) {
+            bar1 = triangleWave(elapsedMs, periodMs = 1040L, min = 0.25f, max = 1f)
+            bar2 = triangleWave(elapsedMs + 300L, periodMs = 1200L, min = 0.35f, max = 0.6f)
+            bar3 = triangleWave(elapsedMs + 150L, periodMs = 920L, min = 0.4f, max = 0.85f)
+            delay(IndicatorStepIntervalMs)
+            elapsedMs += IndicatorStepIntervalMs
         }
     }
 
     NowPlayingIndicatorBars(
-        heights = listOf(bar1.value, bar2.value, bar3.value),
+        heights = listOf(bar1, bar2, bar3),
         modifier = modifier,
         barColor = barColor,
     )
+}
+
+private const val IndicatorStepIntervalMs = 90L
+
+private fun triangleWave(elapsedMs: Long, periodMs: Long, min: Float, max: Float): Float {
+    val phase = (elapsedMs % periodMs).toFloat() / periodMs.toFloat()
+    val triangle = if (phase < 0.5f) phase * 2f else (1f - phase) * 2f
+    return min + (max - min) * triangle
 }
 
 @Composable
