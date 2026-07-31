@@ -23,6 +23,7 @@ import com.phoebe.app.platform.WindowsUndecoratedWindowSupport
 import com.phoebe.app.platform.appDisplayName
 import com.phoebe.app.platform.isDebugBuild
 import com.phoebe.app.ui.DesktopWindowTitleBar
+import com.phoebe.app.ui.LocalContinuousMotionEnabled
 import com.phoebe.app.ui.LocalDesktopMergesTitleBar
 import com.phoebe.app.ui.RegisterDesktopWindowKeyDispatcher
 import com.sun.jna.Library
@@ -37,6 +38,7 @@ import java.awt.event.HierarchyEvent
 import java.awt.event.HierarchyListener
 import java.awt.event.WindowAdapter
 import java.awt.event.WindowEvent
+import java.awt.event.WindowFocusListener
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.util.concurrent.atomic.AtomicBoolean
@@ -103,7 +105,27 @@ fun main(args: Array<String>) {
             }
             RegisterDesktopWindowKeyDispatcher(window)
             ApplyDesktopWindowChrome()
-            CompositionLocalProvider(LocalDesktopMergesTitleBar provides useCustomWindowsTitleBar) {
+            // Decorative loops (equalizer bars, marquees, visualizer motion) burn CPU
+            // redrawing a window nobody can see. Freeze them while the window is
+            // minimized or sitting unfocused behind another app.
+            var windowFocused by remember { mutableStateOf(window.isFocused) }
+            DisposableEffect(window) {
+                val listener = object : WindowFocusListener {
+                    override fun windowGainedFocus(event: WindowEvent) {
+                        windowFocused = true
+                    }
+                    override fun windowLostFocus(event: WindowEvent) {
+                        windowFocused = false
+                    }
+                }
+                window.addWindowFocusListener(listener)
+                onDispose { window.removeWindowFocusListener(listener) }
+            }
+            val continuousMotionEnabled = windowFocused && !windowState.isMinimized
+            CompositionLocalProvider(
+                LocalDesktopMergesTitleBar provides useCustomWindowsTitleBar,
+                LocalContinuousMotionEnabled provides continuousMotionEnabled,
+            ) {
                 Box(Modifier.fillMaxSize()) {
                     App(
                         onAppearanceChange = { light ->
