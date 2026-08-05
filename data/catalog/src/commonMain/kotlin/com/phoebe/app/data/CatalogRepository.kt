@@ -78,6 +78,7 @@ import com.phoebe.app.platform.PhoebeLog
 import com.phoebe.app.platform.catalogTrackIndexParallelism
 import com.phoebe.app.platform.currentTimeMs
 import com.phoebe.app.platform.downloadParallelism
+import com.phoebe.app.platform.shouldDeferCatalogMemoryUpdates
 import com.phoebe.app.platform.isDesktopPlatform
 import com.phoebe.app.platform.platformStreamHttpDownloadToStorage
 import com.phoebe.app.sources.CatalogMerge
@@ -3171,6 +3172,7 @@ class CatalogRepository(
         }
 
     private suspend fun publishIndexedPlexTracks(rawTracks: List<Track>) {
+        if (shouldDeferCatalogMemoryUpdates()) return
         val tracksByAlbum = rawTracks
             .map { it.withPlexPrefix() }
             .groupBy { track -> resolveIndexedTrackParentId(track, mutableCatalog.value) }
@@ -7759,6 +7761,17 @@ class CatalogRepository(
     }
 
     private fun withSmartPlaylists(snapshot: CatalogSnapshot): CatalogSnapshot {
+        if (shouldDeferCatalogMemoryUpdates()) {
+            val preserved = mutableCatalog.value
+            val base = snapshot.withoutSmartPlaylistArtifacts()
+            val smartPlaylists = preserved.playlists.filter { it.isSmartPlaylist() }
+            if (smartPlaylists.isEmpty()) return base
+            val smartTracksByParent = preserved.tracksByParent.filterKeys { it.startsWith(SmartPlaylist.IdPrefix) }
+            return base.copy(
+                playlists = (smartPlaylists.sortedBy { it.title.lowercase() } + base.playlists.sortedBy { it.title.lowercase() }),
+                tracksByParent = base.tracksByParent + smartTracksByParent,
+            )
+        }
         val base = snapshot.withoutSmartPlaylistArtifacts()
         val smartPlaylists = userArtifactsRepository.smartPlaylists.value.filter { it.enabled }
         if (smartPlaylists.isEmpty()) return base
