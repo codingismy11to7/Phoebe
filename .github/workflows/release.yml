@@ -836,16 +836,12 @@ jobs:
           IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
           IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
 
-      - name: Prebuild Kotlin framework for iOS release
-        shell: bash
-        run: ./scripts/prebuild-ios-framework.sh Release iphoneos
-
       - name: Build and Package iOS App
         shell: bash
         run: |
           if [[ "${SIGN_IOS}" == "true" ]]; then
             echo "Building signed iOS App..."
-            OVERRIDE_KOTLIN_BUILD_IDE_SUPPORTED=YES xcodebuild \
+            xcodebuild \
               -project iosApp/iosApp.xcodeproj \
               -scheme iosApp \
               -configuration Release \
@@ -871,7 +867,7 @@ jobs:
             cp "${ipa_path}" "release-artifacts/Phoebe-${VERSION}.ipa"
           else
             echo "Building unsigned iOS App..."
-            OVERRIDE_KOTLIN_BUILD_IDE_SUPPORTED=YES xcodebuild \
+            xcodebuild \
               -project iosApp/iosApp.xcodeproj \
               -scheme iosApp \
               -configuration Release \
