@@ -115,6 +115,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 7555FFA5242A565B00829871 /* Build configuration list for PBXNativeTarget "iosApp" */;
 			buildPhases = (
+				RKIF1NG2A8AADF800D11C3D /* Record Kotlin Input Fingerprint */,
 				05E104082A8AADF800D11C3D /* Compile Kotlin */,
 				7555FF77242A565900829871 /* Sources */,
 				7555FF79242A565900829871 /* Resources */,
@@ -182,8 +183,9 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		05E104082A8AADF800D11C3D /* Compile Kotlin */ = {
+		RKIF1NG2A8AADF800D11C3D /* Record Kotlin Input Fingerprint */ = {
 			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
 			files = (
 			);
@@ -191,10 +193,32 @@
 			);
 			inputPaths = (
 			);
+			name = "Record Kotlin Input Fingerprint";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(SRCROOT)/../composeApp/build/ios-kotlin-input-fingerprint",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "cd \"$SRCROOT/..\"\nif [ -z \"$JAVA_HOME\" ] || [ ! -d \"$JAVA_HOME\" ]; then\n  if [ -d \"$HOME/.sdkman/candidates/java/current\" ]; then\n    export JAVA_HOME=\"$HOME/.sdkman/candidates/java/current\"\n  elif /usr/libexec/java_home -v 21 >/dev/null 2>&1; then\n    export JAVA_HOME=$(/usr/libexec/java_home -v 21)\n  fi\nfi\nif [ -n \"$JAVA_HOME\" ]; then\n  export PATH=\"$JAVA_HOME/bin:$PATH\"\nfi\n./gradlew :composeApp:recordIosKotlinInputFingerprint --quiet\n";
+		};
+		05E104082A8AADF800D11C3D /* Compile Kotlin */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 0;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/../composeApp/build/ios-kotlin-input-fingerprint",
+			);
 			name = "Compile Kotlin";
 			outputFileListPaths = (
 			);
 			outputPaths = (
+				"$(SRCROOT)/../composeApp/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)/ComposeApp.framework",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -202,6 +226,7 @@
 		};
 		CP02RS032600AC8F00CF470E /* Copy Google Cast Resources */ = {
 			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 0;
 			buildActionMask = 2147483647;
 			files = (
 			);
@@ -214,10 +239,11 @@
 			outputFileListPaths = (
 			);
 			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/.google-cast-resources.stamp",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -e\nRESOURCE_DIR=\"$SRCROOT/Vendor/GoogleCastSDK/Resources\"\nDEST_DIR=\"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH\"\nif [ -d \"$RESOURCE_DIR\" ]; then\n  mkdir -p \"$DEST_DIR\"\n  for bundle in \"$RESOURCE_DIR\"/*.bundle; do\n    [ -e \"$bundle\" ] || continue\n    cp -R \"$bundle\" \"$DEST_DIR\"\n  done\nelse\n  echo \"Google Cast resources not installed at $RESOURCE_DIR. Run scripts/install-ios-google-cast-sdk.sh.\"\nfi\n";
+			shellScript = "set -e\nRESOURCE_DIR=\"$SRCROOT/Vendor/GoogleCastSDK/Resources\"\nDEST_DIR=\"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH\"\nif [ -d \"$RESOURCE_DIR\" ]; then\n  mkdir -p \"$DEST_DIR\"\n  for bundle in \"$RESOURCE_DIR\"/*.bundle; do\n    [ -e \"$bundle\" ] || continue\n    cp -R \"$bundle\" \"$DEST_DIR\"\n  done\n  touch \"$DEST_DIR/.google-cast-resources.stamp\"\nelse\n  echo \"Google Cast resources not installed at $RESOURCE_DIR. Run scripts/install-ios-google-cast-sdk.sh.\"\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
