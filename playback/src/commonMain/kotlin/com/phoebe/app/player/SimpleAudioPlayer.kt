@@ -7,6 +7,7 @@ import com.phoebe.app.domain.EqualizerProfile
 import com.phoebe.app.domain.PlayerState
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
+import com.phoebe.app.platform.PhoebeLog
 import com.phoebe.app.platform.currentTimeMs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -42,6 +43,8 @@ abstract class SimpleAudioPlayer(
     private var preferUnityOutputVolume = false
     private var systemVolumeScale = 1f
     private var playGeneration = 0
+    private var failoverGeneration = -1
+    private val triedPlaybackUris = linkedSetOf<String>()
     private var crossfadeDurationMs = 0L
     private var crossfadeRequestKey: String? = null
     private var manualSeekCrossfadeSuppression: ManualSeekCrossfadeSuppression? = null
@@ -124,6 +127,8 @@ abstract class SimpleAudioPlayer(
         )
         setOutputVolume(effectiveOutputVolume())
         if (track != null) {
+            resetPlaybackUriFailover(generation)
+            track.playbackUriCandidates().firstOrNull()?.let { notePlaybackUri(it, generation) }
             startPlaybackStartupWatchdog(generation)
             if (sameQueue) {
                 skipToInQueueOnPlatform(queue, index, track, generation)
@@ -651,8 +656,10 @@ abstract class SimpleAudioPlayer(
         startIndex: Int,
         track: Track,
         generation: Int = activePlayGeneration,
+        startPositionMs: Long = 0L,
     ) {
         playTrack(track)
+        if (startPositionMs > 0L) seek(startPositionMs)
     }
 
     private fun tracksMatch(left: List<Track>, right: List<Track>): Boolean {
@@ -806,9 +813,69 @@ abstract class SimpleAudioPlayer(
         val track = mutableState.value.currentTrack
         val streamUri = track?.localUri?.takeIf { it.isNotBlank() }
             ?: track?.streamUrl?.takeIf { it.isNotBlank() }
+        if (replayWithFailoverUri(generation, streamUri)) return
         publishPlaybackFailure(
             PlaybackFailureClassifier.fromMessage("Playback took too long to start.", streamUri),
             generation,
+        )
+    }
+
+    protected fun resetPlaybackUriFailover(generation: Int) {
+        failoverGeneration = generation
+        triedPlaybackUris.clear()
+    }
+
+    protected fun notePlaybackUri(uri: String, generation: Int) {
+        if (failoverGeneration != generation) {
+            resetPlaybackUriFailover(generation)
+        }
+        if (uri.isNotBlank()) triedPlaybackUris += uri
+    }
+
+    protected fun nextPlaybackFailoverUri(generation: Int, failedUri: String?): String? {
+        notePlaybackUri(failedUri.orEmpty(), generation)
+        val track = mutableState.value.currentTrack ?: return null
+        return track.playbackUriCandidates().firstOrNull { candidate ->
+            candidate.isNotBlank() && candidate !in triedPlaybackUris
+        }
+    }
+
+    protected fun replayWithFailoverUri(generation: Int, failedUri: String?): Boolean {
+        if (!isPlayRequestCurrent(generation) || !playWhenReady) return false
+        val next = nextPlaybackFailoverUri(generation, failedUri) ?: return false
+        notePlaybackUri(next, generation)
+        adoptFailoverStreamUrl(next)
+        val current = mutableState.value
+        val track = current.currentTrack ?: return false
+        val index = current.currentIndex.takeIf { it in current.queue.indices } ?: return false
+        val resumePositionMs = current.positionMs.coerceAtLeast(0L)
+        mutableState.value = current.copy(
+            isBuffering = true,
+            isPlaying = false,
+            positionMs = resumePositionMs,
+            playbackErrorMessage = null,
+        )
+        PhoebeLog.d("AudioPlayer") { "playback failover uri=$next positionMs=$resumePositionMs" }
+        startPlaybackStartupWatchdog(generation)
+        playQueueOnPlatform(
+            queue = mutableState.value.queue,
+            startIndex = index,
+            track = track.copy(streamUrl = next),
+            generation = generation,
+            startPositionMs = resumePositionMs,
+        )
+        return true
+    }
+
+    private fun adoptFailoverStreamUrl(uri: String) {
+        val current = mutableState.value
+        val index = current.currentIndex
+        val track = current.queue.getOrNull(index) ?: return
+        if (track.streamUrl == uri) return
+        mutableState.value = current.copy(
+            queue = current.queue.mapIndexed { itemIndex, item ->
+                if (itemIndex == index) item.copy(streamUrl = uri) else item
+            },
         )
     }
 

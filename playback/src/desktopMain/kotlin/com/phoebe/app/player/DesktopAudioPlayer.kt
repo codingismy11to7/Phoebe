@@ -273,11 +273,13 @@ class DesktopAudioPlayer(
         startIndex: Int,
         track: Track,
         generation: Int,
+        startPositionMs: Long,
     ) {
         playTrack(
             track = track,
             preferJavaFxForLocalStreaming = shouldPreferJavaFxForCrossfade(queue, startIndex, track),
         )
+        if (startPositionMs > 0L) seek(startPositionMs)
         scheduleCrossfadePrefetchAfterLoad(queue, startIndex, generation)
     }
 
@@ -1535,6 +1537,10 @@ class DesktopAudioPlayer(
     }
 
     private fun finishPlaybackFailed(failure: PlaybackFailure, generation: Int = activePlayGeneration) {
+        if (failure.shouldRetry && replayWithFailoverUri(generation, failure.streamUri ?: currentStreamUri())) {
+            pendingPlaybackFailure = null
+            return
+        }
         DesktopInlineRadioMapCoordinator.endLiveRadioStartup()
         reloadOnResume = failure.holdsQueue
         publishPlaybackFailure(failure, generation)

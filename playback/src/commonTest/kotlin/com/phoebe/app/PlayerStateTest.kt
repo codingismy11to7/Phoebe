@@ -16,6 +16,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -99,6 +100,37 @@ class PlayerStateTest {
             player.state.value.playbackErrorMessage,
         )
         assertFalse(player.playIntentActive())
+    }
+
+    @Test
+    fun stalledPlatformStartupFailsoverToTheNextStreamOrigin() = runTest {
+        val player = TimeoutTestPlayer(this)
+        val liveUri = "https://live.example/library/parts/1/file.mp3"
+        val tracks = listOf(
+            Track(
+                id = "t1",
+                title = "One",
+                artist = "Artist",
+                album = "Album",
+                durationMs = 60_000,
+                streamUrl = "https://dead.example/library/parts/1/file.mp3",
+                downloadUrl = "",
+                playbackFallbackUrls = listOf(liveUri),
+            ),
+        )
+
+        player.play(tracks, 0)
+        advanceTimeBy(player.testStartupTimeoutMs + 1L)
+        runCurrent()
+
+        assertEquals(liveUri, player.state.value.currentTrack?.streamUrl)
+        assertEquals(0, player.state.value.playbackErrorSerial)
+        assertTrue(player.state.value.isBuffering)
+
+        player.finishPendingLoad()
+
+        assertTrue(player.state.value.isPlaying)
+        assertNull(player.state.value.playbackErrorMessage)
     }
 
     @Test
@@ -1018,7 +1050,13 @@ private open class SlowTestPlayer(
 
     fun playIntentActive(): Boolean = playWhenReady
 
-    override fun playQueueOnPlatform(queue: List<Track>, startIndex: Int, track: Track, generation: Int) {
+    override fun playQueueOnPlatform(
+        queue: List<Track>,
+        startIndex: Int,
+        track: Track,
+        generation: Int,
+        startPositionMs: Long,
+    ) {
         pendingLoads += generation
     }
 
@@ -1054,7 +1092,13 @@ private class QueueAwareTestPlayer : SimpleAudioPlayer() {
 
     override fun playUri(uri: String) = Unit
 
-    override fun playQueueOnPlatform(queue: List<Track>, startIndex: Int, track: Track, generation: Int) {
+    override fun playQueueOnPlatform(
+        queue: List<Track>,
+        startIndex: Int,
+        track: Track,
+        generation: Int,
+        startPositionMs: Long,
+    ) {
         fullLoads++
     }
 
@@ -1088,7 +1132,13 @@ private class EndedReplayTestPlayer : SimpleAudioPlayer() {
 
     override fun playUri(uri: String) = Unit
 
-    override fun playQueueOnPlatform(queue: List<Track>, startIndex: Int, track: Track, generation: Int) {
+    override fun playQueueOnPlatform(
+        queue: List<Track>,
+        startIndex: Int,
+        track: Track,
+        generation: Int,
+        startPositionMs: Long,
+    ) {
         fullLoads++
         markPlaybackReady(generation = generation)
     }
@@ -1128,7 +1178,13 @@ private class PositionTrackingTestPlayer : SimpleAudioPlayer() {
         markPlaybackReady(generation = generation)
     }
 
-    override fun playQueueOnPlatform(queue: List<Track>, startIndex: Int, track: Track, generation: Int) {
+    override fun playQueueOnPlatform(
+        queue: List<Track>,
+        startIndex: Int,
+        track: Track,
+        generation: Int,
+        startPositionMs: Long,
+    ) {
         lastSeekPositionMs = 0L
         markPlaybackReady(generation = generation)
     }
