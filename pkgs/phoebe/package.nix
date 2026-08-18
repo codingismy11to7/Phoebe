@@ -6,11 +6,15 @@
   autoPatchelfHook,
   makeWrapper,
   alsa-lib,
+  atk,
   brotli,
   bzip2,
+  cairo,
   expat,
   fontconfig,
   freetype,
+  gdk-pixbuf,
+  glib,
   gst_all_1,
   gtk3,
   libGL,
@@ -24,8 +28,12 @@
   libxdmcp,
   libxext,
   libxi,
+  libxinerama,
+  libxkbcommon,
   libxrender,
+  libxt,
   libxtst,
+  pango,
   xdg-utils,
   zlib,
 }:
@@ -60,13 +68,32 @@ let
     libxtst
   ];
 
-  # Native libraries that ship inside jars and are unpacked to a temp directory
-  # at runtime. autoPatchelfHook never sees these files, so they have to resolve
-  # through LD_LIBRARY_PATH instead. GTK and GStreamer are missing from Depends:
-  # because jpackage does not look inside jars; javafx-graphics and javafx-media
-  # need them on the desktop playback fallback path.
+  # Native libraries that ship inside jars and are unpacked at runtime -- JavaFX
+  # into ~/.openjfx/cache, JNativeHook into ~/.cache/phoebe/native.
+  # autoPatchelfHook never sees these files, so they have to resolve through
+  # LD_LIBRARY_PATH instead. None of this appears in the .deb's Depends:,
+  # because jpackage generates that list by scanning loose .so files only.
+  #
+  # Determined empirically: run the app, then ldd the extracted libraries. As of
+  # 2026-08-18 that is libglassgtk3.so (the JavaFX GTK backend, used on the
+  # desktop playback fallback path) and libJNativeHook (global media keys).
   runtimeDeps = debDepends ++ [
+    # libglassgtk3.so: the full GTK stack. gtk3 alone is not enough -- it
+    # supplies only libgtk-3/libgdk-3, while pango, cairo, atk, gdk-pixbuf and
+    # glib (libgthread, libgobject, libgio) are separate derivations.
+    atk
+    cairo
+    gdk-pixbuf
+    glib
     gtk3
+    pango
+
+    # libJNativeHook: X11 input plumbing beyond what Depends: listed.
+    libxinerama
+    libxkbcommon
+    libxt
+
+    # javafx-media playback.
     gst_all_1.gstreamer
     gst_all_1.gst-plugins-base
   ];
