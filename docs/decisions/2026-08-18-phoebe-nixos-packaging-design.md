@@ -227,11 +227,10 @@ This affects only the radio map view. Core playback, browsing, and Plex sign-in 
 unaffected. Verification should confirm the app degrades gracefully — that opening the
 radio map fails to render the map rather than crashing the application.
 
-It may nonetheless work by accident. The target configuration enables
-`programs.nix-ld`, which provides a shim at the standard `/lib64/ld-linux-x86-64.so.2`
-path precisely so that downloaded, unpatched binaries can run. Whether Chromium's full
-library set is satisfied by `NIX_LD_LIBRARY_PATH` is untested. Verification should
-record the outcome either way.
+Confirmed on 2026-08-18: the map does not render. The configuration's
+`programs.nix-ld` shim, which lets some downloaded unpatched binaries run, is not
+enough for Chromium's library set. The application stays running and remains fully
+usable, so this is a missing feature rather than a defect.
 
 Fixing this deliberately would mean pointing `jcefmaven` at a Nix-provided JCEF through
 its install-directory setting, which is out of scope here and belongs with the source
