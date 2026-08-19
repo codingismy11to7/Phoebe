@@ -26,3 +26,11 @@ iosApp/Vendor/GoogleCastSDK/
 .vercel
 .env*
 .andy
+
+# .env* above would otherwise swallow .envrc
+!.envrc
+.direnv/
+result
+
+# Local design notes and implementation plans; not part of the project
+docs/superpowers/

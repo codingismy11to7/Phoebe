@@ -50,7 +50,10 @@ val phoebeRealAudioTests = providers.gradleProperty("phoebe.realAudioTests")
     .map(String::toBoolean)
     .orElse(false)
 
-val desktopJavaLanguageVersion = JavaLanguageVersion.of(22)
+// Must track jvmToolchain below. This launcher is what actually runs and packages the
+// desktop app (:composeApp:run, createDistributable, jpackage), so leaving it at 22
+// while the toolchain says 25 makes Gradle provision a second JDK over the network.
+val desktopJavaLanguageVersion = JavaLanguageVersion.of(25)
 val desktopJavaLauncher = javaToolchains.launcherFor {
     languageVersion.set(desktopJavaLanguageVersion)
 }
@@ -147,7 +150,10 @@ plugins {
 }
 
 kotlin {
-    jvmToolchain(22)
+    // 25 rather than 22: jvmToolchain is an exact match, and JDK 22 is end-of-life
+    // and gone from nixpkgs. filament-ffm only requires "JVM runtime version 22 or
+    // newer", so 25 satisfies it. See docs/decisions for the NixOS dev shell.
+    jvmToolchain(25)
     compilerOptions {
         freeCompilerArgs.add("-Xexpect-actual-classes")
     }
@@ -175,7 +181,7 @@ kotlin {
 
     jvm("desktop") {
         compilerOptions {
-            jvmTarget.set(JvmTarget.JVM_22)
+            jvmTarget.set(JvmTarget.JVM_25)
         }
     }
 
