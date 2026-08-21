@@ -275,7 +275,8 @@ class PlexClient(
     }
 
     suspend fun playlists(server: PlexServer, token: String): List<Playlist> {
-        val response = plexGet<PlexMediaContainerResponse>(server, token, "/playlists")
+        // Without playlistType, Plex also returns video and photo playlists.
+        val response = plexGet<PlexMediaContainerResponse>(server, token, "/playlists?playlistType=audio")
         return response.mediaContainer.metadata.map {
             val thumb = it.thumb ?: it.composite
             Playlist(
