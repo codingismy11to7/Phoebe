@@ -187,6 +187,29 @@ class PlexClientPlaylistEndToEndTest {
     }
 
     @Test
+    fun playlistsRequestsAudioPlaylistsOnly() = runTest {
+        var capturedPlaylistType: String? = null
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/playlists" -> {
+                    capturedPlaylistType = request.url.parameters["playlistType"]
+                    respond(
+                        content = playlistsJson(trackCount = 2),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                }
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val client = PlexClient(testHttpClient(engine))
+        val server = PlexServer("server", "Plex", "https://plex.example:32400", owned = true)
+        client.playlists(server, "token")
+
+        assertEquals("audio", capturedPlaylistType)
+    }
+
+    @Test
     fun rateItemUsesPutWithDoubledRating() = runTest {
         var capturedMethod: String? = null
         var capturedIdentifier: String? = null
