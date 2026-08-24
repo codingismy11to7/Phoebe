@@ -59,12 +59,14 @@ import com.phoebe.app.domain.AudioAnalysisFrame
 import com.phoebe.app.domain.EqualizerProfile
 import com.phoebe.app.domain.NowPlayingVisualizerPreset
 import com.phoebe.app.domain.RepeatMode
+import com.phoebe.app.domain.StreamingQuality
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.UpNextDividerMarker
 import com.phoebe.app.domain.canTogglePlexLike
 import com.phoebe.app.feature.playback.EqualizerDialog
 import com.phoebe.app.platform.isDesktopPlatform
 import com.phoebe.app.player.CastState
+import com.phoebe.app.player.StreamingPlaybackPolicyHolder
 import kotlin.math.abs
 import androidx.compose.ui.unit.IntOffset
 import kotlinx.coroutines.Job
@@ -263,6 +265,7 @@ fun MobilePlayer(
     onDragStart: () -> Unit = {},
     onDrag: (Float) -> Unit = {},
     onDragEnd: (Float) -> Unit = {},
+    effectiveStreamingQuality: StreamingQuality = StreamingQuality.Original,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -781,6 +784,10 @@ fun MobilePlayer(
                             MobileNowPlayingOverlayActions(
                                 track = t,
                                 showAudioQualityBadge = true,
+                                playingQuality = StreamingPlaybackPolicyHolder.artworkQuality(
+                                    t.id,
+                                    effectiveStreamingQuality,
+                                ),
                                 showFeedbackActions = showFeedbackActions,
                                 showLikeControl = showLikeControl,
                                 likeActions = likeActions,
