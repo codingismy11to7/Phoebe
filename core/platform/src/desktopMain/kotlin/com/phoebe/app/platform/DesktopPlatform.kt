@@ -63,7 +63,7 @@ actual fun currentNetworkMeteringStatus(): NetworkMeteringStatus = NetworkMeteri
 
 actual fun defaultDownloadWifiOnly(): Boolean = true
 
-private val storageRoot: File by lazy {
+internal val storageRoot: File by lazy {
     desktopStorageRoot()
 }
 
