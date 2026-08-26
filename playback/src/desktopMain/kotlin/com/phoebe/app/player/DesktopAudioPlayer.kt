@@ -1706,7 +1706,7 @@ class DesktopAudioPlayer(
                 if (mediaReady.get() || !isPlayRequestCurrent(generation)) return@execute
                 stop.set(true)
                 playbackExecutor.execute {
-                    if (!isPlayRequestCurrent(generation)) return@execute
+                    if (stop.get() || mediaReady.get() || !isPlayRequestCurrent(generation)) return@execute
                     disposeJavaFxBlocking()
                     onStartupFailed()
                 }
@@ -1757,11 +1757,11 @@ class DesktopAudioPlayer(
             stop = watchdogStop,
             generation = generation,
             mediaReady = mediaReady,
-            timeoutMs = readyTimeoutMs,
+            timeoutMs = JavaFxRuntimeStartupTimeoutMs,
             onStartupFailed = {
                 failStartup(
                     PlaybackFailureClassifier.fromMessage(
-                        "JavaFX media did not become ready in ${readyTimeoutMs}ms",
+                        "JavaFX runtime did not become ready in ${JavaFxRuntimeStartupTimeoutMs}ms",
                         uri,
                     ),
                 )
@@ -1770,8 +1770,26 @@ class DesktopAudioPlayer(
         JavaFxRuntime.runLater(
             block = {
                 runCatching {
+                    if (startupFailed.get() || !isPlayRequestCurrent(generation)) return@runCatching
                     diagnostics.playbackStartupEvent(PlaybackEnginePath.JavaFxMediaPlayer, "javafx-thread")
                     diagnostics.engineSelected(PlaybackEnginePath.JavaFxMediaPlayer)
+                    cancelJavaFxStartupWatchdog()
+                    val mediaWatchdogStop = AtomicBoolean(false)
+                    javaFxStartupWatchdogStop = mediaWatchdogStop
+                    scheduleJavaFxStartupWatchdog(
+                        stop = mediaWatchdogStop,
+                        generation = generation,
+                        mediaReady = mediaReady,
+                        timeoutMs = readyTimeoutMs,
+                        onStartupFailed = {
+                            failStartup(
+                                PlaybackFailureClassifier.fromMessage(
+                                    "JavaFX media did not become ready in ${readyTimeoutMs}ms",
+                                    uri,
+                                ),
+                            )
+                        },
+                    )
                     val media = Media(uri)
                     diagnostics.playbackStartupEvent(PlaybackEnginePath.JavaFxMediaPlayer, "media-created")
                     val mediaPlayer = MediaPlayer(media)
@@ -3515,6 +3533,7 @@ class DesktopAudioPlayer(
 
     private companion object {
         const val JavaFxEqualizerBandMatchTolerance = 0.045f
+        const val JavaFxRuntimeStartupTimeoutMs = 15_000L
         const val JavaFxMediaPlayingTimeoutMs = 8_000L
         const val JavaFxCrossfadeReadyTimeoutMs = 3_000L
         const val JavaFxGaplessHotStartLeadMs = 180L
