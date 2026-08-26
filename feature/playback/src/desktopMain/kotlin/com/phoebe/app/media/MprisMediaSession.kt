@@ -65,6 +65,13 @@ internal object MprisMediaSession : MediaPlayer2, MediaPlayer2Player, Properties
 
     @Volatile private var snapshot: NowPlayingSnapshot? = null
 
+    /**
+     * Reported through the Volume property. Kept separate from [NowPlayingSnapshot] so
+     * the macOS session, which shares that type and has no notion of volume, does not
+     * start emitting updates every time the volume changes.
+     */
+    @Volatile private var volume: Double = 1.0
+
     override fun getObjectPath(): String = OBJECT_PATH
 
     override fun isRemote(): Boolean = false
@@ -96,9 +103,10 @@ internal object MprisMediaSession : MediaPlayer2, MediaPlayer2Player, Properties
         }
     }
 
-    fun update(newSnapshot: NowPlayingSnapshot) {
+    fun update(newSnapshot: NowPlayingSnapshot, newVolume: Float) {
         val previous = snapshot
         snapshot = newSnapshot
+        volume = newVolume.toDouble().coerceIn(0.0, 1.0)
         val conn = connection ?: return
 
         // Everything here runs inside the guard, including building the Variants:
@@ -108,6 +116,7 @@ internal object MprisMediaSession : MediaPlayer2, MediaPlayer2Player, Properties
             val changed: Map<String, Variant<*>> = mapOf(
                 "Metadata" to metadataVariant(newSnapshot),
                 "PlaybackStatus" to Variant(MprisMetadata.playbackStatus(newSnapshot.playing)),
+                "Volume" to Variant(volume),
             )
             conn.sendMessage(Properties.PropertiesChanged(OBJECT_PATH, PLAYER_IFACE, changed, emptyList()))
         }.onFailure { e ->
@@ -174,8 +183,14 @@ internal object MprisMediaSession : MediaPlayer2, MediaPlayer2Player, Properties
         GetAll(interfaceName)[propertyName]?.value as A
 
     override fun <A : Any?> Set(interfaceName: String, propertyName: String, value: A) {
-        // Volume is the only writable property advertised and Phoebe's volume is not
-        // wired through here, so accept and ignore rather than raising an error.
+        // Volume is the only writable property MPRIS defines on Player, and it is
+        // reported accurately above but not settable: routing a write back into
+        // playback would mean threading a volume callback through
+        // GlobalMediaKeysEffect, whose signature is expect/actual across four
+        // platforms. In practice compositors bind the volume keys to the system mixer
+        // rather than to a player, so this path is rarely exercised. Accepted and
+        // ignored rather than raising an error; see the PR discussion for whether it
+        // is worth wiring.
     }
 
     override fun GetAll(interfaceName: String): MutableMap<String, Variant<*>> {
@@ -195,7 +210,7 @@ internal object MprisMediaSession : MediaPlayer2, MediaPlayer2Player, Properties
                 "PlaybackStatus" to Variant(MprisMetadata.playbackStatus(current?.playing == true)),
                 "Metadata" to metadataVariant(current),
                 "Position" to Variant(MprisMetadata.positionMicros(current?.positionBucketMs ?: 0L)),
-                "Volume" to Variant(1.0),
+                "Volume" to Variant(volume),
                 "Rate" to Variant(1.0),
                 "MinimumRate" to Variant(1.0),
                 "MaximumRate" to Variant(1.0),

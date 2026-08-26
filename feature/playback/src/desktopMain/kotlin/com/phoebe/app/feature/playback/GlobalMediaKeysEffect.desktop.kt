@@ -110,9 +110,9 @@ actual fun GlobalMediaKeysEffect(
 
             try {
                 playerFlow
-                    .map { it.toNowPlayingSnapshot() }
+                    .map { it.toNowPlayingSnapshot() to it.volume }
                     .distinctUntilChanged()
-                    .collectLatest { snapshot -> MprisMediaSession.update(snapshot) }
+                    .collectLatest { (snapshot, volume) -> MprisMediaSession.update(snapshot, volume) }
             } finally {
                 MprisMediaSession.shutdown()
             }
