@@ -178,9 +178,20 @@ internal object MprisMediaSession : MediaPlayer2, MediaPlayer2Player, Properties
 
     // --- org.freedesktop.DBus.Properties ---
 
+    /**
+     * Returns the Variant itself rather than its value. Unwrapping here looks harmless
+     * but breaks Metadata: dbus-java would have to re-wrap a plain Map for the reply,
+     * cannot infer a signature for one, and fails with "Can't wrap class
+     * java.util.LinkedHashMap in an unqualified Variant". The Variants built in
+     * [GetAll] already carry their signatures, so passing them through preserves it.
+     *
+     * Clients differ in which they call, so this is easy to miss: playerctl reads
+     * GetAll and works either way, while swayosd reads Get and silently falls back to
+     * an icon with no track information.
+     */
     @Suppress("UNCHECKED_CAST")
     override fun <A : Any?> Get(interfaceName: String, propertyName: String): A =
-        GetAll(interfaceName)[propertyName]?.value as A
+        GetAll(interfaceName)[propertyName] as A
 
     override fun <A : Any?> Set(interfaceName: String, propertyName: String, value: A) {
         // Volume is the only writable property MPRIS defines on Player, and it is
