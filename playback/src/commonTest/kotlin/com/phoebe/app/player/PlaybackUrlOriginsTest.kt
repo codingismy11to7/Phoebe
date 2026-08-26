@@ -95,6 +95,28 @@ class PlaybackUrlOriginsTest {
     }
 
     @Test
+    fun demoteLocalOriginsDoesNotRePrependLanPreferredOrigin() {
+        val lan = "http://192.168.1.9:32400"
+        val remote = "https://45-79-202-250.abc.plex.direct:8443"
+        val server = PlexServer(
+            id = "plex",
+            name = "Plex",
+            uri = lan,
+            owned = true,
+            connectionUris = listOf(lan, remote),
+            advertisedConnectionUris = listOf(lan, remote),
+            localConnectionUris = listOf(lan),
+        )
+        val origins = playbackOriginCandidates(
+            server = server,
+            preferredOrigin = lan,
+            demoteLocalOrigins = true,
+        )
+        assertEquals(remote, origins.first())
+        assertTrue(origins.indexOf(lan) > origins.indexOf(remote))
+    }
+
+    @Test
     fun radioAndLocalTracksAreNotRebasedOntoTheMusicServer() {
         val radio = Track(
             id = "radio:kexp",
@@ -136,6 +158,8 @@ class PlaybackUrlOriginsTest {
             ),
         )
         assertFalse(isLocalOnlyPlaybackOrigin("https://72-58-82-53.abc.plex.direct:32400/library/parts/1/file.mp3"))
+        assertFalse(isLocalOnlyPlaybackOrigin("file:///music/song.mp3"))
+        assertFalse(isLocalOnlyPlaybackOrigin("/storage/emulated/0/Music/song.mp3"))
     }
 
     @Test

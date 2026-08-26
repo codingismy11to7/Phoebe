@@ -8,8 +8,8 @@ import io.ktor.http.Url
 
 private const val MaxPlaybackFallbackOrigins = 8
 
-/** Stop after this many distinct stream URIs, including the first. Each Android attempt can take 30s. */
-internal const val MaxTriedPlaybackUris = 3
+/** Stop after this many distinct stream URIs, including the first. Attempts are cheap after origin pre-flight. */
+internal const val MaxTriedPlaybackUris = 5
 
 internal fun isMusicServerStreamUrl(url: String): Boolean {
     if (url.isBlank()) return false
@@ -63,13 +63,18 @@ internal fun rebaseHttpUrlOrigin(url: String, origin: String): String? {
 fun playbackOriginCandidates(
     server: PlexServer?,
     preferredOrigin: String? = null,
+    demoteLocalOrigins: Boolean = false,
 ): List<String> {
     val preferred = preferredOrigin?.trimEnd('/')?.takeIf { it.isNotBlank() }
         ?: server?.uri?.trimEnd('/')?.takeIf { it.isNotBlank() }
-    val fromServer = server?.reachableBaseUris(preferred).orEmpty().map { it.trimEnd('/') }
-    return (listOfNotNull(preferred) + fromServer)
-        .filter { it.isNotBlank() }
-        .distinct()
+    val fromServer = server?.reachableBaseUris(
+        preferredFirst = preferred,
+        demoteLocalOrigins = demoteLocalOrigins,
+    ).orEmpty().map { it.trimEnd('/') }
+    // reachableBaseUris already applies demotion to preferredFirst; do not re-prepend
+    // server.uri / a stale LAN preferred and undo remote-first ordering.
+    if (fromServer.isNotEmpty()) return fromServer
+    return listOfNotNull(preferred).filter { it.isNotBlank() }
 }
 
 internal fun playbackUrlsForOrigins(url: String, origins: List<String>): List<String> {
@@ -129,7 +134,8 @@ internal fun playbackOriginOf(url: String): String? {
  * to the dead private address.
  */
 internal fun Track.preferPlaybackOrigin(origin: String): Track {
-    val preferred = origin.trimEnd('/').takeIf { it.isNotBlank() } ?: return this
+    val preferredRaw = origin.trimEnd('/').takeIf { it.isNotBlank() } ?: return this
+    val preferred = playbackOriginOf(preferredRaw) ?: preferredRaw
     val candidates = playbackUriCandidates()
     if (candidates.size <= 1) return this
     val matching = candidates.filter { candidate ->
