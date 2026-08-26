@@ -17,6 +17,15 @@ private const val NOTIFICATIONS_PATH = "/org/freedesktop/Notifications"
 /** Keeps the newest this many cover-art files, deleting oldest-first. */
 private const val MaxCoverArtFiles = 200
 
+/**
+ * Connect and read timeout for the artwork fetch.
+ *
+ * Short on purpose. The fetch is inline so that art appears on a track's first play
+ * rather than only on a repeat, but a notification that arrives late is worse than one
+ * without a picture, so the wait is bounded.
+ */
+private const val ArtworkFetchTimeoutMs = 3_000
+
 @DBusInterfaceName(NOTIFICATIONS_BUS)
 internal interface FreedesktopNotifications : DBusInterface {
     fun Notify(
@@ -60,7 +69,11 @@ actual class NowPlayingNotifier actual constructor() {
 
         val hints = buildMap<String, Variant<*>> {
             put("category", Variant("x-gnome.music"))
-            cachedArtFile(artworkUrl)?.let { put("image-path", Variant(it.toURI().toString())) }
+            // toPath().toUri() rather than File.toURI(): the latter produces the
+            // single-slash form "file:/home/..." which notification daemons do not
+            // parse, and the artwork silently fails to appear. java.nio yields the
+            // authority form "file:///home/..." that the spec calls for.
+            cachedArtFile(artworkUrl)?.let { put("image-path", Variant(it.toPath().toUri().toString())) }
         }
 
         runCatching {
@@ -116,7 +129,17 @@ actual class NowPlayingNotifier actual constructor() {
             if (target.exists() && target.length() > 0L) return target
 
             target.parentFile?.mkdirs()
-            URI(artworkUrl).toURL().openStream().use { input ->
+            // Timeouts are essential rather than tidy: this runs on the shared
+            // Dispatchers.IO, and URL.openStream() has no timeout by default. A Plex
+            // origin that accepts a connection and then stalls -- which happens when a
+            // server advertises an unroutable LAN address -- would block an IO thread
+            // forever, and enough of them would starve the pool the rest of the app
+            // shares.
+            val connection = URI(artworkUrl).toURL().openConnection().apply {
+                connectTimeout = ArtworkFetchTimeoutMs
+                readTimeout = ArtworkFetchTimeoutMs
+            }
+            connection.getInputStream().use { input ->
                 target.outputStream().use { output -> input.copyTo(output) }
             }
             pruneCoverArtCache(target.parentFile)
