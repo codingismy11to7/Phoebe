@@ -3116,6 +3116,13 @@ class AppState(
         }
     }
 
+    fun setNotifyOnTrackChange(enabled: Boolean) = scope.launch {
+        dependencies.settingsService.setNotifyOnTrackChange(enabled)
+        if (enabled) {
+            requestNotificationPermission()
+        }
+    }
+
     fun setKeepPlayingEnabled(enabled: Boolean) = scope.launch {
         dependencies.settingsService.setKeepPlayingEnabled(enabled)
         if (enabled) {
