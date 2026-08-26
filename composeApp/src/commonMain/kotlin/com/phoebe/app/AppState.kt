@@ -603,6 +603,7 @@ class AppState(
         recordPlaybackHistory()
         surfacePlaybackFailures()
         surfaceCastMessages()
+        notifyNowPlayingChanges()
         monitorKeepPlaying()
         dependencies.plexPlaybackReporter.start(scope)
         syncPlayHistoryAfterProviderReports()
@@ -652,6 +653,35 @@ class AppState(
         mutableArtistEvents.value = emptyMap()
         mutableAlbumMusicBrainzMetadata.value = emptyMap()
         mutableArtistMusicBrainzArtwork.value = emptyMap()
+    }
+
+    /**
+     * Posts a desktop notification when a new track starts.
+     *
+     * Keyed on track id rather than on player state: position updates arrive
+     * continuously during playback, so anything broader would notify on every tick.
+     * The isPlaying guard keeps a merely-queued track from notifying.
+     */
+    private fun notifyNowPlayingChanges() {
+        scope.launch {
+            var lastNotifiedTrackId: String? = null
+            dependencies.audioPlayer.state
+                .map { state -> state.currentTrack?.takeIf { state.isPlaying } }
+                .distinctUntilChanged()
+                .collect { track ->
+                    if (track == null) return@collect
+                    if (track.id == lastNotifiedTrackId) return@collect
+                    if (!appSettings.value.notifyOnTrackChange) return@collect
+                    lastNotifiedTrackId = track.id
+                    dependencies.nowPlayingNotifier.notifyNowPlaying(
+                        title = track.title,
+                        artist = track.artist.orEmpty(),
+                        album = track.album.orEmpty(),
+                        artworkUrl = track.localArtworkUri?.takeIf { it.isNotBlank() }
+                            ?: track.thumbUrl.orEmpty(),
+                    )
+                }
+        }
     }
 
     private fun surfacePlaybackFailures() {
