@@ -10,6 +10,7 @@ import com.github.kwhat.jnativehook.keyboard.NativeKeyEvent
 import com.github.kwhat.jnativehook.keyboard.NativeKeyListener
 import com.phoebe.app.domain.PlayerState
 import com.phoebe.app.media.MacMediaSession
+import com.phoebe.app.media.NowPlayingSnapshot
 import com.phoebe.app.media.loadMacMediaDylib
 import com.phoebe.app.platform.PhoebeLog
 import java.util.function.LongConsumer
@@ -22,17 +23,6 @@ import kotlinx.coroutines.flow.StateFlow
 
 private val isMacOs: Boolean
     get() = System.getProperty("os.name").orEmpty().lowercase().contains("mac")
-
-private data class MacNowPlayingSnapshot(
-    val trackId: String,
-    val title: String,
-    val artist: String,
-    val album: String,
-    val artworkUrl: String,
-    val positionBucketMs: Long,
-    val durationMs: Long,
-    val playing: Boolean,
-)
 
 @Composable
 actual fun GlobalMediaKeysEffect(
@@ -74,7 +64,7 @@ actual fun GlobalMediaKeysEffect(
             }
             try {
                 playerFlow
-                    .map { it.toMacNowPlayingSnapshot() }
+                    .map { it.toNowPlayingSnapshot() }
                     .distinctUntilChanged()
                     .collectLatest { snapshot ->
                         MacMediaSession.nativeUpdateNowPlaying(
@@ -149,14 +139,14 @@ actual fun GlobalMediaKeysEffect(
     }
 }
 
-private fun PlayerState.toMacNowPlayingSnapshot(): MacNowPlayingSnapshot {
+internal fun PlayerState.toNowPlayingSnapshot(): NowPlayingSnapshot {
     val track = currentTrack
     val durationMs = when {
         this.durationMs > 0L -> this.durationMs
         track != null && track.durationMs > 0L -> track.durationMs
         else -> 0L
     }
-    return MacNowPlayingSnapshot(
+    return NowPlayingSnapshot(
         trackId = track?.id.orEmpty(),
         title = track?.title.orEmpty(),
         artist = track?.artist.orEmpty(),
