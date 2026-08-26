@@ -3,13 +3,18 @@ package com.phoebe.app.feature.playback
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import com.github.kwhat.jnativehook.GlobalScreen
 import com.github.kwhat.jnativehook.dispatcher.SwingDispatchService
 import com.github.kwhat.jnativehook.keyboard.NativeKeyEvent
 import com.github.kwhat.jnativehook.keyboard.NativeKeyListener
 import com.phoebe.app.domain.PlayerState
 import com.phoebe.app.media.MacMediaSession
+import com.phoebe.app.media.MprisMediaSession
 import com.phoebe.app.media.NowPlayingSnapshot
 import com.phoebe.app.media.loadMacMediaDylib
 import com.phoebe.app.platform.PhoebeLog
@@ -23,6 +28,9 @@ import kotlinx.coroutines.flow.StateFlow
 
 private val isMacOs: Boolean
     get() = System.getProperty("os.name").orEmpty().lowercase().contains("mac")
+
+private val isLinux: Boolean
+    get() = System.getProperty("os.name").orEmpty().lowercase().contains("linux")
 
 @Composable
 actual fun GlobalMediaKeysEffect(
@@ -40,6 +48,10 @@ actual fun GlobalMediaKeysEffect(
     val next = rememberUpdatedState(onNext)
     val previous = rememberUpdatedState(onPrevious)
     val seek = rememberUpdatedState(onSeek)
+
+    // Set when MPRIS cannot register, so the composable falls through to the key hook.
+    // Exactly one path is ever live, so a key press can never be handled twice.
+    var mprisUnavailable by remember { mutableStateOf(false) }
 
     if (isMacOs) {
         LaunchedEffect(playerFlow) {
@@ -79,6 +91,30 @@ actual fun GlobalMediaKeysEffect(
                     }
             } finally {
                 runCatching { MacMediaSession.nativeShutdown() }
+            }
+        }
+    } else if (isLinux && !mprisUnavailable) {
+        LaunchedEffect(playerFlow) {
+            MprisMediaSession.onToggle = { toggle.value.invoke() }
+            MprisMediaSession.onPlay = { play.value.invoke() }
+            MprisMediaSession.onPause = { pause.value.invoke() }
+            MprisMediaSession.onNext = { next.value.invoke() }
+            MprisMediaSession.onPrevious = { previous.value.invoke() }
+            MprisMediaSession.onStop = { pause.value.invoke() }
+            MprisMediaSession.onSeek = { positionMs -> seek.value.invoke(positionMs) }
+
+            if (!MprisMediaSession.connect()) {
+                mprisUnavailable = true
+                return@LaunchedEffect
+            }
+
+            try {
+                playerFlow
+                    .map { it.toNowPlayingSnapshot() }
+                    .distinctUntilChanged()
+                    .collectLatest { snapshot -> MprisMediaSession.update(snapshot) }
+            } finally {
+                MprisMediaSession.shutdown()
             }
         }
     } else {
