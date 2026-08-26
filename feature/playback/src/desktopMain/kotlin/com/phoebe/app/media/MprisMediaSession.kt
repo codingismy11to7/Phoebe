@@ -101,12 +101,14 @@ internal object MprisMediaSession : MediaPlayer2, MediaPlayer2Player, Properties
         snapshot = newSnapshot
         val conn = connection ?: return
 
-        val changed: Map<String, Variant<*>> = mapOf(
-            "Metadata" to Variant(MprisMetadata.metadata(newSnapshot).toVariantMap()),
-            "PlaybackStatus" to Variant(MprisMetadata.playbackStatus(newSnapshot.playing)),
-        )
-
+        // Everything here runs inside the guard, including building the Variants:
+        // constructing one can throw, and this is called from a flow collector, so an
+        // escaping exception would surface to the user as a failed playback update.
         runCatching {
+            val changed: Map<String, Variant<*>> = mapOf(
+                "Metadata" to metadataVariant(newSnapshot),
+                "PlaybackStatus" to Variant(MprisMetadata.playbackStatus(newSnapshot.playing)),
+            )
             conn.sendMessage(Properties.PropertiesChanged(OBJECT_PATH, PLAYER_IFACE, changed, emptyList()))
         }.onFailure { e ->
             PhoebeLog.d("Phoebe") { "MPRIS property signal failed: ${e.message}" }
@@ -185,15 +187,13 @@ internal object MprisMediaSession : MediaPlayer2, MediaPlayer2Player, Properties
                 "CanRaise" to Variant(true),
                 "CanQuit" to Variant(true),
                 "HasTrackList" to Variant(false),
-                "SupportedUriSchemes" to Variant(arrayOf<String>()),
-                "SupportedMimeTypes" to Variant(arrayOf<String>()),
+                "SupportedUriSchemes" to Variant(arrayOf<String>(), "as"),
+                "SupportedMimeTypes" to Variant(arrayOf<String>(), "as"),
             )
 
             PLAYER_IFACE -> mutableMapOf(
                 "PlaybackStatus" to Variant(MprisMetadata.playbackStatus(current?.playing == true)),
-                "Metadata" to Variant(
-                    (current?.let { MprisMetadata.metadata(it) } ?: emptyMap()).toVariantMap(),
-                ),
+                "Metadata" to metadataVariant(current),
                 "Position" to Variant(MprisMetadata.positionMicros(current?.positionBucketMs ?: 0L)),
                 "Volume" to Variant(1.0),
                 "Rate" to Variant(1.0),
@@ -212,5 +212,24 @@ internal object MprisMediaSession : MediaPlayer2, MediaPlayer2Player, Properties
     }
 }
 
+/**
+ * A Map carries no signature dbus-java can infer, so it has to be spelled out. An
+ * unqualified `Variant(map)` throws "Can't wrap class java.util.LinkedHashMap in an
+ * unqualified Variant".
+ */
+private fun metadataVariant(snapshot: NowPlayingSnapshot?): Variant<*> =
+    Variant((snapshot?.let { MprisMetadata.metadata(it) } ?: emptyMap()).toVariantMap(), "a{sv}")
+
+/**
+ * Wraps metadata values as Variants, spelling out the signature wherever dbus-java
+ * cannot infer one. Plain strings, longs and booleans infer fine; collections do not,
+ * and mpris:trackid is an object path rather than a string per the MPRIS spec.
+ */
 private fun Map<String, Any>.toVariantMap(): MutableMap<String, Variant<*>> =
-    entries.associateTo(mutableMapOf()) { (k, v) -> k to Variant(v) }
+    entries.associateTo(mutableMapOf()) { (key, value) ->
+        key to when {
+            key == "mpris:trackid" -> Variant(DBusPath(value as String), "o")
+            value is List<*> -> Variant(value.map(Any?::toString).toTypedArray(), "as")
+            else -> Variant(value)
+        }
+    }
