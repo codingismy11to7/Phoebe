@@ -25,13 +25,11 @@ class CoverArtCachePathTest {
     }
 
     @Test
-    fun extensionComesFromThePathNotTheQueryString() {
-        assertTrue(coverArtCachePath("https://plex.example/art.png?token=abc").endsWith(".png"))
-    }
-
-    @Test
-    fun unknownExtensionFallsBackToJpg() {
-        // Plex thumb URLs frequently have no extension at all.
+    fun everyEntryIsJpgRegardlessOfSourceExtension() {
+        // Entries are re-encoded to JPEG when cached, so the source extension is
+        // irrelevant and the name should not imply otherwise.
+        assertTrue(coverArtCachePath("https://plex.example/art.png?token=abc").endsWith(".jpg"))
+        assertTrue(coverArtCachePath("https://plex.example/art.webp").endsWith(".jpg"))
         assertTrue(coverArtCachePath("https://plex.example/library/metadata/1/thumb/17772").endsWith(".jpg"))
     }
 

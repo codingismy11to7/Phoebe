@@ -8,13 +8,23 @@ import org.freedesktop.dbus.connections.impl.DBusConnectionBuilder
 import org.freedesktop.dbus.interfaces.DBusInterface
 import org.freedesktop.dbus.types.UInt32
 import org.freedesktop.dbus.types.Variant
+import java.awt.RenderingHints
+import java.awt.image.BufferedImage
 import java.io.File
 import java.net.URI
+import javax.imageio.ImageIO
 
 private const val NOTIFICATIONS_BUS = "org.freedesktop.Notifications"
 private const val NOTIFICATIONS_PATH = "/org/freedesktop/Notifications"
 
-/** Keeps the newest this many cover-art files, deleting oldest-first. */
+/**
+ * Keeps the newest this many cover-art files, deleting oldest-first.
+ *
+ * Callers are expected to pass a thumbnail-sized URL, so entries run to tens of
+ * kilobytes and this bound is a handful of megabytes. Bounding by count rather than
+ * bytes is only reasonable under that assumption: passing an unsized Plex URL yields
+ * multi-megabyte originals and 200 of those would be hundreds of megabytes.
+ */
 private const val MaxCoverArtFiles = 200
 
 /**
@@ -25,6 +35,9 @@ private const val MaxCoverArtFiles = 200
  * without a picture, so the wait is bounded.
  */
 private const val ArtworkFetchTimeoutMs = 3_000
+
+/** Longest-edge bound for a cached cover-art thumbnail. */
+private const val CoverArtMaxPixels = 256
 
 @DBusInterfaceName(NOTIFICATIONS_BUS)
 internal interface FreedesktopNotifications : DBusInterface {
@@ -139,13 +152,38 @@ actual class NowPlayingNotifier actual constructor() {
                 connectTimeout = ArtworkFetchTimeoutMs
                 readTimeout = ArtworkFetchTimeoutMs
             }
-            connection.getInputStream().use { input ->
-                target.outputStream().use { output -> input.copyTo(output) }
-            }
+            val source = connection.getInputStream().use { ImageIO.read(it) } ?: return null
+            source.writeThumbnailTo(target)
             pruneCoverArtCache(target.parentFile)
             target.takeIf { it.length() > 0L }
         }.getOrNull()
     }
+}
+
+/**
+ * Writes a downscaled JPEG copy, at most [CoverArtMaxPixels] on its longest edge.
+ *
+ * Servers cannot be relied on to honour a requested size — Plex ignores width and
+ * height on its thumb endpoint and returns the original, routinely 2400x2400 and
+ * several megabytes — so the bound is enforced here instead. Without this the cache
+ * holds full-resolution album art to draw it at roughly 64 pixels.
+ */
+private fun BufferedImage.writeThumbnailTo(target: File) {
+    val longestEdge = maxOf(width, height)
+    val scale = if (longestEdge > CoverArtMaxPixels) CoverArtMaxPixels.toDouble() / longestEdge else 1.0
+    val targetWidth = (width * scale).toInt().coerceAtLeast(1)
+    val targetHeight = (height * scale).toInt().coerceAtLeast(1)
+
+    // TYPE_INT_RGB rather than ARGB: JPEG cannot store alpha, and encoding an
+    // alpha-bearing raster to JPEG produces colour-shifted output.
+    val thumbnail = BufferedImage(targetWidth, targetHeight, BufferedImage.TYPE_INT_RGB)
+    thumbnail.createGraphics().apply {
+        setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
+        setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY)
+        drawImage(this@writeThumbnailTo, 0, 0, targetWidth, targetHeight, null)
+        dispose()
+    }
+    ImageIO.write(thumbnail, "jpg", target)
 }
 
 private fun pruneCoverArtCache(dir: File?) {
