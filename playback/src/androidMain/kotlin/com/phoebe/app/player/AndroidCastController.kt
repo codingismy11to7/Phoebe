@@ -875,15 +875,53 @@ private class AndroidCastController : CastController {
         loadTimeoutJob?.cancel()
         loadTimeoutJob = null
         pendingHandoff = null
-        expectedRemoteHandoff = null
-        val client = remoteMediaClient() ?: return false
-        return runCatching {
+        val requestId = loadRequestId
+        val handoff = PendingCastHandoff(
+            queue = queue,
+            index = appIndex,
+            positionMs = 0L,
+            wasLocalPlaying = mutableState.value.isPlaying,
+            requestId = requestId,
+        )
+        expectedRemoteHandoff = handoff
+        val client = remoteMediaClient() ?: run {
+            expectedRemoteHandoff = null
+            return false
+        }
+        val pendingResult = runCatching {
             client.queueJumpToItem(item.itemId, null as JSONObject?)
-            true
         }.getOrElse { error ->
             PhoebeLog.d(TAG) { "queue jump failed: ${error.message}" }
-            false
+            expectedRemoteHandoff = null
+            return false
         }
+        pendingResult.setResultCallback(
+            ResultCallback { result ->
+                scope.launch {
+                    handleQueueJumpResult(requestId, result, handoff)
+                }
+            },
+        )
+        return true
+    }
+
+    private fun handleQueueJumpResult(
+        requestId: Long,
+        result: RemoteMediaClient.MediaChannelResult,
+        handoff: PendingCastHandoff,
+    ) {
+        if (expectedRemoteHandoff?.requestId != requestId) return
+        val status = result.status
+        val mediaError = result.mediaError
+        if (status.isSuccess && mediaError == null) {
+            syncRemotePlayback()
+            return
+        }
+        PhoebeLog.d(TAG) {
+            "queue jump failed status=${status.statusCode} message=${status.statusMessage} mediaError=${mediaError?.detailedErrorCode} requestId=$requestId"
+        }
+        expectedRemoteHandoff = null
+        loadQueueInternal(handoff.queue, handoff.index)
     }
 
     private fun remotePlaybackMatches(
