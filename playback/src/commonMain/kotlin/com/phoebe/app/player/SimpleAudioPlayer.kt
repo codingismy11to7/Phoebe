@@ -10,6 +10,7 @@ import com.phoebe.app.domain.StreamingPolicySettings
 import com.phoebe.app.domain.Track
 import com.phoebe.app.platform.PhoebeLog
 import com.phoebe.app.platform.currentTimeMs
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -47,6 +48,7 @@ abstract class SimpleAudioPlayer(
     private var systemVolumeScale = 1f
     private var playGeneration = 0
     private var failoverGeneration = -1
+    private var originRediscoveryGeneration = -1
     private val triedPlaybackUris = linkedSetOf<String>()
     private var stickyPlaybackOrigin: String? = null
     private var crossfadeDurationMs = 0L
@@ -974,13 +976,18 @@ abstract class SimpleAudioPlayer(
 
     protected fun replayWithFailoverUri(generation: Int, failedUri: String?): Boolean {
         if (!isPlayRequestCurrent(generation) || !playWhenReady) return false
-        val next = nextPlaybackFailoverUri(generation, failedUri) ?: return false
+        val next = nextPlaybackFailoverUri(generation, failedUri)
+            ?: return rediscoverOriginsAndRetry(generation, failedUri)
         val trackId = mutableState.value.currentTrack?.id
         if (!failedUri.isNullOrBlank() && failedUri.isPlexUniversalTranscodeUrl() && !trackId.isNullOrBlank()) {
             StreamingPlaybackPolicyHolder.preferDirectStreamFor(trackId)
         }
         notePlaybackUri(next, generation)
-        adoptFailoverStreamUrl(next)
+        return startFailoverAttempt(generation, next)
+    }
+
+    private fun startFailoverAttempt(generation: Int, uri: String): Boolean {
+        adoptFailoverStreamUrl(uri)
         val current = mutableState.value
         val track = current.currentTrack ?: return false
         val index = current.currentIndex.takeIf { it in current.queue.indices } ?: return false
@@ -992,17 +999,92 @@ abstract class SimpleAudioPlayer(
             playbackErrorMessage = null,
         )
         PhoebeLog.d("AudioPlayer") {
-            "playback failover uri=${PlaybackFailureClassifier.redactStreamUri(next)} positionMs=$resumePositionMs"
+            "playback failover uri=${PlaybackFailureClassifier.redactStreamUri(uri)} positionMs=$resumePositionMs"
         }
         startPlaybackStartupWatchdog(generation)
         playQueueOnPlatform(
             queue = mutableState.value.queue,
             startIndex = index,
-            track = track.copy(streamUrl = next),
+            track = track.copy(streamUrl = uri),
             generation = generation,
             startPositionMs = resumePositionMs,
         )
         return true
+    }
+
+    /**
+     * Every URL we knew about failed. Ask the provider for the server's current addresses before
+     * giving up: a server that changed address mid-session is unreachable on every stamped URL,
+     * and refetching that list is the only reason quitting and relaunching the app recovered.
+     *
+     * Returns true when a refresh is in flight, so the caller defers surfacing an error — this
+     * publishes the failure itself if nothing new turns up. Capped at one attempt per play
+     * request so a genuinely offline server cannot spin.
+     */
+    private fun rediscoverOriginsAndRetry(generation: Int, failedUri: String?): Boolean {
+        val resolver = PlaybackOriginResolverHolder.resolver ?: return false
+        if (originRediscoveryGeneration == generation) return false
+        val track = mutableState.value.currentTrack ?: return false
+        if (!track.localUri.isNullOrBlank()) return false
+        originRediscoveryGeneration = generation
+        val alreadyTried = triedPlaybackUris.toSet()
+        scope.launch {
+            val origins = runCatching { resolver.rediscoverOrigins() }
+                // Swallowing cancellation here would let the rest of this block publish a failure
+                // and mutate player state after the scope that owns it is already gone.
+                .onFailure { if (it is CancellationException) throw it }
+                .getOrNull()
+                .orEmpty()
+            if (!isPlayRequestCurrent(generation) || !playWhenReady) return@launch
+            // An empty list means the addresses did not move, so the URLs already walked are still
+            // the only ones that exist. Retrying would re-time-out on every one of them, and the
+            // attempt budget may have cut the walk short while dead candidates remained.
+            val target = if (origins.isEmpty()) {
+                null
+            } else {
+                restampQueueWithOrigins(origins)
+                nextPlaybackFailoverCandidate(
+                    candidates = mutableState.value.currentTrack?.playbackUriCandidates().orEmpty(),
+                    tried = alreadyTried,
+                    failedUri = failedUri,
+                    // The addresses are new, so the exhausted budget no longer applies. Going
+                    // through the shared candidate picker keeps the LAN-only skip after a remote
+                    // failure, which a plain "first untried" scan would lose.
+                    maxTriedUris = alreadyTried.size + MaxTriedPlaybackUris,
+                )
+            }
+            if (target == null) {
+                PhoebeLog.d("AudioPlayer") { "origin rediscovery surfaced no untried stream URL" }
+                publishPlaybackFailure(
+                    PlaybackFailure(
+                        kind = PlaybackFailureKind.Unreachable,
+                        message = "every known stream URL for this server failed",
+                        streamUri = failedUri,
+                    ),
+                    generation,
+                )
+                return@launch
+            }
+            PhoebeLog.d("AudioPlayer") {
+                "origin rediscovery found ${origins.size} origin(s); retrying playback"
+            }
+            resetPlaybackUriFailover(generation)
+            notePlaybackUri(target, generation)
+            startFailoverAttempt(generation, target)
+        }
+        return true
+    }
+
+    private fun restampQueueWithOrigins(origins: List<String>) {
+        val preferred = origins.firstOrNull() ?: return
+        val current = mutableState.value
+        var changed = false
+        val restamped = current.queue.map { track ->
+            val next = track.withPlaybackOrigins(preferred, origins.drop(1))
+            if (next !== track) changed = true
+            next
+        }
+        if (changed) mutableState.value = current.copy(queue = restamped)
     }
 
     private fun adoptFailoverStreamUrl(uri: String) {
