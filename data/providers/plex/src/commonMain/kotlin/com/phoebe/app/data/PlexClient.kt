@@ -169,7 +169,7 @@ class PlexClient private constructor(
             baseTimeoutMs = baseTimeoutMs,
         )
         return response.mediaContainer.directories
-            .filter { it.type == "artist" }
+            .filter { it.type.equals("artist", ignoreCase = true) }
             .map { MusicLibrary(key = it.key, title = it.title) }
     }
 

@@ -604,6 +604,7 @@ internal fun PhoebeDesktopScreenshotScenario(
             onCancelPlexSetup = {},
             onBackToServerPicker = {},
             onRetryServers = {},
+            onRetryLibraries = {},
         ),
         settingsState = SettingsUiState(
             appSettings = AppSettings.Default.copy(

@@ -116,11 +116,10 @@ private class AndroidCastController : CastController {
         }
 
         override fun onSessionEnded(session: CastSession, error: Int) {
-            val reason = if (endingSessionIntentionally) {
-                CastSessionDisconnectReason.UserRequested
-            } else {
-                CastSessionDisconnectReason.Unexpected
-            }
+            val reason = castSessionDisconnectReason(
+                endingSessionIntentionally = endingSessionIntentionally,
+                sessionEndError = error,
+            )
             endingSessionIntentionally = false
             PhoebeLog.d(TAG) { "session ended error=$error reason=$reason device=${session.castDevice?.friendlyName}" }
             disconnectState(reason)
@@ -167,6 +166,7 @@ private class AndroidCastController : CastController {
         AndroidPlaybackBridge.readCastVolume = { readCastVolumeNormalized() }
         AndroidPlaybackBridge.applyCastVolume = { volume -> applyCastVolume(volume) }
         AndroidPlaybackBridge.adjustCastVolumeStep = { up -> adjustCastVolumeStep(up) }
+        AndroidPlaybackBridge.onCastDisconnect = { disconnect() }
         ensureCastSessionListener()
     }
 

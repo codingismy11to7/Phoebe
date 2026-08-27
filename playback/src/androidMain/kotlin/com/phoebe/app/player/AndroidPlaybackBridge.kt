@@ -36,6 +36,7 @@ object AndroidPlaybackBridge {
     var applyCastVolume: ((Float) -> Unit)? = null
     var adjustCastVolumeStep: ((up: Boolean) -> Boolean)? = null
     var onCastVolumeChanged: ((Float) -> Unit)? = null
+    var onCastDisconnect: (() -> Unit)? = null
     var onCastMediaSessionState: ((CastMediaSessionState?) -> Unit)? = null
     var onLocalMediaSessionState: ((LocalMediaSessionState?) -> Unit)? = null
 

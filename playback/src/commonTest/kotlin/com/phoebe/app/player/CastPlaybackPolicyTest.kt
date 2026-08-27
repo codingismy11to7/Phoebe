@@ -56,6 +56,31 @@ class CastPlaybackPolicyTest {
     }
 
     @Test
+    fun normalCastSessionEndIsTreatedAsUserDisconnect() {
+        assertEquals(
+            CastSessionDisconnectReason.UserRequested,
+            castSessionDisconnectReason(
+                endingSessionIntentionally = false,
+                sessionEndError = CAST_SESSION_END_SUCCESS,
+            ),
+        )
+        assertEquals(
+            CastSessionDisconnectReason.UserRequested,
+            castSessionDisconnectReason(
+                endingSessionIntentionally = true,
+                sessionEndError = 42,
+            ),
+        )
+        assertEquals(
+            CastSessionDisconnectReason.Unexpected,
+            castSessionDisconnectReason(
+                endingSessionIntentionally = false,
+                sessionEndError = 42,
+            ),
+        )
+    }
+
+    @Test
     fun loadFailureRetriesSmallerQueueWhileSessionStaysConnected() {
         assertEquals(
             CastLoadFailureAction.RetrySmallerQueue,

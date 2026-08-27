@@ -1178,10 +1178,12 @@ fun PlexLibraryPickerPanel(
     providerType: MediaProviderType = MediaProviderType.Plex,
     busy: Boolean,
     librariesLoading: Boolean = false,
+    librariesLoadError: String? = null,
     isJellyfin: Boolean = false,
     onSelectLibrary: (MusicLibrary, JellyfinSyncMode?) -> Unit,
     onBack: () -> Unit,
     onCancel: () -> Unit,
+    onRetry: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var pendingJellyfinLibrary by remember { mutableStateOf<MusicLibrary?>(null) }
@@ -1237,7 +1239,20 @@ fun PlexLibraryPickerPanel(
                 Text("Finding $pickerKindPlural...", color = PhoebeUi.secondaryText, fontSize = 14.sp)
             }
         } else if (libraries.isEmpty()) {
-            Text("No $pickerKindPlural found on this server.", color = PhoebeUi.secondaryText, fontSize = 14.sp)
+            Text(
+                librariesLoadError ?: "No $pickerKindPlural found on this server.",
+                color = PhoebeUi.secondaryText,
+                fontSize = 14.sp,
+                lineHeight = 20.sp,
+            )
+            FilledTonalButton(
+                onClick = onRetry,
+                enabled = !busy && !librariesLoading,
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = PhoebeUi.accent.copy(alpha = 0.22f),
+                    contentColor = PhoebeUi.primaryText,
+                ),
+            ) { Text("Retry") }
         } else {
             LazyColumn(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
