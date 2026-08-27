@@ -126,7 +126,9 @@ class MainActivity : FragmentActivity(), AndroidCastRoutePickerHost {
     private fun showCastChooserDialog(): Boolean =
         runCatching {
             dismissCastDialog(CAST_CHOOSER_DIALOG_TAG)
-            MediaRouteChooserDialogFragment().show(supportFragmentManager, CAST_CHOOSER_DIALOG_TAG)
+            val fragment = MediaRouteChooserDialogFragment()
+            castRouteButton?.routeSelector?.let { fragment.routeSelector = it }
+            fragment.show(supportFragmentManager, CAST_CHOOSER_DIALOG_TAG)
             true
         }.getOrDefault(false)
 

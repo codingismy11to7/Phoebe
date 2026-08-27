@@ -1522,12 +1522,12 @@ class AppState(
     }
 
     private fun loadLibrariesForSelectedServer(force: Boolean) {
+        if (!force) {
+            if (mutableLibrariesLoading.value) return
+            if (mutableLibraries.value.isNotEmpty()) return
+        }
         librariesLoadJob?.cancel()
         librariesLoadJob = scope.launch {
-            if (!force) {
-                if (mutableLibrariesLoading.value) return@launch
-                if (mutableLibraries.value.isNotEmpty()) return@launch
-            }
             val server = session.value?.selectedServer ?: return@launch
             if (session.value?.selectedLibrary != null) return@launch
 
