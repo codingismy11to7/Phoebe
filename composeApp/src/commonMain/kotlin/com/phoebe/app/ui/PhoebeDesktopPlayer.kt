@@ -199,6 +199,7 @@ internal fun DesktopPlayer(
     val servers = authSetupState.servers
     val libraries = authSetupState.libraries
     val librariesLoading = authSetupState.librariesLoading
+    val librariesLoadError = authSetupState.librariesLoadError
     val appSettings = settingsState.appSettings
     val downloadDirectory = settingsState.downloadDirectory
     val downloadCount = settingsState.downloadCount
@@ -317,6 +318,7 @@ internal fun DesktopPlayer(
     val onCancelPlexSetup = authSetupActions.onCancelPlexSetup
     val onBackToServerPicker = authSetupActions.onBackToServerPicker
     val onRetryServers = authSetupActions.onRetryServers
+    val onRetryLibraries = authSetupActions.onRetryLibraries
     val onHomeSections = settingsActions.onHomeSections
     val onMobileBottomTabs = settingsActions.onMobileBottomTabs
     val onPersonalMix = settingsActions.onPersonalMix
@@ -477,12 +479,14 @@ internal fun DesktopPlayer(
                                         providerType = session?.providerType ?: MediaProviderType.Plex,
                                         busy = busy,
                                         librariesLoading = librariesLoading,
+                                        librariesLoadError = librariesLoadError,
                                         isJellyfin = session.isEmbyFamily(),
                                     ),
                                     actions = PlexLibraryPickerRouteActions(
                                         onSelectLibrary = onSelectLibrary,
                                         onBack = onBackToServerPicker,
                                         onCancel = onCancelPlexSetup,
+                                        onRetry = onRetryLibraries,
                                     ),
                                     modifier = Modifier.fillMaxSize(),
                                 )

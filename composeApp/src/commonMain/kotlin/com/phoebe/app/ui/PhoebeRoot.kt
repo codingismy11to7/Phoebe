@@ -401,6 +401,7 @@ private fun PhoebeRootStateHolder(
     val authInProgress by state.authInProgress.collectAsState()
     val serversLoading by state.serversLoading.collectAsState()
     val librariesLoading by state.librariesLoading.collectAsState()
+    val librariesLoadError by state.librariesLoadError.collectAsState()
     val message by state.message.collectAsState()
     val pendingDuplicatePlaylistAdd by state.pendingDuplicatePlaylistAdd.collectAsState()
     val playbackSnackbar by state.playbackSnackbar.collectAsState()
@@ -480,6 +481,12 @@ private fun PhoebeRootStateHolder(
     val missingRoute = routeResolution as? PhoebeRouteResolution.Missing
     val screen = (routeResolution as? PhoebeRouteResolution.Resolved)?.screen ?: AppScreen.Home
     val currentRoutes = navigator.routes
+    LaunchedEffect(session?.selectedServer?.id, session?.selectedLibrary?.key, screen) {
+        if (screen != AppScreen.LibraryPicker) return@LaunchedEffect
+        val currentSession = session ?: return@LaunchedEffect
+        if (currentSession.selectedServer == null || currentSession.selectedLibrary != null) return@LaunchedEffect
+        state.ensureLibrariesLoaded()
+    }
     val browseSection = currentRoutes.filterIsInstance<PhoebeRoute.Browse>().lastOrNull()?.section ?: BrowseSection.Home
     val radioPlayingFromSignIn = currentTrack?.id?.startsWith("radio:") == true &&
         currentRoutes.firstOrNull() == PhoebeRoute.SignIn
@@ -1498,12 +1505,14 @@ private fun PhoebeRootStateHolder(
                             providerType = session?.providerType ?: com.phoebe.app.domain.MediaProviderType.Plex,
                             busy = busy,
                             librariesLoading = librariesLoading,
+                            librariesLoadError = librariesLoadError,
                             isJellyfin = session.isEmbyFamily(),
                         ),
                         actions = PlexLibraryPickerRouteActions(
                             onSelectLibrary = { library, mode -> state.selectLibrary(library, mode) },
                             onBack = state::returnToServerPicker,
                             onCancel = state::signOut,
+                            onRetry = state::retryLibraries,
                         ),
                         modifier = Modifier.fillMaxSize(),
                     )
@@ -2477,6 +2486,7 @@ private fun PhoebeRootStateHolder(
                         servers = servers,
                         libraries = libraries,
                         librariesLoading = librariesLoading,
+                        librariesLoadError = librariesLoadError,
                     ),
                     authSetupActions = AuthSetupActions(
                         onStartSignIn = state::startPlexSignIn,
@@ -2498,6 +2508,7 @@ private fun PhoebeRootStateHolder(
                         onCancelPlexSetup = { state.signOut() },
                         onBackToServerPicker = { state.returnToServerPicker() },
                         onRetryServers = { state.loadServers() },
+                        onRetryLibraries = { state.retryLibraries() },
                     ),
                     settingsState = SettingsUiState(
                         appSettings = appSettings,

@@ -542,6 +542,13 @@ fun MobilePlayer(
             }
         }
 
+        fun skipStepsForSwipe(releaseOffset: Float, artworkSizePx: Float): Int {
+            val rawSteps = (abs(releaseOffset) / artworkSizePx).toInt().coerceIn(1, 5)
+            // Collapsed tray swipes span the full bar while artwork is only 44dp, so distance-based
+            // multi-skip would advance several tracks from a normal gesture.
+            return if (clampedExpansionFraction < 0.1f) 1 else rawSteps
+        }
+
         fun animateSwipeCommit(releaseOffset: Float) {
             horizontalSettleJob?.cancel()
             horizontalSettleJob = scope.launch {
@@ -554,8 +561,7 @@ fun MobilePlayer(
                             targetValue = -artworkSizePx,
                             animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing),
                         )
-                        val steps = (abs(releaseOffset) / artworkSizePx).toInt().coerceIn(1, 5)
-                        onSkipQueueBy(steps)
+                        onSkipQueueBy(skipStepsForSwipe(releaseOffset, artworkSizePx))
                         delay(600L)
                         horizontalSettleOffset.animateTo(
                             0f,
@@ -570,8 +576,7 @@ fun MobilePlayer(
                             targetValue = artworkSizePx,
                             animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing),
                         )
-                        val steps = -(abs(releaseOffset) / artworkSizePx).toInt().coerceIn(1, 5)
-                        onSkipQueueBy(steps)
+                        onSkipQueueBy(-skipStepsForSwipe(releaseOffset, artworkSizePx))
                         delay(600L)
                         horizontalSettleOffset.animateTo(
                             0f,

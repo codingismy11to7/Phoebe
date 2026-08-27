@@ -233,6 +233,7 @@ internal data class AuthSetupState(
     val servers: List<PlexServer>,
     val libraries: List<MusicLibrary>,
     val librariesLoading: Boolean = false,
+    val librariesLoadError: String? = null,
 )
 
 internal data class AuthSetupActions(
@@ -255,6 +256,7 @@ internal data class AuthSetupActions(
     val onCancelPlexSetup: () -> Unit,
     val onBackToServerPicker: () -> Unit,
     val onRetryServers: () -> Unit,
+    val onRetryLibraries: () -> Unit,
 )
 
 internal data class SettingsUiState(

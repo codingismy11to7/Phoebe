@@ -30,6 +30,18 @@ enum class CastSessionDisconnectReason {
     Unexpected,
 }
 
+/** Google Cast reports [CAST_SESSION_END_SUCCESS] for normal app/user teardown. */
+const val CAST_SESSION_END_SUCCESS = 0
+
+fun castSessionDisconnectReason(
+    endingSessionIntentionally: Boolean,
+    sessionEndError: Int,
+): CastSessionDisconnectReason = when {
+    endingSessionIntentionally -> CastSessionDisconnectReason.UserRequested
+    sessionEndError == CAST_SESSION_END_SUCCESS -> CastSessionDisconnectReason.UserRequested
+    else -> CastSessionDisconnectReason.Unexpected
+}
+
 fun shouldRestoreLocalAfterCastSessionEnd(reason: CastSessionDisconnectReason): Boolean =
     reason == CastSessionDisconnectReason.UserRequested
 

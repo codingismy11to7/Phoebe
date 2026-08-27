@@ -53,6 +53,7 @@ data class PlexLibraryPickerRouteState(
     val providerType: MediaProviderType = MediaProviderType.Plex,
     val busy: Boolean,
     val librariesLoading: Boolean = false,
+    val librariesLoadError: String? = null,
     val isJellyfin: Boolean = false,
 )
 
@@ -60,6 +61,7 @@ class PlexLibraryPickerRouteActions(
     val onSelectLibrary: (MusicLibrary, JellyfinSyncMode?) -> Unit,
     val onBack: () -> Unit,
     val onCancel: () -> Unit,
+    val onRetry: () -> Unit,
 )
 
 @Composable
@@ -144,10 +146,12 @@ fun PlexLibraryPickerRoute(
         providerType = state.providerType,
         busy = state.busy,
         librariesLoading = state.librariesLoading,
+        librariesLoadError = state.librariesLoadError,
         isJellyfin = state.isJellyfin,
         onSelectLibrary = actions.onSelectLibrary,
         onBack = actions.onBack,
         onCancel = actions.onCancel,
+        onRetry = actions.onRetry,
         modifier = modifier,
     )
 }

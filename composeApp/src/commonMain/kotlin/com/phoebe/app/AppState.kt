@@ -324,6 +324,11 @@ class AppState(
     private val mutableLibrariesLoading = MutableStateFlow(false)
     val librariesLoading: StateFlow<Boolean> = mutableLibrariesLoading
 
+    private val mutableLibrariesLoadError = MutableStateFlow<String?>(null)
+    val librariesLoadError: StateFlow<String?> = mutableLibrariesLoadError
+
+    private var librariesLoadJob: Job? = null
+
     private val mutableAuthInProgress = MutableStateFlow(false)
     val authInProgress: StateFlow<Boolean> = mutableAuthInProgress
 
@@ -418,6 +423,7 @@ class AppState(
             downloadedArtworkCacheJob,
             artistDetailPreloadJob,
             keepPlayingJob,
+            librariesLoadJob,
             popularMixSeedBuildDeferred,
             topTracksMixBuildDeferred,
         ).forEach { it.cancel() }
@@ -433,6 +439,7 @@ class AppState(
         downloadedArtworkCacheJob = null
         artistDetailPreloadJob = null
         keepPlayingJob = null
+        librariesLoadJob = null
         popularMixSeedBuildDeferred = null
         popularMixSeedBuildSignature = null
         popularMixSeedSignature = null
@@ -533,6 +540,9 @@ class AppState(
             requestNavigation(defaultBrowseRequest(session.value))
             if (session.value?.token?.isNotBlank() == true && session.value?.selectedServer == null) {
                 refreshServers()
+            }
+            if (session.value?.selectedServer != null && session.value?.selectedLibrary == null) {
+                ensureLibrariesLoaded()
             }
             dependencies.catalogRepository.restoreCachedCatalog()
             refreshInternetRadio()
@@ -1467,6 +1477,7 @@ class AppState(
 
     fun returnToServerPicker() = scope.launch {
         mutableLibrariesLoading.value = false
+        mutableLibrariesLoadError.value = null
         requestNavigation(AppNavigationRequest.ServerPicker)
         refreshServers()
     }
@@ -1484,31 +1495,79 @@ class AppState(
     }
 
     fun selectServer(server: PlexServer) = scope.launch {
-        mutableBusy.value = true
         cancelRemotePlayHistorySync()
         cancelLightweightRemoteSync()
         mutableLibraries.value = emptyList()
-        mutableLibrariesLoading.value = true
-        val resolved = runCatching {
-            dependencies.sessionRepository.selectServer(server, refreshConnections = false)
-        }.onFailure {
+        mutableLibrariesLoadError.value = null
+        mutableBusy.value = true
+        try {
+            runCatching {
+                dependencies.sessionRepository.selectServer(server, refreshConnections = false)
+            }.onFailure {
+                mutableMessage.value = it.message ?: "Couldn't select ${session.value.providerLabel()} server."
+            }.getOrNull() ?: return@launch
+            requestNavigation(AppNavigationRequest.LibraryPicker)
+            loadLibrariesForSelectedServer(force = true)
+        } finally {
             mutableBusy.value = false
-            mutableLibrariesLoading.value = false
-            mutableMessage.value = it.message ?: "Couldn't select ${session.value.providerLabel()} server."
-        }.getOrNull()
-        if (resolved == null) {
-            mutableBusy.value = false
-            return@launch
         }
-        requestNavigation(AppNavigationRequest.LibraryPicker)
-        runCatching {
-            mutableLibraries.value = dependencies.sessionRepository.libraries(resolved)
-        }.onFailure {
-            mutableMessage.value = it.message ?: "Couldn't load ${session.value.providerLabel()} libraries."
-        }
-        mutableLibrariesLoading.value = false
-        mutableBusy.value = false
     }
+
+    fun ensureLibrariesLoaded() {
+        loadLibrariesForSelectedServer(force = false)
+    }
+
+    fun retryLibraries() {
+        loadLibrariesForSelectedServer(force = true)
+    }
+
+    private fun loadLibrariesForSelectedServer(force: Boolean) {
+        librariesLoadJob?.cancel()
+        librariesLoadJob = scope.launch {
+            if (!force) {
+                if (mutableLibrariesLoading.value) return@launch
+                if (mutableLibraries.value.isNotEmpty()) return@launch
+            }
+            val server = session.value?.selectedServer ?: return@launch
+            if (session.value?.selectedLibrary != null) return@launch
+
+            mutableLibrariesLoadError.value = null
+            if (force) {
+                mutableLibraries.value = emptyList()
+            }
+            mutableLibrariesLoading.value = true
+            try {
+                prepareSelectedServerForLibraryRequests()
+                val serverForLibraries = session.value?.selectedServer ?: server
+                val loaded = dependencies.sessionRepository.libraries(serverForLibraries)
+                mutableLibraries.value = loaded
+                if (loaded.isEmpty()) {
+                    val error = librariesEmptyMessage(serverForLibraries.name, session.value.providerLabel())
+                    mutableLibrariesLoadError.value = error
+                    mutableMessage.value = error
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                val message = error.message ?: "Couldn't load ${session.value.providerLabel()} libraries."
+                mutableLibrariesLoadError.value = message
+                mutableMessage.value = message
+                mutableLibraries.value = emptyList()
+            } finally {
+                mutableLibrariesLoading.value = false
+            }
+        }
+    }
+
+    private suspend fun prepareSelectedServerForLibraryRequests() {
+        if (!session.value.isPlex()) return
+        runCatching { dependencies.sessionRepository.refreshSelectedServerConnections() }
+        runCatching { dependencies.sessionRepository.warmServerConnection() }
+    }
+
+    private fun librariesEmptyMessage(serverName: String, providerLabel: String): String =
+        "Couldn't reach music libraries on $serverName. Check your network connection and try again, " +
+            "or turn on Prefer home network in streaming settings if you're on the same LAN as your $providerLabel server."
 
     fun selectLibrary(library: MusicLibrary, jellyfinSyncMode: JellyfinSyncMode? = null) = scope.launch {
         cancelRemotePlayHistorySync()
@@ -3972,6 +4031,9 @@ class AppState(
         mutablePin.value = null
         mutableLibraries.value = emptyList()
         mutableLibrariesLoading.value = false
+        mutableLibrariesLoadError.value = null
+        librariesLoadJob?.cancel()
+        librariesLoadJob = null
         mutableAuthInProgress.value = false
         requestNavigation(AppNavigationRequest.SignIn)
         mutableMessage.value = "Signing out…"
