@@ -1170,10 +1170,10 @@ private fun String.withRequestImageSize(maxDecodeDimension: Int): String {
 private fun String.isPlexArtworkUrl(): Boolean =
     hasQueryParameter("X-Plex-Token")
 
-private fun String.isSubsonicCoverArtUrl(): Boolean =
+internal fun String.isSubsonicCoverArtUrl(): Boolean =
     contains("/rest/getCoverArt", ignoreCase = true) || contains("getCoverArt.view", ignoreCase = true)
 
-private fun String.isMusicAssistantImageProxyUrl(): Boolean =
+internal fun String.isMusicAssistantImageProxyUrl(): Boolean =
     contains("/imageproxy", ignoreCase = true)
 
 private fun String.hasQueryParameter(name: String): Boolean {

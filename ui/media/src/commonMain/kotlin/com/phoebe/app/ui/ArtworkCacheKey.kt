@@ -1,6 +1,7 @@
 package com.phoebe.app.ui
 
 import com.phoebe.app.data.bindPlexCoverArt
+import com.phoebe.app.data.isEmbyFamilyArtworkUrl
 import com.phoebe.app.data.isPlexMediaPathOrUrl
 
 /**
@@ -48,13 +49,31 @@ internal fun stableArtworkCacheKey(fetchUrl: String): String? {
     val remote = raw.startsWith("http://", ignoreCase = true) ||
         raw.startsWith("https://", ignoreCase = true)
     val identity = when {
-        remote -> originIndependentRemotePath(raw)
+        remote && raw.isSelfHostedMediaServerUrl() -> originIndependentRemotePath(raw)
+        // An arbitrary third-party image (e.g. a radio station favicon) lives at exactly one
+        // host forever; stripping the origin here would collapse unrelated stations that both
+        // fall back to "/favicon.ico" onto the same cache entry.
+        remote -> normalizeArtworkPathAndQuery(raw.substringBefore('#'))
         // A host-less Plex path is already origin-independent.
         raw.isPlexMediaPathOrUrl() -> normalizeArtworkPathAndQuery(raw)
         else -> null
     } ?: return null
     return "phoebe-art:$identity"
 }
+
+/**
+ * Self-hosted media servers (Plex, Jellyfin/Emby, Subsonic/Navidrome, Music Assistant) are reached
+ * through rotating hosts — a LAN hop, a relay, a tunnel — while an arbitrary remote image lives at
+ * exactly one host. Only the former should have its origin stripped from the cache key.
+ *
+ * Detection is structural on purpose: generic query names like `v`, `t`, or `s` appear on ordinary
+ * cache-busted image URLs, so matching those would re-collapse unrelated hosts onto one entry.
+ */
+private fun String.isSelfHostedMediaServerUrl(): Boolean =
+    isPlexMediaPathOrUrl() ||
+        isEmbyFamilyArtworkUrl() ||
+        isSubsonicCoverArtUrl() ||
+        isMusicAssistantImageProxyUrl()
 
 /** Strip `scheme://host:port` and session query parameters, keeping a stable parameter order. */
 private fun originIndependentRemotePath(url: String): String? {

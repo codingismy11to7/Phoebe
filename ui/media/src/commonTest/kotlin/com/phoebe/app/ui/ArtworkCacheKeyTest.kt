@@ -87,6 +87,35 @@ class ArtworkCacheKeyTest {
         assertTrue("size=256" in first, "size must stay in the key: $first")
     }
 
+    /**
+     * A generic remote image (e.g. a radio station favicon) is not a self-hosted media server
+     * relay: two different stations both falling back to "/favicon.ico" must not collapse onto
+     * the same cache entry just because the path matches.
+     */
+    @Test
+    fun differentHostsForArbitraryRemoteImagesStayDistinct() {
+        val a = stableArtworkCacheKey("https://stationA.example/favicon.ico")
+        val b = stableArtworkCacheKey("https://stationB.example/favicon.ico")
+
+        assertNotNull(a)
+        assertNotNull(b)
+        assertTrue(a != b, "different hosts must not collapse to one cache key: $a")
+    }
+
+    /**
+     * A cache-busting query (`?v=1`) is not a media-server signature. Treating a generic param name
+     * as one would strip the origin and re-collapse distinct hosts, the exact bug this guards.
+     */
+    @Test
+    fun genericCacheBustingParamsDoNotStripOrigin() {
+        val a = stableArtworkCacheKey("https://stationA.example/favicon.ico?v=1")
+        val b = stableArtworkCacheKey("https://stationB.example/favicon.ico?v=1")
+
+        assertNotNull(a)
+        assertNotNull(b)
+        assertTrue(a != b, "generic params must not collapse different hosts: $a")
+    }
+
     /** Local artwork has no origin to strip; Coil's own key is already stable there. */
     @Test
     fun localAndBlankSourcesHaveNoCustomKey() {
