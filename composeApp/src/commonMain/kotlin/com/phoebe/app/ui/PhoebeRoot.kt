@@ -234,6 +234,7 @@ import com.phoebe.app.data.catalogTracksForArtist
 import com.phoebe.app.data.BackupRestoreMode
 import com.phoebe.app.data.PlayHistoryRankedEntries
 import com.phoebe.app.data.PlayHistorySnapshot
+import com.phoebe.app.data.RecentPersonalMixWindowMultiplier
 import com.phoebe.app.data.trackIndexKey
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.AppScreen
@@ -1025,7 +1026,6 @@ private fun PhoebeRootStateHolder(
     val personalMixHomeUiState = rememberUpdatedState(homeUiState)
     val personalMixPreferences = rememberUpdatedState(libraryUi.personalMix)
     val personalMixPlayHistory = rememberUpdatedState(playHistory)
-    var recentPersonalMixKeys by remember { mutableStateOf(emptySet<String>()) }
     val homePosterActionScope = rememberCoroutineScope()
     val playPersonalMix = remember(state, homePosterActionScope) {
         {
@@ -1034,17 +1034,21 @@ private fun PhoebeRootStateHolder(
                 val loadingStartedAtMs = currentTimeMs()
                 try {
                     val preferences = personalMixPreferences.value.normalized()
+                    val recentMixWindow = preferences.limit * RecentPersonalMixWindowMultiplier
                     state.ensurePersonalMixTracks(preferences.limit)
+                    val recentMixTrackKeys = state.recentPersonalMixTrackKeys(recentMixWindow)
                     val tracks = personalMix(
                         catalog = personalMixCatalog.value,
                         state = personalMixHomeUiState.value,
                         preferences = preferences,
                         playHistory = personalMixPlayHistory.value,
-                        recentMixTrackKeys = recentPersonalMixKeys,
+                        recentMixTrackKeys = recentMixTrackKeys,
                     )
                     if (tracks.isNotEmpty()) {
-                        recentPersonalMixKeys = (recentPersonalMixKeys + tracks.map { it.personalMixIdentityKey() })
-                            .let { keys -> if (keys.size > 100) keys.drop(keys.size - 100).toSet() else keys.toSet() }
+                        state.recordPersonalMixSurfaced(
+                            trackKeys = tracks.map { it.personalMixIdentityKey() },
+                            keepCount = recentMixWindow,
+                        )
                         requestMobilePlayback(
                             tracks,
                             0,

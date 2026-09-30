@@ -1,0 +1,18 @@
+-- Add stable row ids so prune can delete by primary key (avoids hanging
+-- self-referencing DELETE ... rowid NOT IN (SELECT rowid ...) on JDBC SQLite).
+
+CREATE TABLE RecentMixTrackRow_new (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    track_id TEXT NOT NULL,
+    surfaced_at_ms INTEGER NOT NULL
+);
+
+INSERT INTO RecentMixTrackRow_new(track_id, surfaced_at_ms)
+SELECT track_id, surfaced_at_ms FROM RecentMixTrackRow;
+
+DROP TABLE RecentMixTrackRow;
+
+ALTER TABLE RecentMixTrackRow_new RENAME TO RecentMixTrackRow;
+
+CREATE INDEX recent_mix_track_surfaced_at_idx ON RecentMixTrackRow(surfaced_at_ms);
+CREATE INDEX recent_mix_track_id_idx ON RecentMixTrackRow(track_id);

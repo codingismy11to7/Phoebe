@@ -691,14 +691,37 @@ fun personalMix(
     val tracks = allLoadedTracks(catalog)
     if (tracks.isEmpty()) return emptyList()
     val tracksByIdentity = tracks.associateBy { it.personalMixIdentityKey() }
-    val heavyRotation = state.heavyRotationTracks.mapNotNull { tracksByIdentity[it.track.personalMixIdentityKey()] }
-    val recent = state.recentlyPlayedTracks.mapNotNull { tracksByIdentity[it.track.personalMixIdentityKey()] }
-    val most = state.mostPlayedTracks.mapNotNull { tracksByIdentity[it.track.personalMixIdentityKey()] }
-    val seeds = (heavyRotation + recent + most).distinctBy { it.personalMixIdentityKey() }
+    // Home UI only keeps ~10 rows per section. Pull a wider history window for mix seeds.
+    val historyPoolLimit = (mixPrefs.limit * 2).coerceAtLeast(40)
+    val recentFromHistory = playHistoryRows(
+        kind = PlayHistoryKind.RecentlyPlayed,
+        catalog = catalog,
+        playHistory = playHistory,
+        queryLimit = historyPoolLimit,
+    ).mapNotNull { tracksByIdentity[it.track.personalMixIdentityKey()] }
+    val mostFromHistory = playHistoryRows(
+        kind = PlayHistoryKind.MostPlayed,
+        catalog = catalog,
+        playHistory = playHistory,
+        queryLimit = historyPoolLimit,
+    ).mapNotNull { tracksByIdentity[it.track.personalMixIdentityKey()] }
+    val heavyRotationSeeds = state.heavyRotationTracks.mapNotNull { tracksByIdentity[it.track.personalMixIdentityKey()] }
+    val recentSeeds = (recentFromHistory + state.recentlyPlayedTracks.mapNotNull {
+        tracksByIdentity[it.track.personalMixIdentityKey()]
+    }).distinctBy { it.personalMixIdentityKey() }
+    val mostSeeds = (mostFromHistory + state.mostPlayedTracks.mapNotNull {
+        tracksByIdentity[it.track.personalMixIdentityKey()]
+    }).distinctBy { it.personalMixIdentityKey() }
+    val seeds = (heavyRotationSeeds + recentSeeds + mostSeeds).distinctBy { it.personalMixIdentityKey() }
     if (seeds.isEmpty()) return tracks.shuffled().take(mixPrefs.limit)
 
+    // Expand each core pool with other tracks by the same artists so anti-repeat can
+    // rotate into different songs that still feel personal (not random deep catalog).
+    val heavyRotation = expandFamiliarArtistPool(heavyRotationSeeds, tracks)
+    val recent = expandFamiliarArtistPool(recentSeeds, tracks)
+    val most = expandFamiliarArtistPool(mostSeeds, tracks)
+
     val seedKeys = seeds.map { it.personalMixIdentityKey() }.toSet()
-    val seedArtists = seeds.map { it.artist.lowercase() }.toSet()
     val sparseSimilar = maturityBlend < 0.5
     val similar = similarTracks(tracks, seeds, seedKeys, sparseSimilar)
     val playedKeys = (state.recentlyPlayedTracks + state.mostPlayedTracks + state.heavyRotationTracks)
@@ -746,7 +769,15 @@ fun personalMix(
         diversity = diversity,
         decadeCapEnabled = decadeCapEnabled,
         recentMixTrackKeys = recentMixTrackKeys,
-    ).let { mix -> deprioritizeRecentMixTracks(mix, recentMixTrackKeys) }
+    )
+}
+
+/** Other catalog tracks by the same artists as [seeds], so mixes can rotate past the home top-N. */
+internal fun expandFamiliarArtistPool(seeds: List<Track>, catalogTracks: List<Track>): List<Track> {
+    if (seeds.isEmpty()) return emptyList()
+    val artists = seeds.mapTo(mutableSetOf()) { it.artist.lowercase() }
+    val extras = catalogTracks.filter { track -> track.artist.lowercase() in artists }
+    return (seeds + extras).distinctBy { it.personalMixIdentityKey() }
 }
 
 private const val RatedUnplayedMinimumStars = 3f
@@ -804,12 +835,6 @@ private class MixDiversityState(
     }
 }
 
-private fun deprioritizeRecentMixTracks(mix: List<Track>, recentMixTrackKeys: Set<String>): List<Track> {
-    if (recentMixTrackKeys.isEmpty()) return mix
-    val (recent, fresh) = mix.partition { it.personalMixIdentityKey() in recentMixTrackKeys }
-    return fresh + recent
-}
-
 private fun buildPersonalMixList(
     target: Int,
     slices: List<Int>,
@@ -820,7 +845,6 @@ private fun buildPersonalMixList(
     recentMixTrackKeys: Set<String>,
 ): List<Track> {
     val diversityState = MixDiversityState(target, diversity, decadeCapEnabled)
-    val sliceAdded = IntArray(sliceCandidates.size)
     return buildList {
         fun tryAdd(track: Track): Boolean {
             if (size >= target || !diversityState.canAdd(track)) return false
@@ -840,15 +864,19 @@ private fun buildPersonalMixList(
             }
             return added
         }
+        fun fillSlice(candidates: List<Track>, maxCount: Int): Int {
+            if (maxCount <= 0) return 0
+            // Never replay recently-surfaced tracks in slice fill — rotate into other
+            // candidates from the (expanded) pool instead. Last-resort replay is only
+            // via the final filler pass when the whole library is exhausted.
+            return addFromCandidates(candidates, maxCount, freshOnly = true)
+        }
         sliceCandidates.forEachIndexed { index, candidates ->
             val maxCount = slices.getOrElse(index) { 0 }
-            sliceAdded[index] = addFromCandidates(candidates, maxCount, freshOnly = true)
+            fillSlice(candidates, maxCount)
         }
-        // Aggressive Deprioritization: Instead of falling back to recent tracks for this specific slice,
-        // we let the slice fall short and make up the difference with fresh filler tracks.
+        // Remaining slots: prefer fresh catalog tracks, then any.
         addFromCandidates(filler, target - size, freshOnly = true)
-        
-        // Absolute last resort if the entire library is exhausted of fresh tracks
         addFromCandidates(filler, target - size, freshOnly = false)
     }
 }
