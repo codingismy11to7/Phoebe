@@ -48,12 +48,28 @@ internal fun stableArtworkCacheKey(fetchUrl: String): String? {
     val remote = raw.startsWith("http://", ignoreCase = true) ||
         raw.startsWith("https://", ignoreCase = true)
     val identity = when {
-        remote -> originIndependentRemotePath(raw)
+        remote && raw.isSelfHostedMediaServerUrl() -> originIndependentRemotePath(raw)
+        // An arbitrary third-party image (e.g. a radio station favicon) lives at exactly one
+        // host forever; stripping the origin here would collapse unrelated stations that both
+        // fall back to "/favicon.ico" onto the same cache entry.
+        remote -> normalizeArtworkPathAndQuery(raw.substringBefore('#'))
         // A host-less Plex path is already origin-independent.
         raw.isPlexMediaPathOrUrl() -> normalizeArtworkPathAndQuery(raw)
         else -> null
     } ?: return null
     return "phoebe-art:$identity"
+}
+
+/**
+ * Self-hosted media servers (Plex, Subsonic/Navidrome, ...) are reached through rotating hosts —
+ * a LAN hop, a relay, a tunnel — while an arbitrary remote image lives at exactly one host. Only
+ * the former should have its origin stripped from the cache key.
+ */
+private fun String.isSelfHostedMediaServerUrl(): Boolean {
+    if (isPlexMediaPathOrUrl()) return true
+    val query = substringAfter('?', "").substringBefore('#')
+    if (query.isBlank()) return false
+    return query.split('&').any { it.substringBefore('=').lowercase() in VolatileArtworkQueryParams }
 }
 
 /** Strip `scheme://host:port` and session query parameters, keeping a stable parameter order. */
