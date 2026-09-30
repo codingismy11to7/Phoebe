@@ -58,6 +58,22 @@ class RecentMixTracksRepositoryDesktopTest {
     }
 
     @Test
+    fun resurfacedKeyReplacesPriorRowInsteadOfEvictingOthers() = runBlocking {
+        val (db, d) = newInMemoryPhoebeDatabase()
+        driver = d
+        val repo = RecentMixTracksRepository(db)
+
+        repo.recordSurfaced(listOf("a", "b"), keepCount = 2, atMs = 1_000L)
+        repo.recordSurfaced(listOf("c"), keepCount = 2, atMs = 2_000L)
+        repo.recordSurfaced(listOf("c"), keepCount = 2, atMs = 3_000L)
+
+        // Without row replacement the duplicate "c" would occupy two slots and
+        // evict "b", leaving a single-entry window.
+        assertEquals(setOf("c", "b"), repo.recentTrackKeys(2))
+        assertEquals(2, db.recentMixTrackQueries.selectRecentTrackIds(100L).awaitAsList().size)
+    }
+
+    @Test
     fun recordSurfacedWithMixSizedBatchDoesNotHang() = runBlocking {
         val (db, d) = newInMemoryPhoebeDatabase()
         driver = d

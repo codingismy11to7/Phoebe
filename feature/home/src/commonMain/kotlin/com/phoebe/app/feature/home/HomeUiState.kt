@@ -889,19 +889,29 @@ private fun similarTracks(
 ): List<Track> {
     val seedArtists = seeds.map { it.artist.lowercase() }.toSet()
     val seedAlbums = seeds.map { it.album.lowercase() }.toSet()
+    // Precompute seed attribute sets once; scoring runs per catalog track and the
+    // seed pool can now be several hundred entries, so `seeds.any` scans are too costly.
+    val seedGenres = seeds.mapNotNull { it.genre?.lowercase() }.toSet()
+    val seedMoods = seeds.mapNotNull { it.mood?.lowercase() }.toSet()
+    val seedStyles = seeds.mapNotNull { it.style?.lowercase() }.toSet()
+    val seedDecades = seeds.mapNotNull { it.year?.let { year -> (year / 10) * 10 } }.toSet()
     return tracks
         .asSequence()
         .filter { it.personalMixIdentityKey() !in seedKeys }
-        .map { track -> track to similarTrackScore(track, seeds, seedAlbums) }
+        .map { track ->
+            track to similarTrackScore(track, seedArtists, seedGenres, seedMoods, seedStyles, seedDecades, seedAlbums)
+        }
         .filter { (track, score) ->
             if (score <= 0) return@filter false
             if (!sparseMode) return@filter true
             val differentArtist = track.artist.lowercase() !in seedArtists
-            val genreMatch = track.genre != null &&
-                seeds.any { seed -> seed.genre.equals(track.genre, ignoreCase = true) }
+            val genre = track.genre
+            val mood = track.mood
+            val style = track.style
+            val genreMatch = genre != null && genre.lowercase() in seedGenres
             val moodStyleMatch =
-                (track.mood != null && seeds.any { seed -> seed.mood.equals(track.mood, ignoreCase = true) }) ||
-                    (track.style != null && seeds.any { seed -> seed.style.equals(track.style, ignoreCase = true) })
+                (mood != null && mood.lowercase() in seedMoods) ||
+                    (style != null && style.lowercase() in seedStyles)
             differentArtist && (genreMatch || moodStyleMatch)
         }
         .sortedByDescending { it.second }
@@ -909,14 +919,24 @@ private fun similarTracks(
         .toList()
 }
 
-private fun similarTrackScore(track: Track, seeds: List<Track>, seedAlbums: Set<String>): Int {
+private fun similarTrackScore(
+    track: Track,
+    seedArtists: Set<String>,
+    seedGenres: Set<String>,
+    seedMoods: Set<String>,
+    seedStyles: Set<String>,
+    seedDecades: Set<Int>,
+    seedAlbums: Set<String>,
+): Int {
     var score = 0
-    if (seeds.any { it.artist.equals(track.artist, ignoreCase = true) }) score += 3
-    if (track.genre != null && seeds.any { it.genre.equals(track.genre, ignoreCase = true) }) score += 2
-    if (track.mood != null && seeds.any { it.mood.equals(track.mood, ignoreCase = true) }) score += 2
-    if (track.style != null && seeds.any { it.style.equals(track.style, ignoreCase = true) }) score += 2
-    val trackDecade = track.year?.let { (it / 10) * 10 }
-    if (trackDecade != null && seeds.any { seed -> seed.year?.let { (it / 10) * 10 } == trackDecade }) score += 1
+    if (track.artist.lowercase() in seedArtists) score += 3
+    val genre = track.genre
+    if (genre != null && genre.lowercase() in seedGenres) score += 2
+    val mood = track.mood
+    if (mood != null && mood.lowercase() in seedMoods) score += 2
+    val style = track.style
+    if (style != null && style.lowercase() in seedStyles) score += 2
+    track.year?.let { (it / 10) * 10 }?.let { if (it in seedDecades) score += 1 }
     if (track.album.lowercase() in seedAlbums) score -= 2
     return score
 }

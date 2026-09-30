@@ -29,5 +29,9 @@ deleteById:
 DELETE FROM RecentMixTrackRow
 WHERE id = ?;
 
+deleteByTrackId:
+DELETE FROM RecentMixTrackRow
+WHERE track_id = ?;
+
 clearAll:
 DELETE FROM RecentMixTrackRow;

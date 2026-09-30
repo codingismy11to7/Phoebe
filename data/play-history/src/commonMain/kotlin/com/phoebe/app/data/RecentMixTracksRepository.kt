@@ -46,6 +46,9 @@ class RecentMixTracksRepository(
         val cappedKeep = keepCount.coerceAtLeast(keys.size)
         withContext(databaseDispatcher) {
             keys.forEach { key ->
+                // Replace any prior row for this identity so a re-surfaced track
+                // does not occupy multiple slots and shrink the effective window.
+                database.recentMixTrackQueries.deleteByTrackId(key)
                 database.recentMixTrackQueries.recordSurfaced(
                     track_id = key,
                     surfaced_at_ms = atMs,
