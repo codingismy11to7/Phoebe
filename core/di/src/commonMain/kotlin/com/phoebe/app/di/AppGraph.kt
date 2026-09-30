@@ -32,6 +32,7 @@ import com.phoebe.app.data.NavidromeProviderAdapter
 import com.phoebe.app.data.NavidromePlayHistorySyncer
 import com.phoebe.app.data.PlayHistoryRepository
 import com.phoebe.app.data.PlaylistService
+import com.phoebe.app.data.RecentMixTracksRepository
 import com.phoebe.app.data.PlexClient
 import com.phoebe.app.data.PlexConnectionResolver
 import com.phoebe.app.data.PlexPlayHistorySyncer
@@ -183,6 +184,7 @@ interface AppGraphContributions {
     val lyricsRepository: LyricsRepository
     val musicBrainzRepository: MusicBrainzRepository
     val playHistoryRepository: PlayHistoryRepository
+    val recentMixTracksRepository: RecentMixTracksRepository
     val playlistService: PlaylistService
     val radioRepository: RadioRepository
     val radioNowPlayingRepository: RadioNowPlayingRepository

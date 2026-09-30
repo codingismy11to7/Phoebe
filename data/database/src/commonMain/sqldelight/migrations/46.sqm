@@ -1,0 +1,7 @@
+CREATE TABLE RecentMixTrackRow (
+    track_id TEXT NOT NULL,
+    surfaced_at_ms INTEGER NOT NULL
+);
+
+CREATE INDEX recent_mix_track_surfaced_at_idx ON RecentMixTrackRow(surfaced_at_ms);
+CREATE INDEX recent_mix_track_id_idx ON RecentMixTrackRow(track_id);

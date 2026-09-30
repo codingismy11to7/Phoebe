@@ -2329,6 +2329,28 @@ class AppState(
         }
     }
 
+    /** Identity keys recently surfaced in Personal Mix (persisted across restarts). */
+    suspend fun recentPersonalMixTrackKeys(limit: Int): Set<String> =
+        try {
+            dependencies.appGraph.recentMixTracksRepository.recentTrackKeys(limit)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            PhoebeLog.d("AppState") { "recent personal mix keys failed: ${error.message}" }
+            emptySet()
+        }
+
+    /** Persist newly surfaced Personal Mix identity keys and prune to [keepCount]. */
+    suspend fun recordPersonalMixSurfaced(trackKeys: Collection<String>, keepCount: Int) {
+        try {
+            dependencies.appGraph.recentMixTracksRepository.recordSurfaced(trackKeys, keepCount)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            PhoebeLog.d("AppState") { "record personal mix surfaced failed: ${error.message}" }
+        }
+    }
+
     fun warmTopTracksMixTracks() {
         if (!session.value.canUsePlexBackgroundFetches()) return
         val currentSession = session.value

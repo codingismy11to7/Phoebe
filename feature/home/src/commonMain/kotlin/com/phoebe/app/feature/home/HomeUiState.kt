@@ -691,14 +691,37 @@ fun personalMix(
     val tracks = allLoadedTracks(catalog)
     if (tracks.isEmpty()) return emptyList()
     val tracksByIdentity = tracks.associateBy { it.personalMixIdentityKey() }
-    val heavyRotation = state.heavyRotationTracks.mapNotNull { tracksByIdentity[it.track.personalMixIdentityKey()] }
-    val recent = state.recentlyPlayedTracks.mapNotNull { tracksByIdentity[it.track.personalMixIdentityKey()] }
-    val most = state.mostPlayedTracks.mapNotNull { tracksByIdentity[it.track.personalMixIdentityKey()] }
-    val seeds = (heavyRotation + recent + most).distinctBy { it.personalMixIdentityKey() }
+    // Home UI only keeps ~10 rows per section. Pull a wider history window for mix seeds.
+    val historyPoolLimit = (mixPrefs.limit * 2).coerceAtLeast(40)
+    val recentFromHistory = playHistoryRows(
+        kind = PlayHistoryKind.RecentlyPlayed,
+        catalog = catalog,
+        playHistory = playHistory,
+        queryLimit = historyPoolLimit,
+    ).mapNotNull { tracksByIdentity[it.track.personalMixIdentityKey()] }
+    val mostFromHistory = playHistoryRows(
+        kind = PlayHistoryKind.MostPlayed,
+        catalog = catalog,
+        playHistory = playHistory,
+        queryLimit = historyPoolLimit,
+    ).mapNotNull { tracksByIdentity[it.track.personalMixIdentityKey()] }
+    val heavyRotationSeeds = state.heavyRotationTracks.mapNotNull { tracksByIdentity[it.track.personalMixIdentityKey()] }
+    val recentSeeds = (recentFromHistory + state.recentlyPlayedTracks.mapNotNull {
+        tracksByIdentity[it.track.personalMixIdentityKey()]
+    }).distinctBy { it.personalMixIdentityKey() }
+    val mostSeeds = (mostFromHistory + state.mostPlayedTracks.mapNotNull {
+        tracksByIdentity[it.track.personalMixIdentityKey()]
+    }).distinctBy { it.personalMixIdentityKey() }
+    val seeds = (heavyRotationSeeds + recentSeeds + mostSeeds).distinctBy { it.personalMixIdentityKey() }
     if (seeds.isEmpty()) return tracks.shuffled().take(mixPrefs.limit)
 
+    // Expand each core pool with other tracks by the same artists so anti-repeat can
+    // rotate into different songs that still feel personal (not random deep catalog).
+    val heavyRotation = expandFamiliarArtistPool(heavyRotationSeeds, tracks)
+    val recent = expandFamiliarArtistPool(recentSeeds, tracks)
+    val most = expandFamiliarArtistPool(mostSeeds, tracks)
+
     val seedKeys = seeds.map { it.personalMixIdentityKey() }.toSet()
-    val seedArtists = seeds.map { it.artist.lowercase() }.toSet()
     val sparseSimilar = maturityBlend < 0.5
     val similar = similarTracks(tracks, seeds, seedKeys, sparseSimilar)
     val playedKeys = (state.recentlyPlayedTracks + state.mostPlayedTracks + state.heavyRotationTracks)
@@ -746,7 +769,15 @@ fun personalMix(
         diversity = diversity,
         decadeCapEnabled = decadeCapEnabled,
         recentMixTrackKeys = recentMixTrackKeys,
-    ).let { mix -> deprioritizeRecentMixTracks(mix, recentMixTrackKeys) }
+    )
+}
+
+/** Other catalog tracks by the same artists as [seeds], so mixes can rotate past the home top-N. */
+internal fun expandFamiliarArtistPool(seeds: List<Track>, catalogTracks: List<Track>): List<Track> {
+    if (seeds.isEmpty()) return emptyList()
+    val artists = seeds.mapTo(mutableSetOf()) { it.artist.lowercase() }
+    val extras = catalogTracks.filter { track -> track.artist.lowercase() in artists }
+    return (seeds + extras).distinctBy { it.personalMixIdentityKey() }
 }
 
 private const val RatedUnplayedMinimumStars = 3f
@@ -804,12 +835,6 @@ private class MixDiversityState(
     }
 }
 
-private fun deprioritizeRecentMixTracks(mix: List<Track>, recentMixTrackKeys: Set<String>): List<Track> {
-    if (recentMixTrackKeys.isEmpty()) return mix
-    val (recent, fresh) = mix.partition { it.personalMixIdentityKey() in recentMixTrackKeys }
-    return fresh + recent
-}
-
 private fun buildPersonalMixList(
     target: Int,
     slices: List<Int>,
@@ -820,7 +845,6 @@ private fun buildPersonalMixList(
     recentMixTrackKeys: Set<String>,
 ): List<Track> {
     val diversityState = MixDiversityState(target, diversity, decadeCapEnabled)
-    val sliceAdded = IntArray(sliceCandidates.size)
     return buildList {
         fun tryAdd(track: Track): Boolean {
             if (size >= target || !diversityState.canAdd(track)) return false
@@ -840,15 +864,19 @@ private fun buildPersonalMixList(
             }
             return added
         }
+        fun fillSlice(candidates: List<Track>, maxCount: Int): Int {
+            if (maxCount <= 0) return 0
+            // Never replay recently-surfaced tracks in slice fill — rotate into other
+            // candidates from the (expanded) pool instead. Last-resort replay is only
+            // via the final filler pass when the whole library is exhausted.
+            return addFromCandidates(candidates, maxCount, freshOnly = true)
+        }
         sliceCandidates.forEachIndexed { index, candidates ->
             val maxCount = slices.getOrElse(index) { 0 }
-            sliceAdded[index] = addFromCandidates(candidates, maxCount, freshOnly = true)
+            fillSlice(candidates, maxCount)
         }
-        // Aggressive Deprioritization: Instead of falling back to recent tracks for this specific slice,
-        // we let the slice fall short and make up the difference with fresh filler tracks.
+        // Remaining slots: prefer fresh catalog tracks, then any.
         addFromCandidates(filler, target - size, freshOnly = true)
-        
-        // Absolute last resort if the entire library is exhausted of fresh tracks
         addFromCandidates(filler, target - size, freshOnly = false)
     }
 }
@@ -861,19 +889,29 @@ private fun similarTracks(
 ): List<Track> {
     val seedArtists = seeds.map { it.artist.lowercase() }.toSet()
     val seedAlbums = seeds.map { it.album.lowercase() }.toSet()
+    // Precompute seed attribute sets once; scoring runs per catalog track and the
+    // seed pool can now be several hundred entries, so `seeds.any` scans are too costly.
+    val seedGenres = seeds.mapNotNull { it.genre?.lowercase() }.toSet()
+    val seedMoods = seeds.mapNotNull { it.mood?.lowercase() }.toSet()
+    val seedStyles = seeds.mapNotNull { it.style?.lowercase() }.toSet()
+    val seedDecades = seeds.mapNotNull { it.year?.let { year -> (year / 10) * 10 } }.toSet()
     return tracks
         .asSequence()
         .filter { it.personalMixIdentityKey() !in seedKeys }
-        .map { track -> track to similarTrackScore(track, seeds, seedAlbums) }
+        .map { track ->
+            track to similarTrackScore(track, seedArtists, seedGenres, seedMoods, seedStyles, seedDecades, seedAlbums)
+        }
         .filter { (track, score) ->
             if (score <= 0) return@filter false
             if (!sparseMode) return@filter true
             val differentArtist = track.artist.lowercase() !in seedArtists
-            val genreMatch = track.genre != null &&
-                seeds.any { seed -> seed.genre.equals(track.genre, ignoreCase = true) }
+            val genre = track.genre
+            val mood = track.mood
+            val style = track.style
+            val genreMatch = genre != null && genre.lowercase() in seedGenres
             val moodStyleMatch =
-                (track.mood != null && seeds.any { seed -> seed.mood.equals(track.mood, ignoreCase = true) }) ||
-                    (track.style != null && seeds.any { seed -> seed.style.equals(track.style, ignoreCase = true) })
+                (mood != null && mood.lowercase() in seedMoods) ||
+                    (style != null && style.lowercase() in seedStyles)
             differentArtist && (genreMatch || moodStyleMatch)
         }
         .sortedByDescending { it.second }
@@ -881,14 +919,24 @@ private fun similarTracks(
         .toList()
 }
 
-private fun similarTrackScore(track: Track, seeds: List<Track>, seedAlbums: Set<String>): Int {
+private fun similarTrackScore(
+    track: Track,
+    seedArtists: Set<String>,
+    seedGenres: Set<String>,
+    seedMoods: Set<String>,
+    seedStyles: Set<String>,
+    seedDecades: Set<Int>,
+    seedAlbums: Set<String>,
+): Int {
     var score = 0
-    if (seeds.any { it.artist.equals(track.artist, ignoreCase = true) }) score += 3
-    if (track.genre != null && seeds.any { it.genre.equals(track.genre, ignoreCase = true) }) score += 2
-    if (track.mood != null && seeds.any { it.mood.equals(track.mood, ignoreCase = true) }) score += 2
-    if (track.style != null && seeds.any { it.style.equals(track.style, ignoreCase = true) }) score += 2
-    val trackDecade = track.year?.let { (it / 10) * 10 }
-    if (trackDecade != null && seeds.any { seed -> seed.year?.let { (it / 10) * 10 } == trackDecade }) score += 1
+    if (track.artist.lowercase() in seedArtists) score += 3
+    val genre = track.genre
+    if (genre != null && genre.lowercase() in seedGenres) score += 2
+    val mood = track.mood
+    if (mood != null && mood.lowercase() in seedMoods) score += 2
+    val style = track.style
+    if (style != null && style.lowercase() in seedStyles) score += 2
+    track.year?.let { (it / 10) * 10 }?.let { if (it in seedDecades) score += 1 }
     if (track.album.lowercase() in seedAlbums) score -= 2
     return score
 }

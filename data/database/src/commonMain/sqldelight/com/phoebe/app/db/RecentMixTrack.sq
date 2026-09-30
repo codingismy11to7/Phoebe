@@ -1,0 +1,37 @@
+-- Tracks recently surfaced in a client-generated Personal Mix. Used only to
+-- soft-deprioritize repeats across app restarts; not play history.
+
+CREATE TABLE RecentMixTrackRow (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    track_id TEXT NOT NULL,
+    surfaced_at_ms INTEGER NOT NULL
+);
+
+CREATE INDEX recent_mix_track_surfaced_at_idx ON RecentMixTrackRow(surfaced_at_ms);
+CREATE INDEX recent_mix_track_id_idx ON RecentMixTrackRow(track_id);
+
+recordSurfaced:
+INSERT INTO RecentMixTrackRow(track_id, surfaced_at_ms)
+VALUES (?, ?);
+
+selectRecentTrackIds:
+SELECT track_id
+FROM RecentMixTrackRow
+ORDER BY surfaced_at_ms DESC, id DESC
+LIMIT ?;
+
+selectIdsNewestFirst:
+SELECT id
+FROM RecentMixTrackRow
+ORDER BY surfaced_at_ms DESC, id DESC;
+
+deleteById:
+DELETE FROM RecentMixTrackRow
+WHERE id = ?;
+
+deleteByTrackId:
+DELETE FROM RecentMixTrackRow
+WHERE track_id = ?;
+
+clearAll:
+DELETE FROM RecentMixTrackRow;

@@ -60,6 +60,7 @@ class DatabaseWiperDesktopTest {
                 database.lyricsQueries.upsertLyrics("track", "Cache", null, "lyrics", 0L)
                 database.downloadsQueries.upsert("track", "Song", "Artist", "Complete", 1.0, "file:///song.mp3", "", "", 0L, null, 0L, null, null)
                 database.playHistoryQueries.recordPlay("track", "Artist", "Album", 123L)
+                database.recentMixTrackQueries.recordSurfaced("mix-key", 456L)
 
                 database.catalogQueries.upsertArtist("artist", "Artist", null, 1L, 1L, 0L, null, null, null, null, null, 0L)
                 database.catalogQueries.upsertAlbum("album", "Album", "Artist", 2024L, null, 0L, null, null, null, null, null, 0L)
@@ -122,6 +123,7 @@ class DatabaseWiperDesktopTest {
             assertNull(database.lyricsQueries.selectLyrics("track").awaitAsOneOrNull())
             assertTrue(database.downloadsQueries.selectAll().awaitAsList().isEmpty())
             assertTrue(database.playHistoryQueries.selectPlayCountsByTrack().awaitAsList().isEmpty())
+            assertTrue(database.recentMixTrackQueries.selectRecentTrackIds(10L).awaitAsList().isEmpty())
             assertTrue(database.catalogQueries.selectArtists().awaitAsList().isEmpty())
             assertTrue(database.catalogQueries.selectAlbums().awaitAsList().isEmpty())
             assertTrue(database.catalogQueries.selectPlaylists().awaitAsList().isEmpty())

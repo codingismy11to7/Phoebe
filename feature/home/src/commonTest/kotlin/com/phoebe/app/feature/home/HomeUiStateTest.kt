@@ -418,7 +418,12 @@ class HomeUiStateTest {
             playHistory = establishedPlayHistory(),
         ).map { it.id }
 
-        assertEquals(setOf("heavy1", "heavy2"), mix.take(2).toSet())
+        val comfortIds = setOf(
+            "heavy1", "heavy2", "recent1", "recent2", "most1", "most2", "similar1", "similar2",
+        )
+        // Core pools expand to other tracks by the same artists, so order within the
+        // opening slots is shuffled — but discovery should stay a small garnish.
+        assertTrue(mix.take(4).all { it in comfortIds })
         assertTrue(mix.count { it.startsWith("new") } <= 1)
     }
 
@@ -763,25 +768,50 @@ class HomeUiStateTest {
     }
 
     @Test
-    fun personalMixDeprioritizesRecentlyQueuedTracks() {
-        val tracks = (1..6).map { index ->
+    fun personalMixPrefersFreshFamiliarTracksOverRecentlySurfacedOnes() {
+        val freshFamiliar = (1..6).map { index ->
             Track(
-                id = "track-$index",
-                title = "Track $index",
-                artist = "Artist $index",
-                album = "Album $index",
+                id = "fresh-$index",
+                title = "Fresh $index",
+                artist = "Fresh Artist $index",
+                album = "Fresh Album $index",
                 durationMs = 1_000L,
                 streamUrl = "stream",
                 downloadUrl = "",
             )
         }
-        val catalog = CatalogSnapshot(tracksByParent = mapOf("all" to tracks))
+        val recentFamiliar = (1..6).map { index ->
+            Track(
+                id = "recent-$index",
+                title = "Recent $index",
+                artist = "Recent Artist $index",
+                album = "Recent Album $index",
+                durationMs = 1_000L,
+                streamUrl = "stream",
+                downloadUrl = "",
+            )
+        }
+        val strangers = (1..12).map { index ->
+            Track(
+                id = "stranger-$index",
+                title = "Stranger $index",
+                artist = "Stranger Artist $index",
+                album = "Stranger Album $index",
+                durationMs = 1_000L,
+                streamUrl = "stream",
+                downloadUrl = "",
+            )
+        }
+        val familiar = freshFamiliar + recentFamiliar
+        val catalog = CatalogSnapshot(tracksByParent = mapOf("all" to familiar + strangers))
         val state = HomeUiState(
-            heavyRotationTracks = tracks.take(1).map { HomePlayedTrack(it, playCount = 3L) },
-            recentlyPlayedTracks = tracks.slice(1..2).map { HomePlayedTrack(it, playCount = 1L) },
-            mostPlayedTracks = tracks.drop(3).map { HomePlayedTrack(it, playCount = 10L) },
+            heavyRotationTracks = familiar.take(4).map { HomePlayedTrack(it, playCount = 5L) },
+            recentlyPlayedTracks = familiar.slice(4..7).map { HomePlayedTrack(it, playCount = 2L) },
+            mostPlayedTracks = familiar.drop(8).map { HomePlayedTrack(it, playCount = 10L) },
         )
-        val recentKeys = tracks.take(3).map { it.personalMixIdentityKey() }.toSet()
+        val recentKeys = recentFamiliar.map { it.personalMixIdentityKey() }.toSet()
+        val freshIds = freshFamiliar.map { it.id }.toSet()
+        val strangerIds = strangers.map { it.id }.toSet()
 
         val mix = personalMix(
             catalog = catalog,
@@ -791,7 +821,125 @@ class HomeUiStateTest {
             recentMixTrackKeys = recentKeys,
         )
 
-        assertTrue(mix.take(3).none { it.personalMixIdentityKey() in recentKeys })
+        assertTrue(mix.count { it.id in freshIds } >= 3)
+        assertTrue(mix.take(3).none { it.id in strangerIds })
+    }
+
+    @Test
+    fun personalMixRotatesToOtherTracksByFamiliarArtists() {
+        val hits = (1..6).map { index ->
+            Track(
+                id = "hit-$index",
+                title = "Hit $index",
+                artist = "Familiar Artist $index",
+                album = "Hits $index",
+                durationMs = 1_000L,
+                streamUrl = "stream",
+                downloadUrl = "",
+            )
+        }
+        val deepCuts = hits.flatMap { hit ->
+            (1..3).map { cut ->
+                Track(
+                    id = "deep-${hit.id}-$cut",
+                    title = "Deep ${hit.title} $cut",
+                    artist = hit.artist,
+                    album = "Deep ${hit.album} $cut",
+                    durationMs = 1_000L,
+                    streamUrl = "stream",
+                    downloadUrl = "",
+                )
+            }
+        }
+        val strangers = (1..20).map { index ->
+            Track(
+                id = "stranger-$index",
+                title = "Stranger $index",
+                artist = "Stranger Artist $index",
+                album = "Stranger Album $index",
+                durationMs = 1_000L,
+                streamUrl = "stream",
+                downloadUrl = "",
+            )
+        }
+        val catalog = CatalogSnapshot(tracksByParent = mapOf("all" to hits + deepCuts + strangers))
+        val state = HomeUiState(
+            heavyRotationTracks = hits.take(2).map { HomePlayedTrack(it, playCount = 8L) },
+            recentlyPlayedTracks = hits.slice(2..3).map { HomePlayedTrack(it, playCount = 3L) },
+            mostPlayedTracks = hits.drop(4).map { HomePlayedTrack(it, playCount = 20L) },
+        )
+        val hitIds = hits.map { it.id }.toSet()
+        val deepIds = deepCuts.map { it.id }.toSet()
+        val strangerIds = strangers.map { it.id }.toSet()
+
+        val mix = personalMix(
+            catalog = catalog,
+            state = state,
+            limit = 6,
+            playHistory = establishedPlayHistory(),
+            recentMixTrackKeys = hits.map { it.personalMixIdentityKey() }.toSet(),
+        )
+
+        assertTrue(mix.none { it.id in hitIds })
+        assertTrue(mix.count { it.id in deepIds } >= 4)
+        assertTrue(mix.count { it.id in strangerIds } <= 2)
+    }
+
+    @Test
+    fun personalMixKeepsFamiliarTracksWhenCorePoolWasRecentlySurfaced() {
+        val familiar = (1..8).map { index ->
+            Track(
+                id = "familiar-$index",
+                title = "Familiar $index",
+                artist = "Familiar Artist $index",
+                album = "Familiar Album $index",
+                durationMs = 1_000L,
+                streamUrl = "stream",
+                downloadUrl = "",
+            )
+        }
+        val moreBySameArtists = familiar.mapIndexed { index, track ->
+            Track(
+                id = "extra-$index",
+                title = "Extra $index",
+                artist = track.artist,
+                album = "Extra Album $index",
+                durationMs = 1_000L,
+                streamUrl = "stream",
+                downloadUrl = "",
+            )
+        }
+        val strangers = (1..20).map { index ->
+            Track(
+                id = "stranger-$index",
+                title = "Stranger $index",
+                artist = "Stranger Artist $index",
+                album = "Stranger Album $index",
+                durationMs = 1_000L,
+                streamUrl = "stream",
+                downloadUrl = "",
+            )
+        }
+        val catalog = CatalogSnapshot(tracksByParent = mapOf("all" to familiar + moreBySameArtists + strangers))
+        val state = HomeUiState(
+            heavyRotationTracks = familiar.take(3).map { HomePlayedTrack(it, playCount = 5L) },
+            recentlyPlayedTracks = familiar.slice(3..5).map { HomePlayedTrack(it, playCount = 2L) },
+            mostPlayedTracks = familiar.drop(6).map { HomePlayedTrack(it, playCount = 10L) },
+        )
+        val recentKeys = familiar.map { it.personalMixIdentityKey() }.toSet()
+        val familiarArtistTrackIds = (familiar + moreBySameArtists).map { it.id }.toSet()
+
+        val mix = personalMix(
+            catalog = catalog,
+            state = state,
+            limit = 6,
+            playHistory = establishedPlayHistory(),
+            recentMixTrackKeys = recentKeys,
+        )
+
+        // Home hits were recently surfaced; rotate into other tracks by those artists.
+        assertTrue(mix.none { it.id in familiar.map { track -> track.id }.toSet() })
+        assertTrue(mix.count { it.id in familiarArtistTrackIds } >= 4)
     }
 
     @Test
