@@ -1,6 +1,7 @@
 package com.phoebe.app.ui
 
 import com.phoebe.app.data.bindPlexCoverArt
+import com.phoebe.app.data.isEmbyFamilyArtworkUrl
 import com.phoebe.app.data.isPlexMediaPathOrUrl
 
 /**
@@ -61,16 +62,18 @@ internal fun stableArtworkCacheKey(fetchUrl: String): String? {
 }
 
 /**
- * Self-hosted media servers (Plex, Subsonic/Navidrome, ...) are reached through rotating hosts —
- * a LAN hop, a relay, a tunnel — while an arbitrary remote image lives at exactly one host. Only
- * the former should have its origin stripped from the cache key.
+ * Self-hosted media servers (Plex, Jellyfin/Emby, Subsonic/Navidrome, Music Assistant) are reached
+ * through rotating hosts — a LAN hop, a relay, a tunnel — while an arbitrary remote image lives at
+ * exactly one host. Only the former should have its origin stripped from the cache key.
+ *
+ * Detection is structural on purpose: generic query names like `v`, `t`, or `s` appear on ordinary
+ * cache-busted image URLs, so matching those would re-collapse unrelated hosts onto one entry.
  */
-private fun String.isSelfHostedMediaServerUrl(): Boolean {
-    if (isPlexMediaPathOrUrl()) return true
-    val query = substringAfter('?', "").substringBefore('#')
-    if (query.isBlank()) return false
-    return query.split('&').any { it.substringBefore('=').lowercase() in VolatileArtworkQueryParams }
-}
+private fun String.isSelfHostedMediaServerUrl(): Boolean =
+    isPlexMediaPathOrUrl() ||
+        isEmbyFamilyArtworkUrl() ||
+        isSubsonicCoverArtUrl() ||
+        isMusicAssistantImageProxyUrl()
 
 /** Strip `scheme://host:port` and session query parameters, keeping a stable parameter order. */
 private fun originIndependentRemotePath(url: String): String? {
