@@ -13,7 +13,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "Downloading Google Cast iOS Sender SDK ${VERSION}..."
-curl -L "$SDK_URL" -o "$TMP_DIR/google-cast-sdk.zip"
+curl --fail --location --retry 5 --retry-all-errors --retry-delay 5 "$SDK_URL" -o "$TMP_DIR/google-cast-sdk.zip"
 
 echo "Extracting SDK..."
 unzip -q "$TMP_DIR/google-cast-sdk.zip" -d "$TMP_DIR/sdk"
