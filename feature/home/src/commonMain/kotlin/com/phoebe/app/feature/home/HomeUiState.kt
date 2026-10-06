@@ -660,8 +660,22 @@ internal fun effectivePersonalMixPreferences(
     )
 }
 
-private fun sparseOnlyMixWeights(blend: Double): EffectiveMixWeights {
-    if (blend >= 1.0) return EffectiveMixWeights(0, 0, 0, 0, 0)
+/** Baseline weight for favorites/rated candidates that applies at any maturity level. */
+private const val FavoritesBaselineWeight = 12
+private const val RatedUnplayedBaselineWeight = 8
+
+/**
+ * Editorial slice weights layered on top of the user-tunable core weights
+ * (heavyRotation/recent/mostPlayed/similar/discovery).
+ *
+ * Favorites and highly-rated tracks keep a non-zero baseline even for
+ * established listeners: heavyRotation/recent/mostPlayed/similar only ever draw
+ * from the user's handful of most-played artists (expanded to those artists'
+ * other songs), so without another source of "known and liked" tracks, mixes
+ * started feeling like the same couple of artists on repeat. RecentlyAdded and
+ * wildcards stay sparse-only filler that fades out as listening history grows.
+ */
+private fun editorialMixWeights(blend: Double): EffectiveMixWeights {
     val sparseOnlyScale = (1.0 - blend).coerceIn(0.0, 1.0)
     fun scaled(weight: Int): Int = (weight * sparseOnlyScale).roundToInt()
     return EffectiveMixWeights(
@@ -670,10 +684,10 @@ private fun sparseOnlyMixWeights(blend: Double): EffectiveMixWeights {
         mostPlayed = 0,
         similar = 0,
         discovery = 0,
-        favorites = scaled(5),
+        favorites = FavoritesBaselineWeight + scaled(5),
         recentlyAdded = scaled(5),
         wildcards = scaled(5),
-        ratedUnplayed = scaled(5),
+        ratedUnplayed = RatedUnplayedBaselineWeight + scaled(5),
     )
 }
 
@@ -687,7 +701,7 @@ fun personalMix(
 ): List<Track> {
     val mixPrefs = effectivePersonalMixPreferences(preferences, playHistory).copy(limit = limit)
     val maturityBlend = mixMaturityBlend(playHistory)
-    val sparseOnlyWeights = sparseOnlyMixWeights(maturityBlend)
+    val editorialWeights = editorialMixWeights(maturityBlend)
     val tracks = allLoadedTracks(catalog)
     if (tracks.isEmpty()) return emptyList()
     val tracksByIdentity = tracks.associateBy { it.personalMixIdentityKey() }
@@ -746,25 +760,36 @@ fun personalMix(
         mostPlayed = mixPrefs.mostPlayedWeight,
         similar = mixPrefs.similarWeight,
         discovery = mixPrefs.discoveryWeight,
+        favorites = editorialWeights.favorites,
+        recentlyAdded = editorialWeights.recentlyAdded,
+        wildcards = editorialWeights.wildcards,
+        ratedUnplayed = editorialWeights.ratedUnplayed,
     )
-    val allWeights = coreWeights.asList() + sparseOnlyWeights.asList().drop(5)
-    val slices = mixSliceCounts(target, allWeights)
+    val sliceCandidates = listOf(
+        heavyRotation,
+        recent,
+        most,
+        similar,
+        discovery,
+        favorites,
+        recentlyAdded,
+        wildcards,
+        ratedUnplayed,
+    )
+    // A category with no candidates (e.g. no favorited artists/albums, no rated
+    // tracks) shouldn't reserve mix slots it can't fill — those slots would just
+    // fall through to the generic full-catalog filler instead of the intended
+    // weighting.
+    val weights = coreWeights.asList().mapIndexed { index, weight ->
+        if (sliceCandidates[index].isEmpty()) 0 else weight
+    }
+    val slices = mixSliceCounts(target, weights)
     val diversity = MixDiversityLimits.forTarget(target)
     val decadeCapEnabled = tracks.mapNotNull { track -> track.year?.let { (it / 10) * 10 } }.distinct().size >= 2
     return buildPersonalMixList(
         target = target,
         slices = slices,
-        sliceCandidates = listOf(
-            heavyRotation,
-            recent,
-            most,
-            similar,
-            discovery,
-            favorites,
-            recentlyAdded,
-            wildcards,
-            ratedUnplayed,
-        ),
+        sliceCandidates = sliceCandidates,
         filler = tracks,
         diversity = diversity,
         decadeCapEnabled = decadeCapEnabled,
@@ -790,7 +815,12 @@ private data class MixDiversityLimits(
     companion object {
         fun forTarget(target: Int): MixDiversityLimits =
             MixDiversityLimits(
-                maxPerArtist = if (target <= 30) 1 else 2,
+                // Kept tight even for larger mixes: heavyRotation/recent/mostPlayed/similar
+                // pools are expanded to just the seed artists' catalogs, so a looser cap
+                // let those same handful of artists fill most of the mix. A tight cap
+                // pushes the overflow into the full-catalog filler pass instead, which
+                // is what actually varies the mix artist-to-artist.
+                maxPerArtist = if (target <= 60) 1 else 2,
                 maxPerAlbum = 1,
             )
     }
