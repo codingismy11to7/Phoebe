@@ -45,14 +45,20 @@ class RecentMixTracksRepository(
         if (keys.isEmpty()) return
         val cappedKeep = keepCount.coerceAtLeast(keys.size)
         withContext(databaseDispatcher) {
-            keys.forEach { key ->
-                // Replace any prior row for this identity so a re-surfaced track
-                // does not occupy multiple slots and shrink the effective window.
-                database.recentMixTrackQueries.deleteByTrackId(key)
-                database.recentMixTrackQueries.recordSurfaced(
-                    track_id = key,
-                    surfaced_at_ms = atMs,
-                )
+            // Batch all per-key replace writes into one transaction — issuing each
+            // delete/insert as its own implicit transaction serializes a commit
+            // (and fsync) per statement, which made Personal Mix playback wait
+            // seconds before starting for a full mix-sized key set.
+            database.transaction {
+                keys.forEach { key ->
+                    // Replace any prior row for this identity so a re-surfaced track
+                    // does not occupy multiple slots and shrink the effective window.
+                    database.recentMixTrackQueries.deleteByTrackId(key)
+                    database.recentMixTrackQueries.recordSurfaced(
+                        track_id = key,
+                        surfaced_at_ms = atMs,
+                    )
+                }
             }
             pruneToKeepCount(cappedKeep)
         }
@@ -61,15 +67,19 @@ class RecentMixTracksRepository(
     /**
      * Drop oldest rows beyond [keepCount]. Done in Kotlin (rowid list + per-row
      * deletes) instead of a self-referencing DELETE subquery — that pattern can
-     * hang indefinitely on the JDBC SQLite driver used by desktop.
+     * hang indefinitely on the JDBC SQLite driver used by desktop. The deletes
+     * are batched into one transaction for the same reason as [recordSurfaced].
      */
     private suspend fun pruneToKeepCount(keepCount: Int) {
         val ids = database.recentMixTrackQueries
             .selectIdsNewestFirst()
             .awaitAsList()
         if (ids.size <= keepCount) return
-        ids.drop(keepCount).forEach { id ->
-            database.recentMixTrackQueries.deleteById(id)
+        val idsToDelete = ids.drop(keepCount)
+        database.transaction {
+            idsToDelete.forEach { id ->
+                database.recentMixTrackQueries.deleteById(id)
+            }
         }
     }
 }

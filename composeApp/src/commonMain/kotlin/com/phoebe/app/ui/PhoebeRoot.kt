@@ -299,6 +299,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import com.phoebe.app.sources.rememberPickLocalFolder
 import io.ktor.client.HttpClient
@@ -1037,13 +1038,17 @@ private fun PhoebeRootStateHolder(
                     val recentMixWindow = preferences.limit * RecentPersonalMixWindowMultiplier
                     state.ensurePersonalMixTracks(preferences.limit)
                     val recentMixTrackKeys = state.recentPersonalMixTrackKeys(recentMixWindow)
-                    val tracks = personalMix(
-                        catalog = personalMixCatalog.value,
-                        state = personalMixHomeUiState.value,
-                        preferences = preferences,
-                        playHistory = personalMixPlayHistory.value,
-                        recentMixTrackKeys = recentMixTrackKeys,
-                    )
+                    // Scoring/filtering runs over the full catalog; keep it off the
+                    // Compose/Main dispatcher so a large library can't stall the UI.
+                    val tracks = withContext(Dispatchers.Default) {
+                        personalMix(
+                            catalog = personalMixCatalog.value,
+                            state = personalMixHomeUiState.value,
+                            preferences = preferences,
+                            playHistory = personalMixPlayHistory.value,
+                            recentMixTrackKeys = recentMixTrackKeys,
+                        )
+                    }
                     if (tracks.isNotEmpty()) {
                         state.recordPersonalMixSurfaced(
                             trackKeys = tracks.map { it.personalMixIdentityKey() },

@@ -432,7 +432,9 @@ class HomeUiStateTest {
         val original = Track("plex:101", "Same Song", "Artist", "Album", 1_000L, "stream", "")
         val unprefixed = original.copy(id = "101")
         val differentIdSameMetadata = original.copy(id = "local-copy")
-        val other = Track("other", "Other Song", "Artist", "Other Album", 1_000L, "stream", "")
+        // Different artist from `original` so the per-artist diversity cap doesn't
+        // interact with the identity-dedupe behavior this test is checking.
+        val other = Track("other", "Other Song", "Other Artist", "Other Album", 1_000L, "stream", "")
         val catalog = CatalogSnapshot(
             tracksByParent = mapOf(
                 "album" to listOf(original, other),
@@ -693,8 +695,7 @@ class HomeUiStateTest {
         assertTrue(growingBlend < 1.0)
     }
 
-    @Test
-    fun personalMixEnforcesArtistAndAlbumDiversityCaps() {
+    private fun fourArtistDiversityFixture(): Pair<CatalogSnapshot, HomeUiState> {
         val tracks = (1..16).map { index ->
             Track(
                 id = "track-$index",
@@ -713,6 +714,33 @@ class HomeUiStateTest {
             recentlyPlayedTracks = tracks.slice(4..7).map { HomePlayedTrack(it, playCount = 1L) },
             mostPlayedTracks = tracks.slice(8..11).map { HomePlayedTrack(it, playCount = 10L) },
         )
+        return catalog to state
+    }
+
+    @Test
+    fun personalMixEnforcesArtistAndAlbumDiversityCaps() {
+        // Above the cap-of-1 threshold (60), up to 2 tracks per artist are allowed.
+        val (catalog, state) = fourArtistDiversityFixture()
+
+        val mix = personalMix(
+            catalog = catalog,
+            state = state,
+            limit = 70,
+            playHistory = establishedPlayHistory(),
+        )
+
+        assertEquals(8, mix.size)
+        assertEquals(4, mix.map { it.artist }.distinct().size)
+        assertTrue(mix.groupingBy { it.artist }.eachCount().values.all { it <= 2 })
+        assertEquals(mix.size, mix.map { it.album.lowercase() }.distinct().size)
+    }
+
+    @Test
+    fun personalMixCapsOneTrackPerArtistAtTypicalMixSizes() {
+        // At or below the cap-of-1 threshold (60) — including the default limit of
+        // 50 — only 1 track per artist is allowed, so a mix doesn't lean on the same
+        // couple of artists; the rest rolls over into the full-catalog filler.
+        val (catalog, state) = fourArtistDiversityFixture()
 
         val mix = personalMix(
             catalog = catalog,
@@ -721,10 +749,8 @@ class HomeUiStateTest {
             playHistory = establishedPlayHistory(),
         )
 
-        assertEquals(8, mix.size)
         assertEquals(4, mix.map { it.artist }.distinct().size)
-        assertTrue(mix.groupingBy { it.artist }.eachCount().values.all { it <= 2 })
-        assertEquals(mix.size, mix.map { it.album.lowercase() }.distinct().size)
+        assertTrue(mix.groupingBy { it.artist }.eachCount().values.all { it <= 1 })
     }
 
     @Test
